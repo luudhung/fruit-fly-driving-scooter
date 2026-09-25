@@ -1,0 +1,48 @@
+{
+  "name": "webgpu-fly",
+  "version": "0.1.0",
+  "description": "Realtime LIF simulation of the FlyWire brain + MANC spine + flybody body, all in WebGPU/WASM in the browser.",
+  "type": "module",
+  "homepage": "https://webgpu-fly.pages.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abgnydn/webgpu-fly.git"
+  },
+  "author": {
+    "name": "Ahmet Barış Günaydın",
+    "email": "hi@barisgunaydin.com"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "check:py": "PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q tools",
+    "check:rs": "cargo check --locked --manifest-path tools/cpu-bench/Cargo.toml",
+    "check:sh": "for f in tools/*.sh; do bash -n \"$f\"; done",
+    "check:json": "node -e \"const fs=require('fs');for(const f of ['package.json','vercel.json','r2-cors.json','.zenodo.json','tsconfig.json']){JSON.parse(fs.readFileSync(f,'utf8'));}JSON.parse(fs.readFileSync('wrangler.jsonc','utf8').replace(/^\\s*\\/\\/.*/gm,''));console.log('json-ok')\"",
+    "data": "bash tools/download_data.sh",
+    "convert": ".venv/bin/python tools/build_csr.py",
+    "test:e2e": "playwright test",
+    "test:e2e:list": "playwright test --list",
+    "test:unit": "node --test tests-unit/*.test.ts",
+    "bench:brain": "playwright test tests/bench.spec.ts --reporter=list",
+    "build:slim": "npm run build && rm -rf dist/flybody dist/flybody.bundle.bin dist/brain.bin dist/brain.meta.json dist/vnc.bin dist/vnc.meta.json dist/walking-policy.bin dist/walking-obs-norm.bin dist/walking-ref.bin dist/walking-policy-fixtures.json",
+    "deploy": "npm run build:slim && npx --yes wrangler pages deploy dist --project-name=webgpu-fly --branch=main",
+    "deploy:hf": "npm run build:slim && cp space/README.md space/.gitattributes NOTICE LICENSE LICENSE-FLYBODY LIMITATIONS.md dist/ && rm -f dist/_headers && hf upload abgunaydin/webgpu-fly dist . --repo-type=space",
+    "deploy:vercel": "npm run build && vercel --prod",
+    "deploy:r2": "bash tools/upload_to_r2.sh"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "@webgpu/types": "^0.1.69",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8"
+  },
+  "dependencies": {
+    "@mujoco/mujoco": "^3.8.0",
+    "@types/three": "^0.184.0",
+    "three": "^0.184.0"
+  }
+}
