@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FlyBrain Motorbike — Phase B</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #06070a; color: #e8edf3; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    header { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid #1b2028; background: rgba(8,10,14,.96); }
+    h1 { margin: 0 16px 0 0; font-size: 13px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: #9ad7ff; }
+    .badge { margin-left: auto; border: 1px solid #6b5623; background: #211b0d; color: #f5c542; padding: 5px 9px; border-radius: 999px; font-size: 10px; letter-spacing: .05em; }
+    button { border: 1px solid #293341; background: #121821; color: #d8e0e8; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+    button:hover { background: #192231; border-color: #3d526b; }
+    main { position: relative; min-height: 0; }
+    #world { position: absolute; inset: 0; }
+    #telemetry { position: absolute; top: 14px; left: 14px; margin: 0; min-width: 290px; padding: 12px 14px; background: rgba(5,7,10,.78); backdrop-filter: blur(10px); border: 1px solid #202937; border-radius: 10px; color: #b9c8d8; font: 11px/1.65 "SFMono-Regular", Consolas, monospace; pointer-events: none; }
+    .help { position: absolute; right: 14px; bottom: 14px; max-width: 320px; padding: 10px 12px; background: rgba(5,7,10,.72); border: 1px solid #202937; border-radius: 9px; color: #77818e; font-size: 11px; }
+    .help b { color: #b9c8d8; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FlyBrain Motorbike / Phase B</h1>
+    <button id="start">Start</button>
+    <button id="pause">Pause</button>
+    <button id="reset">Reset</button>
+    <span class="badge">MANUAL PLACEHOLDER — BRAIN NOT CONNECTED YET</span>
+  </header>
+  <main>
+    <div id="world"></div>
+    <pre id="telemetry"></pre>
+    <div class="help"><b>Temporary Phase B controls:</b> A/D or ←/→ steer, W/↑ throttle, Space/↓ brake. The next phase replaces steering input with real descending-neuron activity.</div>
+  </main>
+  <script type="module" src="/src/motorbike.ts"></script>
+</body>
+</html>
