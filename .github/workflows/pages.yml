@@ -1,4 +1,4 @@
-name: Deploy Motorbike to GitHub Pages
+name: Deploy Full Fly Brain to GitHub Pages
 
 on:
   push:
@@ -21,22 +21,87 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore generated neural assets
+        id: neural-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            public/brain.bin
+            public/brain.meta.json
+            public/vnc.bin
+            public/vnc.meta.json
+            public/flybody.bundle.bin
+          key: flybrain-pages-v1-${{ hashFiles('tools/build_csr.py', 'tools/build_vnc.py', 'tools/bake_flybody_bundle.py') }}
+
+      - name: Install Python build dependencies
+        if: steps.neural-cache.outputs.cache-hit != 'true'
+        run: python -m pip install --upgrade pip numpy pandas pyarrow
+
+      - name: Build full FlyWire brain
+        if: steps.neural-cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/download_data.sh
+          python tools/build_csr.py
+
+      - name: Build full MANC VNC
+        if: steps.neural-cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/download_manc.sh
+          python tools/build_vnc.py
+
+      - name: Build flybody browser bundle
+        if: steps.neural-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/TuragaLab/flybody /tmp/flybody
+          cp /tmp/flybody/flybody/fruitfly/assets/*.obj public/flybody/
+          python tools/bake_flybody_bundle.py
+
+      - name: Write asset manifest
+        run: python tools/write_manifest.py
+
+      - name: Install web dependencies
         run: npm ci
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Build
+      - name: Build Science Mode
         env:
           VITE_BASE_PATH: /fruit-fly-driving-scooter/
-        run: npm run build:pages
+          VITE_BRAIN_URL: /fruit-fly-driving-scooter/brain.bin
+          VITE_BRAIN_META_URL: /fruit-fly-driving-scooter/brain.meta.json
+          VITE_VNC_URL: /fruit-fly-driving-scooter/vnc.bin
+          VITE_VNC_META_URL: /fruit-fly-driving-scooter/vnc.meta.json
+          VITE_FLYBODY_BUNDLE_URL: /fruit-fly-driving-scooter/flybody.bundle.bin
+          VITE_ASSET_MANIFEST_URL: /fruit-fly-driving-scooter/assets.json
+        run: |
+          npm run build
+          cat > dist/index.html <<'HTML'
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width,initial-scale=1">
+              <meta http-equiv="refresh" content="0; url=./app.html?mode=science">
+              <title>FlyBrain Motorbike — Full Brain</title>
+            </head>
+            <body>
+              <a href="./app.html?mode=science">Open full brain Science Mode</a>
+            </body>
+          </html>
+          HTML
+          touch dist/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
