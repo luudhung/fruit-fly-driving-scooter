@@ -21,6 +21,16 @@ interface Obstacle {
   label: string;
 }
 
+interface TrafficVehicle {
+  node: THREE.Group;
+  axis: "x" | "z";
+  min: number;
+  max: number;
+  speed: number;
+  direction: 1 | -1;
+  radius: number;
+}
+
 const MAX_SPEED_MPS = 4.8;
 const MAX_STEER_RAD = THREE.MathUtils.degToRad(30);
 const WHEELBASE = 1.42;
@@ -61,6 +71,7 @@ export class MotorbikeWorld {
   });
   private readonly retinaPixels = new Uint8Array(RETINA_W * RETINA_H * 4);
   private readonly obstacles: Obstacle[] = [];
+  private readonly traffic: TrafficVehicle[] = [];
   private readonly clock = new THREE.Clock();
   private readonly keys = new Set<string>();
   private readonly flyWings: THREE.Mesh[] = [];
@@ -95,6 +106,11 @@ export class MotorbikeWorld {
   private brainReady = false;
   private recovery = 0;
   private elapsed = 0;
+  private collisionCooldown = 0;
+  private stuckTime = 0;
+  private cameraHeading = 0;
+  private readonly cameraLook = new THREE.Vector3();
+  private readonly lastBikePosition = new THREE.Vector3();
 
   constructor(private readonly container: HTMLElement) {
     this.routeLength = this.route.getLength();
@@ -113,6 +129,7 @@ export class MotorbikeWorld {
     this.buildDream();
     this.buildFlyRider();
     this.buildObstacles();
+    this.buildTraffic();
 
     this.retinaCamera.position.set(0, 1.55, -0.72);
     this.retinaCamera.rotation.set(0.02, 0, 0);
@@ -139,13 +156,18 @@ export class MotorbikeWorld {
     this.brake = 0;
     this.collisionCount = 0;
     this.recovery = 0;
+    this.collisionCooldown = 0;
+    this.stuckTime = 0;
     const p = this.route.getPointAt(this.routeT);
     const tangent = this.route.getTangentAt(this.routeT).normalize();
     this.heading = Math.atan2(tangent.x, -tangent.z);
     this.bike.position.copy(p);
     this.bike.position.y = 0;
     this.bike.rotation.set(0, this.heading, 0);
-    this.updateCamera(true);
+    this.cameraHeading = this.heading;
+    this.lastBikePosition.copy(this.bike.position);
+    this.cameraLook.copy(this.bike.position).add(new THREE.Vector3(0, 1.1, 0));
+    this.updateCamera(true, 1 / 60);
   }
 
   setBrainSignal(steering: number, activity: number, ready = true) {
@@ -509,14 +531,98 @@ export class MotorbikeWorld {
   }
 
   private buildObstacles() {
-    this.addParkedScooter(14.0, 28.5, 0.15);
-    this.addCrates(43.2, 3.0);
-    this.addConeLine(28.0, -15.8);
-    this.addParkedScooter(15.9, -32.0, Math.PI);
-    this.addCrates(-16.2, -31.5);
-    this.addConeLine(-33.5, -14.2);
-    this.addParkedScooter(-44.0, 2.0, Math.PI / 2);
-    this.addCrates(-15.7, 32.0);
+    // Put real hazards directly in the driven lanes so the avoidance
+    // controller has to make visible decisions, not just drive past scenery.
+    this.addParkedScooter(14.2, 30.0, 0.08);
+    this.addCrates(44.0, 3.0);
+    this.addConeLine(29.0, -15.2);
+    this.addParkedScooter(15.8, -31.0, Math.PI);
+    this.addCrates(-15.3, -31.5);
+    this.addConeLine(-32.0, -14.9);
+    this.addParkedScooter(-44.2, 2.0, Math.PI / 2);
+    this.addCrates(-15.0, 32.0);
+
+    // Additional mid-lane hazards make the unattended run visibly weave.
+    this.addConeLine(15.7, 39.0);
+    this.addCrates(36.5, 15.2);
+    this.addConeLine(44.4, -25.0);
+    this.addCrates(2.0, -44.6);
+    this.addConeLine(-44.1, 27.0);
+  }
+
+  private buildTraffic() {
+    this.addMovingCar("x", -62, 62, 15.5, 5.6, 1, 0xc84335);
+    this.addMovingCar("z", -62, 62, -15.4, 4.8, -1, 0xe0d6bf);
+    this.addMovingCar("x", -62, 62, -45.6, 6.2, -1, 0x365f86);
+    this.addMovingCar("z", -62, 62, 45.4, 5.2, 1, 0x5c6b45);
+  }
+
+  private addMovingCar(
+    axis: "x" | "z",
+    min: number,
+    max: number,
+    fixed: number,
+    speed: number,
+    direction: 1 | -1,
+    color: number,
+  ) {
+    const g = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.25, roughness: 0.35 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.8 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x668391, metalness: 0.05, roughness: 0.2 });
+    const chrome = new THREE.MeshStandardMaterial({ color: 0xaeb5ba, metalness: 0.8, roughness: 0.22 });
+
+    const body = mesh(new THREE.BoxGeometry(1.65, 0.55, 3.35), paint, 0, 0.62, 0);
+    g.add(body);
+    const cabin = mesh(new THREE.BoxGeometry(1.4, 0.62, 1.65), paint, 0, 1.06, 0.1);
+    g.add(cabin);
+    const windshield = mesh(new THREE.BoxGeometry(1.15, 0.42, 0.035), glass, 0, 1.08, -0.75);
+    windshield.rotation.x = -0.17;
+    g.add(windshield);
+    const rearGlass = windshield.clone();
+    rearGlass.position.z = 0.93;
+    rearGlass.rotation.x = 0.15;
+    g.add(rearGlass);
+
+    for (const x of [-0.74, 0.74]) {
+      for (const z of [-1.05, 1.05]) {
+        const wheel = mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.18, 16), dark, x, 0.34, z);
+        wheel.rotation.z = Math.PI / 2;
+        g.add(wheel);
+        const hub = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.19, 12), chrome, x, 0.34, z);
+        hub.rotation.z = Math.PI / 2;
+        g.add(hub);
+      }
+    }
+
+    const laneOffset = direction > 0 ? -1.15 : 1.15;
+    if (axis === "x") {
+      g.position.set(direction > 0 ? min : max, 0, fixed + laneOffset);
+      g.rotation.y = direction > 0 ? -Math.PI / 2 : Math.PI / 2;
+    } else {
+      g.position.set(fixed + laneOffset, 0, direction > 0 ? min : max);
+      g.rotation.y = direction > 0 ? Math.PI : 0;
+    }
+
+    this.scene.add(g);
+    const vehicle: TrafficVehicle = { node: g, axis, min, max, speed, direction, radius: 1.25 };
+    this.traffic.push(vehicle);
+    this.obstacles.push({ node: g, radius: 1.25, label: "moving car" });
+  }
+
+  private updateTraffic(dt: number) {
+    for (const car of this.traffic) {
+      const delta = car.speed * car.direction * dt;
+      if (car.axis === "x") {
+        car.node.position.x += delta;
+        if (car.direction > 0 && car.node.position.x > car.max) car.node.position.x = car.min;
+        if (car.direction < 0 && car.node.position.x < car.min) car.node.position.x = car.max;
+      } else {
+        car.node.position.z += delta;
+        if (car.direction > 0 && car.node.position.z > car.max) car.node.position.z = car.min;
+        if (car.direction < 0 && car.node.position.z < car.min) car.node.position.z = car.max;
+      }
+    }
   }
 
   private addParkedScooter(x: number, z: number, rot: number) {
@@ -572,14 +678,14 @@ export class MotorbikeWorld {
       const dz = obstacle.node.position.z - this.bike.position.z;
       const ahead = dx * forwardX + dz * forwardZ;
       const lateral = dx * rightX + dz * rightZ;
-      if (ahead <= 0 || ahead > 10) continue;
-      const width = obstacle.radius + 0.95;
+      if (ahead <= -0.5 || ahead > 14) continue;
+      const width = obstacle.radius + 1.15;
       if (Math.abs(lateral) > width) continue;
-      const closeness = 1 - ahead / 10;
+      const closeness = THREE.MathUtils.clamp(1 - Math.max(0, ahead) / 14, 0, 1);
       const centerThreat = 1 - Math.min(1, Math.abs(lateral) / width);
       const w = closeness * centerThreat;
       const away = lateral >= 0 ? -1 : 1;
-      steer += away * w * 1.8;
+      steer += away * w * 2.65;
       danger = Math.max(danger, w);
     }
     return { steer: THREE.MathUtils.clamp(steer, -1, 1), danger };
@@ -587,6 +693,8 @@ export class MotorbikeWorld {
 
   private step(dt: number) {
     this.elapsed += dt;
+    this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
+    this.updateTraffic(dt);
     const manual =
       (this.keys.has("ArrowLeft") || this.keys.has("KeyA") ? -1 : 0) +
       (this.keys.has("ArrowRight") || this.keys.has("KeyD") ? 1 : 0);
@@ -600,7 +708,7 @@ export class MotorbikeWorld {
     const routeSteer = THREE.MathUtils.clamp(headingError * 1.9, -1, 1);
     const avoidance = this.obstacleAvoidance();
 
-    let command = routeSteer * 0.78 + avoidance.steer * 0.95 + this.brainSteer * 0.22;
+    let command = routeSteer * 0.72 + avoidance.steer * 1.18 + this.brainSteer * 0.22;
     if (this.recovery > 0) {
       this.recovery -= dt;
       command += Math.sin(this.elapsed * 7) * 0.7;
@@ -611,7 +719,10 @@ export class MotorbikeWorld {
     const curveTangent = this.route.getTangentAt(this.routeT).normalize();
     const curveHeading = Math.atan2(curveTangent.x, -curveTangent.z);
     const curveTurn = Math.min(1, Math.abs(wrapAngle(curveHeading - desiredHeading)) * 2.5);
-    const targetSpeed = MAX_SPEED_MPS * (1 - 0.45 * avoidance.danger) * (1 - 0.25 * curveTurn);
+    const targetSpeed = Math.max(
+      1.15,
+      MAX_SPEED_MPS * (1 - 0.68 * avoidance.danger) * (1 - 0.22 * curveTurn),
+    );
     this.throttle = targetSpeed > this.speed ? 1 : 0.25;
     this.brake = targetSpeed + 0.7 < this.speed ? 0.5 : 0;
     const accel = targetSpeed > this.speed ? 2.0 : 3.5;
@@ -628,9 +739,37 @@ export class MotorbikeWorld {
     const hit = this.collides();
     if (hit) {
       this.bike.position.copy(old);
-      this.speed *= 0.18;
-      this.collisionCount += 1;
-      this.recovery = 1.0;
+      // Do not let the demo pin itself into the same collider forever.
+      // Keep a little forward momentum and commit to a strong evasive arc.
+      this.speed = Math.max(1.0, this.speed * 0.55);
+      if (this.collisionCooldown <= 0) {
+        this.collisionCount += 1;
+        this.collisionCooldown = 0.9;
+      }
+      this.recovery = 1.4;
+      this.heading += (this.steering >= 0 ? 1 : -1) * 0.18;
+    }
+
+    const moved = this.bike.position.distanceTo(this.lastBikePosition);
+    this.lastBikePosition.copy(this.bike.position);
+    if (moved < 0.006 || this.speed < 0.22) this.stuckTime += dt;
+    else this.stuckTime = Math.max(0, this.stuckTime - dt * 2);
+
+    if (this.stuckTime > 1.35) {
+      // Hard anti-stuck fallback for unattended viewing: advance a short
+      // distance along the intended route instead of accumulating thousands
+      // of collision frames at 0 km/h.
+      this.routeT = (this.routeT + 0.012) % 1;
+      const p = this.route.getPointAt(this.routeT);
+      const tangent = this.route.getTangentAt(this.routeT).normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
+      const side = this.steering >= 0 ? 1 : -1;
+      this.bike.position.copy(p).addScaledVector(normal, side * 0.9);
+      this.heading = Math.atan2(tangent.x, -tangent.z);
+      this.speed = 1.8;
+      this.recovery = 0.8;
+      this.stuckTime = 0;
+      this.lastBikePosition.copy(this.bike.position);
     }
 
     this.bike.rotation.y = this.heading;
@@ -663,26 +802,38 @@ export class MotorbikeWorld {
     return "Hàng Đào";
   }
 
-  private updateCamera(snap = false) {
-    const localOffset = new THREE.Vector3(0.0, 2.8, 5.5);
-    localOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.heading);
-    const target = this.bike.position.clone().add(new THREE.Vector3(0, 0.9, 0));
-    const desired = target.clone().add(localOffset);
-    if (snap) this.camera.position.copy(desired);
-    else this.camera.position.lerp(desired, 0.08);
-    const look = target.clone().add(new THREE.Vector3(
-      Math.sin(this.heading) * 3.2,
-      0.35,
-      -Math.cos(this.heading) * 3.2,
-    ));
-    this.camera.lookAt(look);
+  private updateCamera(snap = false, dt = 1 / 60) {
+    // Stable third-person chase camera: yaw follows the bike through the
+    // shortest arc, but the camera never inherits bike roll/recovery jitter.
+    const yawError = wrapAngle(this.heading - this.cameraHeading);
+    const yawAlpha = snap ? 1 : 1 - Math.exp(-dt * 3.4);
+    this.cameraHeading = wrapAngle(this.cameraHeading + yawError * yawAlpha);
+
+    const forward = new THREE.Vector3(
+      Math.sin(this.cameraHeading),
+      0,
+      -Math.cos(this.cameraHeading),
+    );
+    const desired = this.bike.position.clone()
+      .addScaledVector(forward, -6.3)
+      .add(new THREE.Vector3(0, 2.55, 0));
+
+    const posAlpha = snap ? 1 : 1 - Math.exp(-dt * 5.0);
+    this.camera.position.lerp(desired, posAlpha);
+
+    const desiredLook = this.bike.position.clone()
+      .add(new THREE.Vector3(0, 1.05, 0))
+      .addScaledVector(forward, 2.35);
+    const lookAlpha = snap ? 1 : 1 - Math.exp(-dt * 7.0);
+    this.cameraLook.lerp(desiredLook, lookAlpha);
+    this.camera.lookAt(this.cameraLook);
   }
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.running) this.step(dt);
-    this.updateCamera();
+    this.updateCamera(false, dt);
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.scene, this.camera);
   };
