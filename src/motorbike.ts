@@ -1,29 +1,62 @@
 import { MotorbikeWorld } from "./motorbike-world";
+import { BrainDrive, type BrainStatus } from "./motorbike-brain";
 
 const worldEl = document.getElementById("world") as HTMLDivElement;
+const telemetry = document.getElementById("telemetry") as HTMLDivElement;
+const brainStatusEl = document.getElementById("brain-status") as HTMLDivElement;
+const brainDetailEl = document.getElementById("brain-detail") as HTMLDivElement;
+const retinaCanvas = document.getElementById("retina") as HTMLCanvasElement;
+const retinaCtx = retinaCanvas.getContext("2d")!;
+const retinaImage = retinaCtx.createImageData(64, 16);
+
 const world = new MotorbikeWorld(worldEl);
+world.start();
 
-const start = document.getElementById("start") as HTMLButtonElement;
-const pause = document.getElementById("pause") as HTMLButtonElement;
-const reset = document.getElementById("reset") as HTMLButtonElement;
-const telemetry = document.getElementById("telemetry") as HTMLPreElement;
+let latestBrain: BrainStatus = {
+  stage: "loading",
+  message: "Starting full FlyWire brain…",
+};
 
-start.addEventListener("click", () => world.start());
-pause.addEventListener("click", () => world.pause());
-reset.addEventListener("click", () => world.reset());
+const brain = new BrainDrive(world, {
+  onStatus(status) {
+    latestBrain = { ...latestBrain, ...status };
+    brainStatusEl.dataset.state = status.stage;
+    brainStatusEl.textContent =
+      status.stage === "running" ? "FULL BRAIN ONLINE"
+      : status.stage === "error" ? "BRAIN LOAD ERROR"
+      : "LOADING FULL BRAIN";
+    brainDetailEl.textContent = status.message;
+  },
+  onRetina(pixels, w, h) {
+    const dst = retinaImage.data;
+    for (let y = 0; y < h; y++) {
+      const srcRow = (h - 1 - y) * w * 4;
+      const dstRow = y * w * 4;
+      for (let i = 0; i < w * 4; i++) dst[dstRow + i] = pixels[srcRow + i];
+    }
+    retinaCtx.putImageData(retinaImage, 0, 0);
+  },
+});
+
+void brain.start();
+
+function fmt(n: number | undefined) {
+  return n == null ? "—" : n.toLocaleString();
+}
 
 function tickHud() {
   const t = world.getTelemetry();
-  telemetry.textContent = [
-    "CONTROL SOURCE  MANUAL (PHASE B — NOT BRAIN)",
-    `speed           ${t.speedKmh.toFixed(1)} km/h`,
-    `position        x=${t.positionX.toFixed(2)}  z=${t.positionZ.toFixed(2)}`,
-    `heading         ${(t.headingRad * 180 / Math.PI).toFixed(1)}°`,
-    `steering        ${t.steering.toFixed(2)}`,
-    `throttle        ${t.throttle.toFixed(2)}`,
-    `brake           ${t.brake.toFixed(2)}`,
-    `collisions      ${t.collisionCount}`,
-  ].join("\n");
+  telemetry.innerHTML = [
+    '<div class="metric"><span>street</span><b>' + t.street + '</b></div>',
+    '<div class="metric"><span>speed</span><b>' + t.speedKmh.toFixed(1) + ' km/h</b></div>',
+    '<div class="metric"><span>steering</span><b>' + t.steering.toFixed(2) + '</b></div>',
+    '<div class="metric"><span>brain steer</span><b>' + t.brainSteer.toFixed(2) + '</b></div>',
+    '<div class="metric"><span>DN activity</span><b>' + t.brainActivity.toFixed(4) + '</b></div>',
+    '<div class="metric"><span>collisions</span><b>' + t.collisionCount + '</b></div>',
+    '<div class="metric wide"><span>FlyWire</span><b>' + fmt(latestBrain.neurons) + ' neurons · ' + fmt(latestBrain.edges) + ' edges</b></div>',
+    '<div class="metric wide"><span>MANC</span><b>' + fmt(latestBrain.vncNeurons) + ' neurons · ' + fmt(latestBrain.vncEdges) + ' edges</b></div>',
+  ].join("");
   requestAnimationFrame(tickHud);
 }
+
 tickHud();
