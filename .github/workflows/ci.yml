@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: typecheck · unit · build · static
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+        # Needs node >= 22.18 for unflagged TypeScript stripping.
+
+      - name: E2E collection (no browser)
+        run: npm run test:e2e:list
+        # Parses playwright.config.ts + every tests/*.spec.ts without
+        # launching Chromium — the full run needs WebGPU (see below).
+
+      - name: Python syntax
+        run: npm run check:py
+        # Stdlib compileall only — no numpy/pandas needed.
+
+      - name: Rust baseline check
+        run: npm run check:rs
+        # ubuntu-latest ships Rust; --locked pins rayon via Cargo.lock.
+
+      - name: Shell syntax
+        run: npm run check:sh
+
+      - name: JSON configs
+        run: npm run check:json
+        # Strict JSON.parse for *.json; wrangler.jsonc gets a
+        # line-comment strip first (it has // comments, no blocks).
+
+      - name: Manifest consistency
+        run: |
+          tracked=$(grep -E '^    "[a-z]' tools/write_manifest.py | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
+          used=$(grep -hoE 'versionFor\("[^"]+"\)' src/*.ts | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
+          diff <(echo "$tracked") <(echo "$used")
+        # tools/write_manifest.py TRACKED must equal the versionFor()
+        # call sites, or a new asset ships without cache busting.
+
+      - name: Build
+        run: npm run build
+        # vite copies whatever is in public/; the large connectome binaries
+        # are gitignored and fetched at runtime, so the build needs no data.
+
+      # The Playwright e2e suite (npm run test:e2e) is intentionally NOT run
+      # here. It needs a WebGPU-capable Chromium with GPU virtualization plus
+      # ~1 GB of connectome / body assets, neither of which the default Ubuntu
+      # runners provide. It runs locally on an M2 Pro — see README "Quickstart".
