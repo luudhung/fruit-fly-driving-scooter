@@ -1,39 +1,113 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FlyBrain Motorbike — Phase B</title>
+  <title>FlyBrain Dream — Hanoi Old Quarter</title>
+  <meta name="description" content="Full FlyWire fruit-fly brain running in-browser while a fly rides a Dream-style motorcycle through a stylized Hanoi Old Quarter." />
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: #06070a; color: #e8edf3; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
-    body { display: grid; grid-template-rows: auto 1fr; }
-    header { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid #1b2028; background: rgba(8,10,14,.96); }
-    h1 { margin: 0 16px 0 0; font-size: 13px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: #9ad7ff; }
-    .badge { margin-left: auto; border: 1px solid #6b5623; background: #211b0d; color: #f5c542; padding: 5px 9px; border-radius: 999px; font-size: 10px; letter-spacing: .05em; }
-    button { border: 1px solid #293341; background: #121821; color: #d8e0e8; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
-    button:hover { background: #192231; border-color: #3d526b; }
-    main { position: relative; min-height: 0; }
-    #world { position: absolute; inset: 0; }
-    #telemetry { position: absolute; top: 14px; left: 14px; margin: 0; min-width: 290px; padding: 12px 14px; background: rgba(5,7,10,.78); backdrop-filter: blur(10px); border: 1px solid #202937; border-radius: 10px; color: #b9c8d8; font: 11px/1.65 "SFMono-Regular", Consolas, monospace; pointer-events: none; }
-    .help { position: absolute; right: 14px; bottom: 14px; max-width: 320px; padding: 10px 12px; background: rgba(5,7,10,.72); border: 1px solid #202937; border-radius: 9px; color: #77818e; font-size: 11px; }
-    .help b { color: #b9c8d8; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0e12; color: #edf3f6; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #world { position: fixed; inset: 0; }
+    #world canvas { width: 100%; height: 100%; display: block; }
+    .topbar {
+      position: fixed; z-index: 10; top: 0; left: 0; right: 0;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 18px;
+      background: linear-gradient(180deg, rgba(7,10,14,.82), rgba(7,10,14,0));
+      pointer-events: none;
+    }
+    .brand { font-weight: 780; letter-spacing: -.02em; font-size: 17px; }
+    .brand small { display: block; margin-top: 2px; color: rgba(235,243,246,.55); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    .live {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+      border: 1px solid rgba(255,255,255,.13); border-radius: 999px;
+      background: rgba(10,14,19,.62); backdrop-filter: blur(14px);
+      padding: 7px 10px; font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #f0bd51; box-shadow: 0 0 12px #f0bd51; }
+    #brain-status[data-state="running"] + .dot, .live:has(#brain-status[data-state="running"]) .dot { background:#58e48b; box-shadow:0 0 12px #58e48b; }
+    #brain-status[data-state="error"] + .dot, .live:has(#brain-status[data-state="error"]) .dot { background:#ff6666; box-shadow:0 0 12px #ff6666; }
+
+    .panel {
+      position: fixed; z-index: 10; left: 16px; bottom: 16px;
+      width: min(410px, calc(100vw - 32px));
+      border: 1px solid rgba(255,255,255,.11);
+      border-radius: 16px;
+      background: rgba(7,10,14,.68);
+      backdrop-filter: blur(18px) saturate(120%);
+      box-shadow: 0 18px 50px rgba(0,0,0,.24);
+      overflow: hidden;
+    }
+    .panel-head { padding: 13px 14px 10px; border-bottom: 1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:12px; }
+    #retina { width: 128px; height: 32px; image-rendering: pixelated; border-radius: 6px; background:#050609; border:1px solid rgba(255,255,255,.09); }
+    .brain-copy { min-width:0; }
+    #brain-status { font: 750 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.08em; color:#f0bd51; }
+    #brain-status[data-state="running"] { color:#63e795; }
+    #brain-status[data-state="error"] { color:#ff7474; }
+    #brain-detail { margin-top:4px; font-size:10px; color:rgba(237,243,246,.55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #telemetry { padding: 11px 14px 13px; display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; }
+    .metric { display:flex; justify-content:space-between; gap:10px; font-size:11px; }
+    .metric span { color:rgba(237,243,246,.45); }
+    .metric b { font-weight:650; color:rgba(237,243,246,.9); text-align:right; }
+    .metric.wide { grid-column:1/-1; }
+    .honesty {
+      grid-column:1/-1; padding-top:8px; border-top:1px solid rgba(255,255,255,.07);
+      color:rgba(237,243,246,.38); font-size:9px; line-height:1.45;
+    }
+    .science {
+      position:fixed; right:16px; bottom:16px; z-index:11;
+      text-decoration:none; color:#eef4f7; font-size:11px; font-weight:650;
+      padding:10px 12px; border:1px solid rgba(255,255,255,.12); border-radius:10px;
+      background:rgba(7,10,14,.6); backdrop-filter:blur(14px);
+    }
+    .science:hover { background:rgba(7,10,14,.82); }
+    .cinema { position:fixed; inset:0; pointer-events:none; z-index:5; box-shadow:inset 0 0 120px rgba(0,0,0,.18); }
+    @media (max-width: 680px) {
+      .panel { bottom: 12px; left: 12px; width: calc(100vw - 24px); }
+      .science { display:none; }
+      #telemetry { gap:6px 10px; }
+      .metric.wide { display:none; }
+      .topbar { padding:12px; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>FlyBrain Motorbike / Phase B</h1>
-    <button id="start">Start</button>
-    <button id="pause">Pause</button>
-    <button id="reset">Reset</button>
-    <span class="badge">MANUAL PLACEHOLDER — BRAIN NOT CONNECTED YET</span>
-  </header>
-  <main>
-    <div id="world"></div>
-    <pre id="telemetry"></pre>
-    <div class="help"><b>Temporary Phase B controls:</b> A/D or ←/→ steer, W/↑ throttle, Space/↓ brake. The next phase replaces steering input with real descending-neuron activity.</div>
-  </main>
+  <div id="world"></div>
+  <div class="cinema"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      FlyBrain Dream
+      <small>Hanoi Old Quarter · autoplay</small>
+    </div>
+    <div class="live">
+      <span class="dot"></span>
+      <span id="brain-status" data-state="loading">LOADING FULL BRAIN</span>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <canvas id="retina" width="64" height="16"></canvas>
+      <div class="brain-copy">
+        <div>Rider retina · 64×16</div>
+        <div id="brain-detail">Starting full FlyWire brain…</div>
+      </div>
+    </div>
+    <div id="telemetry"></div>
+    <div style="padding:0 14px 13px">
+      <div class="honesty">
+        Full FlyWire LIF runs in-browser and its descending-neuron asymmetry influences steering.
+        Route following + obstacle safety assist remains active so the unattended demo keeps moving; it is not labelled as pure brain-only control.
+      </div>
+    </div>
+  </section>
+
+  <a class="science" href="./app.html?mode=science">Science mode ↗</a>
+
   <script type="module" src="/src/motorbike.ts"></script>
 </body>
 </html>
