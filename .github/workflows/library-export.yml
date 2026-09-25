@@ -1,0 +1,28 @@
+name: Library Export
+on:
+  push:
+    branches: [chatgpt-library-export]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package source and dist
+        run: |
+          zip -r fruit-fly-driving-scooter-snapshot.zip .             -x ".git/*" "node_modules/*" "fruit-fly-driving-scooter-snapshot.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fruit-fly-driving-scooter-snapshot
+          path: fruit-fly-driving-scooter-snapshot.zip
+          if-no-files-found: error
