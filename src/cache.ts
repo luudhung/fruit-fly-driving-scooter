@@ -114,6 +114,54 @@ async function readWithProgress(
   return out.buffer;
 }
 
+interface ChunkManifest {
+  version: number;
+  totalBytes: number;
+  parts: Array<{ file: string; size: number }>;
+}
+
+/**
+ * Vercel Hobby cannot serve the original 125 MB brain.bin as one static
+ * file. On Vercel builds we therefore ship deterministic <24 MB parts plus
+ * <asset>.parts.json. The browser reconstructs the exact original bytes
+ * before parsing; the neural graph is not reduced or approximated.
+ */
+async function fetchChunked(
+  url: string,
+  onProgress?: (got: number, total: number) => void,
+): Promise<ArrayBuffer | null> {
+  const absolute = new URL(url, window.location.href);
+  const query = absolute.search;
+  absolute.search = "";
+  const manifestUrl = absolute.toString() + ".parts.json" + query;
+  const manifestResponse = await fetch(manifestUrl);
+  if (!manifestResponse.ok) return null;
+
+  const manifest = await manifestResponse.json() as ChunkManifest;
+  if (!Array.isArray(manifest.parts) || !manifest.parts.length || manifest.totalBytes <= 0) {
+    throw new Error(manifestUrl + ": invalid chunk manifest");
+  }
+
+  const out = new Uint8Array(manifest.totalBytes);
+  let offset = 0;
+  for (const part of manifest.parts) {
+    const partUrl = new URL(part.file, manifestUrl).toString();
+    const response = await fetch(partUrl);
+    if (!response.ok) throw new Error(partUrl + ": HTTP " + response.status);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength !== part.size) {
+      throw new Error(partUrl + ": size mismatch " + bytes.byteLength + " != " + part.size);
+    }
+    out.set(bytes, offset);
+    offset += bytes.byteLength;
+    onProgress?.(offset, manifest.totalBytes);
+  }
+  if (offset !== manifest.totalBytes) {
+    throw new Error(url + ": reconstructed size mismatch " + offset + " != " + manifest.totalBytes);
+  }
+  return out.buffer;
+}
+
 /**
  * Get bytes for `key` (the cache key) by fetching `url` if not cached.
  * If `key` is already in IDB, return its bytes immediately. Otherwise
@@ -134,16 +182,24 @@ export async function getOrFetch(
     // fall back to plain fetch each call.
   }
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  const bytes = onProgress && r.body
-    ? await readWithProgress(r, onProgress)
-    : await r.arrayBuffer();
+  let etag: string | null = null;
+  let bytes: ArrayBuffer;
+  if (r.ok) {
+    etag = r.headers.get("ETag");
+    bytes = onProgress && r.body
+      ? await readWithProgress(r, onProgress)
+      : await r.arrayBuffer();
+  } else {
+    const chunked = await fetchChunked(url, onProgress);
+    if (!chunked) throw new Error(`${url}: HTTP ${r.status}`);
+    bytes = chunked;
+  }
   // Fire-and-forget the IDB write — we have the bytes in memory and
   // the caller doesn't need to block on the cache populating. For
   // 125 MB blobs the IDB write is ~30 s and was dominating cold-load
   // wall time.
   idbPut(key, {
-    etag: r.headers.get("ETag"),
+    etag,
     size: bytes.byteLength,
     bytes,
   }).catch(() => {
