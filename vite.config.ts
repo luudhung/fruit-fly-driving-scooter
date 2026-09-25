@@ -14,7 +14,7 @@ export default defineConfig({
         app: resolve(__dirname, "app.html"),
         play: resolve(__dirname, "play.html"),
         bench: resolve(__dirname, "bench.html"),
-        motorbike: resolve(__dirname, "motorbike.html"),
+        motorbike: resolve(__dirname, "motorbike.html"),\n        upstream: resolve(__dirname, "upstream.html"),
       },
     },
   },
