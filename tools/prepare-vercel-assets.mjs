@@ -73,5 +73,6 @@ await copySmall("brain.meta.json");
 await copySmall("vnc.meta.json");
 await copyChunked("brain.bin");
 await copyChunked("vnc.bin");
+await copyChunked("flybody.bundle.bin");
 
-console.log("[prepare-vercel-assets] full FlyWire + MANC assets prepared for Vercel");
+console.log("[prepare-vercel-assets] full FlyWire + MANC + flybody assets prepared for Vercel");
