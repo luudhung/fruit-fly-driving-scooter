@@ -5,8 +5,6 @@
 <br/><br/>
 
 <a href="https://webgpu-fly.pages.dev"><img alt="Launch" src="https://img.shields.io/badge/%E2%96%B6%20LAUNCH-webgpu--fly.pages.dev-9ad7ff?style=for-the-badge&labelColor=06070a"/></a>
-&nbsp;
-<a href="https://webgpu-fly.pages.dev/app?mode=science"><img alt="Science view" src="https://img.shields.io/badge/SCIENCE%20VIEW-%2Fapp%3Fmode%3Dscience-6cd28a?style=for-the-badge&labelColor=06070a"/></a>
 
 <br/><br/>
 
@@ -81,7 +79,6 @@ W DNa02    forward, faster S DNp09    looming-evoked  X BPN     forward
 E DNb01    backward        D DNp52    forward circuit
 R DNg13    turning         F MDN      backward
                                                        SPACE     new round
-                                                       M         science view
 ```
 
 Win → copy the replay URL. The recipient's brain re-runs the **identical**
@@ -92,10 +89,8 @@ on display refresh rate. Daily-challenge mode uses the same target seed for
 everyone on the same UTC day.
 
 The landing page at [`/`](https://webgpu-fly.pages.dev) explains the project in
-plain language; the simulator itself lives at
-[`/app`](https://webgpu-fly.pages.dev/app). Append `?mode=science` (or press
-`M` in game) for the researcher interface: stim presets, closed-loop visual
-mode, ARS evolver, raw spike-rate log.
+plain language; the playable simulator is served from `/play.html`. The legacy
+Science Mode entry has been removed from this fork.
 
 ---
 
@@ -202,21 +197,20 @@ npm install
 npm run dev          # http://localhost:8766
 npm run typecheck    # tsc --noEmit          ← what CI enforces
 npm run build        # tsc && vite build     ← what CI enforces
-npm run test:e2e     # Playwright (game + science modes) — needs WebGPU + assets
+npm run test:e2e     # Playwright browser checks — needs WebGPU + assets
 ```
 
 CI (`.github/workflows/ci.yml`) runs `typecheck` + `build` on Ubuntu. The
 Playwright e2e suite is **not** in CI — it needs a WebGPU-capable Chromium and
 ~1 GB of assets, neither of which the default runners provide. It runs locally
-and covers both game and science modes (KC sparsity, DN cascade, retina
-detection, RL walker translation, replay roundtrip, daily-challenge).
+for the remaining browser-facing game checks, including replay and daily-challenge flows.
 
 ---
 
 ## 🚀 Deploy
 
 [`DEPLOY.md`](./DEPLOY.md) covers the full Cloudflare Pages + R2 path. The root
-`/` is a lightweight landing page; the app is at `/app`. Heavy assets
+`/` is a lightweight landing page; the playable simulator is at `/play.html`. Heavy assets
 (`brain.bin`, `vnc.bin`, flybody, `walking-policy.bin`) live in R2 because
 Cloudflare Pages caps individual files at 25 MB; Pages serves the ~9 MB JS+WASM
 bundle. `npm run deploy` builds slim and pushes to Pages; `npm run deploy:r2`
@@ -239,7 +233,9 @@ src/
   room.ts              three.js scene, retinal render, camera
   evolution.ts         WebGPU ARS gait evolver
   game.ts              game mode + deterministic replay URLs
-  main.ts              UI, brain-stim orchestration, button wiring
+  openworld.ts         autonomous ecology experiment adapter
+  stock.ts             market-decision experiment adapter
+  fulllife.ts          long-running civilization/life observer
 
 tools/
   build_csr.py         FlyWire feather → brain.bin (authoritative binary spec)
