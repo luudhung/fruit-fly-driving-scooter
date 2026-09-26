@@ -13,8 +13,7 @@ Combined with `Cache-Control: public, max-age=31536000, immutable` on the
 binaries (set by tools/upload_to_r2.sh), this gives permanent browser
 caching with automatic invalidation on rebuild — no IDB, no service worker.
 
-Run after any of: build_csr.py, build_vnc.py, extract_walking_policy.py,
-dump_flybody_spec.py. Cheap (a few sha256s over ~100 MB), idempotent.
+Run after any runtime asset regeneration that affects the currently loaded browser assets. Cheap (a few sha256s over ~100 MB), idempotent.
 """
 from __future__ import annotations
 
@@ -34,10 +33,6 @@ TRACKED = [
     "brain.bin",
     "brain.meta.json",
     "vnc.bin",
-    "vnc.meta.json",
-    "walking-policy.bin",
-    "walking-obs-norm.bin",
-    "walking-ref.bin",
     "flybody.bundle.bin",
 ]
 
