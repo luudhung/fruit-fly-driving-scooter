@@ -1341,7 +1341,7 @@ function brainLevel(v:number){
   return clamp(Math.log10(1+v*7000)/2.2,0,1);
 }
 
-function drawBrainMonitor(){
+function drawBrainRegionMonitor(){
   const regions=latestBrain.regions||{};
   const full=latestBrain.stage==="running"&&latestBrain.fullBrainLoaded===true;
   const serverOnly=!full&&latestWorkerMode==="AUTONOMOUS_SERVER";
@@ -1432,7 +1432,7 @@ function updateFundsCard(){
 
 function updateHud(){
   updateFundsCard();
-  drawBrainMonitor();
+  drawBrainRegionMonitor();
   const prev=prices.length>1?prices[prices.length-2]:price;
   const change=price&&prev?((price-prev)/prev*100):0;
   const staleSec=lastFetchAt?Math.floor((Date.now()-lastFetchAt)/1000):0;
