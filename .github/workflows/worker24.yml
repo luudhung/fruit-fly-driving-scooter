@@ -28,3 +28,6 @@ jobs:
         with:
           workspaces: worker24
       - run: cargo check
+      - name: Build worker24 Docker image
+        working-directory: .
+        run: docker build --progress=plain -t flybrain-worker24 .
