@@ -32,6 +32,20 @@
     #decision{font-size:20px;letter-spacing:-.03em}
     #decision[data-side="UP"]{color:#168e53} #decision[data-side="DOWN"]{color:#d34c4c} #decision[data-side="WAIT"]{color:#ae7a24}
     #call-note{color:rgba(25,42,54,.5);font-weight:680}
+    .funds-panel{padding:12px 13px 11px;border-bottom:1px solid rgba(21,40,54,.08);background:rgba(255,255,255,.62)}
+    .funds-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
+    .funds-title{font:850 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;color:rgba(25,42,54,.42);margin-bottom:5px}
+    #funds-equity{font:900 27px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.045em;color:#1e303b}
+    #funds-equity[data-sign="up"]{color:#168e53}
+    #funds-equity[data-sign="down"]{color:#d34c4c}
+    #funds-position{max-width:48%;text-align:right;font:800 9px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:#40515b}
+    .funds-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 12px}
+    .fund-item{min-width:0}
+    .fund-item span{display:block;font-size:8px;color:rgba(25,42,54,.42);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em}
+    .fund-item b{display:block;overflow:hidden;text-overflow:ellipsis;font:800 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:#22343f}
+    .fund-item b[data-sign="up"]{color:#168e53}
+    .fund-item b[data-sign="down"]{color:#d34c4c}
+    .fund-flow{grid-column:span 2}
     .stress-panel{padding:10px 13px 11px;border-bottom:1px solid rgba(21,40,54,.08);background:rgba(245,249,251,.52)}
     .stress-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;color:rgba(25,42,54,.54)}
     #stress-value{margin-left:auto;color:#20333f}
@@ -83,6 +97,20 @@
   <section class="panel">
     <div class="brain"><canvas id="retina" width="64" height="16"></canvas><div><b style="font-size:10px">market retina · 64×16</b><div id="brain-detail">Starting full FlyWire brain…</div></div></div>
     <div id="call"><b id="decision" data-side="WAIT">HOLD</b><span id="call-note">waiting for brain activity</span></div>
+    <div class="funds-panel">
+      <div class="funds-top">
+        <div><div class="funds-title">CURRENT EQUITY</div><div id="funds-equity" data-sign="flat">$100,000.00</div></div>
+        <div id="funds-position">FLAT</div>
+      </div>
+      <div class="funds-grid">
+        <div class="fund-item"><span>Cash</span><b id="funds-cash">$100,000.00</b></div>
+        <div class="fund-item"><span>Free cash</span><b id="funds-free">$100,000.00</b></div>
+        <div class="fund-item"><span>Margin locked</span><b id="funds-margin">$0.00</b></div>
+        <div class="fund-item"><span>Unrealized PnL</span><b id="funds-unrealized" data-sign="flat">$0.00</b></div>
+        <div class="fund-item"><span>Realized PnL</span><b id="funds-realized" data-sign="flat">$0.00</b></div>
+        <div class="fund-item fund-flow"><span>Money in / out</span><b id="funds-flow">$100,000.00 / $0.00</b></div>
+      </div>
+    </div>
     <div class="stress-panel">
       <div class="stress-head"><span>STRESS LOAD</span><b id="stress-value">18 / 100</b><span id="stress-state" data-state="calm">TRADING</span></div>
       <div class="stress-track"><i id="stress-fill"></i></div>

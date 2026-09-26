@@ -14,6 +14,14 @@ const feedStatusEl=document.getElementById("feed-status") as HTMLSpanElement;
 const stressFillEl=document.getElementById("stress-fill") as HTMLElement;
 const stressValueEl=document.getElementById("stress-value") as HTMLElement;
 const stressStateEl=document.getElementById("stress-state") as HTMLElement;
+const fundsEquityEl=document.getElementById("funds-equity") as HTMLElement;
+const fundsCashEl=document.getElementById("funds-cash") as HTMLElement;
+const fundsFreeEl=document.getElementById("funds-free") as HTMLElement;
+const fundsMarginEl=document.getElementById("funds-margin") as HTMLElement;
+const fundsUnrealizedEl=document.getElementById("funds-unrealized") as HTMLElement;
+const fundsRealizedEl=document.getElementById("funds-realized") as HTMLElement;
+const fundsFlowEl=document.getElementById("funds-flow") as HTMLElement;
+const fundsPositionEl=document.getElementById("funds-position") as HTMLElement;
 const retinaCanvas=document.getElementById("retina") as HTMLCanvasElement;
 const retinaCtx=retinaCanvas.getContext("2d")!;
 const retinaImage=retinaCtx.createImageData(64,16);
@@ -788,7 +796,13 @@ function handleDecision(d:StockBrainDecision){
   }
   const desired=d.side==="UP"?"LONG":"SHORT";
   if(position?.side===desired){
-    addEvent("· KEEP "+desired+" "+symbol+" · "+money(unrealizedPnL()));
+    addEvent(
+      "· KEEP "+desired+" "+symbol+
+      " · entry "+position.entry.toFixed(2)+
+      " · mark "+price.toFixed(2)+
+      " · uPnL "+money(unrealizedPnL())+
+      " · equity "+money(equity())
+    );
     return;
   }
   if(position)closePosition("brain reversed");
@@ -860,7 +874,31 @@ function updateBreakBehavior(dt:number,time:number){
   updateStressHud();
 }
 
+function updateFundsCard(){
+  const eq=equity();
+  const upnl=unrealizedPnL();
+
+  fundsEquityEl.textContent=money(eq);
+  fundsEquityEl.dataset.sign=eq<STARTING_CASH?"down":eq>STARTING_CASH?"up":"flat";
+
+  fundsCashEl.textContent=money(cash);
+  fundsFreeEl.textContent=money(freeCash());
+  fundsMarginEl.textContent=money(marginLocked);
+
+  fundsUnrealizedEl.textContent=(upnl>0?"+":"")+money(upnl);
+  fundsUnrealizedEl.dataset.sign=upnl<0?"down":upnl>0?"up":"flat";
+
+  fundsRealizedEl.textContent=(realizedPnL>0?"+":"")+money(realizedPnL);
+  fundsRealizedEl.dataset.sign=realizedPnL<0?"down":realizedPnL>0?"up":"flat";
+
+  fundsFlowEl.textContent=money(totalCashIn)+" / "+money(totalCashOut);
+  fundsPositionEl.textContent=position
+    ? position.side+" · "+money(position.notional)+" notional"
+    : "FLAT";
+}
+
 function updateHud(){
+  updateFundsCard();
   const prev=prices.length>1?prices[prices.length-2]:price;
   const change=price&&prev?((price-prev)/prev*100):0;
   const staleSec=lastFetchAt?Math.floor((Date.now()-lastFetchAt)/1000):0;
