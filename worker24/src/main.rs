@@ -1,7 +1,9 @@
+mod multi_brain;
+
 use axum::{
     extract::State,
     http::Method,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -15,7 +17,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{watch, RwLock},
+    sync::{watch, Mutex, RwLock},
     time::sleep,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -427,6 +429,7 @@ impl Sim {
 #[derive(Clone)]
 struct AppState {
     state: Arc<RwLock<PersistedState>>,
+    multi_brains: Arc<Mutex<multi_brain::MultiBrainRegistry>>,
 }
 
 fn now_ms() -> u64 {
@@ -1252,6 +1255,15 @@ async fn state_handler(State(app): State<AppState>) -> Json<PersistedState> {
     Json(app.state.read().await.clone())
 }
 
+
+async fn civilization_brain_sync(
+    State(app): State<AppState>,
+    Json(batch): Json<multi_brain::CivilizationBrainBatch>,
+) -> Json<multi_brain::CivilizationBrainBatchResponse> {
+    let mut registry = app.multi_brains.lock().await;
+    Json(registry.sync(batch))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let brain_bytes = ensure_brain_file().await.map_err(|e| {
@@ -1267,7 +1279,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         brain.num_neurons, brain.num_edges
     );
 
-    let partitions = partition(&brain);
+    let partitions = Arc::new(partition(&brain));
     let state_path = PathBuf::from(
         env::var("STATE_PATH").unwrap_or_else(|_| "/data/flybrain-state.json".into()),
     );
@@ -1289,7 +1301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(market_loop(market_tx));
     tokio::spawn(simulation_loop(
         brain.clone(),
-        partitions,
+        (*partitions).clone(),
         shared.clone(),
         market_rx,
         state_path,
@@ -1297,16 +1309,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interval_ms,
     ));
 
+    let multi_steps = env::var("MULTI_BRAIN_STEPS_PER_SYNC")
+        .ok()
+        .and_then(|x| x.parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    let multi_budget = env::var("MULTI_BRAIN_MAX_PER_SYNC")
+        .ok()
+        .and_then(|x| x.parse::<usize>().ok())
+        .unwrap_or(2)
+        .max(1);
+    let multi_brains = Arc::new(Mutex::new(multi_brain::MultiBrainRegistry::new(
+        brain.clone(),
+        partitions.clone(),
+        multi_steps,
+        multi_budget,
+    )));
+    eprintln!(
+        "Full-Life multi-brain registry ready · full topology shared · {} independent brains stepped/sync max · {} neural steps/brain",
+        multi_budget,
+        multi_steps
+    );
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET])
+        .allow_methods([Method::GET, Method::POST])
         .allow_headers(Any);
 
-    let app_state = AppState { state: shared };
+    let app_state = AppState {
+        state: shared,
+        multi_brains,
+    };
     let app = Router::new()
         .route("/", get(state_handler))
         .route("/state", get(state_handler))
         .route("/health", get(health))
+        .route("/civilization/brains/sync", post(civilization_brain_sync))
         .layer(cors)
         .with_state(app_state);
 
