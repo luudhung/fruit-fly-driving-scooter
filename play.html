@@ -14,7 +14,7 @@
       #brain-pane { border-right: 1px solid #1a1c20; }
       #canvas-container, #room-container { position: absolute; inset: 0; }
 
-      /* Boot overlay — same pattern as app.html. */
+      /* Boot overlay. */
       #boot {
         position: fixed; inset: 0; z-index: 1000;
         background: radial-gradient(circle at 50% 35%, #0d1320, #06070a 70%);
@@ -37,7 +37,7 @@
       /* Hidden log sink — tests and Game's log() read this. */
       #out { position: absolute; left: -9999px; top: -9999px; width: 1px; height: 1px; overflow: hidden; white-space: pre-wrap; }
 
-      /* Game HUD — copied from app.html, enabled by default on the play page. */
+      /* Game HUD, enabled by default on the play page. */
       #game-hud {
         position: fixed; inset: 0;
         pointer-events: none;
@@ -278,11 +278,6 @@
         font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
         color: #6c7480;
       }
-      #nerd-mode {
-        font-size: 11px; color: #9ad7ff; text-decoration: none;
-        border-bottom: 1px solid rgba(154,215,255,0.3);
-      }
-      #nerd-mode:hover { border-color: #9ad7ff; }
 
       #play-captions {
         position: absolute; bottom: 84px; left: 18px;
@@ -329,7 +324,6 @@
       <div id="play-retina">
         <canvas id="retina-mini" width="64" height="16"></canvas>
         <div id="retina-caption">what the fly sees</div>
-        <a id="nerd-mode" href="app.html?mode=science">nerd mode →</a>
       </div>
       <div id="play-captions">
         <span>a real fly brain — every key fires real neurons</span>

@@ -28,7 +28,6 @@
     <!--
       Auto-forward deep links into the simulator so nothing breaks:
         #r=…            shared replay URLs (replay state lives in the hash)
-        ?mode=science   the researcher view
         ?play / ?app    explicit "skip the landing" links
       Runs before paint so a shared replay link never flashes the landing.
     -->
@@ -38,9 +37,9 @@
         var q = window.location.search || "";
         var go =
           /^#?r=/.test(h) ||
-          /[?&]mode=(science|game)\b/.test(q) ||
+          /[?&]mode=game\b/.test(q) ||
           /[?&](play|app)\b/.test(q);
-        if (go) window.location.replace("app.html" + q + h);
+        if (go) window.location.replace("play.html" + q + h);
       })();
     </script>
 
@@ -395,7 +394,7 @@
         <a href="#play">Play</a>
         <a href="#line">Research line</a>
         <a href="https://github.com/abgnydn/webgpu-fly" target="_blank" rel="noopener">GitHub</a>
-        <a class="nav-cta" href="app.html">Launch ▸</a>
+        <a class="nav-cta" href="play.html">Launch ▸</a>
       </span>
     </nav>
 
@@ -556,7 +555,6 @@
           <span class="kbd"><span class="cap">S</span> looming dodge</span>
           <span class="kbd"><span class="cap">F</span> backward (MDN)</span>
           <span class="kbd"><span class="cap">SPACE</span> new round</span>
-          <span class="kbd"><span class="cap">M</span> science view</span>
         </div>
         <p class="body reveal" style="margin-top:24px">
           Reach the red target in the least time × fewest spikes. When you win,
@@ -708,7 +706,6 @@
           </div>
           <div class="foot-links">
             <a href="play.html">Play</a>
-            <a href="app.html?mode=science">Nerd mode</a>
             <a href="https://github.com/abgnydn/webgpu-fly" target="_blank" rel="noopener">GitHub</a>
             <a href="https://github.com/abgnydn/webgpu-fly/blob/main/NOTICE" target="_blank" rel="noopener">Licenses</a>
           </div>

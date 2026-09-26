@@ -189,7 +189,7 @@ export class Game {
       div.addEventListener("pointerleave", (e) => { if (e.buttons) press(false); });
       this.keyStripEl.appendChild(div);
     }
-    // SPACE / M tap-affordances. Click = same effect as the keyboard
+    // SPACE tap-affordance. Click = same effect as the keyboard
     // shortcut, so mobile players don't need a keyboard.
     const ctrl = document.createElement("div");
     ctrl.className = "game-key game-key-ctrl";
@@ -209,19 +209,6 @@ export class Game {
       }
     });
     this.keyStripEl.appendChild(ctrl);
-    const sci = document.createElement("div");
-    sci.className = "game-key game-key-ctrl";
-    sci.innerHTML = `
-      <span class="game-key-label">M</span>
-      <span class="game-key-name">science</span>
-      <span class="game-key-desc">switch view</span>
-    `;
-    sci.addEventListener("click", () => {
-      const url = new URL(window.location.href);
-      url.searchParams.set("mode", "science");
-      window.location.href = url.toString();
-    });
-    this.keyStripEl.appendChild(sci);
   }
 
   // ───── State transitions ─────────────────────────────────────────
@@ -462,13 +449,6 @@ export class Game {
 
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
-      if (k === "m") {
-        // toggle to science mode
-        const url = new URL(window.location.href);
-        url.searchParams.set("mode", "science");
-        window.location.href = url.toString();
-        return;
-      }
       if (k === " " || k === "spacebar" || e.code === "Space") {
         e.preventDefault();
         if (this.state === "idle") { this.dailyMode = false; this.enterCountdown(); }
