@@ -125,24 +125,6 @@
   <section class="panel">
     <div class="brain"><canvas id="retina" width="64" height="16"></canvas><div><b style="font-size:10px">market retina · 64×16</b><div id="brain-detail">Starting full FlyWire brain…</div></div></div>
     <div id="call"><b id="decision" data-side="WAIT">HOLD</b><span id="call-note">waiting for brain activity</span></div>
-    <div class="brain-monitor">
-      <div class="brain-monitor-head">
-        <div class="brain-monitor-title">BRAIN ACTIVITY MONITOR</div>
-        <div id="brain-mode-badge" data-mode="server">LOADING</div>
-      </div>
-      <div class="brain-monitor-grid">
-        <canvas id="brain-map" width="300" height="184"></canvas>
-        <div class="brain-bars">
-          <div class="brain-row"><span>OPTIC L</span><i class="brain-track"><b class="brain-fill" data-brain-region="opticLeft"></b></i><span class="brain-value" data-brain-value="opticLeft">0</span></div>
-          <div class="brain-row"><span>OPTIC R</span><i class="brain-track"><b class="brain-fill" data-brain-region="opticRight"></b></i><span class="brain-value" data-brain-value="opticRight">0</span></div>
-          <div class="brain-row"><span>SENSORY</span><i class="brain-track"><b class="brain-fill" data-brain-region="sensory"></b></i><span class="brain-value" data-brain-value="sensory">0</span></div>
-          <div class="brain-row"><span>DN L</span><i class="brain-track"><b class="brain-fill" data-brain-region="dnLeft"></b></i><span class="brain-value" data-brain-value="dnLeft">0</span></div>
-          <div class="brain-row"><span>DN R</span><i class="brain-track"><b class="brain-fill" data-brain-region="dnRight"></b></i><span class="brain-value" data-brain-value="dnRight">0</span></div>
-          <div class="brain-row"><span>MBON</span><i class="brain-track"><b class="brain-fill" data-brain-region="mbon"></b></i><span class="brain-value" data-brain-value="mbon">0</span></div>
-        </div>
-      </div>
-      <div id="brain-coverage">Waiting for FlyWire connectome…</div>
-    </div>
     <div class="funds-panel">
       <div class="funds-top">
         <div><div class="funds-title">CURRENT EQUITY</div><div id="funds-equity" data-sign="flat">$100,000.00</div></div>
@@ -176,7 +158,7 @@
       <span>24/7 worker <b id="worker-status">checking…</b></span>
     </div>
     <div id="brain-regions"></div>
-    <div class="brain-note">When the 24/7 worker is online, account state and region activity are authoritative from the server full-connectome CPU LIF worker. The point-cloud map uses the same FlyWire coordinates and shows local WebGPU firing while this tab is open. MANC/VNC remains metadata-only for stock trading.</div>
+    <div class="brain-note">FULL FLYWIRE means the complete FlyWire connectome is actively simulated by WebGPU in this browser tab. When the tab is closed, Railway keeps the market/account simulation running in AUTONOMOUS SERVER mode and persists state; it does not claim full-brain emulation.</div>
   </aside>
   <a class="home" href="./">← MODES</a>
   <script type="module" src="/src/stock.ts"></script>
