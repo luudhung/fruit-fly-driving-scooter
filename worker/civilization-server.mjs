@@ -117,6 +117,108 @@ function randRange(a, b) {
   return a + (b - a) * rand();
 }
 
+function hashText(text) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function createBrainInstance(flyId, mother = null, father = null) {
+  const serial = state.nextBrainId++;
+  const id = `BRAIN-${String(serial).padStart(6, "0")}`;
+  const seed = (hashText(`${WORLD_SEED}:${flyId}:${id}`) ^ (serial * 2654435761)) >>> 0;
+  const parentBrains = [mother?.brain?.id, father?.brain?.id].filter(Boolean);
+
+  const inherited = (key, fallback) => {
+    const vals = [mother?.brain?.plasticity?.[key], father?.brain?.plasticity?.[key]].filter(Number.isFinite);
+    const base = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : fallback;
+    const mutation = (((seed >>> (serial % 16)) & 255) / 255 - 0.5) * 0.08;
+    return Math.max(0.05, Math.min(0.95, base + mutation));
+  };
+
+  return {
+    id,
+    seed,
+    rngState: seed || 1,
+    lineage: {
+      parentBrainIds: parentBrains,
+      generation: parentBrains.length ? Math.max(mother?.generation || 1, father?.generation || 1) + 1 : 1,
+    },
+    bornAtSimulationSeconds: state.simulationAgeSeconds,
+    plasticity: {
+      learningRate: inherited("learningRate", 0.36),
+      noveltyBias: inherited("noveltyBias", 0.48),
+      socialBias: inherited("socialBias", 0.5),
+      riskBias: inherited("riskBias", 0.42),
+      persistence: inherited("persistence", 0.58),
+    },
+    dynamic: {
+      fatigue: 0.2,
+      arousal: 0.35,
+      curiosity: 0.5,
+      rewardExpectation: 0,
+      stressLoad: 0.2,
+    },
+    memory: {
+      episodes: [],
+      locationReward: {},
+      socialAffinity: {},
+    },
+    decisionCount: 0,
+    lastDecision: "resting",
+    lastConfidence: 0.5,
+  };
+}
+
+function brainRand(fly) {
+  if (!fly.brain) fly.brain = createBrainInstance(fly.id);
+  fly.brain.rngState = (Math.imul(fly.brain.rngState >>> 0, 1664525) + 1013904223) >>> 0;
+  return fly.brain.rngState / 4294967296;
+}
+
+function brainRange(fly, a, b) {
+  return a + (b - a) * brainRand(fly);
+}
+
+function brainRemember(fly, kind, payload = {}) {
+  const episodes = fly.brain?.memory?.episodes;
+  if (!episodes) return;
+  episodes.push({
+    t: state.simulationAgeSeconds,
+    day: gameClock().day,
+    kind,
+    ...payload,
+  });
+  if (episodes.length > 32) episodes.splice(0, episodes.length - 32);
+}
+
+function updateBrainDynamics(fly) {
+  if (!fly.brain) return;
+  const d = fly.brain.dynamic;
+  d.fatigue = clamp((100 - fly.energy) / 100 * 0.72 + fly.stress / 100 * 0.28, 0, 1);
+  d.arousal = clamp(fly.excitement / 100 * 0.58 + fly.stress / 100 * 0.42, 0, 1);
+  d.stressLoad = clamp(d.stressLoad * 0.94 + fly.stress / 100 * 0.06, 0, 1);
+  d.curiosity = clamp(d.curiosity * 0.992 + brainRange(fly, -0.015, 0.018), 0.05, 0.95);
+}
+
+function brainLearnFromOutcome(fly, before) {
+  if (!fly.brain) return;
+  const reward =
+    (fly.happiness - before.happiness) * 0.08 +
+    (before.stress - fly.stress) * 0.06 +
+    (before.hunger - fly.hunger) * 0.04 +
+    (fly.health - before.health) * 0.05;
+  const key = fly.currentLocationId || "unknown";
+  const lr = fly.brain.plasticity.learningRate;
+  const old = Number(fly.brain.memory.locationReward[key] || 0);
+  fly.brain.memory.locationReward[key] = old * (1 - lr * 0.08) + reward * lr * 0.08;
+  fly.brain.dynamic.rewardExpectation =
+    fly.brain.dynamic.rewardExpectation * 0.96 + reward * 0.04;
+}
+
 function pick(items) {
   return items[Math.floor(rand() * items.length)] ?? items[0];
 }
@@ -159,6 +261,7 @@ function createFly(index, parents = null) {
   const initialAge = parents ? 0 : randRange(16, 72);
   const sex = rand() < 0.5 ? "F" : "M";
   const id = `FLY-${String(state.nextFlyId++).padStart(5, "0")}`;
+  const brain = createBrainInstance(id, mother, father);
   const traits = {
     sociability: inheritedTrait(mother, father, "sociability"),
     risk: inheritedTrait(mother, father, "risk"),
@@ -233,6 +336,7 @@ function createFly(index, parents = null) {
     lastSocialTick: 0,
     lastEventTick: 0,
     mentalHealthCrisis: false,
+    brain,
     traits,
   };
 }
@@ -249,6 +353,7 @@ function freshState() {
     updatedAt: new Date().toISOString(),
     paused: false,
     nextFlyId: 1,
+    nextBrainId: 1,
     flies: [],
     births: 0,
     deaths: 0,
@@ -355,8 +460,17 @@ async function initDb() {
     state.businesses = state.businesses || JSON.parse(JSON.stringify(BUSINESSES));
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
+    state.nextBrainId = Number(state.nextBrainId || (state.flies.length + 1));
     state.eventSeq = Number(state.eventSeq || 1);
     for (const fly of state.flies) {
+      if (!fly.brain?.id) fly.brain = createBrainInstance(fly.id);
+      fly.brain.memory = fly.brain.memory || { episodes: [], locationReward: {}, socialAffinity: {} };
+      fly.brain.memory.episodes = fly.brain.memory.episodes || [];
+      fly.brain.memory.locationReward = fly.brain.memory.locationReward || {};
+      fly.brain.memory.socialAffinity = fly.brain.memory.socialAffinity || {};
+      fly.brain.dynamic = fly.brain.dynamic || { fatigue: 0.2, arousal: 0.35, curiosity: 0.5, rewardExpectation: 0, stressLoad: 0.2 };
+      fly.brain.plasticity = fly.brain.plasticity || { learningRate: 0.36, noveltyBias: 0.48, socialBias: 0.5, riskBias: 0.42, persistence: 0.58 };
+      fly.brain.rngState = Number(fly.brain.rngState || fly.brain.seed || hashText(fly.id)) >>> 0;
       fly.homeTier = Number(fly.homeTier || (fly.ownsHome ? 1 : 0));
       if (!Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) {
         const base = location(fly.homeId);
@@ -409,14 +523,21 @@ function nearestCompatiblePartner(fly) {
 
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
+  updateBrainDynamics(fly);
+  const brain = fly.brain;
   const candidates = [];
-  const add = (id, action, utility) => candidates.push({ id, action, utility: utility + randRange(-3, 3) });
+  const add = (id, action, utility) => {
+    const learned = Number(brain.memory.locationReward[id] || 0) * 4;
+    const novelty = brain.dynamic.curiosity * brain.plasticity.noveltyBias * brainRange(fly, -1.2, 2.4);
+    const noise = brainRange(fly, -2.5, 2.5);
+    candidates.push({ id, action, utility: utility + learned + novelty + noise });
+  };
 
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.58 + (clock.hour >= 22 || clock.hour < 6 ? 65 : 0));
   add("market", "buying food", fly.hunger * 0.8 + (fly.money > 5 ? 8 : -35));
   add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
-  add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18);
+  add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
   add("park", "taking a walk", fly.stress * 0.55 + fly.traits.resilience * 15);
   add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
   add("clinic", "seeking care", (100 - fly.health) * 1.3);
@@ -428,7 +549,7 @@ function brainChooseAction(fly, clock) {
   }
 
   if (fly.stress > 76 && fly.traits.resilience < 0.45) {
-    add("park", "smoke break", 42 + fly.stress * 0.5);
+    add("park", "smoke break", 42 + fly.stress * 0.5 + brain.plasticity.riskBias * 8);
   }
 
   if (age < 18 && clock.hour >= 8 && clock.hour < 15) {
@@ -439,6 +560,14 @@ function brainChooseAction(fly, clock) {
   const chosen = candidates[0];
   fly.brainDecision = chosen.action;
   fly.brainConfidence = clamp((chosen.utility - (candidates[1]?.utility ?? 0) + 20) / 60, 0, 1);
+  brain.decisionCount += 1;
+  brain.lastDecision = chosen.action;
+  brain.lastConfidence = fly.brainConfidence;
+  brainRemember(fly, "decision", {
+    action: chosen.action,
+    destination: chosen.id,
+    confidence: fly.brainConfidence,
+  });
   return chosen;
 }
 
@@ -710,7 +839,13 @@ function completePregnancy(fly) {
     father.children.push(child.id);
     state.births += 1;
     state.generation = Math.max(state.generation, child.generation);
-    emit("birth", `${child.id} was born to ${fly.id} and ${fatherId}.`, { childId: child.id, motherId: fly.id, fatherId });
+    emit("birth", `${child.id} / ${child.brain.id} was born to ${fly.id} and ${fatherId} with a new independent brain instance.`, {
+      childId: child.id,
+      childBrainId: child.brain.id,
+      motherId: fly.id,
+      fatherId,
+      parentBrainIds: child.brain.lineage.parentBrainIds,
+    });
   }
 }
 
@@ -824,6 +959,12 @@ function needsAndActivities(fly, clock) {
 
 function tickFly(fly, clock) {
   if (!fly.alive) return;
+  const before = {
+    happiness: fly.happiness,
+    stress: fly.stress,
+    hunger: fly.hunger,
+    health: fly.health,
+  };
   fly.ageYears = ageOf(fly);
   if (fly.ageYears < 18) {
     fly.jobId = null;
@@ -853,6 +994,7 @@ function tickFly(fly, clock) {
   reproduction(fly);
   completePregnancy(fly);
   mentalHealthAndMortality(fly);
+  brainLearnFromOutcome(fly, before);
 }
 
 async function checkpoint(force = false) {
@@ -931,6 +1073,18 @@ function compactFly(f) {
     homeTier: f.homeTier || 0,
     homeX: f.homeX,
     homeZ: f.homeZ,
+    brainId: f.brain?.id,
+    brainSeed: f.brain?.seed,
+    brainParentIds: f.brain?.lineage?.parentBrainIds || [],
+    brainDecisionCount: Number(f.brain?.decisionCount || 0),
+    brainMemoryCount: Number(f.brain?.memory?.episodes?.length || 0),
+    brainDynamic: f.brain ? {
+      fatigue: Number((f.brain.dynamic?.fatigue ?? 0).toFixed(3)),
+      arousal: Number((f.brain.dynamic?.arousal ?? 0).toFixed(3)),
+      curiosity: Number((f.brain.dynamic?.curiosity ?? 0).toFixed(3)),
+      rewardExpectation: Number((f.brain.dynamic?.rewardExpectation ?? 0).toFixed(3)),
+      stressLoad: Number((f.brain.dynamic?.stressLoad ?? 0).toFixed(3)),
+    } : null,
     brainDecision: f.brainDecision,
     brainConfidence: Number((f.brainConfidence ?? 0).toFixed(2)),
     smoking: Boolean(f.smoking),
@@ -948,7 +1102,7 @@ function getState() {
   return {
     authoritative: true,
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
-    modelDisclosure: "Every action is driven by 100% of each fly's persistent simulated decision-state model. This is not yet a separate full biological FlyWire connectome per individual.",
+    modelDisclosure: "Every fly has its own unique persistent brainId, RNG stream, dynamic state, plasticity and memory. Offspring receive a brand-new independent brain instance; only inherited predispositions/traits and parent brain lineage IDs are carried forward. This is still a synthetic brain model, not a biological FlyWire connectome clone per fly.",
     worldId: WORLD_ID,
     experimentId: EXPERIMENT_ID,
     worldSeed: String(WORLD_SEED),
@@ -972,6 +1126,7 @@ function getState() {
     flies: state.flies.map(compactFly),
     selectedFly: selected ? {
       id: selected.id,
+      brainId: selected.brain?.id,
       sensorySummary: selected.action,
       motorSummary: selected.vehicle ? `moving with ${selected.vehicle}` : "walking/flying",
       neuralActivity: Array.from({ length: 100 }, (_, i) => {
