@@ -31,9 +31,6 @@ const brainVncEl=document.getElementById("brain-vnc") as HTMLElement;
 const workerStatusEl=document.getElementById("worker-status") as HTMLElement;
 const brainFullBadgeEl=document.getElementById("brain-full-badge") as HTMLElement;
 const brainRegionsEl=document.getElementById("brain-regions") as HTMLElement;
-const brainModeBadgeEl=document.getElementById("brain-mode-badge") as HTMLElement;
-const brainRegionFills=Array.from(document.querySelectorAll<HTMLElement>("[data-brain-region]"));
-const brainRegionValues=Array.from(document.querySelectorAll<HTMLElement>("[data-brain-value]"));
 let brainLayout:BrainLayout|null=null;
 let brainFrame:BrainActivityFrame|null=null;
 const brainPalette=["#607078","#ffb45c","#d1d86a","#a5a9ad","#63a8ff","#ff6666","#e7a8ff","#f7d66f","#6de1df","#75d7a7","#6ab2ff"];
@@ -65,7 +62,8 @@ type Position={
   side:"LONG"|"SHORT";
   entry:number;
   qty:number;
-  openedTick:number;
+  openedTick?:number;
+  openedAt?:number;
   notional:number;
   margin:number;
 };
@@ -95,10 +93,6 @@ let feedDetail="connecting";
 let cryptoSocket:WebSocket|null=null;
 let cryptoReconnectTimer:number|null=null;
 let cryptoTradeCounter=0;
-let remoteWorkerOnline=false;
-let remoteWorkerLastSeen=0;
-let remoteWorkerMode="";
-let remoteBrainSteps=0;
 let stress=18;
 let breakMode=false;
 let deskSmokeStartedAt:number|null=null;
@@ -137,6 +131,7 @@ type WorkerState={
   equity:number;
   freeCash:number;
   mode:string;
+  resting?:boolean;
   tape?:string[];
   fullBrain?:{online:boolean;lastSeen:number;neurons:number;edges:number;signal:number;activity:number;regions?:Record<string,number>};
 };
@@ -161,7 +156,16 @@ function applyWorkerState(s:WorkerState){
   cash=Number(s.cash??cash);
   marginLocked=Number(s.marginLocked??marginLocked);
   realizedPnL=Number(s.realizedPnL??realizedPnL);
-  position=s.position??null;
+  position=s.position?{
+    side:s.position.side==="SHORT"?"SHORT":"LONG",
+    entry:Number(s.position.entry)||0,
+    qty:Number(s.position.qty)||0,
+    openedTick:Number(s.position.openedTick??0)||0,
+    openedAt:Number(s.position.openedAt??0)||0,
+    notional:Number(s.position.notional)||0,
+    margin:Number(s.position.margin)||0,
+  }:null;
+  breakMode=Boolean(s.resting??false);
   wins=Number(s.wins??wins);
   losses=Number(s.losses??losses);
   stress=Number(s.stress??stress);
@@ -173,6 +177,8 @@ function applyWorkerState(s:WorkerState){
     eventLines.splice(0,eventLines.length,...s.tape.slice(0,8));
     eventsEl.innerHTML=eventLines.map(x=>"<div>"+x+"</div>").join("");
   }
+  workerStatusEl.textContent="ONLINE · persistent";
+  workerStatusEl.style.color="#80e4ab";
   updateChart();
 }
 
@@ -184,6 +190,8 @@ async function syncWorkerState(){
     applyWorkerState(s);
   }catch(error){
     workerConnected=false;
+    workerStatusEl.textContent="OFFLINE · browser fallback";
+    workerStatusEl.style.color="#ff9a8e";
     feedDetail="24/7 worker unavailable · browser-only fallback";
   }finally{
     workerSyncBusy=false;
@@ -336,8 +344,7 @@ function openPosition(side:"LONG"|"SHORT",confidence:number){
 }
 
 function onFreshMarketTick(){
-  if(remoteWorkerOnline)return;
-  if(!breakMode&&position&&tick-position.openedTick>=MAX_HOLD_TICKS) closePosition("time exit");
+  if(!breakMode&&position&&tick-(position.openedTick??tick)>=MAX_HOLD_TICKS) closePosition("time exit");
 
   const absMove=returns.length?Math.abs(returns[returns.length-1]):0;
   let stressDelta=Math.min(4,absMove*6000);
@@ -1056,10 +1063,6 @@ function drawBrainMonitor(){
 
 function renderBrainFrame(frame:BrainActivityFrame){
   brainFrame=frame;
-  if(remoteWorkerOnline){
-    drawBrainMonitor();
-    return;
-  }
   brainCoverageEl.textContent=frame.simulatedNeurons.toLocaleString()+" / "+frame.simulatedNeurons.toLocaleString()+" neurons";
   brainActiveEl.textContent=frame.activeNeurons.toLocaleString();
   brainFullBadgeEl.textContent="FULL · SIMULATED";
@@ -1074,164 +1077,22 @@ function renderBrainFrame(frame:BrainActivityFrame){
 }
 
 
-function renderRemoteBrainRegions(regions:any[]){
-  if(!Array.isArray(regions)||!regions.length)return;
-  const maxMean=Math.max(.00001,...regions.map(r=>Number(r.mean)||0));
-  brainRegionsEl.innerHTML=regions
-    .filter(r=>Number(r.count)>0)
-    .map(r=>{
-      const mean=Number(r.mean)||0;
-      const pct=Math.min(100,mean/maxMean*100);
-      return '<div class="brain-region"><div class="brain-region-top"><span>'+String(r.label||"region")+'</span><span>'+Number(r.active||0).toLocaleString()+'/'+Number(r.count||0).toLocaleString()+'</span></div><div class="brain-region-track"><i style="width:'+pct.toFixed(1)+'%"></i></div></div>';
-    }).join("");
-}
-
-function remoteNum(s:any,snake:string,camel?:string,fallback=0){
-  const a=Number(s?.[snake]);
-  if(Number.isFinite(a))return a;
-  if(camel){
-    const b=Number(s?.[camel]);
-    if(Number.isFinite(b))return b;
-  }
-  return fallback;
-}
-
-function applyRemoteWorkerState(s:any){
-  const firstConnect=!remoteWorkerOnline;
-  remoteWorkerOnline=true;
-  remoteWorkerLastSeen=Date.now();
-  remoteWorkerMode=String(s?.mode||"full-flywire-cpu-24x7");
-  remoteBrainSteps=remoteNum(s,"brain_steps_total","brainStepsTotal",0);
-
-  stopCryptoSocket();
-  symbol=String(s?.symbol||"BTCUSDT");
-  price=remoteNum(s,"price",undefined,price);
-  tick=remoteNum(s,"tick",undefined,tick);
-
-  if(Array.isArray(s?.prices)&&s.prices.length){
-    const incoming=s.prices.map(Number).filter(Number.isFinite).slice(-96);
-    prices.splice(0,prices.length,...incoming);
-    rebuildReturns();
-  }
-
-  cash=remoteNum(s,"cash",undefined,cash);
-  marginLocked=remoteNum(s,"margin_locked","marginLocked",marginLocked);
-  totalCashIn=remoteNum(s,"total_cash_in","totalCashIn",totalCashIn);
-  totalCashOut=remoteNum(s,"total_cash_out","totalCashOut",totalCashOut);
-  realizedPnL=remoteNum(s,"realized_pnl","realizedPnL",realizedPnL);
-  stress=remoteNum(s,"stress",undefined,stress);
-  wins=remoteNum(s,"wins",undefined,wins);
-  losses=remoteNum(s,"losses",undefined,losses);
-  peakEquity=remoteNum(s,"peak_equity","peakEquity",peakEquity);
-  breakMode=Boolean(s?.break_mode??s?.resting??false);
-  pendingConfirmations=remoteNum(s,"pending_confirmations","pendingConfirmations",0);
-  pendingSide=(s?.pending_side??s?.pendingSide??null) as "LONG"|"SHORT"|null;
-
-  const smokeSince=remoteNum(s,"desk_smoke_since_ms","deskSmokeSinceMs",0);
-  deskSmokeStartedAt=smokeSince>0
-    ? performance.now()-Math.max(0,Date.now()-smokeSince)
-    : null;
-
-  const p=s?.position;
-  position=p?{
-    side:String(p.side)==="SHORT"?"SHORT":"LONG",
-    entry:Number(p.entry)||0,
-    qty:Number(p.qty)||0,
-    openedTick:Number(p.opened_tick??p.openedTick??0)||0,
-    notional:Number(p.notional)||0,
-    margin:Number(p.margin)||0,
-  }:null;
-
-  lastFetchAt=Date.now();
-  feedState="live";
-  feedDetail="24/7 Railway full-FlyWire worker · "+remoteWorkerMode;
-  renderFeedState();
-
-  const rawDecision=String(s?.decision||"WAIT").toUpperCase();
-  decisionEl.textContent=
-    rawDecision==="LONG"?"BUY":
-    rawDecision==="SHORT"?"SHORT":
-    rawDecision==="BREAK"?"BREAK":
-    rawDecision==="STUDY"?"STUDY":"HOLD";
-  decisionEl.dataset.side=rawDecision==="LONG"?"UP":rawDecision==="SHORT"?"DOWN":"WAIT";
-  const conf=remoteNum(s,"confidence",undefined,0);
-  const sig=remoteNum(s,"signal",undefined,0);
-  callNoteEl.textContent=
-    "24/7 full brain · "+Math.round(conf*100)+"% confidence · signal "+sig.toFixed(2)+
-    " · "+remoteBrainSteps.toLocaleString()+" LIF steps";
-
-  const neurons=remoteNum(s,"brain_neurons","brainNeurons",0);
-  const edges=remoteNum(s,"brain_edges","brainEdges",0);
-  const activity=remoteNum(s,"activity",undefined,0);
-  latestBrain={...latestBrain,stage:"running",message:"24/7 full FlyWire CPU worker online",neurons,edges,activity,signal:sig};
-
-  brainLiveEl.dataset.state="running";
-  brainStatusEl.textContent="24/7 FULL BRAIN ONLINE";
-  brainDetailEl.textContent="server CPU LIF persists when this tab is closed";
-  brainFullBadgeEl.textContent="FULL · 24/7 CPU";
-  brainCoverageEl.textContent=neurons.toLocaleString()+" / "+neurons.toLocaleString()+" neurons";
-  brainEdgesEl.textContent=edges.toLocaleString();
-
-  const regions=s?.brain_regions??s?.brainRegions;
-  if(Array.isArray(regions)){
-    renderRemoteBrainRegions(regions);
-    brainActiveEl.textContent=regions.reduce((sum:number,r:any)=>sum+(Number(r.active)||0),0).toLocaleString();
-  }
-
-  workerStatusEl.textContent="ONLINE · persistent";
-  workerStatusEl.style.color="#80e4ab";
-
-  if(Array.isArray(s?.recent_events)){
-    eventLines.splice(0,eventLines.length,...s.recent_events.slice(0,8).map(String));
-    eventsEl.innerHTML=eventLines.map(x=>"<div>"+x+"</div>").join("");
-  }
-
-  tickerButtons.forEach(b=>b.classList.toggle("active",b.dataset.symbol===symbol));
-  updateChart();
-  updateFundsCard();
-  updateStressHud();
-
-  if(firstConnect)addEvent("● 24/7 FULL FlyWire worker connected · browser is spectator");
-}
-
-async function pollRemoteWorker(){
-  try{
-    const res=await fetch("/api/worker-state",{cache:"no-store"});
-    if(!res.ok)throw new Error("worker HTTP "+res.status);
-    const s=await res.json();
-    if(!String(s?.mode||"").includes("full-flywire"))throw new Error("worker is not full-FlyWire mode");
-    applyRemoteWorkerState(s);
-  }catch(error){
-    const wasOnline=remoteWorkerOnline;
-    remoteWorkerOnline=false;
-    workerStatusEl.textContent="OFFLINE / NOT CONFIGURED";
-    workerStatusEl.style.color="#ff9a8e";
-    if(wasOnline){
-      addEvent("24/7 worker disconnected · browser fallback resumed");
-      startCryptoSocket();
-    }
-  }finally{
-    window.setTimeout(()=>void pollRemoteWorker(),1500);
-  }
-}
-
 const brain=new StockBrain({
   getSnapshot:()=>({prices:[...prices],momentum:momentum(),volatility:volatility(),stress,tick,resting:breakMode}),
   onStatus(status){
-    if(!remoteWorkerOnline){
-      latestBrain={...latestBrain,...status};
-      brainLiveEl.dataset.state=status.stage;
-      brainStatusEl.textContent=status.stage==="running"?"FULL BRAIN ONLINE":status.stage==="error"?"BRAIN ERROR":"LOADING FULL BRAIN";
-      brainDetailEl.textContent=status.message;
-    }
-    if(status.neurons&&!remoteWorkerOnline){
-      brainCoverageEl.textContent=status.neurons.toLocaleString()+" / "+status.neurons.toLocaleString()+" neurons";
+    latestBrain={...latestBrain,...status};
+    brainLiveEl.dataset.state=status.stage;
+    brainStatusEl.textContent=status.stage==="running"?"FULL BRAIN ONLINE":status.stage==="error"?"BRAIN ERROR":"LOADING FULL BRAIN";
+    brainDetailEl.textContent=status.message;
+    if(status.neurons){
+      brainCoverageEl.textContent=(status.simulatedNeurons||status.neurons).toLocaleString()+" / "+status.neurons.toLocaleString()+" neurons";
       brainEdgesEl.textContent=(status.edges||0).toLocaleString();
-      brainFullBadgeEl.textContent="FULL · SIMULATED";
+      brainFullBadgeEl.textContent=status.fullBrainLoaded?"FULL · WEBGPU":"LOADING";
     }
     if(status.vncNeurons){
-      brainVncEl.textContent=status.vncNeurons.toLocaleString()+" loaded · not simulated";
+      brainVncEl.textContent=status.vncNeurons.toLocaleString()+" loaded · metadata only";
     }
+    if(status.stage==="running")void postBrainTelemetry(status);
   },
   onBrainLayout(layout){
     brainLayout=layout;
@@ -1276,16 +1137,6 @@ function updateStressHud(){
 }
 
 function updateBreakBehavior(dt:number,time:number){
-  if(remoteWorkerOnline){
-    const target=breakMode?windowFlyPosition:deskFlyPosition;
-    const targetPos=target.clone();
-    targetPos.y+=breakMode?Math.sin(time*.8)*.015:Math.sin(time*2.1)*.025;
-    fly.position.lerp(targetPos,1-Math.exp(-dt*(breakMode?1.05:1.45)));
-    fly.rotation.y=THREE.MathUtils.damp(fly.rotation.y,0,3.5,dt);
-    fly.rotation.z=THREE.MathUtils.damp(fly.rotation.z,breakMode?0:Math.sin(time*.85)*.018,3.2,dt);
-    updateStressHud();
-    return;
-  }
   const now=performance.now();
 
   if(!breakMode&&stress>=SMOKE_ENTER_STRESS&&deskSmokeStartedAt===null){
@@ -1336,77 +1187,6 @@ function updateBreakBehavior(dt:number,time:number){
   updateStressHud();
 }
 
-function brainLevel(v:number){
-  if(!Number.isFinite(v)||v<=0)return 0;
-  return clamp(Math.log10(1+v*7000)/2.2,0,1);
-}
-
-function drawBrainRegionMonitor(){
-  const regions=latestBrain.regions||{};
-  const full=latestBrain.stage==="running"&&latestBrain.fullBrainLoaded===true;
-  const serverOnly=!full&&latestWorkerMode==="AUTONOMOUS_SERVER";
-
-  brainModeBadgeEl.dataset.mode=full?"full":"server";
-  brainModeBadgeEl.textContent=full?"FULL FLYWIRE":serverOnly?"SERVER AUTONOMOUS":"CONNECTING";
-
-  if(full){
-    const simulated=latestBrain.simulatedNeurons||latestBrain.neurons||0;
-    const total=latestBrain.neurons||0;
-    brainCoverageEl.textContent=
-      "Full connectome simulated: "+simulated.toLocaleString()+" / "+total.toLocaleString()+
-      " neurons · "+(latestBrain.edges||0).toLocaleString()+
-      " edges. Market adapter stimulates optic/sensory populations; decision readout uses DN/MBON.";
-  }else if(serverOnly){
-    brainCoverageEl.textContent=
-      "24/7 worker is trading while the browser is closed. Full FlyWire WebGPU is offline; this mode does not claim full-brain emulation.";
-  }else{
-    brainCoverageEl.textContent="Loading FlyWire connectome…";
-  }
-
-  for(const el of brainRegionFills){
-    const key=el.dataset.brainRegion||"";
-    const value=Number(regions[key]||0);
-    el.style.width=(brainLevel(value)*100).toFixed(1)+"%";
-  }
-  for(const el of brainRegionValues){
-    const key=el.dataset.brainValue||"";
-    const value=Number(regions[key]||0);
-    el.textContent=value.toFixed(4);
-  }
-
-  const ctx=brainMapCtx,w=brainMapCanvas.width,h=brainMapCanvas.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.fillStyle="#0c1419";ctx.fillRect(0,0,w,h);
-
-  const glow=(name:string)=>brainLevel(Number(regions[name]||0));
-  const left=glow("opticLeft"),right=glow("opticRight"),sens=glow("sensory");
-  const dnL=glow("dnLeft"),dnR=glow("dnRight"),mb=glow("mbon");
-
-  function lobe(cx:number,cy:number,rx:number,ry:number,intensity:number){
-    const g=ctx.createRadialGradient(cx,cy,4,cx,cy,Math.max(rx,ry));
-    const alpha=.14+.78*intensity;
-    g.addColorStop(0,"rgba(121,214,163,"+alpha+")");
-    g.addColorStop(1,"rgba(48,93,77,.08)");
-    ctx.fillStyle=g;
-    ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle="rgba(180,220,205,.18)";ctx.lineWidth=2;ctx.stroke();
-  }
-
-  lobe(82,76,62,48,left);
-  lobe(218,76,62,48,right);
-  lobe(150,98,56,39,sens);
-  lobe(122,138,31,22,dnL);
-  lobe(178,138,31,22,dnR);
-  lobe(150,65,34,22,mb);
-
-  ctx.fillStyle="rgba(226,239,234,.72)";
-  ctx.font="700 13px ui-monospace, monospace";
-  ctx.textAlign="center";
-  ctx.fillText("L",82,80);ctx.fillText("R",218,80);
-  ctx.font="700 11px ui-monospace, monospace";
-  ctx.fillText("MBON",150,69);ctx.fillText("DN",150,143);
-}
-
 function updateFundsCard(){
   const eq=equity();
   const upnl=unrealizedPnL();
@@ -1432,7 +1212,6 @@ function updateFundsCard(){
 
 function updateHud(){
   updateFundsCard();
-  drawBrainRegionMonitor();
   const prev=prices.length>1?prices[prices.length-2]:price;
   const change=price&&prev?((price-prev)/prev*100):0;
   const staleSec=lastFetchAt?Math.floor((Date.now()-lastFetchAt)/1000):0;
