@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-26
+
+### Cleanup — retired legacy surfaces
+- Removed the legacy `app.html?mode=science` Science Mode entry and its dedicated `src/main.ts` runtime.
+- Removed the motorcycle preview entry and its dedicated motorbike source files.
+- Removed stale navigation/build hooks and retargeted remaining game tests to `play.html`.
+- Kept shared full-brain assets/runtime modules required by Open World, Stock Trader, Full Life and Play.
+
 ## 2026-09-25
 
 ### Phase A — baseline import
