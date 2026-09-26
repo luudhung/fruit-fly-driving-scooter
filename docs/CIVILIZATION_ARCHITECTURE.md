@@ -2,104 +2,93 @@
 
 ## Scientific rule
 
-The project must not decide what a fly *should* do. The environment exposes physical/sensory signals; each active fly has its own FlyWire/WebGPU LIF dynamic state; motor output changes the body/world; consequences become the next sensory input.
+The project must not decide what a fly *should* do. The environment exposes physical and sensory signals; each active fly gets its own FlyWire/WebGPU LIF dynamic state; decoded neural output changes the body/world; consequences become the next sensory input.
 
-## Current milestone: `fulllife.html`
+## Checkpoint 1 — independent-brain baseline
 
-This first deploy establishes a truthful browser prototype for the future server-authoritative civilization.
+Current branch: `feat/fulllife-civilization`
 
-### Brain
+Current working page: `/fulllife.html`
+
+Implemented in this checkpoint:
+
 - `brain.bin` is loaded once as immutable FlyWire graph data.
-- Each active fly receives a separate `FlySim` instance, so Vm, refractory state, synaptic state, spikes and external input are not shared.
-- Initial full-brain population is deliberately 2, with capacity for one offspring (3 concurrent full brains) until benchmark data justifies more. This follows scientific validity over fake scale.
-- MANC is loaded as model metadata; current motor control still uses the FlyWire-derived adapter already used elsewhere in the repo.
+- Two starting flies are created.
+- Each fly receives a separate `FlySim` instance.
+- Vm, refractory state, synaptic state, spike buffers and external input are therefore independent per fly.
+- The environment feeds only graded physical channels into the brain adapter:
+  - left/right visual salience;
+  - food odor;
+  - contact / boundary pressure;
+  - internal energy and hunger modulation.
+- DN/MBON/LHN/PN activity is decoded into continuous motor outputs:
+  - turn;
+  - drive;
+  - lift;
+  - interact.
+- The body can walk, become airborne, fall under gravity, consume energy and physically contact food.
+- Food quantity is finite and visibly shrinks as it is consumed.
+- The world uses a seeded PRNG with `WORLD_SEED = 948291`; the civilization path intentionally avoids new `Math.random()` decisions.
+- Observer UI shows population, independent brain count, energy and per-fly motor telemetry.
 
-### Sensory encoding
-No semantic strings such as “shop”, “house” or “vehicle” are injected into the brain. The adapter provides graded physical channels:
-- left/right visual salience;
-- forward visual salience;
-- food odor;
-- nearby-fly/pheromone-like left/right cues;
-- contact/collision;
-- ground contact;
-- internal energy/hunger modulation.
+### Scientific limitation
 
-### Motor decoding
-Observed FlyWire activity is decoded from DN/GF/MBON/LHN/PN groups into continuous values:
-- turn;
-- drive;
-- lift;
-- interact/proboscis-like output;
-- escape/activity telemetry.
+The sensory and motor mapping is an experimental adapter around the FlyWire LIF model. It is not a claim that the connectome natively exposes a human-like action API.
 
-These are experimental adapters, not claims that FlyWire already implements a human-level action API.
+The current initial population is deliberately only 2 full brains. Scale must be increased only after GPU/memory benchmarking proves that more independent neural states can run without replacing any fly with scripted NPC logic.
 
-### Body / physics
-The body can walk, become airborne, fall under gravity, expend more energy while airborne, contact resources, carry a physical crate, enter a purchased vehicle and then steer/throttle that vehicle from the same neural motor output.
+## Checkpoint 2 — physical economy
 
-### World
-The map contains road grids, districts, buildings, a park, water, vegetation, a warehouse/work station, food sources, a token-operated food machine, houses and vehicles. Day/light cycles are deterministic from simulation time.
+Next implementation target:
 
-### Economy
-`FC` is conserved inside the current world ledger. It begins in a treasury and moves through explicit physical interactions:
-- treasury → fly for crate delivery;
-- fly → store machine for food release;
-- fly → treasury for house/vehicle access.
+- conserved FC treasury;
+- physical work objects;
+- treasury → fly payment transfers;
+- fly → machine/store payments;
+- no money creation from arbitrary scripted rewards;
+- transaction/event ledger.
 
-No per-fly infinite money faucet is used.
+## Checkpoint 3 — ownership and transport
 
-### Property and vehicles
-Ownership is persistent for the lifetime of the current browser experiment. A fly can only activate property/vehicle access when physically close, producing sufficient neural interaction output, and carrying enough FC. A fly that owns a vehicle can enter it; steering and throttle remain brain-derived.
+Planned:
 
-### Reproduction / genetics
-Repeated close contact plus interaction output from both opposite-sex adults can accumulate into a mating event. Offspring inherits averaged genome parameters with seeded mutation. A birth is only accepted if a new independent full FlySim can be allocated; otherwise the event is blocked rather than spawning a fake-brain fly.
+- houses / apartments with physical access;
+- vehicles with persistent ownership;
+- a fly must physically reach the asset and produce sufficient neural interaction output;
+- when inside a vehicle, the same fly brain remains the controller of steering/throttle;
+- collision and damage telemetry.
 
-### Death
-Energy, hydration and age can produce permanent death. Dead individuals are not respawned.
+## Checkpoint 4 — social, reproduction and genetics
 
-### Analytics
-The UI reports observed population, generations, births/deaths, food, money supply, ownership, energy/stress, individual motor signals and an event stream. Analytics does not feed stories or labels back into the brain.
+Planned:
 
-## Determinism
-World mechanisms use seeded PRNG (`WORLD_SEED = 948291`). New `Math.random()` calls are intentionally avoided in the civilization implementation.
+- proximity/contact history;
+- mating only from observed physical + neural interaction conditions;
+- offspring genome inheritance with seeded mutation;
+- a birth is accepted only when a new independent full neural state can be allocated;
+- no fake-brain children;
+- permanent death and lineage records.
 
-## Important limitation: not yet 24/7
-The current Vercel deployment is a Vite/browser app. Vercel serverless is not used to pretend that a long-running simulation process exists. When the browser closes, this milestone stops. It performs no random or synthetic “offline progress”.
+## Checkpoint 5 — true 24/7 persistence
 
-## Phase 1 infrastructure required for true 24/7
-A persistent worker/container plus PostgreSQL is required:
+The current Vercel page is browser-authoritative. Closing the page stops the simulation. It performs no random or synthetic offline catch-up.
+
+True 24/7 requires:
 
 ```text
-Web frontend (Vercel, read-only observer)
-          |
-       WebSocket/SSE
-          |
-Persistent simulation worker
-          |
-      PostgreSQL
+Vercel observer frontend
+        |
+   WebSocket / SSE
+        |
+Persistent simulation worker/container
+        |
+    PostgreSQL
 ```
 
-Minimum persistent tables:
-- worlds
-- experiments
-- flies
-- brains / brain snapshots
-- genomes
-- fly_states
-- relationships
-- family_links
-- births
-- deaths
-- resources
-- inventory
-- properties
-- vehicles
-- transactions
-- world_events
-- snapshots
-- interventions
+The backend must persist world state, each fly's neural dynamic state/checkpoint, genomes, relationships, family links, births, deaths, resources, inventory, property, vehicles, transactions, events and snapshots.
 
-The worker must checkpoint brain/world state and resume from the last checkpoint after restart. A future deploy should not claim 24/7 until that backend exists and is verified.
+A future deployment must not claim 24/7 until this persistent worker has been implemented and verified.
 
-## Performance path
-Before scaling to 40–100 flies, benchmark 1 / 2 / 3 / 10 / 25 / 50 / 100 independent neural states. The next optimization target is a shared-device/shared-immutable-connectome GPU runtime so graph buffers are not duplicated for every fly. Rendering LOD must never replace neural state with scripted NPC logic.
+## Commit discipline
+
+Development is intentionally split into small, auditable commits. Each scientific subsystem should be independently reviewable and revertible instead of landing as one large opaque commit.
