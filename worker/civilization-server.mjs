@@ -445,6 +445,10 @@ function createFly(index, parents = null) {
     brainDecision: "resting",
     brainConfidence: 0.5,
     traveling: false,
+    travelStartedAt: 0,
+    travelLastDistance: null,
+    travelStuckTicks: 0,
+    travelGoalId: null,
     smoking: false,
     exercising: false,
     sleeping: false,
@@ -633,6 +637,10 @@ async function initDb() {
       fly.brainDecision = fly.brainDecision || fly.action || "resting";
       fly.brainConfidence = Number.isFinite(fly.brainConfidence) ? fly.brainConfidence : 0.5;
       fly.traveling = Boolean(fly.traveling);
+      fly.travelStartedAt = Number(fly.travelStartedAt || 0);
+      fly.travelLastDistance = Number.isFinite(fly.travelLastDistance) ? fly.travelLastDistance : null;
+      fly.travelStuckTicks = Number(fly.travelStuckTicks || 0);
+      fly.travelGoalId = fly.travelGoalId || fly.targetLocationId || null;
       fly.smoking = Boolean(fly.smoking);
       fly.exercising = Boolean(fly.exercising);
       fly.sleeping = Boolean(fly.sleeping);
@@ -1064,6 +1072,44 @@ function brainChooseAction(fly, clock) {
     add("school", "at school", 92);
   }
 
+  const explorationDrive =
+    brain.dynamic.curiosity * 36 +
+    brain.plasticity.noveltyBias * 28 +
+    neuralDrive(fly, "exploreDrive") * 34 +
+    fly.excitement * 0.16 -
+    fly.stress * 0.08 -
+    Math.max(0, fly.sleepDebt || 0) * 0.14;
+
+  if (explorationDrive > 24) {
+    const eligible = LOCATIONS.filter((loc) =>
+      loc.id !== fly.currentLocationId &&
+      loc.id !== fly.homeId &&
+      loc.type !== "home" &&
+      !(loc.type === "health" && !fly.illness && fly.health > 72)
+    );
+    const sampleCount = Math.min(7, eligible.length);
+    const picked = new Set();
+    for (let i = 0; i < sampleCount; i += 1) {
+      const idx = Math.floor(brainRand(fly) * eligible.length);
+      const loc = eligible[idx];
+      if (!loc || picked.has(loc.id)) continue;
+      picked.add(loc.id);
+      const distance = Math.hypot(loc.x - fly.x, loc.z - fly.z);
+      const learned = Number(brain.memory.locationReward[loc.id] || 0);
+      const typeBonus =
+        loc.type === "nightlife" && nightlifeOpen(clock) ? 14 :
+        loc.type === "social" ? 8 :
+        loc.type === "food" && fly.hunger > 45 ? 12 :
+        loc.type === "transit" ? 2 :
+        loc.type === "job" ? 1 : 4;
+      add(
+        loc.id,
+        `exploring ${loc.name}`,
+        explorationDrive + typeBonus + learned * 8 - Math.min(18, distance / 24),
+      );
+    }
+  }
+
   candidates.sort((a, b) => b.utility - a.utility);
   const chosen = candidates[0];
   fly.brainDecision = chosen.action;
@@ -1102,6 +1148,10 @@ function chooseDestination(fly, clock) {
   fly.targetZ = p.z;
   fly.transitMode = chooseTravelMode(fly, dest);
   fly.traveling = true;
+  fly.travelStartedAt = state.simulationAgeSeconds;
+  fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+  fly.travelStuckTicks = 0;
+  fly.travelGoalId = chosen.id;
   fly.actionUntil = 0;
 }
 
@@ -1109,7 +1159,8 @@ function moveFly(fly) {
   const dx = fly.targetX - fly.x;
   const dz = fly.targetZ - fly.z;
   const dist = Math.hypot(dx, dz);
-  if (dist < 0.8) {
+
+  if (dist <= 0.85) {
     fly.vx = 0;
     fly.vz = 0;
     fly.x = fly.targetX;
@@ -1117,27 +1168,61 @@ function moveFly(fly) {
     fly.currentLocationId = fly.targetLocationId;
     if (fly.traveling) {
       fly.traveling = false;
-      fly.actionUntil = state.simulationAgeSeconds + randRange(1200, 4200);
+      fly.travelGoalId = null;
+      fly.travelLastDistance = null;
+      fly.travelStuckTicks = 0;
+      fly.actionUntil = state.simulationAgeSeconds + brainRange(fly, 1200, 4200);
+      brainRemember(fly, "arrived", {
+        locationId: fly.currentLocationId,
+        action: fly.action,
+        transitMode: fly.transitMode,
+      });
     }
     return;
   }
+
   const vehicleBoost =
     fly.transitMode === "metro" ? 5.8 :
     fly.transitMode === "car" ? 2.8 :
     fly.transitMode === "scooter" ? 2.15 : 1;
+
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
-  const neuralTurn = fc?.connected ? clamp(Number(fc.locomotionX || 0), -1, 1) : 0;
-  const speed = (0.42 + fly.energy / 320 + neuralMotor * 0.42) * vehicleBoost;
-  const baseX = dx / dist;
-  const baseZ = dz / dist;
-  const steer = neuralTurn * 0.22;
-  const norm = Math.hypot(baseX + steer * baseZ, baseZ - steer * baseX) || 1;
-  fly.vx = ((baseX + steer * baseZ) / norm) * speed;
-  fly.vz = ((baseZ - steer * baseX) / norm) * speed;
+  const baseSpeed = (0.42 + fly.energy / 320 + neuralMotor * 0.42) * vehicleBoost;
+
+  // Goal direction is authoritative. Neural motor output may alter effort,
+  // but can no longer rotate the fly away from its committed destination.
+  const ux = dx / dist;
+  const uz = dz / dist;
+  const step = Math.min(baseSpeed, dist);
+  fly.vx = ux * step;
+  fly.vz = uz * step;
   fly.x += fly.vx;
   fly.z += fly.vz;
   fly.y = 1.4 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.3;
+
+  const remaining = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+  if (Number.isFinite(fly.travelLastDistance)) {
+    if (remaining >= fly.travelLastDistance - 0.02) fly.travelStuckTicks += 1;
+    else fly.travelStuckTicks = 0;
+  }
+  fly.travelLastDistance = remaining;
+
+  if (fly.travelStuckTicks >= 8) {
+    brainRemember(fly, "route_recovery", {
+      goal: fly.travelGoalId,
+      remaining,
+      mode: fly.transitMode,
+    });
+    const dest = fly.targetLocationId === fly.homeId
+      ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
+      : location(fly.targetLocationId);
+    const p = jittered(dest, fly.targetLocationId === fly.homeId ? 1.0 : 2.2);
+    fly.targetX = p.x;
+    fly.targetZ = p.z;
+    fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+    fly.travelStuckTicks = 0;
+  }
 }
 
 function productionAndRetail(fly, clock) {
