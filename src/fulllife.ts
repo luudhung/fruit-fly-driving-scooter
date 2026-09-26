@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 type CivilizationSnapshot = {
   authoritative: boolean;
+  simulationStatus?: string;
   worldId: string;
   experimentId: string;
   worldSeed: number | string;
@@ -74,7 +75,13 @@ function setConnection(state: "authoritative" | "offline" | "connecting", label:
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
-  setConnection(s.authoritative ? "authoritative" : "offline", s.authoritative ? "AUTHORITATIVE LIVE" : "NON-AUTHORITATIVE");
+  const brainPending = s.simulationStatus === "WAITING_FOR_BRAIN_RUNTIME";
+  setConnection(
+    s.authoritative ? "authoritative" : "offline",
+    s.authoritative
+      ? (brainPending ? "PERSISTENT CORE LIVE · BRAIN PENDING" : "AUTHORITATIVE LIVE")
+      : "NON-AUTHORITATIVE",
+  );
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = num(s.population);
   generation.textContent = num(s.generation);
@@ -121,7 +128,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
     : "No fly selected. Neural telemetry is sampled and must come from the real brain pipeline; this UI does not invent explanations.";
 }
 
-const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "").replace(/\/$/, "");
+const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-v2-production.up.railway.app").replace(/\/$/, "");
 
 async function fetchSnapshot() {
   setConnection("connecting", "CONNECTING");
