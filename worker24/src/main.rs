@@ -674,6 +674,20 @@ fn build_input(
     ext
 }
 
+async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let res = reqwest::get(url)
+        .await
+        .map_err(|e| format!("fetch {url}: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("{url} HTTP {}", res.status()));
+    }
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| format!("read {url}: {e}"))?;
+    Ok(bytes.to_vec())
+}
+
 async fn ensure_brain_file() -> Result<Vec<u8>, String> {
     if let Ok(path) = env::var("BRAIN_PATH") {
         if Path::new(&path).exists() {
@@ -681,20 +695,115 @@ async fn ensure_brain_file() -> Result<Vec<u8>, String> {
         }
     }
 
+    let cache_path = PathBuf::from(
+        env::var("BRAIN_CACHE_PATH").unwrap_or_else(|_| "/data/brain.bin".into()),
+    );
+    if cache_path.exists() {
+        match fs::read(&cache_path) {
+            Ok(bytes) if bytes.len() >= HEADER_BYTES && &bytes[0..8] == MAGIC => {
+                eprintln!(
+                    "loading cached full FlyWire brain from {} ({:.1} MB)",
+                    cache_path.display(),
+                    bytes.len() as f64 / 1_000_000.0
+                );
+                return Ok(bytes);
+            }
+            Ok(_) => eprintln!("cached brain is invalid; rebuilding from network"),
+            Err(e) => eprintln!("cached brain read failed: {e}"),
+        }
+    }
+
     let url = env::var("BRAIN_URL")
         .unwrap_or_else(|_| "https://fruit-fly-driving-scooter.vercel.app/brain.bin".into());
-    eprintln!("downloading full FlyWire brain from {url}");
-    let res = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("brain download: {e}"))?;
-    if !res.status().is_success() {
-        return Err(format!("brain download HTTP {}", res.status()));
+    eprintln!("loading full FlyWire brain from {url}");
+
+    // First try the original monolithic file.
+    if let Ok(bytes) = fetch_bytes(&url).await {
+        if bytes.len() >= HEADER_BYTES && &bytes[0..8] == MAGIC {
+            if let Some(parent) = cache_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(&cache_path, &bytes);
+            return Ok(bytes);
+        }
     }
-    let bytes = res
-        .bytes()
-        .await
-        .map_err(|e| format!("brain bytes: {e}"))?;
-    Ok(bytes.to_vec())
+
+    // Vercel Hobby serves this ~125 MB asset as deterministic <24 MB chunks.
+    // Reconstruct the exact original brain.bin from the same manifest the browser uses.
+    let manifest_url = format!("{url}.parts.json");
+    eprintln!("monolithic brain unavailable; reconstructing from {manifest_url}");
+    let manifest_bytes = fetch_bytes(&manifest_url).await?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("parse brain chunk manifest: {e}"))?;
+
+    let total = manifest
+        .get("totalBytes")
+        .and_then(|x| x.as_u64())
+        .ok_or_else(|| "brain chunk manifest missing totalBytes".to_string())? as usize;
+    let parts = manifest
+        .get("parts")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| "brain chunk manifest missing parts".to_string())?;
+
+    let base = url
+        .rsplit_once('/')
+        .map(|(left, _)| format!("{left}/"))
+        .ok_or_else(|| "invalid BRAIN_URL".to_string())?;
+
+    let mut out = Vec::with_capacity(total);
+    for (index, part) in parts.iter().enumerate() {
+        let file = part
+            .get("file")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| format!("brain part {index} missing file"))?;
+        let expected = part
+            .get("size")
+            .and_then(|x| x.as_u64())
+            .ok_or_else(|| format!("brain part {index} missing size"))? as usize;
+        let part_url = if file.starts_with("http://") || file.starts_with("https://") {
+            file.to_string()
+        } else {
+            format!("{base}{file}")
+        };
+        let bytes = fetch_bytes(&part_url).await?;
+        if bytes.len() != expected {
+            return Err(format!(
+                "brain part {index} size mismatch: {} != {}",
+                bytes.len(),
+                expected
+            ));
+        }
+        out.extend_from_slice(&bytes);
+        eprintln!(
+            "brain chunk {}/{} · {:.1}/{:.1} MB",
+            index + 1,
+            parts.len(),
+            out.len() as f64 / 1_000_000.0,
+            total as f64 / 1_000_000.0
+        );
+    }
+
+    if out.len() != total {
+        return Err(format!(
+            "reconstructed brain size mismatch: {} != {}",
+            out.len(),
+            total
+        ));
+    }
+    if out.len() < HEADER_BYTES || &out[0..8] != MAGIC {
+        return Err("reconstructed brain.bin has invalid magic/header".into());
+    }
+
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&cache_path, &out)
+        .map_err(|e| format!("cache reconstructed brain at {}: {e}", cache_path.display()))?;
+    eprintln!(
+        "cached reconstructed full FlyWire brain at {}",
+        cache_path.display()
+    );
+    Ok(out)
 }
 
 fn load_state(path: &Path) -> PersistedState {
