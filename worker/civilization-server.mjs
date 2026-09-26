@@ -356,6 +356,22 @@ async function initDb() {
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
     state.eventSeq = Number(state.eventSeq || 1);
+    for (const fly of state.flies) {
+      fly.homeTier = Number(fly.homeTier || (fly.ownsHome ? 1 : 0));
+      if (!Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) {
+        const base = location(fly.homeId);
+        const n = Number(String(fly.id).replace(/\D/g, "")) || 1;
+        const ring = 7 + (n % 5) * 3.2;
+        const angle = (n * 2.399963229728653) % (Math.PI * 2);
+        fly.homeX = base.x + Math.cos(angle) * ring;
+        fly.homeZ = base.z + Math.sin(angle) * ring;
+      }
+      fly.brainDecision = fly.brainDecision || fly.action || "resting";
+      fly.brainConfidence = Number.isFinite(fly.brainConfidence) ? fly.brainConfidence : 0.5;
+      fly.traveling = Boolean(fly.traveling);
+      fly.smoking = Boolean(fly.smoking);
+      fly.exercising = Boolean(fly.exercising);
+    }
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
     freshState();
