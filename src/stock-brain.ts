@@ -13,6 +13,29 @@ export interface StockSnapshot {
   resting?: boolean;
 }
 
+export interface BrainRegionActivity {
+  id: number;
+  label: string;
+  count: number;
+  mean: number;
+  active: number;
+}
+
+export interface BrainLayout {
+  x: Float32Array;
+  y: Float32Array;
+  group: Uint8Array;
+  sampleCount: number;
+  totalNeurons: number;
+}
+
+export interface BrainActivityFrame {
+  rates: Float32Array;
+  regions: BrainRegionActivity[];
+  activeNeurons: number;
+  simulatedNeurons: number;
+}
+
 export interface StockBrainStatus {
   stage: "loading" | "running" | "error";
   message: string;
@@ -36,6 +59,8 @@ export interface StockBrainOptions {
   getSnapshot: () => StockSnapshot;
   onStatus?: (status: StockBrainStatus) => void;
   onRetina?: (pixels: Uint8Array, w: number, h: number) => void;
+  onBrainLayout?: (layout: BrainLayout) => void;
+  onBrainActivity?: (frame: BrainActivityFrame) => void;
   onDecision?: (decision: StockBrainDecision) => void;
 }
 
@@ -43,6 +68,11 @@ const SUPER_SENSORY = 1;
 const SUPER_OPTIC = 10;
 const HERO_DN = 7;
 const HERO_MBON = 2;
+const SUPER_CLASS_LABELS = [
+  "unknown","sensory","ascending","intrinsic","central",
+  "descending","motor","endocrine","visual centrifugal",
+  "visual projection","optic",
+];
 
 function clamp(v:number,min=0,max=1){return Math.max(min,Math.min(max,v));}
 
@@ -90,6 +120,8 @@ export class StockBrain {
   private dnRight:number[]=[];
   private mbon:number[]=[];
   private vncInfo:{neurons:number;edges:number}|null=null;
+  private mapSample:number[]=[];
+  private lastBrainFrameAt=0;
   private lastDecisionAt=0;
 
   constructor(private readonly options:StockBrainOptions){}
@@ -116,6 +148,7 @@ export class StockBrain {
       });
 
       this.partition(this.brain);
+      this.prepareBrainMap(this.brain);
       this.ext=new Float32Array(this.brain.header.numNeurons);
       this.sim=await FlySim.create(this.brain,{...DEFAULT_PARAMS});
 
@@ -157,6 +190,68 @@ export class StockBrain {
     this.opticRight=sampleEvenly(or,4200);
     this.sensory=sampleEvenly(sens,2200);
     this.dnLeft=dl; this.dnRight=dr; this.mbon=mb;
+  }
+
+  private prepareBrainMap(brain:Brain){
+    const all=Array.from({length:brain.header.numNeurons},(_,i)=>i);
+    this.mapSample=sampleEvenly(all,3600);
+
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for(const i of this.mapSample){
+      const x=brain.neurons.pos[i*3];
+      const y=brain.neurons.pos[i*3+1];
+      minX=Math.min(minX,x);maxX=Math.max(maxX,x);
+      minY=Math.min(minY,y);maxY=Math.max(maxY,y);
+    }
+    const sx=Math.max(1,maxX-minX),sy=Math.max(1,maxY-minY);
+    const x=new Float32Array(this.mapSample.length);
+    const y=new Float32Array(this.mapSample.length);
+    const group=new Uint8Array(this.mapSample.length);
+    for(let j=0;j<this.mapSample.length;j++){
+      const i=this.mapSample[j];
+      x[j]=(brain.neurons.pos[i*3]-minX)/sx;
+      y[j]=(brain.neurons.pos[i*3+1]-minY)/sy;
+      group[j]=brain.neurons.superClass[i]&0xff;
+    }
+    this.options.onBrainLayout?.({
+      x,y,group,
+      sampleCount:this.mapSample.length,
+      totalNeurons:brain.header.numNeurons,
+    });
+  }
+
+  private emitBrainActivity(rate:Float32Array){
+    if(!this.brain)return;
+    const now=performance.now();
+    if(now-this.lastBrainFrameAt<180)return;
+    this.lastBrainFrameAt=now;
+
+    const sums=new Float64Array(SUPER_CLASS_LABELS.length);
+    const counts=new Uint32Array(SUPER_CLASS_LABELS.length);
+    const active=new Uint32Array(SUPER_CLASS_LABELS.length);
+    let activeNeurons=0;
+    for(let i=0;i<rate.length;i++){
+      const g=this.brain.neurons.superClass[i]&0xff;
+      if(g>=SUPER_CLASS_LABELS.length)continue;
+      const r=rate[i];
+      sums[g]+=r;
+      counts[g]++;
+      if(r>.0005){active[g]++;activeNeurons++;}
+    }
+    const rates=new Float32Array(this.mapSample.length);
+    for(let j=0;j<this.mapSample.length;j++)rates[j]=rate[this.mapSample[j]];
+
+    const regions:BrainRegionActivity[]=SUPER_CLASS_LABELS.map((label,id)=>({
+      id,label,
+      count:counts[id],
+      mean:counts[id]?sums[id]/counts[id]:0,
+      active:active[id],
+    }));
+
+    this.options.onBrainActivity?.({
+      rates,regions,activeNeurons,
+      simulatedNeurons:this.brain.header.numNeurons,
+    });
   }
 
   private makeRetina(snapshot:StockSnapshot){
@@ -217,6 +312,7 @@ export class StockBrain {
       this.sim.setExternalInput(this.ext);
 
       const rate=await this.sim.captureRollingRate(24);
+      this.emitBrainActivity(rate);
       const l=meanAt(rate,this.dnLeft);
       const r=meanAt(rate,this.dnRight);
       const activity=l+r;

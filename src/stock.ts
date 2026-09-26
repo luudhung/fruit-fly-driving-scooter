@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { StockBrain, type StockBrainDecision, type StockBrainStatus } from "./stock-brain";
+import { StockBrain, type StockBrainDecision, type StockBrainStatus, type BrainLayout, type BrainActivityFrame } from "./stock-brain";
 
 const worldEl=document.getElementById("world") as HTMLDivElement;
 const telemetryEl=document.getElementById("telemetry") as HTMLDivElement;
@@ -22,6 +22,18 @@ const fundsUnrealizedEl=document.getElementById("funds-unrealized") as HTMLEleme
 const fundsRealizedEl=document.getElementById("funds-realized") as HTMLElement;
 const fundsFlowEl=document.getElementById("funds-flow") as HTMLElement;
 const fundsPositionEl=document.getElementById("funds-position") as HTMLElement;
+const brainMapCanvas=document.getElementById("brain-map") as HTMLCanvasElement;
+const brainMapCtx=brainMapCanvas.getContext("2d")!;
+const brainCoverageEl=document.getElementById("brain-coverage") as HTMLElement;
+const brainActiveEl=document.getElementById("brain-active") as HTMLElement;
+const brainEdgesEl=document.getElementById("brain-edges") as HTMLElement;
+const brainVncEl=document.getElementById("brain-vnc") as HTMLElement;
+const brainFullBadgeEl=document.getElementById("brain-full-badge") as HTMLElement;
+const brainRegionsEl=document.getElementById("brain-regions") as HTMLElement;
+let brainLayout:BrainLayout|null=null;
+let brainFrame:BrainActivityFrame|null=null;
+const brainPalette=["#607078","#ffb45c","#d1d86a","#a5a9ad","#63a8ff","#ff6666","#e7a8ff","#f7d66f","#6de1df","#75d7a7","#6ab2ff"];
+
 const retinaCanvas=document.getElementById("retina") as HTMLCanvasElement;
 const retinaCtx=retinaCanvas.getContext("2d")!;
 const retinaImage=retinaCtx.createImageData(64,16);
@@ -883,6 +895,46 @@ function handleDecision(d:StockBrainDecision){
   openPosition(desired,d.confidence);
 }
 
+function drawBrainMonitor(){
+  const w=brainMapCanvas.width,h=brainMapCanvas.height;
+  brainMapCtx.fillStyle="#050a0d";
+  brainMapCtx.fillRect(0,0,w,h);
+  if(!brainLayout)return;
+
+  const rates=brainFrame?.rates;
+  let maxRate=.0001;
+  if(rates)for(let i=0;i<rates.length;i++)maxRate=Math.max(maxRate,rates[i]);
+
+  for(let i=0;i<brainLayout.sampleCount;i++){
+    const x=26+brainLayout.x[i]*(w-52);
+    const y=22+(1-brainLayout.y[i])*(h-44);
+    const rate=rates?.[i]||0;
+    const level=Math.min(1,rate/(maxRate*.7+.00001));
+    brainMapCtx.globalAlpha=.16+level*.84;
+    brainMapCtx.fillStyle=brainPalette[brainLayout.group[i]]||"#98a8ae";
+    const r=1.15+level*2.15;
+    brainMapCtx.beginPath();
+    brainMapCtx.arc(x,y,r,0,Math.PI*2);
+    brainMapCtx.fill();
+  }
+  brainMapCtx.globalAlpha=1;
+}
+
+function renderBrainFrame(frame:BrainActivityFrame){
+  brainFrame=frame;
+  brainCoverageEl.textContent=frame.simulatedNeurons.toLocaleString()+" / "+frame.simulatedNeurons.toLocaleString()+" neurons";
+  brainActiveEl.textContent=frame.activeNeurons.toLocaleString();
+  brainFullBadgeEl.textContent="FULL · SIMULATED";
+  const maxMean=Math.max(.00001,...frame.regions.map(r=>r.mean));
+  brainRegionsEl.innerHTML=frame.regions
+    .filter(r=>r.count>0)
+    .map(r=>{
+      const pct=Math.min(100,r.mean/maxMean*100);
+      return '<div class="brain-region"><div class="brain-region-top"><span>'+r.label+'</span><span>'+r.active.toLocaleString()+'/'+r.count.toLocaleString()+'</span></div><div class="brain-region-track"><i style="width:'+pct.toFixed(1)+'%"></i></div></div>';
+    }).join("");
+  drawBrainMonitor();
+}
+
 const brain=new StockBrain({
   getSnapshot:()=>({prices:[...prices],momentum:momentum(),volatility:volatility(),stress,tick,resting:breakMode}),
   onStatus(status){
@@ -890,6 +942,21 @@ const brain=new StockBrain({
     brainLiveEl.dataset.state=status.stage;
     brainStatusEl.textContent=status.stage==="running"?"FULL BRAIN ONLINE":status.stage==="error"?"BRAIN ERROR":"LOADING FULL BRAIN";
     brainDetailEl.textContent=status.message;
+    if(status.neurons){
+      brainCoverageEl.textContent=status.neurons.toLocaleString()+" / "+status.neurons.toLocaleString()+" neurons";
+      brainEdgesEl.textContent=(status.edges||0).toLocaleString();
+      brainFullBadgeEl.textContent="FULL · SIMULATED";
+    }
+    if(status.vncNeurons){
+      brainVncEl.textContent=status.vncNeurons.toLocaleString()+" loaded · not simulated";
+    }
+  },
+  onBrainLayout(layout){
+    brainLayout=layout;
+    drawBrainMonitor();
+  },
+  onBrainActivity(frame){
+    renderBrainFrame(frame);
   },
   onRetina(pixels,w,h){
     const dst=retinaImage.data;
