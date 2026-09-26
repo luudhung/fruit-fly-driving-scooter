@@ -568,15 +568,6 @@ fn partition(brain: &Brain) -> Partitions {
     }
 }
 
-fn momentum(prices: &[f64]) -> f64 {
-    if prices.len() < 8 {
-        return 0.0;
-    }
-    let a = prices[prices.len() - 1];
-    let b = prices[prices.len() - 8];
-    if b != 0.0 { (a - b) / b } else { 0.0 }
-}
-
 fn volatility(prices: &[f64]) -> f64 {
     if prices.len() < 3 {
         return 0.0;
@@ -604,36 +595,79 @@ fn build_input(
     resting: bool,
 ) -> Vec<f32> {
     let mut ext = vec![0.0f32; brain.num_neurons];
-    if resting {
-        for &i in &p.sensory {
-            ext[i] = 0.035;
+
+    // Build a tiny 64x16 monochrome "retina" from the recent price chart.
+    // Crucially, no momentum direction / UP / DOWN label is injected.
+    const W: usize = 64;
+    const H: usize = 16;
+    let mut retina = vec![0.025f32; W * H];
+
+    if prices.len() >= 2 {
+        let window = &prices[prices.len().saturating_sub(W)..];
+        let min_p = window
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let max_p = window
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let span = (max_p - min_p).abs().max(1e-9);
+
+        let mut last_xy: Option<(usize, usize)> = None;
+        for x in 0..W {
+            let src = if window.len() <= 1 {
+                0
+            } else {
+                ((x as f64 / (W - 1) as f64) * (window.len() - 1) as f64).round() as usize
+            };
+            let norm = clamp64((window[src] - min_p) / span, 0.0, 1.0);
+            let y = ((1.0 - norm) * (H - 1) as f64).round() as usize;
+
+            retina[y * W + x] = 1.0;
+            if y > 0 { retina[(y - 1) * W + x] = 0.45; }
+            if y + 1 < H { retina[(y + 1) * W + x] = 0.45; }
+
+            // Connect adjacent samples so the fly sees a continuous line instead of dots.
+            if let Some((px, py)) = last_xy {
+                let dx = x.saturating_sub(px).max(1);
+                for step in 1..dx {
+                    let t = step as f64 / dx as f64;
+                    let iy = (py as f64 + (y as f64 - py as f64) * t).round() as usize;
+                    let ix = px + step;
+                    if ix < W && iy < H {
+                        retina[iy * W + ix] = retina[iy * W + ix].max(0.72);
+                    }
+                }
+            }
+            last_xy = Some((x, y));
         }
-        return ext;
     }
 
-    let mom = momentum(prices);
+    // Spatial retinal projection: left optic population sees the left half,
+    // right optic population sees the right half. Both receive the actual chart pixels.
+    let visual_scale = if resting { 0.35 } else { 1.0 };
+    for (k, &i) in p.optic_left.iter().enumerate() {
+        let x = k % (W / 2);
+        let y = (k / (W / 2)) % H;
+        ext[i] = (0.08 + retina[y * W + x] as f64 * 1.25 * visual_scale) as f32;
+    }
+    for (k, &i) in p.optic_right.iter().enumerate() {
+        let x = W / 2 + (k % (W / 2));
+        let y = (k / (W / 2)) % H;
+        ext[i] = (0.08 + retina[y * W + x] as f64 * 1.25 * visual_scale) as f32;
+    }
+
+    // Non-directional body state. Stress and volatility can change arousal,
+    // but they do not tell the connectome which market direction to choose.
     let vol = volatility(prices);
-    let trend = clamp64(mom.abs() * 8.0, 0.0, 1.0);
-    let calm = 1.0 - clamp64(vol * 12.0, 0.0, 1.0);
-    let base = 0.22 + calm * 0.08;
-    let up = mom >= 0.0;
-    let left_amp = base + if up { trend * 0.45 } else { trend * 3.8 };
-    let right_amp = base + if up { trend * 3.8 } else { trend * 0.45 };
-
-    for &i in &p.optic_left {
-        ext[i] = left_amp as f32;
-    }
-    for &i in &p.optic_right {
-        ext[i] = right_amp as f32;
-    }
-
-    let arousal = 0.06
-        + clamp64(vol * 9.0, 0.0, 1.0) * 1.5
-        + clamp64(stress / 100.0, 0.0, 1.0) * 0.9;
+    let arousal = 0.05
+        + clamp64(vol * 10.0, 0.0, 1.0) * 1.35
+        + clamp64(stress / 100.0, 0.0, 1.0) * 0.95;
 
     for &i in &p.sensory {
         if ext[i] == 0.0 {
-            ext[i] = arousal as f32;
+            ext[i] = (arousal * if resting { 0.55 } else { 1.0 }) as f32;
         }
     }
 
