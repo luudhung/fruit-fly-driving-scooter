@@ -522,7 +522,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.target.set(fly.x, fly.y, fly.z);
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     visual.group.scale.setScalar(ageScale);
-    visual.halo.material.opacity = selectedFlyId === fly.id ? 0.85 : 0;
+    (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
     if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
       visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
     }
@@ -610,7 +610,7 @@ renderer.domElement.addEventListener("click", (e) => {
   selectedFlyId = id;
   const fly = latestFlyStates.get(id) || null;
   renderInspector(fly);
-  for (const [fid, visual] of flyVisuals) visual.halo.material.opacity = fid === id ? 0.85 : 0;
+  for (const [fid, visual] of flyVisuals) (visual.halo.material as THREE.MeshBasicMaterial).opacity = fid === id ? 0.85 : 0;
   if (fly) orbitTarget.set(fly.x, Math.max(2, fly.y), fly.z);
 });
 
