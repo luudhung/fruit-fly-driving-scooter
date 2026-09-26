@@ -45,6 +45,9 @@ export interface StockBrainStatus {
   vncEdges?: number;
   activity?: number;
   signal?: number;
+  fullBrainLoaded?: boolean;
+  simulatedNeurons?: number;
+  regions?: Record<string,number>;
 }
 
 export interface StockBrainDecision {
@@ -119,6 +122,7 @@ export class StockBrain {
   private dnLeft:number[]=[];
   private dnRight:number[]=[];
   private mbon:number[]=[];
+  private wholeSample:number[]=[];
   private vncInfo:{neurons:number;edges:number}|null=null;
   private mapSample:number[]=[];
   private lastBrainFrameAt=0;
@@ -157,6 +161,11 @@ export class StockBrain {
         message:"Full FlyWire brain online · market retina attached",
         neurons:this.brain.header.numNeurons,
         edges:this.brain.header.numEdges,
+        fullBrainLoaded:true,
+        simulatedNeurons:this.brain.header.numNeurons,
+        regions:{
+          whole:0,opticLeft:0,opticRight:0,sensory:0,dnLeft:0,dnRight:0,mbon:0
+        },
       });
 
       void this.loadVnc(versionFor);
@@ -190,6 +199,9 @@ export class StockBrain {
     this.opticRight=sampleEvenly(or,4200);
     this.sensory=sampleEvenly(sens,2200);
     this.dnLeft=dl; this.dnRight=dr; this.mbon=mb;
+    const all:number[]=[];
+    for(let i=0;i<brain.header.numNeurons;i++)all.push(i);
+    this.wholeSample=sampleEvenly(all,6000);
   }
 
   private prepareBrainMap(brain:Brain){
@@ -317,6 +329,15 @@ export class StockBrain {
       const r=meanAt(rate,this.dnRight);
       const activity=l+r;
       const mbon=meanAt(rate,this.mbon);
+      const regions={
+        whole:meanAt(rate,this.wholeSample),
+        opticLeft:meanAt(rate,this.opticLeft),
+        opticRight:meanAt(rate,this.opticRight),
+        sensory:meanAt(rate,this.sensory),
+        dnLeft:l,
+        dnRight:r,
+        mbon,
+      };
       const asym=activity>.0004?(r-l)/(activity+.0005):0;
       const signal=Math.tanh(asym*2.15+(mbon-.01)*.35);
 
@@ -330,6 +351,9 @@ export class StockBrain {
         vncNeurons:this.vncInfo?.neurons,
         vncEdges:this.vncInfo?.edges,
         activity,signal,
+        fullBrainLoaded:true,
+        simulatedNeurons:this.brain.header.numNeurons,
+        regions,
       });
 
       if(snapshot.resting){
