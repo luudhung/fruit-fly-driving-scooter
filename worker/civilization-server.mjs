@@ -379,8 +379,43 @@ function inheritHousehold(child, mother) {
     assignApartment(child);
     return;
   }
+
   if (!hh.members.includes(child.id)) hh.members.push(child.id);
   child.householdId = hh.id;
+
+  if (hh.housingType === "apartment") {
+    let block = state.housing.apartmentBlocks.find((b) => b.id === hh.unitId);
+    const required = hh.members.filter((id) => state.flies.some((f) => f.id === id && f.alive) || id === child.id).length;
+    const currentOccupants = block?.occupants?.length || 0;
+
+    if (!block || currentOccupants >= block.capacity) {
+      const nextBlock = state.housing.apartmentBlocks
+        .filter((b) => b.id !== block?.id && (b.occupants?.length || 0) + required <= b.capacity)
+        .sort((a,b) => (a.occupants?.length || 0) - (b.occupants?.length || 0))[0];
+
+      if (nextBlock) {
+        if (block) block.occupants = (block.occupants || []).filter((id) => !hh.members.includes(id));
+        block = nextBlock;
+        hh.unitId = block.id;
+        hh.homeX = block.x;
+        hh.homeZ = block.z;
+        hh.monthlyHousingCost = block.rent;
+        for (const memberId of hh.members) {
+          const member = state.flies.find((f) => f.id === memberId);
+          if (member) {
+            member.housingUnitId = block.id;
+            member.homeX = block.x + randRange(-2.2, 2.2);
+            member.homeZ = block.z + randRange(-2.2, 2.2);
+          }
+        }
+      }
+    }
+
+    if (block && !block.occupants.includes(child.id) && block.occupants.length < block.capacity) {
+      block.occupants.push(child.id);
+    }
+  }
+
   child.housingType = hh.housingType;
   child.housingUnitId = hh.unitId;
   child.homeX = hh.homeX + randRange(-1.5, 1.5);
@@ -388,10 +423,6 @@ function inheritHousehold(child, mother) {
   child.ownsHome = false;
   child.homeTier = 0;
   child.homeEquity = 0;
-  const block = state.housing.apartmentBlocks.find((b) => b.id === hh.unitId);
-  if (block && !block.occupants.includes(child.id) && block.occupants.length < block.capacity) {
-    block.occupants.push(child.id);
-  }
 }
 
 
@@ -794,6 +825,8 @@ function updateWeather(clock) {
 
 function freshState() {
   const s = {
+    cityName: CITY_NAME,
+    currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
     worldId: WORLD_ID,
     experimentId: EXPERIMENT_ID,
     worldSeed: WORLD_SEED,
@@ -2599,6 +2632,19 @@ function compactFly(f) {
     children: f.children,
     parents: f.parents,
     vehicle: f.vehicle,
+    transitMode: f.transitMode || "walk",
+    illness: f.illness || null,
+    socialClass: f.socialClass || "working",
+    householdId: f.householdId || null,
+    housingType: f.housingType || null,
+    housingUnitId: f.housingUnitId || null,
+    businessId: f.businessId || null,
+    businessEmployeeOf: f.businessEmployeeOf || null,
+    businessEquity: Number(f.businessEquity || 0),
+    creditScore: Number(f.creditScore || 0),
+    bankLoan: Number(f.bankLoan || 0),
+    businessFailures: Number(f.businessFailures || 0),
+    businessSuccesses: Number(f.businessSuccesses || 0),
     ownsHome: f.ownsHome,
     homeTier: f.homeTier || 0,
     homeX: f.homeX,
@@ -2670,6 +2716,26 @@ function getState() {
     foodReserve: state.foodReserve,
     moneySupply,
     totalTransactions: state.totalTransactions,
+    economy: {
+      ...(state.economy || {}),
+      bankReserves: Number(state.bank?.reserves || 0),
+      loansOutstanding: Number(state.bank?.loansOutstanding || 0),
+      defaults: Number(state.bank?.defaults || 0),
+      operatingBusinesses: Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length,
+    },
+    housing: {
+      apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
+        id: b.id,
+        x: b.x,
+        z: b.z,
+        capacity: b.capacity,
+        occupants: (b.occupants || []).length,
+        rent: b.rent,
+        purchaseValue: b.purchaseValue,
+      })) || [],
+      occupiedGroundHouses: state.housing?.houseLots?.filter((x) => x.ownerHouseholdId).length || 0,
+      totalGroundHouseLots: state.housing?.houseLots?.length || 0,
+    },
     weather: {
       ...(state.weather || {}),
       danger: weatherDanger(),
@@ -2713,12 +2779,12 @@ async function tick() {
 
       // periodic city-wide events
       if (clock.hour === 6 && clock.minute < 2 && rand() < 0.12) {
-        emit("weather", "A new synthetic day begins across Fly City.", { day: clock.day });
+        emit("weather", "A new simulated day begins across Hansdrex City of Fruit Fly.", { day: clock.day });
       }
 
       if (state.foodReserve < 2000 && rand() < 0.002) {
         state.foodReserve += 4000;
-        emit("supply", "Central Market restocked food supplies.", { foodReserve: state.foodReserve });
+        emit("supply", "Hansdrex Central Market restocked food supplies.", { foodReserve: state.foodReserve });
       }
 
       if (state.flies.filter((f) => f.alive).length < 8 && state.flies.length < MAX_POPULATION) {
