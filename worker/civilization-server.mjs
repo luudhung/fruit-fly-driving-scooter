@@ -94,6 +94,62 @@ const LOCATIONS = [
   { id: "metro-industrial", type: "transit", name: "Hansdrex Industrial Station", x: -128, z: 88 },
 ];
 
+const METRO_ROUTE_LINES = [
+  { id:"M1", points:[[-150,0],[0,0],[142,0],[190,0]] },
+  { id:"M2", points:[[0,-175],[0,-140],[0,0],[0,142],[0,175]] },
+  { id:"M3", points:[[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]] },
+  { id:"M4", points:[[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]] },
+  { id:"M5", points:[[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]] },
+  { id:"M6", points:[[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]] },
+];
+
+function nearestPointIndex(points, x, z) {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < points.length; i += 1) {
+    const [px,pz] = points[i];
+    const d = Math.hypot(px - x, pz - z);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return { index: best, distance: bestD };
+}
+
+function linePathDistance(points, a, b) {
+  const lo = Math.min(a,b);
+  const hi = Math.max(a,b);
+  let total = 0;
+  for (let i = lo; i < hi; i += 1) {
+    total += Math.hypot(points[i+1][0]-points[i][0], points[i+1][1]-points[i][1]);
+  }
+  return total;
+}
+
+function planMetroRoute(fly, dest) {
+  let best = null;
+  for (const line of METRO_ROUTE_LINES) {
+    const entry = nearestPointIndex(line.points, fly.x, fly.z);
+    const exit = nearestPointIndex(line.points, dest.x, dest.z);
+    const pathDistance = linePathDistance(line.points, entry.index, exit.index);
+    const score = entry.distance + exit.distance + pathDistance * 0.18;
+    if (!best || score < best.score) best = { line, entry, exit, score };
+  }
+  if (!best || best.entry.index === best.exit.index) return null;
+
+  const waypoints = [];
+  const [ex,ez] = best.line.points[best.entry.index];
+  waypoints.push({ x:ex, z:ez, mode:"walk", lineId:best.line.id, stage:"station-entry" });
+  const dir = best.exit.index > best.entry.index ? 1 : -1;
+  for (let i = best.entry.index; i !== best.exit.index + dir; i += dir) {
+    const [x,z] = best.line.points[i];
+    waypoints.push({ x, z, mode:"metro", lineId:best.line.id, stage:"on-train" });
+  }
+  const [xx,xz] = best.line.points[best.exit.index];
+  waypoints.push({ x:xx, z:xz, mode:"walk", lineId:best.line.id, stage:"station-exit" });
+  waypoints.push({ x:dest.x, z:dest.z, mode:"walk", lineId:best.line.id, stage:"last-mile" });
+  return { lineId:best.line.id, waypoints, score:best.score };
+}
+
+
 const JOBS = [
   { id: "office", locationId: "office", title: "clerk", wage: 5.2, shiftStart: 8, shiftEnd: 17 },
   { id: "factory", locationId: "factory", title: "processor", wage: 4.4, shiftStart: 7, shiftEnd: 16 },
@@ -724,6 +780,12 @@ function createFly(index, parents = null) {
     travelLastDistance: null,
     travelStuckTicks: 0,
     travelGoalId: null,
+    finalTargetX: pos.x,
+    finalTargetZ: pos.z,
+    routeWaypoints: [],
+    routeIndex: 0,
+    metroLineId: null,
+    transitStage: null,
     smoking: false,
     exercising: false,
     sleeping: false,
@@ -1019,6 +1081,12 @@ async function initDb() {
       fly.travelLastDistance = Number.isFinite(fly.travelLastDistance) ? fly.travelLastDistance : null;
       fly.travelStuckTicks = Number(fly.travelStuckTicks || 0);
       fly.travelGoalId = fly.travelGoalId || fly.targetLocationId || null;
+      fly.finalTargetX = Number.isFinite(fly.finalTargetX) ? fly.finalTargetX : fly.targetX;
+      fly.finalTargetZ = Number.isFinite(fly.finalTargetZ) ? fly.finalTargetZ : fly.targetZ;
+      fly.routeWaypoints = Array.isArray(fly.routeWaypoints) ? fly.routeWaypoints : [];
+      fly.routeIndex = Number(fly.routeIndex || 0);
+      fly.metroLineId = fly.metroLineId || null;
+      fly.transitStage = fly.transitStage || null;
       fly.smoking = Boolean(fly.smoking);
       fly.exercising = Boolean(fly.exercising);
       fly.sleeping = Boolean(fly.sleeping);
@@ -1256,20 +1324,24 @@ function nearestTransitStation(x, z) {
 function chooseTravelMode(fly, dest) {
   const distance = Math.hypot(dest.x - fly.x, dest.z - fly.z);
   const danger = weatherDanger();
-  if (distance < 38 && danger < 0.48) return "walk";
-  if (fly.vehicle === "compact car" && fly.money > 1.2 && neuralDrive(fly, "avoidDrive") < 0.84) return "car";
-  if (fly.vehicle === "scooter" && fly.money > 0.6 && distance < 150) return "scooter";
-  const from = nearestTransitStation(fly.x, fly.z);
-  const to = nearestTransitStation(dest.x, dest.z);
-  if ((distance > 68 || danger >= 0.48) && from.station && to.station && fly.money >= 1.5) {
+  if (distance < 38 && danger < 0.48) return { mode:"walk", metro:null };
+  if (fly.vehicle === "compact car" && fly.money > 1.2 && neuralDrive(fly, "avoidDrive") < 0.84 && danger < 0.78) {
+    return { mode:"car", metro:null };
+  }
+  if (fly.vehicle === "scooter" && fly.money > 0.6 && distance < 150 && danger < 0.42) {
+    return { mode:"scooter", metro:null };
+  }
+
+  const metro = planMetroRoute(fly, dest);
+  if (metro && (distance > 68 || danger >= 0.48) && fly.money >= 1.5) {
     if (!fly.transitPass) {
       fly.money -= 1.5;
       fly.expensesLifetime += 1.5;
       state.totalTransactions += 1;
     }
-    return "metro";
+    return { mode:"metro", metro };
   }
-  return "walk";
+  return { mode:"walk", metro:null };
 }
 
 function nightlifeOpen(clock) {
@@ -1787,9 +1859,22 @@ function chooseDestination(fly, clock) {
     ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
     : location(chosen.id);
   const p = jittered(dest, chosen.id === fly.homeId ? 1.4 : 3.8);
-  fly.targetX = p.x;
-  fly.targetZ = p.z;
-  fly.transitMode = chooseTravelMode(fly, dest);
+  fly.finalTargetX = p.x;
+  fly.finalTargetZ = p.z;
+  const travelPlan = chooseTravelMode(fly, p);
+  fly.transitMode = travelPlan.mode;
+  fly.routeWaypoints = travelPlan.metro?.waypoints || [];
+  fly.routeIndex = 0;
+  fly.metroLineId = travelPlan.metro?.lineId || null;
+  fly.transitStage = travelPlan.metro ? "station-entry" : travelPlan.mode;
+  if (fly.routeWaypoints.length) {
+    fly.targetX = fly.routeWaypoints[0].x;
+    fly.targetZ = fly.routeWaypoints[0].z;
+    fly.transitMode = fly.routeWaypoints[0].mode;
+  } else {
+    fly.targetX = p.x;
+    fly.targetZ = p.z;
+  }
   fly.traveling = true;
   fly.travelStartedAt = state.simulationAgeSeconds;
   fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
@@ -1808,18 +1893,37 @@ function moveFly(fly) {
     fly.vz = 0;
     fly.x = fly.targetX;
     fly.z = fly.targetZ;
+
+    if (fly.routeWaypoints?.length && fly.routeIndex < fly.routeWaypoints.length - 1) {
+      fly.routeIndex += 1;
+      const next = fly.routeWaypoints[fly.routeIndex];
+      fly.targetX = next.x;
+      fly.targetZ = next.z;
+      fly.transitMode = next.mode;
+      fly.transitStage = next.stage;
+      fly.metroLineId = next.lineId || fly.metroLineId;
+      fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+      fly.travelStuckTicks = 0;
+      return;
+    }
+
     fly.currentLocationId = fly.targetLocationId;
     if (fly.traveling) {
+      const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
       fly.traveling = false;
       fly.travelGoalId = null;
       fly.travelLastDistance = null;
       fly.travelStuckTicks = 0;
+      fly.routeWaypoints = [];
+      fly.routeIndex = 0;
+      fly.transitStage = null;
       fly.actionUntil = state.simulationAgeSeconds + brainRange(fly, 1200, 4200);
       brainRemember(fly, "arrived", {
         locationId: fly.currentLocationId,
         action: fly.action,
-        transitMode: fly.transitMode,
+        transitMode: completedMode,
       });
+      fly.metroLineId = null;
     }
     return;
   }
@@ -2633,6 +2737,8 @@ function compactFly(f) {
     parents: f.parents,
     vehicle: f.vehicle,
     transitMode: f.transitMode || "walk",
+    transitStage: f.transitStage || null,
+    metroLineId: f.metroLineId || null,
     illness: f.illness || null,
     socialClass: f.socialClass || "working",
     householdId: f.householdId || null,
