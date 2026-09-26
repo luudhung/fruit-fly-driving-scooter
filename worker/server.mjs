@@ -1,7 +1,7 @@
 import http from "node:http";
 import { createClient } from "redis";
 
-const PORT=Number(process.env.PORT||3000);
+const PORT=3000;
 const REDIS_HOST=process.env.REDIS_HOST||"redis";
 const REDIS_PORT=Number(process.env.REDIS_PORT||6379);
 const STATE_KEY="flybrain:stock:state:v1";
