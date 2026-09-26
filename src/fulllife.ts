@@ -395,13 +395,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
 scene.fog = new THREE.Fog(0x93b8cf, 210, 720);
 
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 1100);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 720);
 const renderer = new THREE.WebGLRenderer({
   antialias: false,
   powerPreference: "low-power",
   precision: "mediump",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
@@ -702,8 +702,8 @@ function addSuburbanHouse(x: number, z: number, seed: number, premium = false) {
 let suburbSeed = 3000;
 for (const side of [-1, 1]) {
   const baseX = side < 0 ? -215 : 205;
-  for (let row = -4; row <= 4; row += 1) {
-    for (let col = 0; col < 3; col += 1) {
+  for (let row = -3; row <= 3; row += 1) {
+    for (let col = 0; col < 2; col += 1) {
       const x = baseX + side * col * 18;
       const z = row * 34 + (col % 2) * 9;
       if (side > 0 && Math.abs(x - riverX) < riverWidth + 28) continue;
@@ -816,15 +816,14 @@ for (let i = 0; i < industrial.length; i += 1) {
 // Hansdrex Farm outside the dense grid.
 const farmSoil = new THREE.MeshStandardMaterial({ color: 0x6e5738, roughness: 1 });
 const cropMat = new THREE.MeshStandardMaterial({ color: 0x6f8f45, roughness: 1 });
-for (let row = 0; row < 9; row += 1) {
-  const soil = new THREE.Mesh(new THREE.BoxGeometry(36, 0.08, 1.6), farmSoil);
-  soil.position.set(-208, 0.08, -55 + row * 4);
+for (let row = 0; row < 7; row += 1) {
+  const soil = new THREE.Mesh(new THREE.BoxGeometry(36, 0.08, 2.1), farmSoil);
+  soil.position.set(-208, 0.08, -55 + row * 5);
   cityRoot.add(soil);
-  for (let col = 0; col < 14; col += 1) {
-    const crop = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 6), cropMat);
-    crop.position.set(-225 + col * 2.55, 0.53, -55 + row * 4);
-    cityRoot.add(crop);
-  }
+  // One crop strip replaces 14 individual cone meshes per row.
+  const crops = new THREE.Mesh(new THREE.BoxGeometry(34, 0.42, 0.85), cropMat);
+  crops.position.set(-208, 0.31, -55 + row * 5);
+  cityRoot.add(crops);
 }
 
 // Street trees and lights along main avenues.
