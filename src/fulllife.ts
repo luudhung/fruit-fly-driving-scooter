@@ -372,6 +372,8 @@ function renderSnapshot(s: CivilizationSnapshot) {
 }
 
 async function fetchSnapshot() {
+  // The civilization keeps running on Railway; hidden tabs do not need to poll/render it.
+  if (document.hidden) return;
   try {
     const response = await fetch(`${apiBase}/api/civilization/state`, {
       headers: { Accept: "application/json" },
@@ -385,7 +387,7 @@ async function fetchSnapshot() {
   }
 }
 void fetchSnapshot();
-window.setInterval(fetchSnapshot, 1000);
+window.setInterval(fetchSnapshot, 2500);
 
 // ---------- Three.js city ----------
 const host = $("world");
@@ -394,8 +396,12 @@ scene.background = new THREE.Color(0x93b8cf);
 scene.fog = new THREE.Fog(0x93b8cf, 210, 720);
 
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 1100);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: "low-power",
+  precision: "mediump",
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
@@ -414,7 +420,7 @@ const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 420, 1.4);
 weatherFlash.position.set(0, 120, 0);
 scene.add(weatherFlash);
 
-const rainCount = 2200;
+const rainCount = 320;
 const rainPositions = new Float32Array(rainCount * 3);
 for (let i = 0; i < rainCount; i += 1) {
   rainPositions[i * 3] = (Math.random() - 0.5) * 240;
@@ -556,10 +562,10 @@ function addTree(x: number, z: number, scale = 1) {
   crown.position.set(x, 2.15 * scale, z);
   cityRoot.add(trunk, crown);
 }
-for (let i = 0; i < 80; i += 1) {
+for (let i = 0; i < 26; i += 1) {
   addTree(-2 + seeded(i + 20) * 34, -120 + seeded(i + 80) * 66, 0.8 + seeded(i + 140) * 0.5);
 }
-for (let i = 0; i < 36; i += 1) {
+for (let i = 0; i < 12; i += 1) {
   addTree(5 + seeded(i + 500) * 95, 155 + seeded(i + 600) * 20, 0.8 + seeded(i + 700) * 0.4);
 }
 
@@ -592,48 +598,21 @@ function addBuilding(
   roof.position.y = h + 0.18;
   group.add(roof);
 
-  const floorCount = Math.max(2, Math.floor(h / 3.1));
-  const colsX = Math.max(2, Math.floor(w / 2.7));
-  const colsZ = Math.max(2, Math.floor(d / 2.7));
-  const windowGeo = new THREE.BoxGeometry(0.92, 1.12, 0.08);
-  const sideWindowGeo = new THREE.BoxGeometry(0.08, 1.12, 0.92);
-
-  for (let floor = 0; floor < floorCount; floor += 1) {
-    const wy = 1.8 + floor * 2.9;
-    if (wy > h - 0.65) continue;
-    for (let col = 0; col < colsX; col += 1) {
-      const wx = -w / 2 + 1.25 + col * ((w - 2.5) / Math.max(1, colsX - 1));
-      for (const face of [-1, 1]) {
-        const mat = new THREE.MeshStandardMaterial({
-          color: options.glass ? 0x3b596b : 0x294351,
-          emissive: 0xffd77f,
-          emissiveIntensity: 0,
-          roughness: options.glass ? 0.18 : 0.3,
-          metalness: options.glass ? 0.42 : 0.25,
-        });
-        windowMaterials.push(mat);
-        const win = new THREE.Mesh(windowGeo, mat);
-        win.position.set(wx, wy, face * (d / 2 + 0.045));
-        group.add(win);
-      }
-    }
-    for (let col = 0; col < colsZ; col += 1) {
-      const wz = -d / 2 + 1.25 + col * ((d - 2.5) / Math.max(1, colsZ - 1));
-      for (const face of [-1, 1]) {
-        const mat = new THREE.MeshStandardMaterial({
-          color: options.glass ? 0x3b596b : 0x294351,
-          emissive: 0xffd77f,
-          emissiveIntensity: 0,
-          roughness: options.glass ? 0.18 : 0.3,
-          metalness: options.glass ? 0.42 : 0.25,
-        });
-        windowMaterials.push(mat);
-        const win = new THREE.Mesh(sideWindowGeo, mat);
-        win.position.set(face * (w / 2 + 0.045), wy, wz);
-        group.add(win);
-      }
-    }
-  }
+  // Performance mode: a single facade strip replaces hundreds of per-window meshes/materials.
+  const facadeMat = new THREE.MeshStandardMaterial({
+    color: options.glass ? 0x3b596b : 0x294351,
+    emissive: 0xffd77f,
+    emissiveIntensity: 0,
+    roughness: options.glass ? 0.24 : 0.5,
+    metalness: options.glass ? 0.28 : 0.08,
+  });
+  windowMaterials.push(facadeMat);
+  const facade = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(2, w * 0.72), Math.max(1.4, Math.min(h * 0.55, 14)), 0.06),
+    facadeMat,
+  );
+  facade.position.set(0, Math.min(h * 0.55, 8), d / 2 + 0.04);
+  group.add(facade);
 
   const door = new THREE.Mesh(
     new THREE.BoxGeometry(1.35, 2.45, 0.12),
@@ -850,7 +829,7 @@ for (let row = 0; row < 9; row += 1) {
 
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
-  for (let z = -150; z <= 150; z += 24) {
+  for (let z = -150; z <= 150; z += 48) {
     if (x > 95 && Math.abs(x - riverX) < 25) continue;
     addTree(x + 7.2, z + 4, 0.72);
     const pole = new THREE.Mesh(
@@ -859,10 +838,8 @@ for (const x of avenueXs) {
     );
     pole.position.set(x - 6.2, 2, z);
     cityRoot.add(pole);
-    const bulb = new THREE.PointLight(0xffd59a, 0, 18, 2);
-    bulb.position.set(x - 6.2, 3.85, z);
-    cityRoot.add(bulb);
-    streetLights.push(bulb);
+    // Point lights are intentionally omitted in performance mode; 100+ dynamic lights
+    // were one of the largest GPU costs on integrated/mobile GPUs.
   }
 }
 
@@ -889,7 +866,7 @@ const metroLines = [
 function addElevatedMetroLine(line: typeof metroLines[number], lineIndex: number) {
   const pts = line.points.map(([x,z]) => new THREE.Vector3(x, line.height, z));
   const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
-  const samples = curve.getPoints(100);
+  const samples = curve.getPoints(28);
 
   for (let i = 0; i < samples.length - 1; i += 1) {
     const a = samples[i];
@@ -1027,6 +1004,7 @@ function flyStatusEmoji(fly: FlyState) {
   return "";
 }
 
+const MAX_RENDERED_FLIES = 80;
 const flyVisuals = new Map<string, FlyVisual>();
 const flyPickables: THREE.Object3D[] = [];
 const bodyMat = new THREE.MeshStandardMaterial({ color: 0x33261f, roughness: 0.55 });
@@ -1044,29 +1022,29 @@ const wingMat = new THREE.MeshStandardMaterial({
 
 function createFlyVisual(id: string): FlyVisual {
   const group = new THREE.Group();
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), bodyMat);
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.42, 7, 5), bodyMat);
   thorax.scale.set(1, 0.82, 1.05);
   thorax.userData.flyId = id;
   group.add(thorax);
 
-  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.38, 12, 10), abdomenMat);
+  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.38, 7, 5), abdomenMat);
   abdomen.scale.set(0.9, 0.78, 1.35);
   abdomen.position.z = 0.52;
   abdomen.userData.flyId = id;
   group.add(abdomen);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), bodyMat);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 7, 5), bodyMat);
   head.position.z = -0.48;
   head.userData.flyId = id;
   group.add(head);
 
   for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 9, 7), eyeMat);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 5, 4), eyeMat);
     eye.position.set(sx * 0.22, 0.05, -0.7);
     eye.userData.flyId = id;
     group.add(eye);
 
-    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 14), wingMat);
+    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 8), wingMat);
     wing.scale.set(1.35, 0.55, 1);
     wing.rotation.set(Math.PI / 2.7, 0, sx * 0.72);
     wing.position.set(sx * 0.42, 0.26, 0.06);
@@ -1075,7 +1053,7 @@ function createFlyVisual(id: string): FlyVisual {
   }
 
   const halo = new THREE.Mesh(
-    new THREE.RingGeometry(0.62, 0.82, 24),
+    new THREE.RingGeometry(0.62, 0.82, 12),
     new THREE.MeshBasicMaterial({ color: 0xffe48a, transparent: true, opacity: 0, side: THREE.DoubleSide }),
   );
   halo.rotation.x = -Math.PI / 2;
@@ -1095,8 +1073,11 @@ function createFlyVisual(id: string): FlyVisual {
 
 function syncFlyMeshes(flies: FlyState[]) {
   const active = new Set<string>();
+  let rendered = 0;
   for (const fly of flies) {
     if (!fly.alive) continue;
+    if (rendered >= MAX_RENDERED_FLIES && fly.id !== selectedFlyId) continue;
+    rendered += 1;
     active.add(fly.id);
     let visual = flyVisuals.get(fly.id);
     if (!visual) {
@@ -1111,7 +1092,9 @@ function syncFlyMeshes(flies: FlyState[]) {
     (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
     const emoji = flyStatusEmoji(fly);
     updateSpriteText(visual.status, emoji);
-    visual.status.visible = Boolean(emoji);
+    visual.status.visible = Boolean(emoji) && (
+      selectedFlyId === fly.id || fly.mentalHealthCrisis || Boolean(fly.illness)
+    );
     if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
       visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
     }
@@ -1127,6 +1110,7 @@ function syncFlyMeshes(flies: FlyState[]) {
 
 
 type HomeVisual = { group: THREE.Group; tier: number };
+const MAX_RENDERED_HOMES = 40;
 const homeVisuals = new Map<string, HomeVisual>();
 
 function createHomeVisual(fly: FlyState) {
@@ -1154,10 +1138,6 @@ function createHomeVisual(fly: FlyState) {
   door.position.set(0, 0.62, (tier ? 3 + tier * 0.7 : 2.1) / 2 + 0.05);
   group.add(door);
 
-  const label = makeCanvasSprite(`🏠 ${fly.id.slice(-2)}`, 30, 1.1);
-  label.position.y = tier ? 4.8 + tier * 0.5 : 3.1;
-  group.add(label);
-
   group.position.set(fly.homeX || 0, 0, fly.homeZ || 0);
   scene.add(group);
   return { group, tier };
@@ -1165,8 +1145,11 @@ function createHomeVisual(fly: FlyState) {
 
 function syncHomes(flies: FlyState[]) {
   const active = new Set<string>();
+  let rendered = 0;
   for (const fly of flies) {
     if (!fly.alive || !fly.ownsHome || !Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) continue;
+    if (rendered >= MAX_RENDERED_HOMES && fly.id !== selectedFlyId) continue;
+    rendered += 1;
     active.add(fly.id);
     const tier = Math.max(1, fly.homeTier || 1);
     const existing = homeVisuals.get(fly.id);
@@ -1231,6 +1214,8 @@ let lastX = 0;
 let lastY = 0;
 let followSelected = false;
 let lastFrameAt = performance.now();
+let lastRenderedAt = 0;
+const TARGET_FRAME_MS = 1000 / 30;
 const pressed = new Set<string>();
 const freePosition = new THREE.Vector3(86, 54, 105);
 const lookDirection = new THREE.Vector3();
@@ -1380,6 +1365,8 @@ function updateFreeCamera(dt: number) {
 
 function animate(now = performance.now()) {
   requestAnimationFrame(animate);
+  if (document.hidden || now - lastRenderedAt < TARGET_FRAME_MS) return;
+  lastRenderedAt = now;
   const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
   lastFrameAt = now;
 
