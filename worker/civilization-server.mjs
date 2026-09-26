@@ -852,7 +852,11 @@ async function syncFullConnectomeBrains() {
           target_dz: (target?.z ?? fly.z) - fly.z,
           social_signal: socialSignalFor(fly),
           reward: clamp(fly.brain.dynamic?.rewardExpectation || 0, -1, 1),
-          sleeping: fly.action?.includes("rest") && (gameClock().hour >= 22 || gameClock().hour < 6),
+          weather_danger: weatherDanger(),
+          precipitation: Number(state.weather?.precipitation || 0),
+          wind: Number(state.weather?.wind || 0),
+          sunset_quality: sunsetQuality(),
+          sleeping: Boolean(fly.sleeping),
         };
       });
 
