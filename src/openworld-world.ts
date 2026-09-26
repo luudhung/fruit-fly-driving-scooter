@@ -831,14 +831,14 @@ export class OpenWorld {
       this.wanderBias=(Math.random()-0.5)*0.65;
     }
 
-    let desiredTurn=this.brain.turn*0.9;
     const food=this.nearestFood();
+    const metabolicUrgency=Math.max(this.hunger,clamp01((65-this.energy)/65));
+    let desiredTurn=this.brain.turn*(metabolicUrgency>0.5?0.42:0.9);
     const danger=this.nearestDanger();
     // Sensory adapters only bias the body toward/away from stimuli; the
     // full connectome output remains the dominant continuous steering term.
     if(food.food && (this.hunger>0.22 || this.energy<65) && food.distance<52 && danger.strength<0.18){
-      const foodUrgency=Math.max(this.hunger,clamp01((65-this.energy)/65));
-      desiredTurn+=THREE.MathUtils.clamp(food.angle*0.62,-0.9,0.9)*(0.55+foodUrgency*0.75);
+      desiredTurn+=THREE.MathUtils.clamp(food.angle*0.78,-1,1)*(0.7+metabolicUrgency*0.9);
     } else {
       desiredTurn+=this.wanderBias*(0.25+0.5*(1-this.brain.drive));
     }
@@ -865,7 +865,10 @@ export class OpenWorld {
       if(this.mode==="walk"){
         this.fly.position.y=THREE.MathUtils.damp(this.fly.position.y,GROUND_Y,8,dt);
         const energyFactor=THREE.MathUtils.clamp(this.energy/18,0.18,1);
-        const targetSpeed=(0.35+this.brain.drive*1.0+this.hunger*0.55)*energyFactor;
+        const approachFactor=food.food && food.distance<4
+          ? THREE.MathUtils.clamp(food.distance/4,0.16,1)
+          : 1;
+        const targetSpeed=(0.35+this.brain.drive*1.0+this.hunger*0.55)*energyFactor*approachFactor;
         this.speed=THREE.MathUtils.damp(this.speed,targetSpeed,3.5,dt);
         this.heading=wrapAngle(this.heading+desiredTurn*dt*1.45);
         this.verticalSpeed=0;
