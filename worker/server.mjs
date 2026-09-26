@@ -1,5 +1,5 @@
 import http from "node:http";
-import net from "node:net";
+import { createClient } from "redis";
 
 const PORT=Number(process.env.PORT||3000);
 const REDIS_HOST=process.env.REDIS_HOST||"redis";
@@ -18,35 +18,30 @@ const defaultState=()=>({
   tape:["24/7 worker booted"]
 });
 
-function encode(parts){
-  let out="*"+parts.length+"\r\n";
-  for(const p of parts){const s=String(p);out+="$"+Buffer.byteLength(s)+"\r\n"+s+"\r\n";}
-  return out;
-}
-function parseBulk(buf){
-  const s=buf.toString();
-  if(s.startsWith("$-1"))return null;
-  if(s.startsWith("+"))return s.slice(1,s.indexOf("\r\n"));
-  if(s.startsWith("-"))throw new Error(s.slice(1,s.indexOf("\r\n")));
-  const first=s.indexOf("\r\n");
-  const len=Number(s.slice(1,first));
-  return s.slice(first+2,first+2+len);
-}
-function redisCommand(parts){
-  return new Promise((resolve,reject)=>{
-    const sock=net.createConnection({host:REDIS_HOST,port:REDIS_PORT});
-    const chunks=[];sock.setTimeout(4000);
-    sock.on("connect",()=>sock.write(encode(parts)));
-    sock.on("data",c=>chunks.push(c));
-    sock.on("end",()=>{try{resolve(parseBulk(Buffer.concat(chunks)));}catch(e){reject(e);}});
-    sock.on("error",reject);sock.on("timeout",()=>sock.destroy(new Error("redis timeout")));
-  });
-}
+const redis=createClient({
+  socket:{
+    host:REDIS_HOST,
+    port:REDIS_PORT,
+    reconnectStrategy:retries=>Math.min(1000+retries*250,5000)
+  }
+});
+redis.on("error",err=>console.error("redis error",err));
+await redis.connect();
+
 async function loadState(){
-  try{const raw=await redisCommand(["GET",STATE_KEY]);return raw?{...defaultState(),...JSON.parse(raw)}:defaultState();}
-  catch(e){console.error("redis load failed",e);return defaultState();}
+  try{
+    const raw=await redis.get(STATE_KEY);
+    return raw?{...defaultState(),...JSON.parse(raw)}:defaultState();
+  }catch(e){
+    console.error("redis load failed",e);
+    return defaultState();
+  }
 }
-async function saveState(s){s.updatedAt=Date.now();await redisCommand(["SET",STATE_KEY,JSON.stringify(s)]);}
+async function saveState(s){
+  s.updatedAt=Date.now();
+  await redis.set(STATE_KEY,JSON.stringify(s));
+}
+
 function addTape(s,line){s.tape.unshift(new Date().toISOString()+" · "+line);s.tape=s.tape.slice(0,40);}
 function unrealized(s){if(!s.position||!s.price)return 0;const d=s.position.side==="LONG"?1:-1;return(s.price-s.position.entry)*s.position.qty*d;}
 function equity(s){return s.cash+unrealized(s);}
@@ -84,12 +79,29 @@ function serverDecision(s){
 function brainFresh(s){return Date.now()-(s.fullBrain?.lastSeen||0)<30000;}
 
 let state=await loadState(),loopBusy=false;
+async function fetchBtcPrice(){
+  try{
+    const r=await fetch("https://api.kraken.com/0/public/Ticker?pair=XBTUSD",{signal:AbortSignal.timeout(5000)});
+    if(!r.ok)throw new Error("kraken "+r.status);
+    const j=await r.json();
+    const first=Object.values(j.result||{})[0];
+    const px=Number(first?.c?.[0]);
+    if(Number.isFinite(px)&&px>0)return px;
+    throw new Error("kraken invalid price");
+  }catch(primary){
+    const r=await fetch("https://api.coinbase.com/v2/prices/BTC-USD/spot",{signal:AbortSignal.timeout(5000)});
+    if(!r.ok)throw new Error("coinbase "+r.status+" after "+String(primary));
+    const j=await r.json();
+    const px=Number(j?.data?.amount);
+    if(!Number.isFinite(px)||px<=0)throw new Error("coinbase invalid price");
+    return px;
+  }
+}
+
 async function marketTick(){
   if(loopBusy)return;loopBusy=true;
   try{
-    const r=await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",{signal:AbortSignal.timeout(5000)});
-    if(!r.ok)throw new Error("binance "+r.status);
-    const px=Number((await r.json()).price);
+    const px=await fetchBtcPrice();
     if(Number.isFinite(px)&&px>0){
       const prev=state.price||px;state.price=px;state.prices.push(px);if(state.prices.length>MAX_HISTORY)state.prices.shift();
       state.stress=Math.min(100,state.stress+Math.min(2.5,Math.abs((px-prev)/prev)*5000));
