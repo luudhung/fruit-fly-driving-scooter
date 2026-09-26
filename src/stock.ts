@@ -44,13 +44,16 @@ const prices:number[]=[];
 const returns:number[]=[];
 const eventLines:string[]=[];
 
-let symbol="NVDA";
+let symbol="BTCUSDT";
 let price=0;
 let tick=0;
 let lastMarketIdentity="";
 let lastFetchAt=0;
 let feedState:"loading"|"live"|"delayed"|"error"="loading";
 let feedDetail="connecting";
+let cryptoSocket:WebSocket|null=null;
+let cryptoReconnectTimer:number|null=null;
+let cryptoTradeCounter=0;
 let stress=18;
 let breakMode=false;
 let wins=0;
@@ -129,7 +132,67 @@ function onFreshMarketTick(){
   stress=Math.min(100,stress+Math.max(0,absMove-.0025)*650);
 }
 
+function stopCryptoSocket(){
+  if(cryptoReconnectTimer!=null){window.clearTimeout(cryptoReconnectTimer);cryptoReconnectTimer=null;}
+  if(cryptoSocket){
+    cryptoSocket.onclose=null;
+    cryptoSocket.onerror=null;
+    cryptoSocket.close();
+    cryptoSocket=null;
+  }
+}
+
+function ingestCryptoTrade(nextPrice:number,eventTime:number){
+  if(!Number.isFinite(nextPrice)||nextPrice<=0)return;
+  const prev=price||nextPrice;
+  price=nextPrice;
+  cryptoTradeCounter++;
+  const shouldSample=cryptoTradeCounter%4===0 || prices.length<20;
+  if(shouldSample){
+    prices.push(nextPrice);
+    while(prices.length>96)prices.shift();
+    rebuildReturns();
+    tick++;
+    const move=prev?Math.abs((nextPrice-prev)/prev):0;
+    stress=Math.min(100,stress+Math.max(0,move-.00018)*1450);
+    onFreshMarketTick();
+    updateChart();
+  }
+  lastFetchAt=Date.now();
+  feedState="live";
+  feedDetail="Binance BTCUSDT trade stream · "+new Date(eventTime).toLocaleTimeString();
+  renderFeedState();
+}
+
+function startCryptoSocket(){
+  stopCryptoSocket();
+  feedState="loading";feedDetail="opening BTCUSDT WebSocket";renderFeedState();
+  const ws=new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
+  cryptoSocket=ws;
+  ws.onopen=()=>{
+    feedState="live";
+    feedDetail="Binance BTCUSDT public trade stream · connected";
+    renderFeedState();
+    addEvent("● BTCUSDT WebSocket connected · continuous market");
+  };
+  ws.onmessage=(event)=>{
+    try{
+      const msg=JSON.parse(String(event.data));
+      ingestCryptoTrade(Number(msg.p),Number(msg.T||msg.E||Date.now()));
+    }catch{}
+  };
+  ws.onerror=()=>{
+    feedState="error";feedDetail="BTC WebSocket error";renderFeedState();
+  };
+  ws.onclose=()=>{
+    if(symbol!=="BTCUSDT")return;
+    feedState="delayed";feedDetail="BTC stream reconnecting";renderFeedState();
+    cryptoReconnectTimer=window.setTimeout(()=>startCryptoSocket(),1800);
+  };
+}
+
 async function fetchMarket(){
+  if(symbol==="BTCUSDT")return;
   try{
     const res=await fetch("/api/market?symbol="+encodeURIComponent(symbol),{cache:"no-store"});
     const data=await res.json() as MarketResponse;
@@ -174,7 +237,7 @@ async function fetchMarket(){
 function renderFeedState(){
   feedStatusEl.dataset.state=feedState;
   feedStatusEl.textContent=feedState==="live"
-    ? "LIVE / BEST-EFFORT"
+    ? (symbol==="BTCUSDT"?"LIVE WEBSOCKET":"LIVE / BEST-EFFORT")
     : feedState==="delayed"
       ? "DELAYED / MARKET IDLE"
       : feedState==="error"
@@ -186,6 +249,7 @@ function renderFeedState(){
 function switchSymbol(next:string){
   if(next===symbol)return;
   closePosition("symbol switch");
+  stopCryptoSocket();
   symbol=next;
   prices.length=0;
   returns.length=0;
@@ -197,7 +261,8 @@ function switchSymbol(next:string){
   renderFeedState();
   tickerButtons.forEach(b=>b.classList.toggle("active",b.dataset.symbol===symbol));
   addEvent("symbol → "+symbol+" · portfolio preserved");
-  void fetchMarket();
+  if(symbol==="BTCUSDT") startCryptoSocket();
+  else void fetchMarket();
 }
 
 tickerButtons.forEach(button=>{
@@ -205,8 +270,8 @@ tickerButtons.forEach(button=>{
 });
 
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xd8ecf8);
-scene.fog=new THREE.Fog(0xd8e9f3,34,92);
+scene.background=new THREE.Color(0xf3a66d);
+scene.fog=new THREE.Fog(0xe8a774,38,110);
 
 const camera=new THREE.PerspectiveCamera(47,innerWidth/innerHeight,.1,140);
 camera.position.set(8.7,5.2,9.6);
@@ -238,16 +303,16 @@ controls.mouseButtons.MIDDLE=THREE.MOUSE.DOLLY;
 controls.mouseButtons.RIGHT=THREE.MOUSE.ROTATE;
 controls.update();
 
-scene.add(new THREE.HemisphereLight(0xe9f6ff,0xb69b78,2.25));
-const sun=new THREE.DirectionalLight(0xfff3d7,4.6);
-sun.position.set(-8,15,10);
+scene.add(new THREE.HemisphereLight(0xffd7b0,0x6d5d58,2.55));
+const sun=new THREE.DirectionalLight(0xff9a58,5.2);
+sun.position.set(-13,10,-4);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
 sun.shadow.camera.left=-14;sun.shadow.camera.right=14;
 sun.shadow.camera.top=14;sun.shadow.camera.bottom=-14;
 scene.add(sun);
 
-const fill=new THREE.DirectionalLight(0xb9ddff,1.35);
+const fill=new THREE.DirectionalLight(0xf1c8bc,1.55);
 fill.position.set(8,8,-12);scene.add(fill);
 
 function material(color:number,rough=.72,metal=.03){
@@ -266,8 +331,6 @@ function addBox(
 }
 
 addBox([17,.22,15],[0,-.12,0],0xd8c4a4,.88);
-addBox([.22,8,15],[-8.38,3.9,0],0xf3f1eb,.92);
-addBox([.22,8,15],[8.38,3.9,0],0xf3f1eb,.92);
 addBox([17,.20,15],[0,7.85,0],0xf7f6f1,.95);
 addBox([17,1.05,.22],[0,.45,-5.55],0xf3f1eb,.94);
 addBox([17,.9,.22],[0,7.4,-5.55],0xf3f1eb,.94);
@@ -285,8 +348,26 @@ scene.add(windowGlass);
 for(const x of [-5.25,0,5.25]) addBox([.13,6.1,.16],[x,3.82,-5.39],0xd6dde0,.3,.65);
 addBox([15.7,.13,.16],[0,3.84,-5.39],0xd6dde0,.3,.65);
 
+// Warm procedural sunset beyond the glass.
+const skyCanvas=document.createElement("canvas");
+skyCanvas.width=16;skyCanvas.height=512;
+const skyCtx=skyCanvas.getContext("2d")!;
+const skyGradient=skyCtx.createLinearGradient(0,0,0,512);
+skyGradient.addColorStop(0,"#6b77b8");
+skyGradient.addColorStop(.40,"#e38c82");
+skyGradient.addColorStop(.70,"#f8b56f");
+skyGradient.addColorStop(1,"#f5d6a3");
+skyCtx.fillStyle=skyGradient;skyCtx.fillRect(0,0,16,512);
+const skyTexture=new THREE.CanvasTexture(skyCanvas);
+skyTexture.colorSpace=THREE.SRGBColorSpace;
+const skyPlane=new THREE.Mesh(new THREE.PlaneGeometry(120,58),new THREE.MeshBasicMaterial({map:skyTexture,toneMapped:false}));
+skyPlane.position.set(0,21,-72);scene.add(skyPlane);
+
+const sunDisk=new THREE.Mesh(new THREE.CircleGeometry(3.5,48),new THREE.MeshBasicMaterial({color:0xffdf9b,toneMapped:false}));
+sunDisk.position.set(-19,12,-66);scene.add(sunDisk);
+
 const skyline=new THREE.Group();
-skyline.position.set(0,0,-27);
+skyline.position.set(0,0,-31);
 scene.add(skyline);
 
 const river=new THREE.Mesh(
@@ -323,6 +404,109 @@ const empireTop=addBox([.9,2.1,.9],[8.2,10.55,-8.6],0x9e9b93,.7,.08,skyline);
 const empireSpire=new THREE.Mesh(new THREE.CylinderGeometry(.05,.08,2.7,8),material(0x8e9190,.5,.25));
 empireSpire.position.set(8.2,12.95,-8.6);skyline.add(empireSpire);
 empire.castShadow=false;empireTop.castShadow=false;
+
+// Street grid directly below the office so traffic remains visible through the open sides.
+const roads=new THREE.Group();
+scene.add(roads);
+const asphalt=material(0x34363a,.96,.01);
+const sidewalkMat=material(0xa59d94,.9,.02);
+for(const z of [-10.5,-15.2,-20.0]){
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(42,3.3),asphalt);
+  road.rotation.x=-Math.PI/2;road.position.set(0,.035,z);roads.add(road);
+  const s1=new THREE.Mesh(new THREE.PlaneGeometry(42,.65),sidewalkMat);
+  s1.rotation.x=-Math.PI/2;s1.position.set(0,.07,z-1.95);roads.add(s1);
+  const s2=s1.clone();s2.position.z=z+1.95;roads.add(s2);
+  for(let x=-20;x<=20;x+=2.2){
+    const mark=new THREE.Mesh(new THREE.PlaneGeometry(1.05,.055),new THREE.MeshBasicMaterial({color:0xf2d878}));
+    mark.rotation.x=-Math.PI/2;mark.position.set(x,.08,z);roads.add(mark);
+  }
+}
+for(const x of [-9.5,10.5]){
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(3.4,15),asphalt);
+  road.rotation.x=-Math.PI/2;road.position.set(x,.04,-15.2);roads.add(road);
+}
+for(let i=0;i<18;i++){
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.045,.06,2.4,8),material(0x3d4347,.55,.35));
+  const z=-9.4-(i%3)*4.7;
+  pole.position.set(-18+i*2.05,1.2,z-2.15);roads.add(pole);
+  const lamp=new THREE.Mesh(new THREE.SphereGeometry(.11,10,8),new THREE.MeshBasicMaterial({color:0xffc777}));
+  lamp.position.set(pole.position.x,2.34,pole.position.z);roads.add(lamp);
+}
+
+class TrafficBrain{
+  state=0;
+  memory=0;
+  constructor(public readonly id:number,private readonly w:number[]){}
+  step(speed:number,front:number,laneBias:number,dt:number){
+    const x0=clamp(speed/7,0,1);
+    const x1=clamp(front/8,0,1);
+    this.memory=Math.tanh(this.memory*.78 + x0*this.w[0] + x1*this.w[1] + laneBias*this.w[2]);
+    this.state=Math.tanh(this.state*.56 + this.memory*this.w[3] + (1-x1)*this.w[4]);
+    const throttle=clamp(.58+this.state*.32+x1*.20,0,1);
+    const brake=clamp((1-x1)*.92-this.state*.12,0,1);
+    const steer=Math.tanh(laneBias*.45+this.memory*.18)*dt;
+    return {throttle,brake,steer};
+  }
+}
+type TrafficCar={mesh:THREE.Group;brain:TrafficBrain;speed:number;lane:number;dir:1|-1;roadZ:number;phase:number};
+const traffic:TrafficCar[]=[];
+const carColors=[0xd9544d,0x2f76c7,0xe7b64b,0xe9e7df,0x25282c,0x5d9c67,0x9b68b5,0xd77735];
+
+function seededWeights(seed:number){
+  let s=seed>>>0;
+  const out:number[]=[];
+  for(let i=0;i<5;i++){
+    s=(s*1664525+1013904223)>>>0;
+    out.push(((s/4294967295)*2-1)*1.35);
+  }
+  return out;
+}
+function makeCar(color:number){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.05,.36,.55),material(color,.55,.12));
+  body.position.y=.32;g.add(body);
+  const cabin=new THREE.Mesh(new THREE.BoxGeometry(.55,.28,.48),material(0xb8d0dc,.25,.24));
+  cabin.position.set(-.08,.62,0);g.add(cabin);
+  for(const sx of [-.32,.32])for(const sz of [-.31,.31]){
+    const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.10,12),material(0x1f2022,.8,.05));
+    wheel.rotation.x=Math.PI/2;wheel.position.set(sx,.18,sz);g.add(wheel);
+  }
+  return g;
+}
+for(let i=0;i<16;i++){
+  const roadZ=[-10.5,-15.2,-20.0][i%3];
+  const lane=(i%2===0?-0.78:.78);
+  const dir:(1|-1)=i%2===0?1:-1;
+  const mesh=makeCar(carColors[i%carColors.length]);
+  mesh.position.set(-20+(i*3.15)%40,.12,roadZ+lane);
+  mesh.rotation.y=dir===1?Math.PI/2:-Math.PI/2;
+  scene.add(mesh);
+  traffic.push({
+    mesh,brain:new TrafficBrain(i+1,seededWeights(9001+i*7919)),
+    speed:2.2+(i%5)*.42,lane,dir,roadZ,phase:i*.47
+  });
+}
+function updateTraffic(dt:number,time:number){
+  for(let i=0;i<traffic.length;i++){
+    const car=traffic[i];
+    let front=8;
+    for(let j=0;j<traffic.length;j++){
+      if(i===j)continue;
+      const other=traffic[j];
+      if(other.roadZ!==car.roadZ||other.dir!==car.dir)continue;
+      const dx=(other.mesh.position.x-car.mesh.position.x)*car.dir;
+      if(dx>0&&dx<front)front=dx;
+    }
+    const laneBias=Math.sin(time*.23+car.phase)*.18;
+    const action=car.brain.step(car.speed,front,laneBias,dt);
+    car.speed+=((action.throttle*5.2-action.brake*7.6)-car.speed*.34)*dt;
+    car.speed=clamp(car.speed,.45,6.4);
+    car.mesh.position.x+=car.dir*car.speed*dt;
+    car.mesh.position.z=THREE.MathUtils.damp(car.mesh.position.z,car.roadZ+car.lane+action.steer,4,dt);
+    if(car.dir===1&&car.mesh.position.x>22)car.mesh.position.x=-22;
+    if(car.dir===-1&&car.mesh.position.x<-22)car.mesh.position.x=22;
+  }
+}
 
 const desk=addBox([8.4,.30,3.25],[0,1.46,-.35],0xe9dfcf,.62);
 addBox([.22,1.55,.22],[-3.45,.68,-1.55],0x9ba5a9,.3,.72);
@@ -491,7 +675,12 @@ function updateChart(){
   chartCtx.font="750 19px ui-monospace, monospace";
   chartCtx.fillText((m>=0?"+":"")+m.toFixed(2)+"% momentum",28,76);
   chartCtx.fillStyle="#667781";chartCtx.font="650 15px ui-monospace, monospace";
-  chartCtx.fillText(breakMode?"STRESS BREAK · MARKET WATCH PAUSED":feedState==="live"?"REAL MARKET FEED · PAPER ONLY":feedState.toUpperCase()+" · PAPER ONLY",28,h-22);
+  chartCtx.fillText(
+    breakMode?"STRESS BREAK · MARKET WATCH PAUSED":
+    symbol==="BTCUSDT"?"BTCUSDT LIVE TRADE STREAM · PAPER ONLY":
+    feedState==="live"?"REAL EQUITY FEED · PAPER ONLY":feedState.toUpperCase()+" · PAPER ONLY",
+    28,h-22
+  );
 
   const pnl=unrealizedPnL();
   chartCtx.fillStyle="#1d303b";chartCtx.font="700 17px ui-monospace, monospace";
@@ -647,10 +836,11 @@ function animate(){
   feedAccumulator+=dt;
   if(feedAccumulator>=6){
     feedAccumulator=0;
-    void fetchMarket();
+    if(symbol!=="BTCUSDT")void fetchMarket();
   }
   updateBreakBehavior(dt,time);
   updateSmoking(dt,time);
+  updateTraffic(dt,time);
   controls.update();
   updateHud();
   renderer.render(scene,camera);
@@ -659,8 +849,10 @@ animate();
 
 renderFeedState();
 updateChart();
-addEvent("NYC trading desk ready · real feed connecting");
-addEvent("brain evaluates every market tick · paper capital $10,000");
+startCryptoSocket();
+addEvent("NYC sunset trading desk ready · BTC live stream connecting");
+addEvent("full FlyWire trader evaluates live BTC samples · paper capital $10,000");
+addEvent("16 independent traffic neural agents driving below");
 addEvent("stress 62 → smoking · stress 78 → city break · return at 42");
 
 window.addEventListener("resize",()=>{

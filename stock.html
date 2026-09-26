@@ -61,13 +61,14 @@
 <body>
   <div id="world"></div><div class="shade"></div>
   <header class="top">
-    <div class="brand">FlyBrain Stock Trader<small>NYC daylight office · real-data paper trading</small></div>
+    <div class="brand">FlyBrain Stock Trader<small>NYC sunset office · continuous crypto + equity paper trading</small></div>
     <div class="live" id="brain-live" data-state="loading"><span class="dot"></span><span id="brain-status">LOADING FULL BRAIN</span></div>
   </header>
 
-  <nav class="tickerbar" aria-label="Stock symbol">
+  <nav class="tickerbar" aria-label="Market symbol">
+    <button data-symbol="BTCUSDT" class="active">BTC LIVE</button>
     <button data-symbol="AAPL">AAPL</button>
-    <button data-symbol="NVDA" class="active">NVDA</button>
+    <button data-symbol="NVDA">NVDA</button>
     <button data-symbol="TSLA">TSLA</button>
     <button data-symbol="SPY">SPY</button>
     <button data-symbol="MSFT">MSFT</button>
@@ -76,7 +77,7 @@
   <aside class="hint">
     <b>3D view:</b> giữ chuột trái và kéo để nhìn quanh phòng · lăn chuột để zoom · camera bị giới hạn trong phòng.
     <div class="market-line"><b>Market feed:</b> <span id="feed-status" data-state="loading">CONNECTING</span><br>
-    Giá lấy từ Yahoo Finance chart endpoint qua server-side proxy, có thể trễ hoặc bị rate-limit. Chỉ paper trading, không gửi lệnh tiền thật.</div>
+    BTCUSDT dùng public WebSocket trade stream để cập nhật liên tục 24/7; cổ phiếu dùng Yahoo Finance best-effort và có thể trễ. Chỉ paper trading, không gửi lệnh tiền thật.<br><b>Traffic:</b> xe ngoài phố dùng các neural-agent độc lập; full FlyWire connectome chỉ chạy cho trader chính để tránh nhân bản hàng chục mô phỏng GPU nặng.</div>
   </aside>
 
   <section class="panel">
