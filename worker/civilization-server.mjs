@@ -592,6 +592,19 @@ function payAndFinance(fly, clock) {
   }
 }
 
+function romanceUtility(a, b) {
+  const compatibility =
+    (1 - Math.abs(a.traits.sociability - b.traits.sociability)) * 0.22 +
+    (1 - Math.abs(a.traits.empathy - b.traits.empathy)) * 0.22 +
+    b.traits.attractiveness * 0.18 +
+    a.traits.sociability * 0.10 +
+    a.traits.empathy * 0.10 +
+    (a.loneliness / 100) * 0.10 +
+    (a.excitement / 100) * 0.08;
+  const stressPenalty = (a.stress / 100) * 0.22;
+  return clamp(compatibility - stressPenalty, 0, 1);
+}
+
 function socialLife(fly, clock) {
   if (!fly.alive) return;
   if (!["social", "food"].includes(location(fly.currentLocationId).type)) return;
@@ -628,19 +641,22 @@ function socialLife(fly, clock) {
   const candidate = nearestCompatiblePartner(fly);
   if (!candidate || candidate.partnerId) return;
   fly.flirtingWith = candidate.id;
+  candidate.flirtingWith = fly.id;
   fly.excitement = clamp(fly.excitement + 9);
   candidate.excitement = clamp(candidate.excitement + 7);
 
-  if (rand() < 0.06 + fly.traits.sociability * 0.12) {
-    emit("flirt", `${fly.id} flirted with ${candidate.id} at ${location(fly.currentLocationId).name}.`, { flyId: fly.id, otherId: candidate.id });
+  const desireA = romanceUtility(fly, candidate);
+  const desireB = romanceUtility(candidate, fly);
+  fly.brainDecision = `evaluating romance with ${candidate.id}`;
+  fly.brainConfidence = desireA;
+  candidate.brainDecision = `evaluating romance with ${fly.id}`;
+  candidate.brainConfidence = desireB;
+
+  if (rand() < 0.08 + Math.max(desireA, desireB) * 0.12) {
+    emit("flirt", `${fly.id} and ${candidate.id} are flirting at ${location(fly.currentLocationId).name}.`, { flyId: fly.id, otherId: candidate.id, desireA, desireB });
   }
 
-  const chemistry = (
-    fly.traits.attractiveness + candidate.traits.attractiveness +
-    fly.traits.empathy + candidate.traits.empathy
-  ) / 4;
-
-  if (chemistry > 0.48 && rand() < 0.035 + chemistry * 0.08) {
+  if (desireA > 0.54 && desireB > 0.54 && rand() < 0.04 + ((desireA + desireB) / 2) * 0.09) {
     fly.partnerId = candidate.id;
     candidate.partnerId = fly.id;
     fly.affection = candidate.affection = randRange(45, 72);
@@ -650,7 +666,15 @@ function socialLife(fly, clock) {
     candidate.happiness = clamp(candidate.happiness + 15);
     fly.loneliness = clamp(fly.loneliness - 30);
     candidate.loneliness = clamp(candidate.loneliness - 30);
-    emit("relationship", `${fly.id} and ${candidate.id} started a relationship.`, { flyId: fly.id, partnerId: candidate.id });
+    fly.brainDecision = `chose relationship with ${candidate.id}`;
+    candidate.brainDecision = `chose relationship with ${fly.id}`;
+    emit("relationship", `${fly.id} and ${candidate.id} mutually chose a relationship.`, { flyId: fly.id, partnerId: candidate.id, desireA, desireB });
+  } else if ((desireA < 0.38 || desireB < 0.38) && rand() < 0.18) {
+    fly.flirtingWith = null;
+    candidate.flirtingWith = null;
+    fly.brainDecision = `did not choose relationship with ${candidate.id}`;
+    candidate.brainDecision = `did not choose relationship with ${fly.id}`;
+    emit("romance_rejected", `${fly.id} and ${candidate.id} did not mutually choose a relationship.`, { flyId: fly.id, otherId: candidate.id, desireA, desireB });
   }
 }
 
@@ -924,7 +948,7 @@ function getState() {
   return {
     authoritative: true,
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
-    modelDisclosure: "Synthetic civilization model. Behavior is modeled and persistent; it is not a biological FlyWire multi-brain simulation.",
+    modelDisclosure: "Every action is driven by 100% of each fly's persistent simulated decision-state model. This is not yet a separate full biological FlyWire connectome per individual.",
     worldId: WORLD_ID,
     experimentId: EXPERIMENT_ID,
     worldSeed: String(WORLD_SEED),
