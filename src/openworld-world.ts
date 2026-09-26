@@ -112,10 +112,9 @@ export class OpenWorld {
   private takeoffs = 0;
   private landings = 0;
   private distanceTravelled = 0;
-  private cameraHeading = 0;
   private nextWanderBias = 0;
   private wanderBias = 0;
-  private nextRestDecision = 0;
+  private nextTakeoffEarliest = 4;
   private currentFood: FoodPatch | null = null;
   private lastPosition = new THREE.Vector3();
   private birdPhase = -100;
@@ -152,7 +151,6 @@ export class OpenWorld {
 
     this.fly.position.set(0, GROUND_Y, 12);
     this.lastPosition.copy(this.fly.position);
-    this.cameraHeading = this.heading;
     this.cameraLook.copy(this.fly.position);
     this.scene.add(this.fly);
 
@@ -545,27 +543,62 @@ export class OpenWorld {
 
   private chooseMode(s:OpenWorldSensory) {
     const prev=this.mode;
+
     if(this.mode==="feed"){
-      if(!this.currentFood || this.currentFood.energy<=0 || s.danger>0.2 || this.stateAge>8) this.mode=s.danger>0.2?"fly":"walk";
-    } else if(s.danger>0.28 || this.brain.escape>0.18 || this.brain.lift>0.78){
+      if(!this.currentFood || this.currentFood.energy<=0 || s.danger>0.2 || this.stateAge>8) {
+        this.mode=s.danger>0.2?"fly":"walk";
+      }
+    } else if(this.mode==="fly"){
+      // Once airborne, keep the fly in the air long enough to produce a
+      // visible exploratory flight. It may still stay up longer if the brain
+      // keeps lift/escape activity high.
+      const minimumFlight = this.stateAge < 10;
+      const brainStillWantsFlight =
+        this.brain.escape>0.08 ||
+        this.brain.lift>0.10 ||
+        this.brain.activity>0.012;
+      const wantsFoodLanding =
+        s.foodOdor>0.62 &&
+        s.foodDistance<7 &&
+        this.hunger>0.42;
+
+      if(!minimumFlight && !brainStillWantsFlight && s.danger<0.12 && (this.energy<30 || wantsFoodLanding)) {
+        this.mode="walk";
+      }
+    } else if(s.danger>0.20 || this.brain.escape>0.10){
       this.mode="fly";
     } else if(s.foodDistance<1.55 && s.altitude<0.45 && (this.hunger>0.38 || this.brain.feed>0.48)){
       this.mode="feed";
       this.currentFood=this.nearestFood().food;
-    } else if(this.mode==="fly"){
-      if((this.energy<24 || (s.foodOdor>0.62 && s.foodDistance<7)) && s.danger<0.12) this.mode="walk";
     } else if(this.energy<16 && s.danger<0.1){
       this.mode="rest";
     } else if(this.mode==="rest"){
       if(this.energy>32 || s.danger>0.1 || this.stateAge>10)this.mode=s.danger>0.1?"fly":"walk";
-    } else if(this.brain.lift>0.58 && this.energy>30){
-      this.mode="fly";
+    } else {
+      // The old threshold (lift > 0.58) almost never fired with the live
+      // connectome. Use a lower, still-neural gate and require several
+      // seconds of ground exploration between takeoffs.
+      const neuralTakeoff =
+        this.brain.ready &&
+        this.elapsed>=this.nextTakeoffEarliest &&
+        this.energy>28 &&
+        this.stateAge>4 &&
+        (this.brain.lift>0.10 || this.brain.activity>0.012 || this.brain.drive>0.42);
+
+      if(neuralTakeoff) this.mode="fly";
     }
 
     if(prev!==this.mode){
       this.stateAge=0;
-      if(this.mode==="fly"){this.takeoffs++;this.emit("takeoff");}
-      if(prev==="fly" && this.mode!=="fly"){this.landings++;this.emit("landed");}
+      if(this.mode==="fly"){
+        this.takeoffs++;
+        this.emit("takeoff · neural activity crossed flight gate");
+      }
+      if(prev==="fly" && this.mode!=="fly"){
+        this.landings++;
+        this.nextTakeoffEarliest=this.elapsed+7;
+        this.emit("landed");
+      }
       if(this.mode==="feed")this.emit("proboscis extended toward "+(this.currentFood?.name??"food"));
       if(this.mode==="rest")this.emit("stopped to rest");
     }
@@ -623,13 +656,20 @@ export class OpenWorld {
         const targetSpeed=2.2+this.brain.drive*3.2+danger.strength*2.2;
         this.speed=THREE.MathUtils.damp(this.speed,targetSpeed,2.8,dt);
         this.heading=wrapAngle(this.heading+desiredTurn*dt*(1.3+this.speed*0.08));
-        let targetAlt=2.2+this.brain.lift*8.5+danger.strength*5.5;
-        if(food.food && this.hunger>0.45 && food.distance<9)targetAlt=0.45;
-        targetAlt=Math.min(13,targetAlt);
+        let targetAlt=3.6+this.brain.lift*9.5+danger.strength*5.5;
+        // Do not immediately dive for food during the first part of a flight.
+        if(this.stateAge>10 && food.food && this.hunger>0.45 && food.distance<9)targetAlt=0.45;
+        targetAlt=Math.min(14,targetAlt);
         const alt=this.fly.position.y-GROUND_Y;
         this.verticalSpeed=THREE.MathUtils.damp(this.verticalSpeed,(targetAlt-alt)*0.95,3.0,dt);
         this.fly.position.y=Math.max(GROUND_Y,this.fly.position.y+this.verticalSpeed*dt);
-        if(targetAlt<0.6 && this.fly.position.y<GROUND_Y+0.3){this.mode="walk";this.landings++;this.stateAge=0;this.emit("landed near "+(food.food?.name??"ground"));}
+        if(this.stateAge>10 && targetAlt<0.6 && this.fly.position.y<GROUND_Y+0.3){
+          this.mode="walk";
+          this.landings++;
+          this.nextTakeoffEarliest=this.elapsed+7;
+          this.stateAge=0;
+          this.emit("landed near "+(food.food?.name??"ground"));
+        }
       } else {
         this.speed=THREE.MathUtils.damp(this.speed,0,4,dt);
         this.energy=Math.min(100,this.energy+dt*0.55);
@@ -676,15 +716,22 @@ export class OpenWorld {
     this.head.rotation.y=THREE.MathUtils.damp(this.head.rotation.y,this.brain.turn*0.22,6,dt);
   }
 
-  private updateCamera(dt:number) {
-    const error=wrapAngle(this.heading-this.cameraHeading);
-    this.cameraHeading=wrapAngle(this.cameraHeading+error*(1-Math.exp(-dt*1.6)));
-    const forward=new THREE.Vector3(Math.sin(this.cameraHeading),0,-Math.cos(this.cameraHeading));
+  private updateCamera(_dt:number) {
+    // Locked third-person camera: always the same offset directly behind the
+    // fly. No independent camera yaw, orbit, catch-up arc or cinematic spin.
+    const forward=new THREE.Vector3(Math.sin(this.heading),0,-Math.cos(this.heading));
     const altitude=this.fly.position.y-GROUND_Y;
-    const desired=this.fly.position.clone().addScaledVector(forward,-8.5).add(new THREE.Vector3(0,4.4+altitude*0.25,0));
-    this.camera.position.lerp(desired,1-Math.exp(-dt*2.8));
-    const look=this.fly.position.clone().add(new THREE.Vector3(0,0.45,0)).addScaledVector(forward,1.4);
-    this.cameraLook.lerp(look,1-Math.exp(-dt*4.2));
+    const behind=8.8;
+    const height=3.8+Math.min(2.2,altitude*0.18);
+
+    this.camera.position.copy(this.fly.position)
+      .addScaledVector(forward,-behind)
+      .add(new THREE.Vector3(0,height,0));
+
+    this.cameraLook.copy(this.fly.position)
+      .add(new THREE.Vector3(0,0.42,0))
+      .addScaledVector(forward,1.6);
+
     this.camera.lookAt(this.cameraLook);
   }
 
