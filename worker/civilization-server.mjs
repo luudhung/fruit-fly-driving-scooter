@@ -17,7 +17,8 @@ const CHECKPOINT_EVERY_MS = 5000;
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
 const MAP_VERSION = 2;
 const CURRENCY_CODE = "WC";
-const CURRENCY_NAME = "WingCoin";
+const CURRENCY_NAME = "Hansdrex WingCoin";
+const CITY_NAME = "Hansdrex City of Fruit Fly";
 
 if (!DATABASE_URL) {
   console.error("[civilization] DATABASE_URL is required.");
@@ -39,57 +40,57 @@ const VERSION = {
 };
 
 const LOCATIONS = [
-  { id: "apt-north", type: "home", name: "North Garden Homes", x: 0, z: -165 },
-  { id: "apt-east", type: "home", name: "East River Homes", x: 170, z: 12 },
-  { id: "apt-south", type: "home", name: "South Meadow Homes", x: 12, z: 170 },
-  { id: "apt-west", type: "home", name: "West Orchard Homes", x: -170, z: 8 },
+  { id: "apt-north", type: "home", name: "Hansdrex North Garden Homes", x: 0, z: -165 },
+  { id: "apt-east", type: "home", name: "Hansdrex East River Homes", x: 170, z: 12 },
+  { id: "apt-south", type: "home", name: "Hansdrex South Meadow Homes", x: 12, z: 170 },
+  { id: "apt-west", type: "home", name: "Hansdrex West Orchard Homes", x: -170, z: 8 },
 
-  { id: "market", type: "food", name: "Central Market", x: -18, z: 10 },
-  { id: "cafe", type: "social", name: "Nectar Cafe", x: 22, z: 16 },
-  { id: "tea-house", type: "social", name: "Amber Tea House", x: -32, z: -20 },
-  { id: "restaurant", type: "food", name: "Golden Fruit Kitchen", x: 36, z: -18 },
-  { id: "park", type: "social", name: "Wing Park", x: 0, z: -52 },
-  { id: "office", type: "job", name: "Archive Tower", x: 52, z: 14 },
-  { id: "bank", type: "service", name: "Seed Bank", x: -52, z: 26 },
-  { id: "hotel", type: "service", name: "Sunwing Hotel", x: 52, z: 48 },
-  { id: "cinema", type: "social", name: "Moonlight Cinema", x: -52, z: 50 },
-  { id: "library", type: "service", name: "Memory Library", x: 14, z: 60 },
+  { id: "market", type: "food", name: "Hansdrex Central Market", x: -18, z: 10 },
+  { id: "cafe", type: "social", name: "Hansdrex Coffee", x: 22, z: 16 },
+  { id: "tea-house", type: "social", name: "Hansdrex Tea House", x: -32, z: -20 },
+  { id: "restaurant", type: "food", name: "Hansdrex Kitchen", x: 36, z: -18 },
+  { id: "park", type: "social", name: "Hansdrex Central Park", x: 0, z: -52 },
+  { id: "office", type: "job", name: "Hansdrex Commerce Tower", x: 52, z: 14 },
+  { id: "bank", type: "service", name: "Hansdrex Bank", x: -52, z: 26 },
+  { id: "hotel", type: "service", name: "Hansdrex Grand Hotel", x: 52, z: 48 },
+  { id: "cinema", type: "social", name: "Hansdrex Cinema", x: -52, z: 50 },
+  { id: "library", type: "service", name: "Hansdrex Library", x: 14, z: 60 },
 
-  { id: "hospital-central", type: "health", name: "Central General Hospital", x: -82, z: 58 },
-  { id: "hospital-east", type: "health", name: "Eastside Medical Center", x: 126, z: 48 },
-  { id: "clinic", type: "health", name: "Community Clinic", x: -72, z: 90 },
-  { id: "pharmacy", type: "health", name: "Green Wing Pharmacy", x: -92, z: 24 },
-  { id: "school", type: "service", name: "Larva School", x: -16, z: 102 },
-  { id: "post-office", type: "service", name: "Wing Post", x: -98, z: -16 },
-  { id: "lab", type: "job", name: "City Lab", x: 88, z: 62 },
-  { id: "garage", type: "service", name: "South Garage", x: 92, z: -58 },
-  { id: "gym", type: "wellness", name: "Flight Gym", x: 88, z: 24 },
+  { id: "hospital-central", type: "health", name: "Hansdrex Central Hospital", x: -82, z: 58 },
+  { id: "hospital-east", type: "health", name: "Hansdrex East Hospital", x: 126, z: 48 },
+  { id: "clinic", type: "health", name: "Hansdrex Community Clinic", x: -72, z: 90 },
+  { id: "pharmacy", type: "health", name: "Hansdrex Pharmacy", x: -92, z: 24 },
+  { id: "school", type: "service", name: "Hansdrex Academy", x: -16, z: 102 },
+  { id: "post-office", type: "service", name: "Hansdrex Post", x: -98, z: -16 },
+  { id: "lab", type: "job", name: "Hansdrex Research Lab", x: 88, z: 62 },
+  { id: "garage", type: "service", name: "Hansdrex Garage", x: 92, z: -58 },
+  { id: "gym", type: "wellness", name: "Hansdrex Fitness", x: 88, z: 24 },
 
-  { id: "bakery", type: "food", name: "Crumb & Fruit Bakery", x: 20, z: 84 },
-  { id: "grocery", type: "food", name: "Daily Drop Grocery", x: -72, z: -46 },
-  { id: "corner-shop", type: "shop", name: "Tiny Things Store", x: 72, z: -82 },
-  { id: "night-market", type: "nightlife", name: "Midnight Market", x: 8, z: -98 },
-  { id: "arcade", type: "nightlife", name: "Pixel Wings Arcade", x: -64, z: -82 },
-  { id: "music-hall", type: "nightlife", name: "Buzz Hall", x: 68, z: 82 },
-  { id: "nightclub", type: "nightlife", name: "Afterdark Club", x: 82, z: -20 },
-  { id: "rooftop", type: "nightlife", name: "Sky Nectar Rooftop", x: 40, z: 44 },
+  { id: "bakery", type: "food", name: "Hansdrex Bakery", x: 20, z: 84 },
+  { id: "grocery", type: "food", name: "Hansdrex Grocery", x: -72, z: -46 },
+  { id: "corner-shop", type: "shop", name: "Hansdrex Store", x: 72, z: -82 },
+  { id: "night-market", type: "nightlife", name: "Hansdrex Night Market", x: 8, z: -98 },
+  { id: "arcade", type: "nightlife", name: "Hansdrex Arcade", x: -64, z: -82 },
+  { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 68, z: 82 },
+  { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 82, z: -20 },
+  { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", x: 40, z: 44 },
 
-  { id: "factory", type: "job", name: "Sugar Works", x: -132, z: 88 },
-  { id: "factory-east", type: "job", name: "Wing Materials Plant", x: 148, z: 118 },
-  { id: "factory-south", type: "job", name: "Nectar Packaging", x: 78, z: 152 },
-  { id: "warehouse", type: "job", name: "City Warehouse", x: -42, z: -138 },
-  { id: "farm", type: "production", name: "Honeydew Farm", x: -208, z: -42 },
-  { id: "construction", type: "job", name: "Build Yard", x: 142, z: 102 },
-  { id: "transit", type: "job", name: "Transit Depot", x: 152, z: -112 },
-  { id: "power", type: "job", name: "Power & Water", x: -148, z: -104 },
-  { id: "recycling", type: "job", name: "Recycling Works", x: 102, z: 148 },
+  { id: "factory", type: "job", name: "Hansdrex Sugar Works", x: -132, z: 88 },
+  { id: "factory-east", type: "job", name: "Hansdrex Materials Plant", x: 148, z: 118 },
+  { id: "factory-south", type: "job", name: "Hansdrex Packaging", x: 78, z: 152 },
+  { id: "warehouse", type: "job", name: "Hansdrex Warehouse", x: -42, z: -138 },
+  { id: "farm", type: "production", name: "Hansdrex Farm", x: -208, z: -42 },
+  { id: "construction", type: "job", name: "Hansdrex Build Yard", x: 142, z: 102 },
+  { id: "transit", type: "job", name: "Hansdrex Transit Depot", x: 152, z: -112 },
+  { id: "power", type: "job", name: "Hansdrex Utilities", x: -148, z: -104 },
+  { id: "recycling", type: "job", name: "Hansdrex Recycling", x: 102, z: 148 },
 
-  { id: "metro-central", type: "transit", name: "Central Station", x: 0, z: 0 },
-  { id: "metro-north", type: "transit", name: "North Station", x: 0, z: -140 },
-  { id: "metro-east", type: "transit", name: "East Station", x: 142, z: 0 },
-  { id: "metro-south", type: "transit", name: "South Station", x: 0, z: 142 },
-  { id: "metro-west", type: "transit", name: "West Station", x: -142, z: 0 },
-  { id: "metro-industrial", type: "transit", name: "Industrial Station", x: -128, z: 88 },
+  { id: "metro-central", type: "transit", name: "Hansdrex Central Station", x: 0, z: 0 },
+  { id: "metro-north", type: "transit", name: "Hansdrex North Station", x: 0, z: -140 },
+  { id: "metro-east", type: "transit", name: "Hansdrex East Station", x: 142, z: 0 },
+  { id: "metro-south", type: "transit", name: "Hansdrex South Station", x: 0, z: 142 },
+  { id: "metro-west", type: "transit", name: "Hansdrex West Station", x: -142, z: 0 },
+  { id: "metro-industrial", type: "transit", name: "Hansdrex Industrial Station", x: -128, z: 88 },
 ];
 
 const JOBS = [
@@ -395,6 +396,8 @@ function createFly(index, parents = null) {
     actionUntil: 0,
     hunger: randRange(10, 48),
     thirst: randRange(8, 42),
+    caffeine: 0,
+    sleepDebt: randRange(0, 18),
     energy: randRange(45, 95),
     stress: randRange(5, 34),
     happiness: randRange(42, 82),
@@ -630,6 +633,8 @@ async function initDb() {
       fly.smoking = Boolean(fly.smoking);
       fly.exercising = Boolean(fly.exercising);
       fly.thirst = Number.isFinite(fly.thirst) ? fly.thirst : 25;
+      fly.caffeine = Number.isFinite(fly.caffeine) ? fly.caffeine : 0;
+      fly.sleepDebt = Number.isFinite(fly.sleepDebt) ? fly.sleepDebt : 0;
       fly.transitMode = fly.transitMode || "walk";
       fly.transitPass = Boolean(fly.transitPass);
       fly.illness = fly.illness || null;
