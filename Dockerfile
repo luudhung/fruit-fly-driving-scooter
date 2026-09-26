@@ -1,4 +1,4 @@
-FROM rust:1.83-bookworm AS build
+FROM rust:1.98-bookworm AS build
 WORKDIR /app
 COPY worker24/Cargo.toml ./Cargo.toml
 COPY worker24/src ./src
