@@ -86,6 +86,11 @@ type FlyState = {
   exercising?: boolean;
   mentalHealthCrisis: boolean;
   traits: Record<string, number>;
+  lawAwareness?: number;
+  lawViolations?: number;
+  wanted?: boolean;
+  arrested?: boolean;
+  professionSkills?: Record<string, number>;
 };
 
 type LocationState = {
@@ -196,6 +201,7 @@ const flyRelationshipEl = $("fly-relationship");
 const flyFamilyEl = $("fly-family");
 const flyClassEl = $("fly-class");
 const flyBusinessEl = $("fly-business");
+const flyLawEl = $("fly-law");
 const flyStressEl = $("fly-stress");
 const flyHappyEl = $("fly-happy");
 const flyExciteEl = $("fly-excite");
@@ -204,6 +210,43 @@ const stressMeter = $("stress-meter");
 const happyMeter = $("happy-meter");
 const exciteMeter = $("excite-meter");
 const healthMeter = $("health-meter");
+
+type GraphicsPreset = "low" | "medium" | "high" | "ultra";
+const GRAPHICS_PROFILES = {
+  low:    { pixelRatio: 0.85, fps: 24, maxFlies: 50,  maxHomes: 24,  rain: 320,  treeScale: 0.34, streetTreeStep: 72, windowStride: 3, metroDetail: 0, trafficStride: 3 },
+  medium: { pixelRatio: 1.0,  fps: 30, maxFlies: 90,  maxHomes: 48,  rain: 700,  treeScale: 0.58, streetTreeStep: 48, windowStride: 2, metroDetail: 1, trafficStride: 2 },
+  high:   { pixelRatio: 1.25, fps: 45, maxFlies: 130, maxHomes: 72,  rain: 1200, treeScale: 0.82, streetTreeStep: 36, windowStride: 1, metroDetail: 2, trafficStride: 1 },
+  ultra:  { pixelRatio: 2.0,  fps: 60, maxFlies: 132, maxHomes: 110, rain: 2200, treeScale: 1.0,  streetTreeStep: 24, windowStride: 1, metroDetail: 3, trafficStride: 1 },
+} as const;
+const savedGraphics = localStorage.getItem("fulllife_graphics");
+const graphicsPreset: GraphicsPreset =
+  savedGraphics === "medium" || savedGraphics === "high" || savedGraphics === "ultra" ? savedGraphics : "low";
+const graphics = GRAPHICS_PROFILES[graphicsPreset];
+
+const graphicsSelect = document.getElementById("graphics-preset") as HTMLSelectElement | null;
+if (graphicsSelect) {
+  graphicsSelect.value = graphicsPreset;
+  graphicsSelect.addEventListener("change", () => {
+    localStorage.setItem("fulllife_graphics", graphicsSelect.value);
+    location.reload();
+  });
+}
+const settingsWrap = document.getElementById("settings-wrap");
+document.getElementById("settings-button")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  settingsWrap?.classList.toggle("open");
+});
+document.addEventListener("click", (event) => {
+  if (settingsWrap && !settingsWrap.contains(event.target as Node)) settingsWrap.classList.remove("open");
+});
+document.querySelectorAll<HTMLButtonElement>(".panel-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    const card = document.getElementById(button.dataset.panel || "");
+    if (!card) return;
+    const collapsed = card.classList.toggle("collapsed");
+    button.textContent = collapsed ? "+" : "−";
+  });
+});
 
 for (let i = 0; i < 100; i += 1) {
   const cell = document.createElement("div");
@@ -243,7 +286,7 @@ function renderInspector(fly: FlyState | null) {
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flySleepEl.textContent = flyNeedsEl.textContent = flyRelationshipEl.textContent = flyFamilyEl.textContent =
-      flyClassEl.textContent = flyBusinessEl.textContent = flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
+      flyClassEl.textContent = flyBusinessEl.textContent = flyLawEl.textContent = flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
     for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
     return;
   }
@@ -278,6 +321,8 @@ function renderInspector(fly: FlyState | null) {
   flyBusinessEl.textContent = fly.businessId
     ? `${fly.businessId} · equity ${num(fly.businessEquity || 0)} WC`
     : `no business · credit ${num(fly.creditScore || 0)}`;
+  const skillNames = Object.entries(fly.professionSkills || {}).filter(([,v]) => Number(v) > 0.45).map(([k]) => k).slice(0,2);
+  flyLawEl.textContent = `${Math.round((fly.lawAwareness || 0) * 100)}% aware · ${fly.lawViolations || 0} violations${fly.arrested ? " · DETAINED" : fly.wanted ? " · WANTED" : ""}${skillNames.length ? " · " + skillNames.join("/") : ""}`;
   flyStressEl.textContent = `${num(fly.stress, 1)}%`;
   flyHappyEl.textContent = `${num(fly.happiness, 1)}%`;
   flyExciteEl.textContent = `${num(fly.excitement, 1)}%`;
@@ -361,6 +406,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   syncFlyMeshes(s.flies || []);
   syncHomes(s.flies || []);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
+  updateTrafficSignals((s.simulationTime || 0) / Math.max(1, s.timeScale || 60));
 
   if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
     renderInspector(latestFlyStates.get(selectedFlyId) || null);
@@ -397,11 +443,11 @@ scene.fog = new THREE.Fog(0x93b8cf, 210, 720);
 
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 720);
 const renderer = new THREE.WebGLRenderer({
-  antialias: false,
-  powerPreference: "low-power",
-  precision: "mediump",
+  antialias: graphics.metroDetail >= 2,
+  powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
+  precision: graphicsPreset === "ultra" ? "highp" : "mediump",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
+renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
@@ -420,7 +466,7 @@ const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 420, 1.4);
 weatherFlash.position.set(0, 120, 0);
 scene.add(weatherFlash);
 
-const rainCount = 320;
+const rainCount = graphics.rain;
 const rainPositions = new Float32Array(rainCount * 3);
 for (let i = 0; i < rainCount; i += 1) {
   rainPositions[i * 3] = (Math.random() - 0.5) * 240;
@@ -492,18 +538,29 @@ const avenueXs = [-102, -76, -50, -24, 2, 28, 54, 80, 106];
 const streetZs = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
 
 function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false) {
-  const sidewalk = new THREE.Mesh(new THREE.BoxGeometry(w + 5, 0.08, d + 5), sidewalkMat);
-  sidewalk.position.set(x, 0.02, z);
-  cityRoot.add(sidewalk);
-  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.11, d), roadMat);
-  road.position.set(x, 0.08, z);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 6, 0.10, d + 6), sidewalkMat);
+  base.position.set(x, 0.04, z);
+  cityRoot.add(base);
+
+  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), roadMat);
+  road.position.set(x, 0.11, z);
   cityRoot.add(road);
 
+  const sidewalkOffset = (avenue ? w : d) / 2 + 1.55;
+  for (const side of [-1, 1]) {
+    const walk = new THREE.Mesh(
+      avenue ? new THREE.BoxGeometry(2.6, 0.18, d + 5) : new THREE.BoxGeometry(w + 5, 0.18, 2.6),
+      sidewalkMat,
+    );
+    walk.position.set(avenue ? x + side * sidewalkOffset : x, 0.18, avenue ? z : z + side * sidewalkOffset);
+    cityRoot.add(walk);
+  }
+
   const marker = new THREE.Mesh(
-    new THREE.BoxGeometry(avenue ? 0.12 : w * 0.92, 0.012, avenue ? d * 0.92 : 0.12),
+    new THREE.BoxGeometry(avenue ? 0.12 : w * 0.92, 0.014, avenue ? d * 0.92 : 0.12),
     laneMat,
   );
-  marker.position.set(x, 0.145, z);
+  marker.position.set(x, 0.18, z);
   cityRoot.add(marker);
 }
 
@@ -516,6 +573,41 @@ addRoadStrip(-154, -2, 10, 365, true);
 for (const z of [-150, -100, -50, 0, 50, 100, 150]) {
   addRoadStrip(-185, z, 135, 8, false);
   addRoadStrip(195, z, 115, 8, false);
+}
+
+// Traffic signals and marked pedestrian crossings. Low quality renders fewer junctions.
+type TrafficSignalVisual = { axis:"ns"|"ew"; offset:number; red:THREE.MeshBasicMaterial; yellow:THREE.MeshBasicMaterial; green:THREE.MeshBasicMaterial };
+const trafficSignals: TrafficSignalVisual[] = [];
+const trafficPoleMat = new THREE.MeshStandardMaterial({ color:0x303638, roughness:0.72, metalness:0.42 });
+const trafficBoxMat = new THREE.MeshStandardMaterial({ color:0x111615, roughness:0.82 });
+const trafficBulbGeo = new THREE.SphereGeometry(0.16, 7, 5);
+const crossingMat = new THREE.MeshBasicMaterial({ color:0xf1f2ed, transparent:true, opacity:0.72 });
+
+function addTrafficHead(x:number,z:number,axis:"ns"|"ew",offset:number) {
+  const g=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.09,3.2,6),trafficPoleMat); pole.position.y=1.6; g.add(pole);
+  const box=new THREE.Mesh(new THREE.BoxGeometry(0.56,1.28,0.34),trafficBoxMat); box.position.y=3.1; if(axis==="ew") box.rotation.y=Math.PI/2; g.add(box);
+  const red=new THREE.MeshBasicMaterial({color:0x3a0808}), yellow=new THREE.MeshBasicMaterial({color:0x302707}), green=new THREE.MeshBasicMaterial({color:0x07351c});
+  [red,yellow,green].forEach((mat,i)=>{ const bulb=new THREE.Mesh(trafficBulbGeo,mat); bulb.position.set(axis==="ew"?0.19:0,3.48-i*0.39,axis==="ns"?0.19:0); g.add(bulb); });
+  g.position.set(x,0,z); cityRoot.add(g); trafficSignals.push({axis,offset,red,yellow,green});
+}
+function addCrossing(x:number,z:number) {
+  for(const dx of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.018,3.2),crossingMat);m.position.set(x+dx,0.195,z-6.1);cityRoot.add(m);}
+  for(const dz of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.018,0.8),crossingMat);m.position.set(x-6.2,0.196,z+dz);cityRoot.add(m);}
+}
+const signalAvenues=avenueXs.filter((_,i)=>i%graphics.trafficStride===0);
+const signalStreets=streetZs.filter((_,i)=>i%graphics.trafficStride===0);
+for(let xi=0;xi<signalAvenues.length;xi+=1) for(let zi=0;zi<signalStreets.length;zi+=1){
+  const x=signalAvenues[xi],z=signalStreets[zi],offset=(xi*7+zi*11)%60;
+  addTrafficHead(x+6.4,z+6.2,"ns",offset); addTrafficHead(x-6.4,z-6.2,"ew",offset); addCrossing(x,z);
+}
+function updateTrafficSignals(seconds:number){
+  for(const s of trafficSignals){
+    const phase=(seconds+s.offset)%60;
+    const nsGreen=phase<25, nsYellow=phase>=25&&phase<30, ewGreen=phase>=30&&phase<55, ewYellow=phase>=55;
+    const green=s.axis==="ns"?nsGreen:ewGreen, yellow=s.axis==="ns"?nsYellow:ewYellow, red=!green&&!yellow;
+    s.red.color.setHex(red?0xff2b2b:0x3a0808); s.yellow.color.setHex(yellow?0xffc928:0x302707); s.green.color.setHex(green?0x35ef87:0x07351c);
+  }
 }
 
 // Sydney-style bridges over Hansdrex River.
@@ -562,12 +654,8 @@ function addTree(x: number, z: number, scale = 1) {
   crown.position.set(x, 2.15 * scale, z);
   cityRoot.add(trunk, crown);
 }
-for (let i = 0; i < 26; i += 1) {
-  addTree(-2 + seeded(i + 20) * 34, -120 + seeded(i + 80) * 66, 0.8 + seeded(i + 140) * 0.5);
-}
-for (let i = 0; i < 12; i += 1) {
-  addTree(5 + seeded(i + 500) * 95, 155 + seeded(i + 600) * 20, 0.8 + seeded(i + 700) * 0.4);
-}
+for (let i = 0; i < Math.round(80 * graphics.treeScale); i += 1) addTree(-2 + seeded(i + 20) * 34, -120 + seeded(i + 80) * 66, 0.8 + seeded(i + 140) * 0.5);
+for (let i = 0; i < Math.round(36 * graphics.treeScale); i += 1) addTree(5 + seeded(i + 500) * 95, 155 + seeded(i + 600) * 20, 0.8 + seeded(i + 700) * 0.4);
 
 function addBuilding(
   x: number, z: number, w: number, d: number, h: number, seed: number,
@@ -598,21 +686,18 @@ function addBuilding(
   roof.position.y = h + 0.18;
   group.add(roof);
 
-  // Performance mode: a single facade strip replaces hundreds of per-window meshes/materials.
-  const facadeMat = new THREE.MeshStandardMaterial({
-    color: options.glass ? 0x3b596b : 0x294351,
-    emissive: 0xffd77f,
-    emissiveIntensity: 0,
-    roughness: options.glass ? 0.24 : 0.5,
-    metalness: options.glass ? 0.28 : 0.08,
-  });
-  windowMaterials.push(facadeMat);
-  const facade = new THREE.Mesh(
-    new THREE.BoxGeometry(Math.max(2, w * 0.72), Math.max(1.4, Math.min(h * 0.55, 14)), 0.06),
-    facadeMat,
-  );
-  facade.position.set(0, Math.min(h * 0.55, 8), d / 2 + 0.04);
-  group.add(facade);
+  // Warm windows are fixed emissive surfaces, not dynamic point lights.
+  const windowMat = new THREE.MeshStandardMaterial({ color:0x6c5735, emissive:0xffcf67, emissiveIntensity:1.05, roughness:0.34, metalness:options.glass?0.22:0.04 });
+  windowMaterials.push(windowMat);
+  const floors=Math.max(2,Math.floor(h/3.1)), colsX=Math.max(2,Math.floor(w/2.7)), colsZ=Math.max(2,Math.floor(d/2.7));
+  const matrices:THREE.Matrix4[]=[]; const dummy=new THREE.Object3D();
+  for(let floor=0;floor<floors;floor+=graphics.windowStride){
+    const wy=1.8+floor*2.9; if(wy>h-0.65) continue;
+    for(let col=0;col<colsX;col+=graphics.windowStride){const wx=-w/2+1.25+col*((w-2.5)/Math.max(1,colsX-1));for(const face of [-1,1]){dummy.position.set(wx,wy,face*(d/2+0.045));dummy.scale.set(0.92,1.12,0.08);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
+    for(let col=0;col<colsZ;col+=graphics.windowStride){const wz=-d/2+1.25+col*((d-2.5)/Math.max(1,colsZ-1));for(const face of [-1,1]){dummy.position.set(face*(w/2+0.045),wy,wz);dummy.scale.set(0.08,1.12,0.92);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
+  }
+  const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),windowMat,matrices.length);
+  matrices.forEach((m,i)=>windows.setMatrixAt(i,m)); windows.instanceMatrix.needsUpdate=true; group.add(windows);
 
   const door = new THREE.Mesh(
     new THREE.BoxGeometry(1.35, 2.45, 0.12),
@@ -700,16 +785,11 @@ function addSuburbanHouse(x: number, z: number, seed: number, premium = false) {
   return group;
 }
 let suburbSeed = 3000;
-for (const side of [-1, 1]) {
-  const baseX = side < 0 ? -215 : 205;
-  for (let row = -3; row <= 3; row += 1) {
-    for (let col = 0; col < 2; col += 1) {
-      const x = baseX + side * col * 18;
-      const z = row * 34 + (col % 2) * 9;
-      if (side > 0 && Math.abs(x - riverX) < riverWidth + 28) continue;
-      addSuburbanHouse(x, z, suburbSeed++, seeded(suburbSeed) > 0.72);
-    }
-  }
+const safeSuburbZ = graphicsPreset === "low" ? [-125,-25,75] : [-125,-75,-25,25,75,125];
+const safeSuburbOffsets = graphicsPreset === "low" ? [-18,18] : [-32,-16,0,16,32];
+for(const side of [-1,1]) for(const z of safeSuburbZ) for(const offset of safeSuburbOffsets){
+  const x=(side<0?-220:220)+offset;
+  addSuburbanHouse(x,z,suburbSeed++,seeded(suburbSeed)>0.72);
 }
 
 // Hansdrex iconic skyline — stylized references, not exact architectural replicas.
@@ -791,11 +871,20 @@ const destinationBuildings = [
   ["RESEARCH LAB", 88, 62, 18, 14, 32],
   ["HANSDREX SCHOOL", -16, 102, 22, 17, 18],
   ["HANSDREX MARKET", -18, 10, 17, 14, 14],
+  ["HANSDREX MOTORS", -130, -74, 22, 15, 14],
+  ["HANSDREX POLICE", -104, -42, 18, 14, 17],
 ] as const;
 for (let i = 0; i < destinationBuildings.length; i += 1) {
   const [label, x, z, w, d, h] = destinationBuildings[i];
   addBuilding(x, z, w, d, h, 8000 + i, { glass: h > 25, sign: label });
 }
+function addShowroomCar(x:number,z:number,color:number){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.65,4.2),new THREE.MeshStandardMaterial({color,roughness:0.42,metalness:0.28}));body.position.y=0.62;g.add(body);
+  const cabin=new THREE.Mesh(new THREE.BoxGeometry(1.75,0.62,2.0),new THREE.MeshStandardMaterial({color:0x5d7582,roughness:0.2,metalness:0.18}));cabin.position.set(0,1.15,-0.15);g.add(cabin);
+  g.position.set(x,0,z);cityRoot.add(g);
+}
+if(graphics.metroDetail>=1){addShowroomCar(-137,-63.5,0xc94d4d);addShowroomCar(-130,-63.5,0xd5d8d2);addShowroomCar(-123,-63.5,0x3d668c);}
 
 // Industrial outer ring.
 const industrial = [
@@ -828,102 +917,78 @@ for (let row = 0; row < 7; row += 1) {
 
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
-  for (let z = -150; z <= 150; z += 72) {
+  for (let z = -150; z <= 150; z += graphics.streetTreeStep) {
     if (x > 95 && Math.abs(x - riverX) < 25) continue;
     addTree(x + 7.2, z + 4, 0.72);
   }
 }
 
-// ---------- six elevated metro lines ----------
-type MetroTrain = {
-  group: THREE.Group;
-  curve: THREE.CatmullRomCurve3;
-  speed: number;
-  offset: number;
-};
-const metroTrains: MetroTrain[] = [];
-const metroTrackMat = new THREE.MeshStandardMaterial({ color: 0x5a6064, roughness: 0.5, metalness: 0.55 });
-const metroBeamMat = new THREE.MeshStandardMaterial({ color: 0x70777b, roughness: 0.65, metalness: 0.34 });
-
-const metroLines = [
-  { name: "M1", points: [[-150,0],[0,0],[142,0],[190,0]], height: 9.0 },
-  { name: "M2", points: [[0,-175],[0,-140],[0,0],[0,142],[0,175]], height: 10.0 },
-  { name: "M3", points: [[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]], height: 11.0 },
-  { name: "M4", points: [[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]], height: 12.0 },
-  { name: "M5", points: [[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]], height: 10.5 },
-  { name: "M6", points: [[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]], height: 11.5 },
+// ---------- elevated metro network ----------
+type MetroTrain = { group:THREE.Group; curve:THREE.CatmullRomCurve3; stationTs:number[]; offset:number; lineIndex:number };
+const metroTrains:MetroTrain[]=[];
+const metroTrackMat=new THREE.MeshStandardMaterial({color:0x555b60,roughness:0.48,metalness:0.62});
+const metroBeamMat=new THREE.MeshStandardMaterial({color:0x6e7478,roughness:0.66,metalness:0.38});
+const lineColors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae];
+const metroLines=[
+  {name:"M1",points:[[-150,0],[0,0],[142,0],[190,0]],height:9.0},
+  {name:"M2",points:[[0,-175],[0,-140],[0,0],[0,142],[0,175]],height:10.0},
+  {name:"M3",points:[[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]],height:11.0},
+  {name:"M4",points:[[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]],height:12.0},
+  {name:"M5",points:[[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]],height:10.5},
+  {name:"M6",points:[[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]],height:11.5},
 ] as const;
 
-function addElevatedMetroLine(line: typeof metroLines[number], lineIndex: number) {
-  const pts = line.points.map(([x,z]) => new THREE.Vector3(x, line.height, z));
-  const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
-  // One low-poly tube per metro line replaces dozens of individual track boxes.
-  const track = new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 28, 0.82, 4, false),
-    metroTrackMat,
-  );
-  cityRoot.add(track);
-
-  for (let t = 0.1; t < 1; t += 0.2) {
-    const p = curve.getPoint(t);
-    const support = new THREE.Mesh(new THREE.BoxGeometry(0.6, line.height, 0.6), metroBeamMat);
-    support.position.set(p.x, line.height / 2, p.z);
-    cityRoot.add(support);
+function addMetroStation(p:THREE.Vector3,lineName:string,lineIndex:number){
+  const platform=new THREE.Mesh(new THREE.BoxGeometry(graphics.metroDetail>=2?16:12,0.65,5.8),new THREE.MeshStandardMaterial({color:0xb9bec0,roughness:0.65,metalness:0.18}));
+  platform.position.copy(p).add(new THREE.Vector3(0,-0.8,0));cityRoot.add(platform);
+  if(graphics.metroDetail>=2){
+    const canopy=new THREE.Mesh(new THREE.BoxGeometry(11,0.3,5.2),new THREE.MeshStandardMaterial({color:0x535b60,roughness:0.55,metalness:0.45}));canopy.position.copy(p).add(new THREE.Vector3(0,2.2,0));cityRoot.add(canopy);
+    for(const sx of [-4,4]){const post=new THREE.Mesh(new THREE.BoxGeometry(0.18,3,0.18),metroBeamMat);post.position.copy(p).add(new THREE.Vector3(sx,0.6,0));cityRoot.add(post);}
+    const sign=makeCanvasSprite(`${lineName} · HANSDREX SUBWAY`,20,1.0);sign.position.copy(p).add(new THREE.Vector3(0,3.2,0));cityRoot.add(sign);
   }
+}
+function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){
+  const pts=line.points.map(([x,z])=>new THREE.Vector3(x,line.height,z));
+  const curve=new THREE.CatmullRomCurve3(pts,false,"catmullrom",0.15);
+  const track=new THREE.Mesh(new THREE.TubeGeometry(curve,graphics.metroDetail>=2?52:28,0.82,graphics.metroDetail>=2?6:4,false),metroTrackMat);cityRoot.add(track);
+  for(let t=0.08;t<1;t+=graphics.metroDetail>=2?0.12:0.2){const p=curve.getPoint(t);const support=new THREE.Mesh(new THREE.BoxGeometry(0.6,line.height,0.6),metroBeamMat);support.position.set(p.x,line.height/2,p.z);cityRoot.add(support);}
+  const stationTs=line.points.map((_,i)=>i/Math.max(1,line.points.length-1));
+  stationTs.forEach(t=>addMetroStation(curve.getPoint(t),line.name,lineIndex));
 
-  for (let t = 0.08; t < 1; t += 0.18) {
-    const p = curve.getPoint(t);
-    const station = new THREE.Mesh(
-      new THREE.BoxGeometry(12, 0.65, 5.5),
-      new THREE.MeshStandardMaterial({ color: 0xb9bec0, roughness: 0.65, metalness: 0.18 }),
-    );
-    station.position.copy(p).add(new THREE.Vector3(0, -0.8, 0));
-    cityRoot.add(station);
+  const train=new THREE.Group();
+  const carCount=graphics.metroDetail>=2?4:3;
+  for(let car=0;car<carCount;car+=1){
+    const carGroup=new THREE.Group();
+    const body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.5,7.6),new THREE.MeshStandardMaterial({color:0xc6cbce,roughness:0.28,metalness:0.78}));carGroup.add(body);
+    const stripe=new THREE.Mesh(new THREE.BoxGeometry(3.24,0.22,7.66),new THREE.MeshBasicMaterial({color:lineColors[lineIndex]}));stripe.position.y=-0.52;carGroup.add(stripe);
+    if(graphics.metroDetail>=2){
+      for(const side of [-1,1]) for(const wz of [-2.35,-0.8,0.8,2.35]){const win=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.72,1.05),new THREE.MeshStandardMaterial({color:0x1a2b34,emissive:0x12212a,emissiveIntensity:0.35,roughness:0.2}));win.position.set(side*1.62,0.35,wz);carGroup.add(win);}
+      for(const side of [-1,1]){const door=new THREE.Mesh(new THREE.BoxGeometry(0.04,1.75,1.3),new THREE.MeshStandardMaterial({color:0x9ea5a8,metalness:0.7,roughness:0.3}));door.position.set(side*1.63,-0.15,0);carGroup.add(door);}
+    }
+    carGroup.position.z=car*8.05;train.add(carGroup);
   }
-
-  const trainGroup = new THREE.Group();
-  for (let car = 0; car < 3; car += 1) {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(3.1, 2.3, 7.5),
-      new THREE.MeshStandardMaterial({
-        color: [0xd0d7db,0xd5cbc1,0xc8d3c3,0xc8c8d8,0xd7cfaa,0xbfd4d6][lineIndex],
-        roughness: 0.45,
-        metalness: 0.35,
-      }),
-    );
-    body.position.z = car * 8.1;
-    trainGroup.add(body);
-  }
-  cityRoot.add(trainGroup);
-  metroTrains.push({
-    group: trainGroup,
-    curve,
-    speed: 0.000012 + lineIndex * 0.0000015,
-    offset: lineIndex / metroLines.length,
-  });
-
-  const lineLabel = makeCanvasSprite(line.name, 26, 1.0);
-  const lp = curve.getPoint(0.5);
-  lineLabel.position.set(lp.x, lp.y + 4, lp.z);
-  cityRoot.add(lineLabel);
+  cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});
 }
 metroLines.forEach(addElevatedMetroLine);
 
-// Most city objects never move. Freeze their local matrices so Three.js does not
-// rebuild hundreds of static transforms every rendered frame.
-cityRoot.traverse((obj) => {
-  obj.updateMatrix();
-  obj.matrixAutoUpdate = false;
-});
-for (const train of metroTrains) train.group.matrixAutoUpdate = true;
+cityRoot.traverse(obj=>{obj.updateMatrix();obj.matrixAutoUpdate=false;});
+for(const train of metroTrains) train.group.matrixAutoUpdate=true;
 
-function updateMetroTrains(now: number) {
-  for (const train of metroTrains) {
-    const t = (train.offset + now * train.speed) % 1;
-    const p = train.curve.getPointAt(t);
-    const ahead = train.curve.getPointAt((t + 0.003) % 1);
-    train.group.position.copy(p);
-    train.group.lookAt(ahead);
+function updateMetroTrains(now:number){
+  const travelMs=graphics.metroDetail>=2?4800:3900, dwellMs=graphics.metroDetail>=2?1500:800;
+  for(const train of metroTrains){
+    const sequence=[...train.stationTs,...train.stationTs.slice(1,-1).reverse()];
+    const segCount=sequence.length;
+    const cycle=segCount*(travelMs+dwellMs);
+    const phase=(now+train.offset)%cycle;
+    const seg=Math.floor(phase/(travelMs+dwellMs))%segCount;
+    const local=phase%(travelMs+dwellMs);
+    const a=sequence[seg], b=sequence[(seg+1)%segCount];
+    const u=local<dwellMs?0:Math.min(1,(local-dwellMs)/travelMs);
+    const t=THREE.MathUtils.lerp(a,b,u);
+    const p=train.curve.getPointAt(THREE.MathUtils.clamp(t,0,1));
+    const ahead=train.curve.getPointAt(THREE.MathUtils.clamp(t+(b>=a?0.003:-0.003),0,1));
+    train.group.position.copy(p);train.group.lookAt(ahead);
   }
 }
 
@@ -999,7 +1064,7 @@ function flyStatusEmoji(fly: FlyState) {
   return "";
 }
 
-const MAX_RENDERED_FLIES = 50;
+const MAX_RENDERED_FLIES = graphics.maxFlies;
 const flyVisuals = new Map<string, FlyVisual>();
 const flyPickables: THREE.Object3D[] = [];
 const bodyMat = new THREE.MeshStandardMaterial({ color: 0x33261f, roughness: 0.55 });
@@ -1105,8 +1170,23 @@ function syncFlyMeshes(flies: FlyState[]) {
 
 
 type HomeVisual = { group: THREE.Group; tier: number };
-const MAX_RENDERED_HOMES = 24;
+const MAX_RENDERED_HOMES = graphics.maxHomes;
 const homeVisuals = new Map<string, HomeVisual>();
+
+function isHomeNoBuildZone(x:number,z:number,margin=5.5){
+  if(avenueXs.some(ax=>Math.abs(x-ax)<9.5/2+margin&&z>-176&&z<166)) return true;
+  if(streetZs.some(sz=>Math.abs(z-sz)<9/2+margin&&x>-113&&x<117)) return true;
+  if(Math.abs(x-159)<5+margin&&z>-178&&z<168) return true;
+  if(Math.abs(x+154)<5+margin&&z>-190&&z<183) return true;
+  for(const rz of [-150,-100,-50,0,50,100,150]) if(Math.abs(z-rz)<4+margin&&((x>-258&&x<-112)||(x>132&&x<258))) return true;
+  if(Math.abs(x-riverX)<riverWidth/2+margin&&z>-248&&z<220) return true;
+  return false;
+}
+function safeHomeVisualPosition(fly:FlyState){
+  const x=Number(fly.homeX||0),z=Number(fly.homeZ||0); if(!isHomeNoBuildZone(x,z)) return{x,z};
+  const n=Number(fly.id.replace(/\D/g,""))||1, zs=[-125,-75,-25,25,75,125], side=n%2?-1:1;
+  return{x:(side<0?-220:220)+((n%5)-2)*16,z:zs[n%zs.length]};
+}
 
 function createHomeVisual(fly: FlyState) {
   const tier = fly.ownsHome ? Math.max(1, fly.homeTier || 1) : 0;
@@ -1133,7 +1213,7 @@ function createHomeVisual(fly: FlyState) {
   door.position.set(0, 0.62, (tier ? 3 + tier * 0.7 : 2.1) / 2 + 0.05);
   group.add(door);
 
-  group.position.set(fly.homeX || 0, 0, fly.homeZ || 0);
+  const hp=safeHomeVisualPosition(fly); group.position.set(hp.x,0,hp.z);
   scene.add(group);
   return { group, tier };
 }
@@ -1152,7 +1232,7 @@ function syncHomes(flies: FlyState[]) {
       if (existing) scene.remove(existing.group);
       homeVisuals.set(fly.id, createHomeVisual(fly));
     } else {
-      existing.group.position.set(fly.homeX!, 0, fly.homeZ!);
+      const hp=safeHomeVisualPosition(fly); existing.group.position.set(hp.x,0,hp.z);
     }
   }
   for (const [id, hv] of homeVisuals) {
@@ -1189,12 +1269,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   moon.intensity = night * 0.55 * (1 - cloud * 0.4);
   sun.position.set(Math.cos((t / 24) * Math.PI * 2) * 80, Math.max(-12, sunHeight * 95), Math.sin((t / 24) * Math.PI * 2) * 80);
 
-  windowMaterials.forEach((m, i) => {
-    const occupied = seeded(i * 1.73 + Math.floor(t * 2)) > 0.4;
-    m.emissiveIntensity = night * (occupied ? 1.5 : 0.08);
-    m.color.setHex(night > 0.5 && occupied ? 0x6e5b43 : 0x294351);
-  });
-  streetLights.forEach((l) => { l.intensity = Math.max(night, storm * 0.42) * 5.2; });
+  // Fixed warm windows stay emissive at all hours and never become dynamic lights.
   const rainLevel = THREE.MathUtils.clamp(weather.precipitation || 0, 0, 1);
   rain.visible = rainLevel > 0.04;
   rainMaterial.opacity = rainLevel * 0.78;
@@ -1210,7 +1285,7 @@ let lastY = 0;
 let followSelected = false;
 let lastFrameAt = performance.now();
 let lastRenderedAt = 0;
-const TARGET_FRAME_MS = 1000 / 24;
+const TARGET_FRAME_MS = 1000 / graphics.fps;
 const pressed = new Set<string>();
 const freePosition = new THREE.Vector3(86, 54, 105);
 const lookDirection = new THREE.Vector3();
@@ -1327,10 +1402,12 @@ function updateFreeCamera(dt: number) {
     }
   } else {
     cameraForward(moveForward);
-    moveForward.y = 0;
-    if (moveForward.lengthSq() < 1e-5) moveForward.set(0, 0, -1);
+    if (moveForward.lengthSq() < 1e-5) moveForward.set(0,0,-1);
     moveForward.normalize();
-    moveRight.crossVectors(moveForward, worldUp).normalize();
+    moveRight.set(moveForward.x,0,moveForward.z);
+    if(moveRight.lengthSq()<1e-5) moveRight.set(0,0,-1);
+    moveRight.normalize();
+    moveRight.crossVectors(moveRight,worldUp).normalize();
 
     let forwardAxis = 0;
     let strafeAxis = 0;
