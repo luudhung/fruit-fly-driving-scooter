@@ -43,6 +43,7 @@ const WORKER_URL="https://flybrain-worker-production.up.railway.app";
 let workerConnected=false;
 let workerLastSync=0;
 let workerSyncBusy=false;
+let latestWorkerState:Worker24State|null=null;
 
 interface MarketPoint{t:number;p:number}
 interface MarketResponse{
@@ -160,6 +161,15 @@ type Worker24State={
   brain_edges:number;
   brain_steps_total:number;
   brain_steps_per_cycle:number;
+  brain_size_signal?:number;
+  brain_risk_fraction?:number;
+  brain_notional?:number;
+  brain_patience_signal?:number;
+  brain_hold_ticks?:number;
+  brain_trade_drive?:number;
+  brain_smoke_drive?:number;
+  brain_break_drive?:number;
+  brain_behavior?:string;
   brain_regions:Worker24Region[];
   recent_events:string[];
 };
@@ -205,6 +215,7 @@ function applyWorkerState(w:Worker24State){
   workerConnected=true;
   workerLastSync=Date.now();
   latestWorkerMode=w.mode;
+  latestWorkerState=w;
 
   symbol="BTCUSDT";
   tickerButtons.forEach(b=>b.classList.toggle("active",b.dataset.symbol===symbol));
@@ -243,8 +254,9 @@ function applyWorkerState(w:Worker24State){
   decisionEl.dataset.side=w.decision==="LONG"?"UP":w.decision==="SHORT"?"DOWN":"WAIT";
   callNoteEl.textContent=
     "24/7 full FlyWire CPU · "+Math.round((Number(w.confidence)||0)*100)+
-    "% confidence · signal "+(Number(w.signal)||0).toFixed(3)+
-    " · step "+Number(w.brain_steps_total||0).toLocaleString();
+    "% confidence · BRAIN STAKE "+money(Number(w.brain_notional)||0)+
+    " · HOLD "+Number(w.brain_hold_ticks||0)+" ticks"+
+    " · "+String(w.brain_behavior||"TRADE");
 
   latestBrain={
     ...latestBrain,
@@ -1312,8 +1324,17 @@ function updateHud(){
     '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':deskSmokeStartedAt!==null?'DESK SMOKE':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
     '<div class="metric"><span>feed poll</span><b>'+staleSec+'s ago</b></div>',
-    '<div class="metric"><span>24/7 worker</span><b>'+(workerConnected?'ONLINE':'FALLBACK')+'</b></div>',
+    '<div class="metric"><span>24/7 worker</span><b>'+(workerConnected?'FULL CPU':'FALLBACK')+'</b></div>',
     '<div class="metric"><span>state sync</span><b>'+(workerLastSync?Math.floor((Date.now()-workerLastSync)/1000)+'s ago':'—')+'</b></div>',
+    '<div class="metric"><span>brain stake</span><b>'+money(Number((latestWorkerState as any)?.brain_notional)||0)+'</b></div>',
+    '<div class="metric"><span>brain hold</span><b>'+String(Number((latestWorkerState as any)?.brain_hold_ticks)||0)+' ticks</b></div>',
+    '<div class="metric wide"><span>behavior drives</span><b>'+(
+      latestWorkerState
+        ? 'trade '+Number((latestWorkerState as any).brain_trade_drive||0).toFixed(3)+
+          ' · smoke '+Number((latestWorkerState as any).brain_smoke_drive||0).toFixed(3)+
+          ' · break '+Number((latestWorkerState as any).brain_break_drive||0).toFixed(3)
+        : '—'
+    )+'</b></div>',
     '<div class="metric"><span>DN activity</span><b>'+(latestBrain.activity??0).toFixed(4)+'</b></div>',
     '<div class="metric"><span>volatility</span><b>'+(volatility()*100).toFixed(3)+'%</b></div>',
     '<div class="metric wide"><span>FlyWire</span><b>'+fmt(latestBrain.neurons)+' neurons · '+fmt(latestBrain.edges)+' edges</b></div>',
