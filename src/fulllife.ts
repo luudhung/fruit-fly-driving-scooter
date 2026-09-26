@@ -1004,7 +1004,7 @@ function flyStatusEmoji(fly: FlyState) {
   return "";
 }
 
-const MAX_RENDERED_FLIES = 80;
+const MAX_RENDERED_FLIES = 50;
 const flyVisuals = new Map<string, FlyVisual>();
 const flyPickables: THREE.Object3D[] = [];
 const bodyMat = new THREE.MeshStandardMaterial({ color: 0x33261f, roughness: 0.55 });
@@ -1022,51 +1022,45 @@ const wingMat = new THREE.MeshStandardMaterial({
 
 function createFlyVisual(id: string): FlyVisual {
   const group = new THREE.Group();
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.42, 7, 5), bodyMat);
-  thorax.scale.set(1, 0.82, 1.05);
+
+  // Ultra-light fly: two body meshes + two wings. The server still simulates every fly
+  // independently; this only cuts browser draw calls.
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.45, 7, 5), bodyMat);
+  thorax.scale.set(1, 0.82, 1.12);
   thorax.userData.flyId = id;
   group.add(thorax);
 
   const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.38, 7, 5), abdomenMat);
-  abdomen.scale.set(0.9, 0.78, 1.35);
-  abdomen.position.z = 0.52;
+  abdomen.scale.set(0.88, 0.74, 1.45);
+  abdomen.position.z = 0.55;
   abdomen.userData.flyId = id;
   group.add(abdomen);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 7, 5), bodyMat);
-  head.position.z = -0.48;
-  head.userData.flyId = id;
-  group.add(head);
-
   for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 5, 4), eyeMat);
-    eye.position.set(sx * 0.22, 0.05, -0.7);
-    eye.userData.flyId = id;
-    group.add(eye);
-
-    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 8), wingMat);
+    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 7), wingMat);
     wing.scale.set(1.35, 0.55, 1);
     wing.rotation.set(Math.PI / 2.7, 0, sx * 0.72);
     wing.position.set(sx * 0.42, 0.26, 0.06);
-    wing.userData.flyId = id;
     group.add(wing);
   }
 
   const halo = new THREE.Mesh(
-    new THREE.RingGeometry(0.62, 0.82, 12),
+    new THREE.RingGeometry(0.62, 0.82, 10),
     new THREE.MeshBasicMaterial({ color: 0xffe48a, transparent: true, opacity: 0, side: THREE.DoubleSide }),
   );
   halo.rotation.x = -Math.PI / 2;
   halo.position.y = -0.58;
   group.add(halo);
 
-  const status = makeCanvasSprite("", 54, 1.4);
+  // No canvas texture is allocated until this fly actually needs a visible status icon.
+  const status = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+  status.scale.set(2.8, 1.4, 1);
+  status.userData.text = "";
   status.position.set(0, 1.45, 0);
+  status.visible = false;
   group.add(status);
 
-  group.traverse((obj) => {
-    if ((obj as THREE.Mesh).isMesh && obj !== halo) flyPickables.push(obj);
-  });
+  flyPickables.push(thorax, abdomen);
   scene.add(group);
   return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status };
 }
@@ -1091,10 +1085,11 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.group.scale.setScalar(ageScale);
     (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
     const emoji = flyStatusEmoji(fly);
-    updateSpriteText(visual.status, emoji);
-    visual.status.visible = Boolean(emoji) && (
+    const showStatus = Boolean(emoji) && (
       selectedFlyId === fly.id || fly.mentalHealthCrisis || Boolean(fly.illness)
     );
+    visual.status.visible = showStatus;
+    if (showStatus) updateSpriteText(visual.status, emoji);
     if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
       visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
     }
@@ -1110,7 +1105,7 @@ function syncFlyMeshes(flies: FlyState[]) {
 
 
 type HomeVisual = { group: THREE.Group; tier: number };
-const MAX_RENDERED_HOMES = 40;
+const MAX_RENDERED_HOMES = 24;
 const homeVisuals = new Map<string, HomeVisual>();
 
 function createHomeVisual(fly: FlyState) {
@@ -1215,7 +1210,7 @@ let lastY = 0;
 let followSelected = false;
 let lastFrameAt = performance.now();
 let lastRenderedAt = 0;
-const TARGET_FRAME_MS = 1000 / 30;
+const TARGET_FRAME_MS = 1000 / 24;
 const pressed = new Set<string>();
 const freePosition = new THREE.Vector3(86, 54, 105);
 const lookDirection = new THREE.Vector3();
