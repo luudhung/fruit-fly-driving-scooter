@@ -34,26 +34,50 @@ const VERSION = {
 };
 
 const LOCATIONS = [
-  { id: "apt-north", type: "home", name: "North Apartments", x: -40, z: -38 },
-  { id: "apt-east", type: "home", name: "East Apartments", x: 42, z: -32 },
-  { id: "apt-south", type: "home", name: "South Apartments", x: 35, z: 42 },
-  { id: "apt-west", type: "home", name: "West Apartments", x: -42, z: 35 },
-  { id: "market", type: "food", name: "Central Market", x: -9, z: 5 },
-  { id: "cafe", type: "social", name: "Nectar Cafe", x: 15, z: 11 },
-  { id: "park", type: "social", name: "Wing Park", x: 0, z: -23 },
-  { id: "office", type: "job", name: "Archive Office", x: 31, z: 5 },
-  { id: "factory", type: "job", name: "Sugar Works", x: -31, z: 8 },
-  { id: "lab", type: "job", name: "City Lab", x: 8, z: 34 },
-  { id: "clinic", type: "service", name: "Clinic", x: -13, z: 34 },
-  { id: "garage", type: "service", name: "Garage", x: 35, z: -4 },
+  { id: "apt-north", type: "home", name: "North Apartments", x: -58, z: -52 },
+  { id: "apt-east", type: "home", name: "East Apartments", x: 58, z: -48 },
+  { id: "apt-south", type: "home", name: "South Apartments", x: 52, z: 58 },
+  { id: "apt-west", type: "home", name: "West Apartments", x: -56, z: 52 },
+  { id: "market", type: "food", name: "Central Market", x: -10, z: 6 },
+  { id: "cafe", type: "social", name: "Nectar Cafe", x: 16, z: 12 },
+  { id: "park", type: "social", name: "Wing Park", x: 0, z: -24 },
+  { id: "office", type: "job", name: "Archive Office", x: 34, z: 6 },
+  { id: "factory", type: "job", name: "Sugar Works", x: -34, z: 9 },
+  { id: "lab", type: "job", name: "City Lab", x: 8, z: 37 },
+  { id: "clinic", type: "service", name: "Clinic", x: -15, z: 37 },
+  { id: "garage", type: "service", name: "Garage", x: 38, z: -8 },
+  { id: "farm", type: "production", name: "Honeydew Farm", x: -68, z: -4 },
+  { id: "bakery", type: "food", name: "Crumb & Fruit Bakery", x: 5, z: 20 },
+  { id: "grocery", type: "food", name: "Daily Drop Grocery", x: -22, z: -15 },
+  { id: "corner-shop", type: "shop", name: "Tiny Things Store", x: 24, z: -17 },
+  { id: "gym", type: "wellness", name: "Flight Gym", x: 43, z: 25 },
+  { id: "bank", type: "service", name: "Seed Bank", x: -43, z: 23 },
+  { id: "warehouse", type: "job", name: "City Warehouse", x: -5, z: -42 },
+  { id: "school", type: "service", name: "Larva School", x: 22, z: 43 },
 ];
 
 const JOBS = [
   { id: "office", locationId: "office", title: "clerk", wage: 5.2 },
   { id: "factory", locationId: "factory", title: "processor", wage: 4.4 },
   { id: "lab", locationId: "lab", title: "researcher", wage: 6.4 },
-  { id: "market", locationId: "market", title: "vendor", wage: 4.8 },
+  { id: "market", locationId: "market", title: "market vendor", wage: 4.8 },
+  { id: "farm", locationId: "farm", title: "farmer", wage: 4.6 },
+  { id: "bakery", locationId: "bakery", title: "baker", wage: 4.9 },
+  { id: "grocery", locationId: "grocery", title: "shop clerk", wage: 4.5 },
+  { id: "corner-shop", locationId: "corner-shop", title: "retail clerk", wage: 4.7 },
+  { id: "garage", locationId: "garage", title: "mechanic", wage: 5.4 },
+  { id: "clinic", locationId: "clinic", title: "care worker", wage: 5.8 },
+  { id: "gym", locationId: "gym", title: "trainer", wage: 4.9 },
+  { id: "warehouse", locationId: "warehouse", title: "warehouse worker", wage: 4.6 },
 ];
+
+const BUSINESSES = {
+  farm: { inventory: 900, cash: 3200, price: 1.4, outputPerShift: 6 },
+  market: { inventory: 450, cash: 2600, price: 5.2 },
+  bakery: { inventory: 220, cash: 1800, price: 6.2 },
+  grocery: { inventory: 360, cash: 2200, price: 4.8 },
+  "corner-shop": { inventory: 160, cash: 1500, price: 7.5 },
+};
 
 const clients = new Set();
 let state = null;
@@ -195,7 +219,15 @@ function createFly(index, parents = null) {
     friends: [],
     vehicle: null,
     ownsHome: false,
+    homeTier: 0,
     homeEquity: 0,
+    homeX: home.x + randRange(-8, 8),
+    homeZ: home.z + randRange(-8, 8),
+    brainDecision: "resting",
+    brainConfidence: 0.5,
+    traveling: false,
+    smoking: false,
+    exercising: false,
     lastPaidDay: -1,
     lastRentDay: -1,
     lastSocialTick: 0,
@@ -226,6 +258,7 @@ function freshState() {
     events: [],
     eventSeq: 1,
     locations: LOCATIONS,
+    businesses: JSON.parse(JSON.stringify(BUSINESSES)),
   };
   state = s;
   for (let i = 0; i < INITIAL_POPULATION; i += 1) state.flies.push(createFly(i));
@@ -319,6 +352,7 @@ async function initDb() {
     state = snapshot.rows[0].state_json;
     state.timeScale = GAME_SECONDS_PER_REAL_SECOND;
     state.locations = LOCATIONS;
+    state.businesses = state.businesses || JSON.parse(JSON.stringify(BUSINESSES));
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
     state.eventSeq = Number(state.eventSeq || 1);
@@ -357,62 +391,126 @@ function nearestCompatiblePartner(fly) {
   return bestScore > 0.55 ? best : null;
 }
 
-function chooseDestination(fly, clock) {
-  if (!fly.alive) return;
-  if (fly.actionUntil > state.simulationAgeSeconds) return;
-
-  const home = location(fly.homeId);
+function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
+  const candidates = [];
+  const add = (id, action, utility) => candidates.push({ id, action, utility: utility + randRange(-3, 3) });
 
-  if (fly.health < 30) {
-    fly.targetLocationId = "clinic";
-    fly.action = "seeking care";
-  } else if (fly.energy < 18 || clock.hour >= 22 || clock.hour < 6) {
-    fly.targetLocationId = fly.homeId;
-    fly.action = "going home";
-  } else if (fly.hunger > 67) {
-    fly.targetLocationId = "market";
-    fly.action = "looking for food";
-  } else if (fly.loneliness > 58 || fly.excitement > 70) {
-    fly.targetLocationId = rand() < 0.55 ? "cafe" : "park";
-    fly.action = "socializing";
-  } else if (fly.jobId && age >= 18 && age <= 75 && clock.hour >= 8 && clock.hour < 17) {
+  add(fly.homeId, "resting at home", (100 - fly.energy) * 0.58 + (clock.hour >= 22 || clock.hour < 6 ? 65 : 0));
+  add("market", "buying food", fly.hunger * 0.8 + (fly.money > 5 ? 8 : -35));
+  add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
+  add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
+  add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18);
+  add("park", "taking a walk", fly.stress * 0.55 + fly.traits.resilience * 15);
+  add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
+  add("clinic", "seeking care", (100 - fly.health) * 1.3);
+  add("corner-shop", "shopping", fly.excitement * 0.28 + Math.min(25, fly.money / 30));
+
+  if (fly.jobId && age >= 18 && age <= 75 && clock.hour >= 8 && clock.hour < 17) {
     const job = JOBS.find((j) => j.id === fly.jobId);
-    fly.targetLocationId = job?.locationId || "office";
-    fly.action = "working";
-  } else if (fly.stress > 72) {
-    fly.targetLocationId = rand() < 0.7 ? "park" : fly.homeId;
-    fly.action = "recovering";
-  } else {
-    const options = ["park", "cafe", "market", fly.homeId];
-    fly.targetLocationId = pick(options);
-    fly.action = pick(["wandering", "exploring", "socializing", "resting"]);
+    if (job) add(job.locationId, "working", 88 + fly.traits.ambition * 25 - fly.stress * 0.25);
   }
 
-  const dest = fly.targetLocationId === fly.homeId ? home : location(fly.targetLocationId);
-  const p = jittered(dest, 3.5);
+  if (fly.stress > 76 && fly.traits.resilience < 0.45) {
+    add("park", "smoke break", 42 + fly.stress * 0.5);
+  }
+
+  if (age < 18 && clock.hour >= 8 && clock.hour < 15) {
+    add("school", "at school", 92);
+  }
+
+  candidates.sort((a, b) => b.utility - a.utility);
+  const chosen = candidates[0];
+  fly.brainDecision = chosen.action;
+  fly.brainConfidence = clamp((chosen.utility - (candidates[1]?.utility ?? 0) + 20) / 60, 0, 1);
+  return chosen;
+}
+
+function chooseDestination(fly, clock) {
+  if (!fly.alive) return;
+  const distToTarget = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+
+  // Once a fly commits to a destination, keep that decision until arrival.
+  if (fly.traveling && distToTarget > 1.0) return;
+  if (!fly.traveling && fly.actionUntil > state.simulationAgeSeconds) return;
+
+  const chosen = brainChooseAction(fly, clock);
+  fly.targetLocationId = chosen.id;
+  fly.action = chosen.action;
+  fly.smoking = chosen.action === "smoke break";
+  fly.exercising = chosen.action === "exercising";
+
+  const dest = chosen.id === fly.homeId
+    ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
+    : location(chosen.id);
+  const p = jittered(dest, chosen.id === fly.homeId ? 1.4 : 3.8);
   fly.targetX = p.x;
   fly.targetZ = p.z;
-  fly.actionUntil = state.simulationAgeSeconds + randRange(900, 3600);
+  fly.traveling = true;
+  fly.actionUntil = 0;
 }
 
 function moveFly(fly) {
   const dx = fly.targetX - fly.x;
   const dz = fly.targetZ - fly.z;
   const dist = Math.hypot(dx, dz);
-  if (dist < 0.45) {
+  if (dist < 0.8) {
     fly.vx = 0;
     fly.vz = 0;
+    fly.x = fly.targetX;
+    fly.z = fly.targetZ;
     fly.currentLocationId = fly.targetLocationId;
+    if (fly.traveling) {
+      fly.traveling = false;
+      fly.actionUntil = state.simulationAgeSeconds + randRange(1200, 4200);
+    }
     return;
   }
-  const vehicleBoost = fly.vehicle ? 1.9 : 1;
-  const speed = (0.15 + fly.energy / 900) * vehicleBoost;
+  const vehicleBoost = fly.vehicle === "compact car" ? 2.5 : fly.vehicle === "scooter" ? 2.0 : 1;
+  const speed = (0.55 + fly.energy / 260) * vehicleBoost;
   fly.vx = (dx / dist) * speed;
   fly.vz = (dz / dist) * speed;
   fly.x += fly.vx;
   fly.z += fly.vz;
-  fly.y = 1.3 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.25;
+  fly.y = 1.4 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.3;
+}
+
+function productionAndRetail(fly, clock) {
+  if (!fly.alive) return;
+  const business = state.businesses?.[fly.currentLocationId];
+
+  if (fly.jobId === "farm" && fly.currentLocationId === "farm" && fly.action === "working") {
+    state.businesses.farm.inventory += 0.08 * (0.5 + fly.traits.ambition);
+    if (state.businesses.farm.inventory > 80 && rand() < 0.025) {
+      const moved = Math.min(35, state.businesses.farm.inventory);
+      state.businesses.farm.inventory -= moved;
+      state.businesses.market.inventory += moved * 0.45;
+      state.businesses.grocery.inventory += moved * 0.35;
+      state.businesses.bakery.inventory += moved * 0.20;
+    }
+  }
+
+  if (["market","grocery","bakery"].includes(fly.currentLocationId) && fly.hunger > 28 && fly.money > 3 && business?.inventory > 0 && rand() < 0.09) {
+    const price = business.price * randRange(0.9, 1.08);
+    fly.money -= price;
+    fly.expensesLifetime += price;
+    fly.hunger = clamp(fly.hunger - randRange(24, 48));
+    fly.happiness = clamp(fly.happiness + 2);
+    business.cash += price;
+    business.inventory = Math.max(0, business.inventory - 1);
+    state.totalTransactions += 1;
+  }
+
+  if (fly.currentLocationId === "gym" && fly.action === "exercising") {
+    fly.stress = clamp(fly.stress - 0.22);
+    fly.health = clamp(fly.health + 0.025);
+    fly.energy = clamp(fly.energy - 0.06);
+  }
+
+  if (fly.smoking) {
+    fly.stress = clamp(fly.stress - 0.16);
+    fly.health = clamp(fly.health - 0.018);
+  }
 }
 
 function payAndFinance(fly, clock) {
@@ -458,7 +556,16 @@ function payAndFinance(fly, clock) {
       fly.savings -= 3200;
       fly.ownsHome = true;
       fly.homeEquity = 3200;
-      emit("home_purchase", `${fly.id} bought a home.`, { flyId: fly.id });
+      fly.homeTier = 1;
+      emit("home_purchase", `${fly.id} bought a small home.`, { flyId: fly.id, tier: fly.homeTier });
+    }
+
+    if (fly.ownsHome && fly.homeTier < 3 && fly.savings > 6500 * fly.homeTier && rand() < 0.08) {
+      const upgradeCost = 2600 + fly.homeTier * 2200;
+      fly.savings -= upgradeCost;
+      fly.homeEquity += upgradeCost;
+      fly.homeTier += 1;
+      emit("home_upgrade", `${fly.id} expanded their home to tier ${fly.homeTier}.`, { flyId: fly.id, tier: fly.homeTier });
     }
 
     if (!fly.vehicle && fly.savings > 900 && fly.traits.risk + fly.traits.ambition > 1.0 && rand() < 0.25) {
@@ -700,6 +807,7 @@ function tickFly(fly, clock) {
   chooseDestination(fly, clock);
   moveFly(fly);
   needsAndActivities(fly, clock);
+  productionAndRetail(fly, clock);
   payAndFinance(fly, clock);
   socialLife(fly, clock);
   reproduction(fly);
@@ -780,6 +888,13 @@ function compactFly(f) {
     parents: f.parents,
     vehicle: f.vehicle,
     ownsHome: f.ownsHome,
+    homeTier: f.homeTier || 0,
+    homeX: f.homeX,
+    homeZ: f.homeZ,
+    brainDecision: f.brainDecision,
+    brainConfidence: Number((f.brainConfidence ?? 0).toFixed(2)),
+    smoking: Boolean(f.smoking),
+    exercising: Boolean(f.exercising),
     mentalHealthCrisis: f.mentalHealthCrisis,
     traits: f.traits,
   };
