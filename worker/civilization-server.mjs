@@ -818,7 +818,7 @@ function freshState() {
     enterprises: {},
     nextEnterpriseId: 1,
     bank: { reserves: 250000, loansOutstanding: 0, defaults: 0 },
-    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 },
+    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1 },
     mapVersion: MAP_VERSION,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
     housing: null,
@@ -927,7 +927,10 @@ async function initDb() {
     state.enterprises = state.enterprises || {};
     state.nextEnterpriseId = Number(state.nextEnterpriseId || 1);
     state.bank = state.bank || { reserves: 250000, loansOutstanding: 0, defaults: 0 };
-    state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 };
+    state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1 };
+    state.economy.gdpToday = Number(state.economy.gdpToday || 0);
+    state.economy.bankruptcies = Number(state.economy.bankruptcies || 0);
+    state.economy.lastEnterpriseHour = Number.isFinite(state.economy.lastEnterpriseHour) ? state.economy.lastEnterpriseHour : -1;
     state.mapVersion = MAP_VERSION;
     state.populationBootstrapVersion = Number(state.populationBootstrapVersion || 0);
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
@@ -1384,6 +1387,228 @@ function attemptStartup(fly) {
   });
 }
 
+function enterpriseSectorDemand(sector, clock) {
+  const living = state.flies.filter((f) => f.alive).length;
+  const base = clamp(living / Math.max(40, INITIAL_POPULATION), 0.45, 1.6);
+  const weather = weatherDanger();
+  const night = nightlifeOpen(clock);
+  const modifier =
+    sector === "food" ? (1.08 + living / 900) :
+    sector === "cafe" ? (0.88 + state.flies.reduce((s,f) => s + (100 - f.energy), 0) / Math.max(1,living) / 180) :
+    sector === "nightlife" ? (night ? 1.42 : 0.28) :
+    sector === "retail" ? 0.92 :
+    sector === "logistics" ? 0.95 + state.economy.index * 0.12 :
+    sector === "manufacturing" ? 0.90 + state.economy.index * 0.20 : 0.85;
+  const weatherEffect =
+    sector === "nightlife" ? 1 - weather * 0.46 :
+    sector === "cafe" ? 1 + weather * 0.16 :
+    1 - weather * 0.08;
+  return clamp(base * modifier * weatherEffect, 0.18, 2.2);
+}
+
+function hireEnterpriseEmployee(business, owner) {
+  const candidates = state.flies.filter((f) =>
+    f.alive &&
+    f.ageYears >= 18 &&
+    f.ageYears <= 72 &&
+    f.id !== owner.id &&
+    !f.businessId &&
+    !f.businessEmployeeOf &&
+    (!f.jobId || f.socialClass === "low income")
+  );
+  if (!candidates.length) return null;
+  candidates.sort((a,b) => {
+    const scoreA = a.traits.ambition * 0.35 + a.traits.resilience * 0.25 + a.health / 100 * 0.20 + brainRand(a) * 0.20;
+    const scoreB = b.traits.ambition * 0.35 + b.traits.resilience * 0.25 + b.health / 100 * 0.20 + brainRand(b) * 0.20;
+    return scoreB - scoreA;
+  });
+  const worker = candidates[0];
+  worker.businessEmployeeOf = business.id;
+  worker.jobId = null;
+  worker.jobTitle = `${business.sector} employee`;
+  worker.wage = 4.4 + business.reputation * 2.2;
+  business.employees.push(worker.id);
+  emit("hire", `${business.name} hired ${worker.id}.`, { businessId: business.id, flyId: worker.id });
+  return worker;
+}
+
+function closeEnterprise(business, owner, reason) {
+  business.status = "bankrupt";
+  const defaultLoss = Math.max(0, Number(business.loanBalance || 0));
+  if (defaultLoss > 0) {
+    state.bank.defaults += defaultLoss;
+    state.bank.loansOutstanding = Math.max(0, state.bank.loansOutstanding - defaultLoss);
+  }
+  for (const employeeId of business.employees || []) {
+    const employee = state.flies.find((f) => f.id === employeeId);
+    if (employee) {
+      employee.businessEmployeeOf = null;
+      employee.jobTitle = null;
+      employee.wage = 0;
+      employee.stress = clamp(employee.stress + 9);
+    }
+  }
+  if (owner) {
+    owner.businessId = null;
+    owner.businessEquity = 0;
+    owner.businessFailures += 1;
+    owner.creditScore = Math.max(300, owner.creditScore - 70);
+    owner.bankLoan = Math.max(0, owner.bankLoan - defaultLoss);
+    owner.stress = clamp(owner.stress + 24);
+    owner.happiness = clamp(owner.happiness - 18);
+    brainRemember(owner, "business_failure", { businessId: business.id, reason });
+  }
+  state.economy.bankruptcies += 1;
+  emit("bankruptcy", `${business.name} failed: ${reason}.`, {
+    businessId: business.id,
+    ownerId: owner?.id,
+    reason,
+  });
+}
+
+function simulateEnterprises(clock) {
+  const hourKey = clock.day * 24 + clock.hour;
+  if (state.economy.lastEnterpriseHour === hourKey) return;
+  state.economy.lastEnterpriseHour = hourKey;
+
+  const operating = Object.values(state.enterprises || {}).filter((b) => b.status === "operating");
+  let hourlyGdp = 0;
+
+  for (const business of operating) {
+    const owner = state.flies.find((f) => f.id === business.ownerId && f.alive);
+    if (!owner) {
+      closeEnterprise(business, owner, "owner unavailable");
+      continue;
+    }
+
+    const demand = enterpriseSectorDemand(business.sector, clock);
+    const neuralManagement =
+      neuralDrive(owner, "approachDrive") * 0.22 +
+      neuralDrive(owner, "exploreDrive") * 0.18 +
+      neuralDrive(owner, "socialDrive") * 0.08 -
+      neuralDrive(owner, "avoidDrive") * 0.12;
+    const management = clamp(
+      0.42 +
+      owner.traits.ambition * 0.20 +
+      owner.traits.thrift * 0.11 +
+      owner.traits.resilience * 0.10 +
+      owner.brain.plasticity.persistence * 0.10 +
+      neuralManagement -
+      owner.stress / 100 * 0.14 +
+      brainRange(owner, -0.08, 0.08),
+      0.12,
+      1.45,
+    );
+
+    const targetEmployees =
+      business.sector === "manufacturing" ? 8 :
+      business.sector === "logistics" ? 6 :
+      business.sector === "nightlife" ? 5 : 4;
+
+    if ((business.employees?.length || 0) < targetEmployees &&
+        business.cash > 420 &&
+        management > 0.48 &&
+        brainRand(owner) < 0.10 + management * 0.05) {
+      hireEnterpriseEmployee(business, owner);
+    }
+
+    const employees = (business.employees || [])
+      .map((id) => state.flies.find((f) => f.id === id && f.alive))
+      .filter(Boolean);
+    const employeeProductivity = employees.length
+      ? employees.reduce((s,e) => s + e.energy / 100 * e.health / 100, 0) / employees.length
+      : 0.55;
+
+    const revenue =
+      demand *
+      (8 + employees.length * 11) *
+      management *
+      (0.58 + employeeProductivity * 0.62) *
+      brainRange(owner, 0.76, 1.28);
+
+    const wageCost = employees.reduce((s,e) => s + Math.max(3.8, Number(e.wage || 4.5)), 0);
+    const rentUtility =
+      business.sector === "manufacturing" ? 18 :
+      business.sector === "nightlife" ? 13 :
+      business.sector === "logistics" ? 14 : 8;
+    const interest = Math.max(0, Number(business.loanBalance || 0)) * 0.00032;
+    const operatingCost = wageCost + rentUtility + interest + revenue * (1 - business.margin) * 0.23;
+    const profit = revenue - operatingCost;
+
+    business.cash += profit;
+    business.revenueLifetime += revenue;
+    business.expensesLifetime += operatingCost;
+    business.profitToday = Number(business.profitToday || 0) + profit;
+    business.reputation = clamp(business.reputation + (profit >= 0 ? 0.003 : -0.006) + (management - 0.5) * 0.002, 0.05, 1);
+    hourlyGdp += Math.max(0, revenue);
+
+    for (const employee of employees) {
+      const pay = Math.max(3.8, Number(employee.wage || 4.5));
+      employee.money += pay;
+      employee.salaryLifetime += pay;
+      business.cash -= pay;
+    }
+
+    if (business.loanBalance > 0 && business.cash > 950) {
+      const payment = Math.min(business.loanBalance, Math.max(8, business.cash * 0.018));
+      business.loanBalance -= payment;
+      owner.bankLoan = Math.max(0, owner.bankLoan - payment);
+      business.cash -= payment;
+      state.bank.reserves += payment;
+      state.bank.loansOutstanding = Math.max(0, state.bank.loansOutstanding - payment);
+      owner.creditScore = Math.min(850, owner.creditScore + 0.15);
+    }
+
+    if (profit < 0) business.badDays += 0.08;
+    else business.badDays = Math.max(0, business.badDays - 0.12);
+
+    if (business.cash > business.assetValue * 1.8 && profit > 0 && brainRand(owner) < 0.12) {
+      const dividend = Math.min(profit * 0.28, business.cash * 0.035);
+      business.cash -= dividend;
+      owner.money += dividend;
+      owner.businessEquity = netWorth(owner);
+    }
+
+    const successThreshold = 3500 * (owner.businessSuccesses + 1);
+    if (business.revenueLifetime > successThreshold && profit > 0 && brainRand(owner) < 0.05) {
+      owner.businessSuccesses += 1;
+      owner.creditScore = Math.min(850, owner.creditScore + 12);
+      owner.happiness = clamp(owner.happiness + 8);
+      emit("business_success", `${business.name} reached a new growth milestone under ${owner.id}.`, {
+        businessId: business.id,
+        ownerId: owner.id,
+        revenueLifetime: business.revenueLifetime,
+      });
+    }
+
+    if (business.cash < -250 || business.badDays > 4.5) {
+      closeEnterprise(business, owner, business.cash < -250 ? "insolvency" : "persistent losses");
+      continue;
+    }
+
+    owner.businessEquity = Math.max(0, business.cash + business.assetValue - business.loanBalance);
+    owner.stress = clamp(owner.stress + (profit < 0 ? 0.16 : -0.035));
+  }
+
+  state.economy.gdpToday += hourlyGdp;
+  state.economy.businessCount = Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length;
+
+  const adults = state.flies.filter((f) => f.alive && f.ageYears >= 18 && f.ageYears <= 75);
+  const unemployed = adults.filter((f) => !f.jobId && !f.businessId && !f.businessEmployeeOf).length;
+  state.economy.unemployment = adults.length ? unemployed / adults.length : 0;
+  const netWorths = state.flies.filter((f) => f.alive).map(netWorth);
+  state.economy.averageNetWorth = netWorths.length ? netWorths.reduce((a,b) => a+b, 0) / netWorths.length : 0;
+
+  // Economy expands/contracts from business health and unemployment.
+  const profitable = operating.filter((b) => Number(b.profitToday || 0) > 0).length;
+  const health = operating.length ? profitable / operating.length : 0.5;
+  state.economy.index = clamp(
+    state.economy.index * 0.994 + (0.78 + health * 0.42 - state.economy.unemployment * 0.28) * 0.006,
+    0.55,
+    1.65,
+  );
+}
+
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
   updateBrainDynamics(fly);
@@ -1656,7 +1881,9 @@ function productionAndRetail(fly, clock) {
 
 function payAndFinance(fly, clock) {
   const day = clock.day;
-  if (clock.hour === 17 && clock.minute < 2 && fly.jobId && fly.lastPaidDay !== day && fly.ageYears >= 18 && fly.ageYears <= 75) {
+  const salaryJob = fly.jobId ? JOBS.find((j) => j.id === fly.jobId) : null;
+  if (salaryJob && clock.hour === (salaryJob.shiftEnd % 24) && clock.minute < 2 &&
+      fly.lastPaidDay !== day && fly.ageYears >= 18 && fly.ageYears <= 75) {
     const base = fly.wage * 8;
     const bonus = base * fly.traits.ambition * randRange(0, 0.18);
     const gross = base + bonus;
@@ -1666,13 +1893,16 @@ function payAndFinance(fly, clock) {
     fly.lastPaidDay = day;
     fly.happiness = clamp(fly.happiness + 3);
     state.totalTransactions += 1;
-    if (rand() < 0.05) emit("salary", `${fly.id} received salary ${gross.toFixed(1)} FC.`, { flyId: fly.id, amount: gross });
+    if (rand() < 0.05) emit("salary", `${fly.id} received salary ${gross.toFixed(1)} WC.`, { flyId: fly.id, amount: gross });
   }
 
   if (clock.hour === 0 && clock.minute < 2 && fly.lastRentDay !== day) {
-    const rent = fly.ownsHome ? 3 : 14;
-    const utilities = 4;
-    const expense = rent + utilities;
+    const hh = state.housing?.households?.[fly.householdId];
+    const housingCost = fly.housingType === "apartment"
+      ? Math.max(8, Number(hh?.monthlyHousingCost || 18))
+      : Math.max(4, Number(hh?.monthlyHousingCost || 8));
+    const utilities = fly.housingType === "house" ? 7 + (fly.homeTier || 1) * 3 : 5;
+    const expense = housingCost + utilities;
     if (fly.money >= expense) {
       fly.money -= expense;
     } else {
@@ -1693,16 +1923,59 @@ function payAndFinance(fly, clock) {
       fly.savings -= payment;
     }
 
-    if (!fly.ownsHome && fly.savings > 4500 && fly.traits.ambition > 0.52) {
-      fly.savings -= 3200;
-      fly.ownsHome = true;
-      fly.homeEquity = 3200;
-      fly.homeTier = 1;
-      emit("home_purchase", `${fly.id} bought a small home.`, { flyId: fly.id, tier: fly.homeTier });
+    if (!fly.ownsHome && fly.ageYears >= 21 && fly.creditScore >= 610 &&
+        fly.money + fly.savings > 2500 &&
+        brainRand(fly) < 0.012 + fly.traits.ambition * 0.012 + neuralDrive(fly, "approachDrive") * 0.008) {
+      const freeLots = state.housing?.houseLots?.filter((lot) => !lot.ownerHouseholdId) || [];
+      if (freeLots.length) {
+        freeLots.sort((a,b) => a.baseValue - b.baseValue);
+        const affordable = freeLots.filter((lot) => {
+          const deposit = lot.baseValue * 0.35;
+          return fly.money + fly.savings >= deposit;
+        });
+        const lot = affordable[Math.floor(brainRand(fly) * Math.max(1, affordable.length))];
+        if (lot) {
+          const deposit = lot.baseValue * 0.35;
+          const loan = lot.baseValue - deposit;
+          const approval =
+            fly.creditScore / 850 * 0.48 +
+            fly.traits.thrift * 0.14 +
+            fly.traits.ambition * 0.10 +
+            neuralDrive(fly, "approachDrive") * 0.12 -
+            neuralDrive(fly, "avoidDrive") * 0.12 -
+            fly.debt / 6000 * 0.08;
+          if (approval > 0.48 && state.bank.reserves > loan) {
+            const fromCash = Math.min(fly.money, deposit);
+            fly.money -= fromCash;
+            fly.savings -= Math.max(0, deposit - fromCash);
+            const hh = state.housing.households[fly.householdId] || createHousehold(fly);
+            lot.ownerHouseholdId = hh.id;
+            hh.housingType = "house";
+            hh.unitId = lot.id;
+            hh.homeX = lot.x;
+            hh.homeZ = lot.z;
+            hh.monthlyHousingCost = Math.round(lot.baseValue * 0.003);
+            hh.propertyValue = lot.baseValue;
+            fly.housingType = "house";
+            fly.housingUnitId = lot.id;
+            fly.homeX = lot.x;
+            fly.homeZ = lot.z;
+            fly.ownsHome = true;
+            fly.homeTier = 1;
+            fly.homeEquity = lot.baseValue;
+            fly.bankLoan += loan;
+            state.bank.reserves -= loan;
+            state.bank.loansOutstanding += loan;
+            emit("home_purchase", `${fly.id} bought a ground house for ${lot.baseValue.toFixed(0)} WC with Hansdrex Bank financing.`, {
+              flyId: fly.id, lotId: lot.id, value: lot.baseValue, loan,
+            });
+          }
+        }
+      }
     }
 
     if (fly.ownsHome && fly.homeTier < 3 && fly.savings > 6500 * fly.homeTier && rand() < 0.08) {
-      const upgradeCost = 2600 + fly.homeTier * 2200;
+      const upgradeCost = 3200 + fly.homeTier * 3600;
       fly.savings -= upgradeCost;
       fly.homeEquity += upgradeCost;
       fly.homeTier += 1;
@@ -2236,6 +2509,10 @@ function tickFly(fly, clock) {
   needsAndActivities(fly, clock);
   productionAndRetail(fly, clock);
   payAndFinance(fly, clock);
+  if (!fly.traveling && fly.currentLocationId === "bank" && fly.action.includes("business")) {
+    attemptStartup(fly);
+  }
+  updateSocialClass(fly);
   socialLife(fly, clock);
   reproduction(fly);
   completePregnancy(fly);
@@ -2431,6 +2708,7 @@ async function tick() {
       const clock = gameClock();
       updateWeather(clock);
       for (const fly of state.flies) tickFly(fly, clock);
+      simulateEnterprises(clock);
       void syncFullConnectomeBrains();
 
       // periodic city-wide events
