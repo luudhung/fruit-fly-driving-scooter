@@ -8,8 +8,8 @@ const WORLD_ID = process.env.CIV_WORLD_ID || "WORLD-A";
 const EXPERIMENT_ID = process.env.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(process.env.CIV_WORLD_SEED || 948291);
 const GAME_SECONDS_PER_REAL_SECOND = Number(process.env.CIV_TIME_SCALE || 60);
-const INITIAL_POPULATION = Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || 40));
-const MAX_POPULATION = Math.max(INITIAL_POPULATION, Number(process.env.CIV_MAX_POPULATION || 180));
+const INITIAL_POPULATION = Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || 200));
+const MAX_POPULATION = Math.max(INITIAL_POPULATION, Number(process.env.CIV_MAX_POPULATION || 320));
 const DATABASE_URL = process.env.DATABASE_URL;
 const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(process.env.NEURAL_SYNC_INTERVAL_MS || 1000));
@@ -155,6 +155,246 @@ const STARTUP_TYPES = [
   { sector: "logistics", baseCapital: 1500, locationId: "warehouse", margin: 0.14 },
   { sector: "manufacturing", baseCapital: 2300, locationId: "factory-east", margin: 0.17 },
 ];
+
+const APARTMENT_CAPACITY = 10;
+const POPULATION_BOOTSTRAP_VERSION = 2;
+
+function buildApartmentBlocks() {
+  const districts = [
+    ["N", 0, -165, 22],
+    ["E", 170, 12, 22],
+    ["S", 12, 170, 22],
+    ["W", -170, 8, 22],
+    ["C", -18, 125, 28],
+  ];
+  const blocks = [];
+  for (const [prefix, cx, cz, rentBase] of districts) {
+    for (let i = 0; i < 6; i += 1) {
+      const row = Math.floor(i / 3);
+      const col = i % 3;
+      blocks.push({
+        id: `APT-${prefix}-${String(i + 1).padStart(2, "0")}`,
+        x: Number(cx) + (col - 1) * 14,
+        z: Number(cz) + (row - 0.5) * 16,
+        capacity: APARTMENT_CAPACITY,
+        rent: Number(rentBase) + row * 2 + col,
+        purchaseValue: (Number(rentBase) + row * 2 + col) * 210,
+        occupants: [],
+      });
+    }
+  }
+  return blocks;
+}
+
+function buildGroundHouseLots() {
+  const lots = [];
+  const zones = [
+    ["NW", -220, -145, 7800],
+    ["W", -220, 20, 8200],
+    ["SW", -218, 145, 7600],
+    ["NE", 218, -145, 9800],
+    ["E", 218, 25, 10400],
+    ["SE", 220, 145, 9200],
+  ];
+  let n = 1;
+  for (const [zone, cx, cz, basePrice] of zones) {
+    for (let row = -2; row <= 2; row += 1) {
+      for (let col = -2; col <= 2; col += 1) {
+        const premium = 1 + ((row + 2) * 0.025) + ((col + 2) * 0.018);
+        lots.push({
+          id: `HOUSE-${zone}-${String(n++).padStart(3, "0")}`,
+          x: Number(cx) + col * 15,
+          z: Number(cz) + row * 28,
+          baseValue: Math.round(Number(basePrice) * premium),
+          ownerHouseholdId: null,
+        });
+      }
+    }
+  }
+  return lots;
+}
+
+function ensureHousingState() {
+  state.housing = state.housing || {
+    apartmentBlocks: buildApartmentBlocks(),
+    houseLots: buildGroundHouseLots(),
+    households: {},
+    nextHouseholdId: 1,
+  };
+  state.housing.apartmentBlocks = state.housing.apartmentBlocks || buildApartmentBlocks();
+  state.housing.houseLots = state.housing.houseLots || buildGroundHouseLots();
+  state.housing.households = state.housing.households || {};
+  state.housing.nextHouseholdId = Number(state.housing.nextHouseholdId || 1);
+}
+
+function createHousehold(fly, inherited = null) {
+  ensureHousingState();
+  if (inherited && state.housing.households[inherited]) {
+    const hh = state.housing.households[inherited];
+    if (!hh.members.includes(fly.id)) hh.members.push(fly.id);
+    fly.householdId = inherited;
+    return hh;
+  }
+  const id = `HH-${String(state.housing.nextHouseholdId++).padStart(5, "0")}`;
+  const hh = {
+    id,
+    members: [fly.id],
+    housingType: null,
+    unitId: null,
+    homeX: fly.homeX,
+    homeZ: fly.homeZ,
+    monthlyHousingCost: 0,
+    propertyValue: 0,
+  };
+  state.housing.households[id] = hh;
+  fly.householdId = id;
+  return hh;
+}
+
+function availableApartmentBlock() {
+  ensureHousingState();
+  const available = state.housing.apartmentBlocks
+    .filter((b) => (b.occupants?.length || 0) < b.capacity)
+    .sort((a, b) => (a.occupants?.length || 0) - (b.occupants?.length || 0));
+  return available.length ? available[Math.floor(rand() * Math.min(8, available.length))] : null;
+}
+
+function assignApartment(fly, household = null) {
+  ensureHousingState();
+  const hh = household || state.housing.households[fly.householdId] || createHousehold(fly);
+  const block = availableApartmentBlock();
+  if (!block) return false;
+  block.occupants = block.occupants || [];
+  if (!block.occupants.includes(fly.id)) block.occupants.push(fly.id);
+  hh.housingType = "apartment";
+  hh.unitId = block.id;
+  hh.homeX = block.x;
+  hh.homeZ = block.z;
+  hh.monthlyHousingCost = block.rent;
+  hh.propertyValue = 0;
+  fly.housingType = "apartment";
+  fly.housingUnitId = block.id;
+  fly.homeX = block.x + randRange(-2.2, 2.2);
+  fly.homeZ = block.z + randRange(-2.2, 2.2);
+  fly.ownsHome = false;
+  fly.homeTier = 0;
+  fly.homeEquity = 0;
+  return true;
+}
+
+function assignGroundHouse(fly, tier = 1, household = null) {
+  ensureHousingState();
+  const hh = household || state.housing.households[fly.householdId] || createHousehold(fly);
+  const free = state.housing.houseLots.filter((lot) => !lot.ownerHouseholdId);
+  if (!free.length) return false;
+  const lot = free[Math.floor(rand() * free.length)];
+  lot.ownerHouseholdId = hh.id;
+  const value = lot.baseValue * (1 + (tier - 1) * 0.58);
+  hh.housingType = "house";
+  hh.unitId = lot.id;
+  hh.homeX = lot.x;
+  hh.homeZ = lot.z;
+  hh.monthlyHousingCost = Math.round(value * 0.003);
+  hh.propertyValue = value;
+  fly.housingType = "house";
+  fly.housingUnitId = lot.id;
+  fly.homeX = lot.x;
+  fly.homeZ = lot.z;
+  fly.ownsHome = true;
+  fly.homeTier = tier;
+  fly.homeEquity = value;
+  return true;
+}
+
+function seedSocioeconomicProfile(fly) {
+  const roll = rand();
+  let cls =
+    roll < 0.18 ? "low income" :
+    roll < 0.55 ? "working" :
+    roll < 0.80 ? "middle" :
+    roll < 0.92 ? "affluent" :
+    roll < 0.99 ? "wealthy" : "elite";
+
+  if (fly.ageYears < 18) cls = rand() < 0.55 ? "working" : "middle";
+  fly.socialClass = cls;
+
+  const profiles = {
+    "low income": { cash:[20,180], save:[0,180], debt:[120,850], credit:[430,610], home:0, vehicle:0.05 },
+    "working": { cash:[100,650], save:[100,1600], debt:[0,520], credit:[540,700], home:0.05, vehicle:0.28 },
+    "middle": { cash:[280,1400], save:[1000,6500], debt:[0,900], credit:[620,770], home:0.22, vehicle:0.62 },
+    "affluent": { cash:[900,4200], save:[5500,19000], debt:[0,1500], credit:[690,810], home:0.66, vehicle:0.88 },
+    "wealthy": { cash:[2500,10000], save:[16000,65000], debt:[0,2500], credit:[730,835], home:0.92, vehicle:0.96 },
+    "elite": { cash:[8000,28000], save:[65000,180000], debt:[0,4000], credit:[780,850], home:1, vehicle:1 },
+  };
+  const p = profiles[cls];
+  fly.money = randRange(...p.cash);
+  fly.savings = randRange(...p.save);
+  fly.debt = rand() < 0.42 ? randRange(...p.debt) : 0;
+  fly.creditScore = Math.round(randRange(...p.credit));
+
+  const hh = createHousehold(fly);
+  if (rand() < p.home && fly.ageYears >= 24) {
+    const tier = cls === "elite" ? 3 : cls === "wealthy" ? (rand() < 0.55 ? 3 : 2) : cls === "affluent" ? 2 : 1;
+    if (!assignGroundHouse(fly, tier, hh)) assignApartment(fly, hh);
+  } else {
+    assignApartment(fly, hh);
+  }
+
+  if (rand() < p.vehicle && fly.ageYears >= 18) {
+    fly.vehicle = cls === "wealthy" || cls === "elite"
+      ? "compact car"
+      : (rand() < 0.48 ? "compact car" : "scooter");
+  }
+  fly.transitPass = rand() < (fly.vehicle ? 0.28 : 0.72);
+
+  if (fly.ageYears >= 18 && fly.ageYears <= 75) {
+    const jobs = [...JOBS].sort((a,b) => a.wage - b.wage);
+    const percentile =
+      cls === "elite" ? 0.9 :
+      cls === "wealthy" ? 0.82 :
+      cls === "affluent" ? 0.72 :
+      cls === "middle" ? 0.56 :
+      cls === "working" ? 0.38 : 0.2;
+    const center = Math.floor(percentile * (jobs.length - 1));
+    const idx = Math.max(0, Math.min(jobs.length - 1, center + Math.floor(randRange(-4, 5))));
+    const job = jobs[idx];
+    if (job && rand() < (cls === "low income" ? 0.68 : 0.9)) {
+      fly.jobId = job.id;
+      fly.jobTitle = job.title;
+      fly.wage = job.wage;
+    } else {
+      fly.jobId = null;
+      fly.jobTitle = null;
+      fly.wage = 0;
+    }
+  }
+}
+
+function inheritHousehold(child, mother) {
+  ensureHousingState();
+  const hhId = mother?.householdId;
+  const hh = hhId ? state.housing.households[hhId] : null;
+  if (!hh) {
+    createHousehold(child);
+    assignApartment(child);
+    return;
+  }
+  if (!hh.members.includes(child.id)) hh.members.push(child.id);
+  child.householdId = hh.id;
+  child.housingType = hh.housingType;
+  child.housingUnitId = hh.unitId;
+  child.homeX = hh.homeX + randRange(-1.5, 1.5);
+  child.homeZ = hh.homeZ + randRange(-1.5, 1.5);
+  child.ownsHome = false;
+  child.homeTier = 0;
+  child.homeEquity = 0;
+  const block = state.housing.apartmentBlocks.find((b) => b.id === hh.unitId);
+  if (block && !block.occupants.includes(child.id) && block.occupants.length < block.capacity) {
+    block.occupants.push(child.id);
+  }
+}
+
+
 
 const clients = new Set();
 let state = null;
@@ -438,6 +678,9 @@ function createFly(index, parents = null) {
     businessFailures: 0,
     businessSuccesses: 0,
     socialClass: "working",
+    householdId: null,
+    housingType: null,
+    housingUnitId: null,
     ownsHome: false,
     homeTier: 0,
     homeEquity: 0,
@@ -577,12 +820,19 @@ function freshState() {
     bank: { reserves: 250000, loansOutstanding: 0, defaults: 0 },
     economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 },
     mapVersion: MAP_VERSION,
+    populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
+    housing: null,
     currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
     weather: null,
   };
   state = s;
   state.weather = makeWeather();
-  for (let i = 0; i < INITIAL_POPULATION; i += 1) state.flies.push(createFly(i));
+  ensureHousingState();
+  for (let i = 0; i < INITIAL_POPULATION; i += 1) {
+    const fly = createFly(i);
+    seedSocioeconomicProfile(fly);
+    state.flies.push(fly);
+  }
   s.generation = 1;
   return s;
 }
@@ -679,7 +929,9 @@ async function initDb() {
     state.bank = state.bank || { reserves: 250000, loansOutstanding: 0, defaults: 0 };
     state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 };
     state.mapVersion = MAP_VERSION;
+    state.populationBootstrapVersion = Number(state.populationBootstrapVersion || 0);
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
+    ensureHousingState();
     state.weather = state.weather || makeWeather();
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
@@ -751,6 +1003,31 @@ async function initDb() {
       fly.businessFailures = Number(fly.businessFailures || 0);
       fly.businessSuccesses = Number(fly.businessSuccesses || 0);
       fly.socialClass = fly.socialClass || "working";
+      fly.householdId = fly.householdId || null;
+      fly.housingType = fly.housingType || null;
+      fly.housingUnitId = fly.housingUnitId || null;
+      if (!fly.householdId) {
+        const hh = createHousehold(fly);
+        if (fly.ownsHome) {
+          if (!assignGroundHouse(fly, Math.max(1, fly.homeTier || 1), hh)) assignApartment(fly, hh);
+        } else {
+          assignApartment(fly, hh);
+        }
+      }
+    }
+
+    if (state.populationBootstrapVersion < POPULATION_BOOTSTRAP_VERSION || state.flies.filter((x) => x.alive).length < INITIAL_POPULATION) {
+      const before = state.flies.filter((x) => x.alive).length;
+      while (state.flies.filter((x) => x.alive).length < INITIAL_POPULATION && state.flies.length < MAX_POPULATION) {
+        const fly = createFly(state.flies.length);
+        seedSocioeconomicProfile(fly);
+        state.flies.push(fly);
+      }
+      state.populationBootstrapVersion = POPULATION_BOOTSTRAP_VERSION;
+      emit("population_bootstrap", `Hansdrex expanded from ${before} to ${state.flies.filter((x) => x.alive).length} residents with mixed socioeconomic starting conditions.`, {
+        before,
+        after: state.flies.filter((x) => x.alive).length,
+      });
     }
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
@@ -1675,6 +1952,7 @@ function completePregnancy(fly) {
   const litter = rand() < 0.14 ? 2 : 1;
   for (let i = 0; i < litter && state.flies.filter((f) => f.alive).length < MAX_POPULATION; i += 1) {
     const child = createFly(state.flies.length, [fly, father]);
+    inheritHousehold(child, fly);
     state.flies.push(child);
     fly.children.push(child.id);
     father.children.push(child.id);
