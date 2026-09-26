@@ -52,12 +52,13 @@ interface FoodPatch {
 }
 
 interface Creature {
-  kind: "ant" | "beetle" | "spider";
+  kind: "ant" | "beetle" | "spider" | "mantis" | "dragonfly" | "frog";
   node: THREE.Group;
   direction: THREE.Vector3;
   speed: number;
   phase: number;
   dangerRadius: number;
+  captureRadius: number;
 }
 
 const WORLD_HALF = 110;
@@ -119,6 +120,7 @@ export class OpenWorld {
   private lastPosition = new THREE.Vector3();
   private birdPhase = -100;
   private birdShadow: THREE.Mesh | null = null;
+  private predatorCooldown = 0;
 
   private brain: BrainMotorSignal = {
     turn: 0, drive: 0, lift: 0, feed: 0, escape: 0, activity: 0, ready: false,
@@ -382,9 +384,20 @@ export class OpenWorld {
   }
 
   private buildCreatures() {
-    for (let i=0;i<18;i++) this.addCreature("ant", -75 + (i*17)%150, -68 + (i*29)%136, 0.75 + (i%3)*0.12);
-    for (let i=0;i<6;i++) this.addCreature("beetle", -65 + (i*27)%130, -60 + (i*43)%120, 0.38 + (i%2)*0.1);
-    for (let i=0;i<4;i++) this.addCreature("spider", -72 + i*45, 58 - i*37, 0.58 + i*0.06);
+    // Harmless background insects.
+    for (let i=0;i<14;i++) this.addCreature("ant", -75 + (i*17)%150, -68 + (i*29)%136, 0.75 + (i%3)*0.12);
+    for (let i=0;i<5;i++) this.addCreature("beetle", -65 + (i*27)%130, -60 + (i*43)%120, 0.38 + (i%2)*0.1);
+
+    // Predators are deliberately placed near the central spawn so the
+    // viewer can actually see ecological interactions without waiting.
+    this.addCreature("spider", 7, 8, 0.95);
+    this.addCreature("spider", -18, 18, 0.72);
+    this.addCreature("mantis", -9, -6, 1.05);
+    this.addCreature("mantis", 25, 12, 0.82);
+    this.addCreature("dragonfly", 0, -18, 2.4);
+    this.addCreature("dragonfly", -28, -12, 2.1);
+    this.addCreature("frog", 19, -12, 0.78);
+    this.addCreature("frog", 48, -48, 0.62);
 
     const shadowMat = new THREE.MeshBasicMaterial({ color:0x11151a, transparent:true, opacity:0.22, depthWrite:false });
     this.birdShadow = mesh(new THREE.CircleGeometry(3.4, 24), shadowMat, -150, 0.025, -150);
@@ -395,28 +408,82 @@ export class OpenWorld {
 
   private addCreature(kind: Creature["kind"], x:number, z:number, speed:number) {
     const g = new THREE.Group();
-    g.position.set(x, 0.16, z);
-    const dark = new THREE.MeshStandardMaterial({ color: kind==="spider" ? 0x2c2422 : kind==="beetle" ? 0x263f36 : 0x191817, roughness:0.78 });
-    const body = mesh(new THREE.SphereGeometry(kind==="spider"?0.48:0.25, 10, 7), dark, 0, kind==="spider"?0.28:0.18, 0);
-    body.scale.set(0.85,0.7,1.3);
-    g.add(body);
-    if (kind==="beetle") {
-      const shell = mesh(new THREE.SphereGeometry(0.31, 12, 8), new THREE.MeshStandardMaterial({ color:0x395f4e, metalness:0.35, roughness:0.4 }),0,0.27,0.08);
-      shell.scale.set(0.9,0.65,1.2); g.add(shell);
+    const isDragonfly = kind==="dragonfly";
+    const isFrog = kind==="frog";
+    const isMantis = kind==="mantis";
+    const isSpider = kind==="spider";
+    g.position.set(x, isDragonfly ? 2.5 : 0.16, z);
+
+    const dark = new THREE.MeshStandardMaterial({
+      color: isSpider ? 0x2c2422 : kind==="beetle" ? 0x263f36 : kind==="ant" ? 0x191817 : 0x30372a,
+      roughness:0.78,
+    });
+
+    if (isMantis) {
+      const green = new THREE.MeshStandardMaterial({ color:0x6f8b45, roughness:0.72 });
+      const thorax=mesh(new THREE.SphereGeometry(0.34,12,8),green,0,0.75,0); thorax.scale.set(0.75,1.1,1.25); g.add(thorax);
+      const abdomen=mesh(new THREE.SphereGeometry(0.38,12,8),green,0,0.72,0.7); abdomen.scale.set(0.72,0.7,1.45); g.add(abdomen);
+      const head=mesh(new THREE.SphereGeometry(0.28,12,8),green,0,1.12,-0.42); head.scale.set(1.05,0.8,0.9); g.add(head);
+      for(const side of [-1,1]){
+        const eye=mesh(new THREE.SphereGeometry(0.08,8,6),new THREE.MeshStandardMaterial({color:0x111714}),side*0.2,1.17,-0.56);g.add(eye);
+        const arm=mesh(new THREE.CylinderGeometry(0.035,0.025,1.25,7),green,side*0.38,0.75,-0.45);
+        arm.rotation.z=side*0.55; arm.rotation.x=0.35; g.add(arm);
+      }
+    } else if (isDragonfly) {
+      const blue = new THREE.MeshStandardMaterial({ color:0x2f6f7c, metalness:0.25, roughness:0.42 });
+      const wing = new THREE.MeshStandardMaterial({ color:0xd5eef0, transparent:true, opacity:0.42, side:THREE.DoubleSide, roughness:0.18 });
+      const thorax=mesh(new THREE.SphereGeometry(0.3,12,8),blue,0,0,0);g.add(thorax);
+      const abdomen=mesh(new THREE.CylinderGeometry(0.12,0.07,2.1,10),blue,0,0,0.95);abdomen.rotation.x=Math.PI/2;g.add(abdomen);
+      for(const side of [-1,1]){
+        for(const zOff of [-0.08,0.3]){
+          const w=mesh(new THREE.PlaneGeometry(1.7,0.45),wing,side*0.75,0.05,zOff);
+          w.rotation.z=side*0.12; w.rotation.y=side*0.18; g.add(w);
+        }
+      }
+      const head=mesh(new THREE.SphereGeometry(0.28,12,8),new THREE.MeshStandardMaterial({color:0x49695e}),0,0,-0.38);g.add(head);
+    } else if (isFrog) {
+      const frogMat=new THREE.MeshStandardMaterial({color:0x5a7d46,roughness:0.82});
+      const body=mesh(new THREE.SphereGeometry(0.72,14,10),frogMat,0,0.58,0);body.scale.set(1.2,0.7,1.0);g.add(body);
+      const head=mesh(new THREE.SphereGeometry(0.58,14,10),frogMat,0,0.68,-0.55);head.scale.set(1.05,0.75,0.9);g.add(head);
+      for(const side of [-1,1]){
+        const eye=mesh(new THREE.SphereGeometry(0.14,10,7),new THREE.MeshStandardMaterial({color:0xe2d68d}),side*0.32,1.03,-0.72);g.add(eye);
+        const pupil=mesh(new THREE.SphereGeometry(0.065,8,6),new THREE.MeshStandardMaterial({color:0x111111}),side*0.34,1.04,-0.84);g.add(pupil);
+        const leg=mesh(new THREE.CylinderGeometry(0.08,0.11,1.4,8),frogMat,side*0.66,0.3,0.45);leg.rotation.z=side*0.9;g.add(leg);
+      }
+    } else {
+      const body = mesh(new THREE.SphereGeometry(isSpider?0.55:0.25, 10, 7), dark, 0, isSpider?0.32:0.18, 0);
+      body.scale.set(0.85,0.7,1.3);
+      g.add(body);
+      if (kind==="beetle") {
+        const shell = mesh(new THREE.SphereGeometry(0.31, 12, 8), new THREE.MeshStandardMaterial({ color:0x395f4e, metalness:0.35, roughness:0.4 }),0,0.27,0.08);
+        shell.scale.set(0.9,0.65,1.2); g.add(shell);
+      }
+      const legCount = isSpider?8:6;
+      for(let i=0;i<legCount;i++){
+        const side=i%2?-1:1;
+        const row=Math.floor(i/2);
+        const limb=mesh(new THREE.CylinderGeometry(0.018,0.018,isSpider?1.05:0.45,6),dark,side*0.34,0.15,(row-(legCount/4-0.5))*0.18);
+        limb.rotation.z=side*(isSpider?1.0:0.85);
+        g.add(limb);
+      }
     }
-    const legCount = kind==="spider"?8:6;
-    for(let i=0;i<legCount;i++){
-      const side=i%2?-1:1;
-      const row=Math.floor(i/2);
-      const limb=mesh(new THREE.CylinderGeometry(0.018,0.018,kind==="spider"?0.9:0.45,6),dark,side*0.3,0.15,(row-(legCount/4-0.5))*0.18);
-      limb.rotation.z=side*(kind==="spider"?1.0:0.85);
-      g.add(limb);
-    }
+
     this.scene.add(g);
     const angle=(x*0.17+z*0.11)%6.28;
+    const dangerRadius =
+      isDragonfly ? 22 :
+      isMantis ? 13 :
+      isFrog ? 12 :
+      isSpider ? 11 : 0;
+    const captureRadius =
+      isDragonfly ? 0.85 :
+      isMantis ? 0.9 :
+      isFrog ? 1.15 :
+      isSpider ? 0.7 : 0;
+
     this.creatures.push({
       kind,node:g,direction:new THREE.Vector3(Math.cos(angle),0,Math.sin(angle)).normalize(),
-      speed,phase:Math.abs(x+z)*0.03,dangerRadius:kind==="spider"?10:0,
+      speed,phase:Math.abs(x+z)*0.03,dangerRadius,captureRadius,
     });
   }
 
@@ -498,12 +565,17 @@ export class OpenWorld {
   private nearestDanger() {
     let distance=Infinity, angle=0, strength=0;
     for(const c of this.creatures){
-      if(c.kind!=="spider") continue;
+      if(c.dangerRadius<=0) continue;
       const dx=c.node.position.x-this.fly.position.x;
+      const dy=c.node.position.y-this.fly.position.y;
       const dz=c.node.position.z-this.fly.position.z;
-      const d=Math.hypot(dx,dz);
-      if(d<distance){distance=d;angle=wrapAngle(Math.atan2(dx,-dz)-this.heading);}
-      strength=Math.max(strength,clamp01(1-d/c.dangerRadius));
+      const d=Math.hypot(dx,dy,dz);
+      const localStrength=clamp01(1-d/c.dangerRadius);
+      if(localStrength>strength){
+        strength=localStrength;
+        distance=d;
+        angle=wrapAngle(Math.atan2(dx,-dz)-this.heading);
+      }
     }
     if(this.birdPhase>=0 && this.birdPhase<8 && this.birdShadow){
       const dx=this.birdShadow.position.x-this.fly.position.x;
@@ -516,19 +588,56 @@ export class OpenWorld {
   }
 
   private updateCreatures(dt:number) {
+    this.predatorCooldown=Math.max(0,this.predatorCooldown-dt);
+
     for(const c of this.creatures){
       c.phase+=dt;
-      if(c.kind==="spider"){
-        const toFly=this.fly.position.clone().sub(c.node.position); toFly.y=0;
-        if(toFly.length()<14) c.direction.lerp(toFly.normalize(),dt*0.25).normalize();
-        else c.direction.applyAxisAngle(new THREE.Vector3(0,1,0),Math.sin(c.phase*0.8)*dt*0.15);
+      const toFly=this.fly.position.clone().sub(c.node.position);
+      const horizontal=new THREE.Vector3(toFly.x,0,toFly.z);
+      const horizontalDistance=horizontal.length();
+
+      if(c.dangerRadius>0 && horizontalDistance<c.dangerRadius*1.25){
+        if(horizontalDistance>0.001)c.direction.lerp(horizontal.normalize(),dt*(c.kind==="dragonfly"?1.4:0.65)).normalize();
       }else{
         c.direction.applyAxisAngle(new THREE.Vector3(0,1,0),Math.sin(c.phase*0.7)*dt*0.22);
       }
-      c.node.position.addScaledVector(c.direction,c.speed*dt);
+
+      const chaseBoost = c.dangerRadius>0 && horizontalDistance<c.dangerRadius ? 1.55 : 1;
+      c.node.position.addScaledVector(c.direction,c.speed*chaseBoost*dt);
+
+      if(c.kind==="dragonfly"){
+        const targetY=THREE.MathUtils.clamp(this.fly.position.y+0.5,1.8,10);
+        c.node.position.y=THREE.MathUtils.damp(c.node.position.y,targetY,2.4,dt);
+        for(const child of c.node.children){
+          if(child instanceof THREE.Mesh && child.geometry.type==="PlaneGeometry"){
+            child.rotation.x=Math.sin(c.phase*34)*0.22;
+          }
+        }
+      }else if(c.kind==="frog"){
+        c.node.position.y=0.16+Math.max(0,Math.sin(c.phase*3.2))*0.28;
+      }else{
+        c.node.position.y=0.16;
+      }
+
       if(Math.abs(c.node.position.x)>WORLD_HALF-5)c.direction.x*=-1;
       if(Math.abs(c.node.position.z)>WORLD_HALF-5)c.direction.z*=-1;
       c.node.rotation.y=Math.atan2(c.direction.x,c.direction.z);
+
+      if(c.captureRadius>0 && this.predatorCooldown<=0){
+        const captureDistance=c.node.position.distanceTo(this.fly.position);
+        if(captureDistance<c.captureRadius){
+          this.emit("caught by "+c.kind+" · respawning");
+          this.fly.position.set(0,2.6,12);
+          this.heading=0;
+          this.speed=2.2;
+          this.verticalSpeed=0.6;
+          this.mode="fly";
+          this.stateAge=0;
+          this.energy=72;
+          this.predatorCooldown=4;
+          this.takeoffs++;
+        }
+      }
     }
 
     if(this.birdPhase<0 && Math.floor(this.elapsed)%38===7 && this.elapsed>10){
@@ -717,21 +826,14 @@ export class OpenWorld {
   }
 
   private updateCamera(_dt:number) {
-    // Locked third-person camera: always the same offset directly behind the
-    // fly. No independent camera yaw, orbit, catch-up arc or cinematic spin.
-    const forward=new THREE.Vector3(Math.sin(this.heading),0,-Math.cos(this.heading));
+    // True world-space fixed third-person view.
+    // The camera and target translate by exactly the same vector as the fly,
+    // so camera yaw/pitch never orbit when the fly turns.
     const altitude=this.fly.position.y-GROUND_Y;
-    const behind=8.8;
-    const height=3.8+Math.min(2.2,altitude*0.18);
+    const fixedOffset=new THREE.Vector3(0,4.2+Math.min(1.5,altitude*0.12),9.2);
 
-    this.camera.position.copy(this.fly.position)
-      .addScaledVector(forward,-behind)
-      .add(new THREE.Vector3(0,height,0));
-
-    this.cameraLook.copy(this.fly.position)
-      .add(new THREE.Vector3(0,0.42,0))
-      .addScaledVector(forward,1.6);
-
+    this.camera.position.copy(this.fly.position).add(fixedOffset);
+    this.cameraLook.copy(this.fly.position).add(new THREE.Vector3(0,0.45,0));
     this.camera.lookAt(this.cameraLook);
   }
 
