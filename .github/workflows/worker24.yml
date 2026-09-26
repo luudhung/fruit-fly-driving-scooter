@@ -1,0 +1,30 @@
+name: Worker24 CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker24/**"
+      - "Dockerfile"
+      - "railway.json"
+      - ".github/workflows/worker24.yml"
+  pull_request:
+    paths:
+      - "worker24/**"
+      - "Dockerfile"
+      - "railway.json"
+      - ".github/workflows/worker24.yml"
+
+jobs:
+  cargo-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: worker24
+      - run: cargo check
