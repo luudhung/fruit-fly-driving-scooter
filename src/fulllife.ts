@@ -390,10 +390,10 @@ window.setInterval(fetchSnapshot, 1000);
 // ---------- Three.js city ----------
 const host = $("world");
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x91b6cf);
-scene.fog = new THREE.Fog(0x91b6cf, 90, 235);
+scene.background = new THREE.Color(0x93b8cf);
+scene.fog = new THREE.Fog(0x93b8cf, 210, 720);
 
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 1100);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -401,31 +401,31 @@ renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
 
-const hemi = new THREE.HemisphereLight(0xdff2ff, 0x33402d, 1.6);
+const hemi = new THREE.HemisphereLight(0xdff2ff, 0x33402d, 1.55);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffe6bd, 2.7);
-sun.position.set(-65, 90, 45);
+const sun = new THREE.DirectionalLight(0xffe6bd, 2.6);
+sun.position.set(-150, 190, 120);
 scene.add(sun);
 const moon = new THREE.DirectionalLight(0x7e9ddb, 0.1);
-moon.position.set(50, 60, -55);
+moon.position.set(130, 120, -150);
 scene.add(moon);
 
-const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 320, 1.4);
-weatherFlash.position.set(0, 95, 0);
+const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 420, 1.4);
+weatherFlash.position.set(0, 120, 0);
 scene.add(weatherFlash);
 
-const rainCount = 1600;
+const rainCount = 2200;
 const rainPositions = new Float32Array(rainCount * 3);
 for (let i = 0; i < rainCount; i += 1) {
-  rainPositions[i * 3] = (Math.random() - 0.5) * 190;
-  rainPositions[i * 3 + 1] = Math.random() * 95;
-  rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 190;
+  rainPositions[i * 3] = (Math.random() - 0.5) * 240;
+  rainPositions[i * 3 + 1] = Math.random() * 120;
+  rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 240;
 }
 const rainGeometry = new THREE.BufferGeometry();
 rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
 const rainMaterial = new THREE.PointsMaterial({
   color: 0xb9d8e8,
-  size: 0.19,
+  size: 0.18,
   transparent: true,
   opacity: 0,
   depthWrite: false,
@@ -436,36 +436,6 @@ scene.add(rain);
 let activeWeather: WeatherState = {};
 let nextLightningAt = 0;
 
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x53775b, roughness: 1 });
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), groundMat);
-ground.rotation.x = -Math.PI / 2;
-scene.add(ground);
-
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x252a2d, roughness: 0.96 });
-const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb1afa7, roughness: 1 });
-const laneMat = new THREE.MeshBasicMaterial({ color: 0xe1d8a9 });
-for (let i = -60; i <= 60; i += 30) {
-  const sideA = new THREE.Mesh(new THREE.BoxGeometry(14, 0.05, 154), sidewalkMat);
-  sideA.position.set(i, 0.03, 0);
-  scene.add(sideA);
-  const roadA = new THREE.Mesh(new THREE.BoxGeometry(9, 0.07, 154), roadMat);
-  roadA.position.set(i, 0.07, 0);
-  scene.add(roadA);
-  const lineA = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 154), laneMat);
-  lineA.position.set(i, 0.12, 0);
-  scene.add(lineA);
-
-  const sideB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.05, 14), sidewalkMat);
-  sideB.position.set(0, 0.031, i);
-  scene.add(sideB);
-  const roadB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.07, 9), roadMat);
-  roadB.position.set(0, 0.071, i);
-  scene.add(roadB);
-  const lineB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.01, 0.12), laneMat);
-  lineB.position.set(0, 0.121, i);
-  scene.add(lineB);
-}
-
 function seeded(n: number) {
   const x = Math.sin(n * 9283.17 + 17.13) * 43758.5453;
   return x - Math.floor(x);
@@ -473,44 +443,173 @@ function seeded(n: number) {
 
 const windowMaterials: THREE.MeshStandardMaterial[] = [];
 const streetLights: THREE.PointLight[] = [];
+const cityRoot = new THREE.Group();
+scene.add(cityRoot);
 
-function addBuilding(x: number, z: number, w: number, d: number, h: number, seed: number, special = false) {
+const WORLD_HALF = 285;
+const riverX = 122;
+const riverWidth = 34;
+const harborZ = 205;
+const harborDepth = 68;
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2),
+  new THREE.MeshStandardMaterial({ color: 0x6e8c68, roughness: 1 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.05;
+cityRoot.add(ground);
+
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x3f7f9f,
+  roughness: 0.35,
+  metalness: 0.12,
+  transparent: true,
+  opacity: 0.92,
+});
+const river = new THREE.Mesh(new THREE.PlaneGeometry(riverWidth, 470), waterMat);
+river.rotation.x = -Math.PI / 2;
+river.position.set(riverX, 0.015, -12);
+cityRoot.add(river);
+const harbor = new THREE.Mesh(new THREE.PlaneGeometry(350, harborDepth), waterMat);
+harbor.rotation.x = -Math.PI / 2;
+harbor.position.set(65, 0.018, harborZ);
+cityRoot.add(harbor);
+
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x242a2e, roughness: 0.97 });
+const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb6b5ad, roughness: 1 });
+const laneMat = new THREE.MeshBasicMaterial({ color: 0xe9dfb1 });
+const parkMat = new THREE.MeshStandardMaterial({ color: 0x4f8459, roughness: 1 });
+const plazaMat = new THREE.MeshStandardMaterial({ color: 0xc7c3b8, roughness: 1 });
+
+const avenueXs = [-102, -76, -50, -24, 2, 28, 54, 80, 106];
+const streetZs = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
+
+function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false) {
+  const sidewalk = new THREE.Mesh(new THREE.BoxGeometry(w + 5, 0.08, d + 5), sidewalkMat);
+  sidewalk.position.set(x, 0.02, z);
+  cityRoot.add(sidewalk);
+  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.11, d), roadMat);
+  road.position.set(x, 0.08, z);
+  cityRoot.add(road);
+
+  const marker = new THREE.Mesh(
+    new THREE.BoxGeometry(avenue ? 0.12 : w * 0.92, 0.012, avenue ? d * 0.92 : 0.12),
+    laneMat,
+  );
+  marker.position.set(x, 0.145, z);
+  cityRoot.add(marker);
+}
+
+for (const x of avenueXs) addRoadStrip(x, -5, 9.5, 332, true);
+for (const z of streetZs) addRoadStrip(2, z, 220, 9, false);
+
+// East-side river boulevard and suburban arterials.
+addRoadStrip(159, -5, 10, 336, true);
+addRoadStrip(-154, -2, 10, 365, true);
+for (const z of [-150, -100, -50, 0, 50, 100, 150]) {
+  addRoadStrip(-185, z, 135, 8, false);
+  addRoadStrip(195, z, 115, 8, false);
+}
+
+// Sydney-style bridges over Hansdrex River.
+function addBridge(z: number, width = 13) {
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(riverWidth + 34, 0.75, width),
+    new THREE.MeshStandardMaterial({ color: 0x4e5357, roughness: 0.82, metalness: 0.18 }),
+  );
+  deck.position.set(riverX, 2.1, z);
+  cityRoot.add(deck);
+
+  for (const sx of [-1, 1]) {
+    const tower = new THREE.Mesh(
+      new THREE.BoxGeometry(2.1, 15, 3),
+      new THREE.MeshStandardMaterial({ color: 0x6f7375, roughness: 0.7, metalness: 0.25 }),
+    );
+    tower.position.set(riverX + sx * 14, 9.4, z);
+    cityRoot.add(tower);
+  }
+}
+[-87, 0, 87].forEach((z) => addBridge(z));
+
+// Central Park and waterfront parks.
+const centralPark = new THREE.Mesh(new THREE.BoxGeometry(40, 0.08, 72), parkMat);
+centralPark.position.set(15, 0.04, -87);
+cityRoot.add(centralPark);
+const harborPark = new THREE.Mesh(new THREE.BoxGeometry(110, 0.08, 24), parkMat);
+harborPark.position.set(52, 0.04, 165);
+cityRoot.add(harborPark);
+const waterfrontPromenade = new THREE.Mesh(new THREE.BoxGeometry(12, 0.08, 350), plazaMat);
+waterfrontPromenade.position.set(99, 0.04, -5);
+cityRoot.add(waterfrontPromenade);
+
+function addTree(x: number, z: number, scale = 1) {
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12 * scale, 0.2 * scale, 1.8 * scale, 7),
+    new THREE.MeshStandardMaterial({ color: 0x624731, roughness: 1 }),
+  );
+  const crown = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.9 * scale, 1),
+    new THREE.MeshStandardMaterial({ color: 0x3f7652, roughness: 1 }),
+  );
+  trunk.position.set(x, 0.9 * scale, z);
+  crown.position.set(x, 2.15 * scale, z);
+  cityRoot.add(trunk, crown);
+}
+for (let i = 0; i < 80; i += 1) {
+  addTree(-2 + seeded(i + 20) * 34, -120 + seeded(i + 80) * 66, 0.8 + seeded(i + 140) * 0.5);
+}
+for (let i = 0; i < 36; i += 1) {
+  addTree(5 + seeded(i + 500) * 95, 155 + seeded(i + 600) * 20, 0.8 + seeded(i + 700) * 0.4);
+}
+
+function addBuilding(
+  x: number, z: number, w: number, d: number, h: number, seed: number,
+  options: { glass?: boolean; sign?: string; residential?: boolean } = {},
+) {
   const group = new THREE.Group();
-  const wallColor = [
-    0xb6afa1, 0x9da8a0, 0xc3b99d, 0x858f8c, 0xb7a6a0, 0xa1a7b3,
-  ][Math.floor(seeded(seed) * 6)];
+  const wallPalette = options.glass
+    ? [0x536b7b, 0x637f8e, 0x71828e]
+    : options.residential
+      ? [0xbcae9d, 0xc7b9a5, 0xa9b6ad, 0xbba9a4]
+      : [0xa5aaa6, 0xb9b3a7, 0x909b97, 0xb7a59d];
+  const wallColor = wallPalette[Math.floor(seeded(seed) * wallPalette.length)];
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.82, metalness: 0.02 }),
+    new THREE.MeshStandardMaterial({
+      color: wallColor,
+      roughness: options.glass ? 0.35 : 0.82,
+      metalness: options.glass ? 0.26 : 0.03,
+    }),
   );
   body.position.y = h / 2;
   group.add(body);
 
   const roof = new THREE.Mesh(
     new THREE.BoxGeometry(w + 0.35, 0.35, d + 0.35),
-    new THREE.MeshStandardMaterial({ color: 0x50585a, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x4c5558, roughness: 0.9 }),
   );
   roof.position.y = h + 0.18;
   group.add(roof);
 
-  const floorCount = Math.max(2, Math.floor(h / 3));
-  const colsX = Math.max(2, Math.floor(w / 2.6));
-  const colsZ = Math.max(2, Math.floor(d / 2.6));
-  const windowGeo = new THREE.BoxGeometry(0.95, 1.15, 0.08);
-  const sideWindowGeo = new THREE.BoxGeometry(0.08, 1.15, 0.95);
+  const floorCount = Math.max(2, Math.floor(h / 3.1));
+  const colsX = Math.max(2, Math.floor(w / 2.7));
+  const colsZ = Math.max(2, Math.floor(d / 2.7));
+  const windowGeo = new THREE.BoxGeometry(0.92, 1.12, 0.08);
+  const sideWindowGeo = new THREE.BoxGeometry(0.08, 1.12, 0.92);
 
   for (let floor = 0; floor < floorCount; floor += 1) {
-    const wy = 1.8 + floor * 2.8;
-    if (wy > h - 0.7) continue;
-    for (let c = 0; c < colsX; c += 1) {
-      const wx = -w / 2 + 1.3 + c * ((w - 2.6) / Math.max(1, colsX - 1));
+    const wy = 1.8 + floor * 2.9;
+    if (wy > h - 0.65) continue;
+    for (let col = 0; col < colsX; col += 1) {
+      const wx = -w / 2 + 1.25 + col * ((w - 2.5) / Math.max(1, colsX - 1));
       for (const face of [-1, 1]) {
         const mat = new THREE.MeshStandardMaterial({
-          color: 0x294351,
+          color: options.glass ? 0x3b596b : 0x294351,
           emissive: 0xffd77f,
-          emissiveIntensity: seeded(seed + floor * 17 + c * 7 + face) > 0.48 ? 0 : 0,
-          roughness: 0.3,
-          metalness: 0.25,
+          emissiveIntensity: 0,
+          roughness: options.glass ? 0.18 : 0.3,
+          metalness: options.glass ? 0.42 : 0.25,
         });
         windowMaterials.push(mat);
         const win = new THREE.Mesh(windowGeo, mat);
@@ -518,15 +617,15 @@ function addBuilding(x: number, z: number, w: number, d: number, h: number, seed
         group.add(win);
       }
     }
-    for (let c = 0; c < colsZ; c += 1) {
-      const wz = -d / 2 + 1.3 + c * ((d - 2.6) / Math.max(1, colsZ - 1));
+    for (let col = 0; col < colsZ; col += 1) {
+      const wz = -d / 2 + 1.25 + col * ((d - 2.5) / Math.max(1, colsZ - 1));
       for (const face of [-1, 1]) {
         const mat = new THREE.MeshStandardMaterial({
-          color: 0x294351,
+          color: options.glass ? 0x3b596b : 0x294351,
           emissive: 0xffd77f,
           emissiveIntensity: 0,
-          roughness: 0.3,
-          metalness: 0.25,
+          roughness: options.glass ? 0.18 : 0.3,
+          metalness: options.glass ? 0.42 : 0.25,
         });
         windowMaterials.push(mat);
         const win = new THREE.Mesh(sideWindowGeo, mat);
@@ -537,112 +636,322 @@ function addBuilding(x: number, z: number, w: number, d: number, h: number, seed
   }
 
   const door = new THREE.Mesh(
-    new THREE.BoxGeometry(1.45, 2.5, 0.12),
-    new THREE.MeshStandardMaterial({ color: special ? 0x5f3f2e : 0x3d342d, roughness: 0.75 }),
+    new THREE.BoxGeometry(1.35, 2.45, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x40362f, roughness: 0.75 }),
   );
-  door.position.set(0, 1.25, d / 2 + 0.07);
+  door.position.set(0, 1.23, d / 2 + 0.07);
   group.add(door);
-  const handle = new THREE.Mesh(
-    new THREE.SphereGeometry(0.07, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0xc7aa68, metalness: 0.75, roughness: 0.25 }),
-  );
-  handle.position.set(0.45, 1.25, d / 2 + 0.15);
-  group.add(handle);
+
+  if (options.sign) {
+    const sign = makeCanvasSprite(options.sign, 25, 1.25);
+    sign.position.set(0, Math.min(h + 2.8, 15), d / 2 + 0.45);
+    group.add(sign);
+  }
 
   group.position.set(x, 0, z);
-  scene.add(group);
+  cityRoot.add(group);
   return group;
 }
 
-let bseed = 1;
-for (let x = -52; x <= 52; x += 15) {
-  for (let z = -52; z <= 52; z += 15) {
-    if (Math.abs((x + 60) % 30) < 8 || Math.abs((z + 60) % 30) < 8) continue;
-    if (Math.hypot(x, z) < 17) continue;
-    const h = 9 + seeded(bseed++) * 23;
-    const w = 8 + seeded(bseed++) * 3.5;
-    const d = 8 + seeded(bseed++) * 3.5;
-    addBuilding(x, z, w, d, h, bseed++);
+// Manhattan-like blocks: buildings are placed inside blocks only, never on roads.
+let blockSeed = 1;
+for (let xi = 0; xi < avenueXs.length - 1; xi += 1) {
+  for (let zi = 0; zi < streetZs.length - 1; zi += 1) {
+    const x0 = avenueXs[xi] + 6.5;
+    const x1 = avenueXs[xi + 1] - 6.5;
+    const z0 = streetZs[zi] + 6.5;
+    const z1 = streetZs[zi + 1] - 6.5;
+    const cx = (x0 + x1) / 2;
+    const cz = (z0 + z1) / 2;
+
+    // Park reservation.
+    if (cx > -8 && cx < 38 && cz < -50 && cz > -125) continue;
+    // Waterfront setback.
+    if (x1 > 101) continue;
+
+    const distCore = Math.hypot(cx - 5, cz - 20);
+    const isCore = distCore < 82;
+    const isMid = distCore < 135;
+    const parcels = isCore ? 2 : 1;
+
+    for (let p = 0; p < parcels; p += 1) {
+      const pw = Math.max(7, (x1 - x0) / parcels - 2);
+      const px = x0 + pw / 2 + p * ((x1 - x0) / parcels);
+      const pd = Math.max(9, z1 - z0 - 2);
+      const height =
+        isCore ? 26 + seeded(blockSeed++) * 78 :
+        isMid ? 14 + seeded(blockSeed++) * 34 :
+        8 + seeded(blockSeed++) * 16;
+      addBuilding(
+        px, cz, pw, pd, height, blockSeed++,
+        { glass: isCore && seeded(blockSeed + 20) > 0.42, residential: !isCore },
+      );
+    }
   }
 }
 
-const specialBuildings = [
-  { x: -10, z: 6, w: 11, d: 9, h: 7 },
-  { x: 34, z: 6, w: 12, d: 10, h: 17 },
-  { x: -34, z: 9, w: 13, d: 11, h: 11 },
-  { x: 8, z: 37, w: 12, d: 10, h: 15 },
-  { x: -15, z: 37, w: 10, d: 9, h: 10 },
-  { x: 16, z: 12, w: 9, d: 8, h: 7 },
-  { x: 5, z: 20, w: 10, d: 8, h: 7 },
-  { x: -22, z: -15, w: 11, d: 9, h: 7 },
-  { x: 24, z: -17, w: 9, d: 8, h: 7 },
-  { x: 43, z: 25, w: 12, d: 10, h: 8 },
-  { x: -43, z: 23, w: 11, d: 9, h: 10 },
-  { x: -5, z: -42, w: 16, d: 12, h: 9 },
-  { x: 22, z: 43, w: 12, d: 10, h: 9 },
-  { x: 38, z: -8, w: 12, d: 10, h: 8 },
-];
-specialBuildings.forEach((b, i) => addBuilding(b.x, b.z, b.w, b.d, b.h, 900 + i * 13, true));
+// Outer low-rise suburbs. Houses stay in reserved lots between arterials.
+function addSuburbanHouse(x: number, z: number, seed: number, premium = false) {
+  const group = new THREE.Group();
+  const w = premium ? 8.5 : 6.5;
+  const d = premium ? 8 : 6;
+  const h = premium ? 5.4 : 4.2;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color: premium ? 0xd4c2a2 : 0xb8b0a2, roughness: 0.9 }),
+  );
+  body.position.y = h / 2;
+  group.add(body);
+  const roof = new THREE.Mesh(
+    new THREE.ConeGeometry(Math.max(w, d) * 0.72, premium ? 2.5 : 2, 4),
+    new THREE.MeshStandardMaterial({ color: 0x694d40, roughness: 0.95 }),
+  );
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = h + 1;
+  group.add(roof);
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 1.9, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0x4a352c, roughness: 0.8 }),
+  );
+  door.position.set(0, 0.95, d / 2 + 0.06);
+  group.add(door);
+  group.position.set(x, 0, z);
+  cityRoot.add(group);
+  addTree(x + w * 0.65, z + d * 0.4, 0.9);
+  return group;
+}
+let suburbSeed = 3000;
+for (const side of [-1, 1]) {
+  const baseX = side < 0 ? -215 : 205;
+  for (let row = -4; row <= 4; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      const x = baseX + side * col * 18;
+      const z = row * 34 + (col % 2) * 9;
+      if (side > 0 && Math.abs(x - riverX) < riverWidth + 28) continue;
+      addSuburbanHouse(x, z, suburbSeed++, seeded(suburbSeed) > 0.72);
+    }
+  }
+}
 
+// Hansdrex iconic skyline — stylized references, not exact architectural replicas.
+function addEmpireStyleTower(x: number, z: number) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x9c9b93, roughness: 0.7, metalness: 0.08 });
+  const tiers = [
+    [18, 18, 52, 26],
+    [13, 13, 26, 65],
+    [8, 8, 18, 87],
+  ];
+  for (const [w, d, h, y] of tiers) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.y = y;
+    g.add(m);
+  }
+  const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 1.8, 29, 10), mat);
+  spire.position.y = 111;
+  g.add(spire);
+  g.position.set(x, 0, z);
+  cityRoot.add(g);
+  const label = makeCanvasSprite("HANSDREX EMPIRE", 24, 1.5);
+  label.position.set(x, 130, z);
+  cityRoot.add(label);
+}
+addEmpireStyleTower(28, 28);
+
+function addCnStyleTower(x: number, z: number) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xb8b9b8, roughness: 0.55, metalness: 0.16 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 3.8, 96, 12), mat);
+  shaft.position.y = 48;
+  g.add(shaft);
+  const pod = new THREE.Mesh(new THREE.CylinderGeometry(8, 6, 7, 18), mat);
+  pod.position.y = 84;
+  g.add(pod);
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.7, 34, 8), mat);
+  antenna.position.y = 104;
+  g.add(antenna);
+  g.position.set(x, 0, z);
+  cityRoot.add(g);
+  const label = makeCanvasSprite("HANSDREX SKY TOWER", 22, 1.45);
+  label.position.set(x, 124, z);
+  cityRoot.add(label);
+}
+addCnStyleTower(88, 54);
+
+function addNeedleTower(x: number, z: number, height: number, labelText: string) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x75838c, roughness: 0.35, metalness: 0.32 });
+  for (let i = 0; i < 5; i += 1) {
+    const h = height * (0.24 - i * 0.025);
+    const w = 13 - i * 2;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
+    m.position.y = i * height * 0.15 + h / 2;
+    g.add(m);
+  }
+  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.7, height * 0.28, 8), mat);
+  needle.position.y = height * 0.88;
+  g.add(needle);
+  g.position.set(x, 0, z);
+  cityRoot.add(g);
+  const label = makeCanvasSprite(labelText, 20, 1.35);
+  label.position.set(x, height + 8, z);
+  cityRoot.add(label);
+}
+addNeedleTower(-45, 22, 105, "HANSDREX 101");
+addNeedleTower(65, -52, 125, "HANSDREX SPIRE");
+
+// Major destination buildings aligned to backend coordinates.
+const destinationBuildings = [
+  ["HANSDREX COFFEE", 22, 16, 12, 10, 12],
+  ["HANSDREX BANK", -52, 26, 15, 12, 31],
+  ["HANSDREX HOSPITAL", -82, 58, 20, 16, 27],
+  ["EAST HOSPITAL", 126, 48, 18, 15, 24],
+  ["HANSDREX NIGHT", 82, -20, 15, 13, 22],
+  ["SKY LOUNGE", 40, 44, 14, 12, 38],
+  ["HANSDREX HOTEL", 52, 48, 17, 14, 46],
+  ["RESEARCH LAB", 88, 62, 18, 14, 32],
+  ["HANSDREX SCHOOL", -16, 102, 22, 17, 18],
+  ["HANSDREX MARKET", -18, 10, 17, 14, 14],
+] as const;
+for (let i = 0; i < destinationBuildings.length; i += 1) {
+  const [label, x, z, w, d, h] = destinationBuildings[i];
+  addBuilding(x, z, w, d, h, 8000 + i, { glass: h > 25, sign: label });
+}
+
+// Industrial outer ring.
+const industrial = [
+  [-132, 88, 25, 18, 20, "SUGAR WORKS"],
+  [148, 118, 28, 20, 22, "MATERIALS"],
+  [78, 152, 28, 19, 18, "PACKAGING"],
+  [-42, -138, 31, 22, 19, "WAREHOUSE"],
+  [142, 102, 26, 20, 16, "BUILD YARD"],
+  [152, -112, 30, 20, 18, "TRANSIT DEPOT"],
+  [-148, -104, 27, 21, 17, "UTILITIES"],
+  [102, 148, 27, 20, 17, "RECYCLING"],
+] as const;
+for (let i = 0; i < industrial.length; i += 1) {
+  const [x, z, w, d, h, label] = industrial[i];
+  addBuilding(x, z, w, d, h, 9000 + i, { sign: label });
+}
+
+// Hansdrex Farm outside the dense grid.
 const farmSoil = new THREE.MeshStandardMaterial({ color: 0x6e5738, roughness: 1 });
 const cropMat = new THREE.MeshStandardMaterial({ color: 0x6f8f45, roughness: 1 });
-for (let row = 0; row < 6; row += 1) {
-  const soil = new THREE.Mesh(new THREE.BoxGeometry(22, 0.08, 1.5), farmSoil);
-  soil.position.set(-68, 0.08, -10 + row * 3.2);
-  scene.add(soil);
-  for (let col = 0; col < 11; col += 1) {
-    const crop = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.85, 6), cropMat);
-    crop.position.set(-78 + col * 2, 0.52, -10 + row * 3.2);
-    scene.add(crop);
+for (let row = 0; row < 9; row += 1) {
+  const soil = new THREE.Mesh(new THREE.BoxGeometry(36, 0.08, 1.6), farmSoil);
+  soil.position.set(-208, 0.08, -55 + row * 4);
+  cityRoot.add(soil);
+  for (let col = 0; col < 14; col += 1) {
+    const crop = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 6), cropMat);
+    crop.position.set(-225 + col * 2.55, 0.53, -55 + row * 4);
+    cityRoot.add(crop);
   }
 }
 
-
-const locationLabels = [
-  { name: "MARKET", x: -10, z: 6, y: 8 },
-  { name: "CAFE", x: 16, z: 12, y: 8 },
-  { name: "FARM", x: -68, z: -4, y: 5 },
-  { name: "BAKERY", x: 5, z: 20, y: 8 },
-  { name: "GROCERY", x: -22, z: -15, y: 8 },
-  { name: "SHOP", x: 24, z: -17, y: 8 },
-  { name: "GYM", x: 43, z: 25, y: 8 },
-  { name: "CLINIC", x: -15, z: 37, y: 11 },
-  { name: "GARAGE", x: 38, z: -8, y: 9 },
-  { name: "LAB", x: 8, z: 37, y: 16 },
-  { name: "WAREHOUSE", x: -5, z: -42, y: 10 },
-];
-for (const l of locationLabels) {
-  const s = makeCanvasSprite(l.name, 26, 1.4);
-  s.position.set(l.x, l.y, l.z);
-  scene.add(s);
-}
-
-
-const trunkMat = new THREE.MeshStandardMaterial({ color: 0x624731, roughness: 1 });
-const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7652, roughness: 1 });
-for (let i = 0; i < 55; i += 1) {
-  const x = -82 + seeded(i + 100) * 164;
-  const z = -82 + seeded(i + 200) * 164;
-  if (Math.abs((x + 60) % 30) < 8 || Math.abs((z + 60) % 30) < 8) continue;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, 1.8, 7), trunkMat);
-  const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 + seeded(i + 300) * 0.65, 1), leafMat);
-  trunk.position.set(x, 0.9, z);
-  crown.position.set(x, 2.2, z);
-  scene.add(trunk, crown);
-}
-
-for (let i = -54; i <= 54; i += 18) {
-  for (const z of [-7, 7]) {
+// Street trees and lights along main avenues.
+for (const x of avenueXs) {
+  for (let z = -150; z <= 150; z += 24) {
+    if (x > 95 && Math.abs(x - riverX) < 25) continue;
+    addTree(x + 7.2, z + 4, 0.72);
     const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.1, 3.5, 7),
+      new THREE.CylinderGeometry(0.07, 0.11, 4, 7),
       new THREE.MeshStandardMaterial({ color: 0x34383a, metalness: 0.5, roughness: 0.5 }),
     );
-    pole.position.set(i, 1.75, z);
-    scene.add(pole);
-    const bulb = new THREE.PointLight(0xffd59a, 0, 14, 2);
-    bulb.position.set(i, 3.4, z);
-    scene.add(bulb);
+    pole.position.set(x - 6.2, 2, z);
+    cityRoot.add(pole);
+    const bulb = new THREE.PointLight(0xffd59a, 0, 18, 2);
+    bulb.position.set(x - 6.2, 3.85, z);
+    cityRoot.add(bulb);
     streetLights.push(bulb);
+  }
+}
+
+// ---------- six elevated metro lines ----------
+type MetroTrain = {
+  group: THREE.Group;
+  curve: THREE.CatmullRomCurve3;
+  speed: number;
+  offset: number;
+};
+const metroTrains: MetroTrain[] = [];
+const metroTrackMat = new THREE.MeshStandardMaterial({ color: 0x5a6064, roughness: 0.5, metalness: 0.55 });
+const metroBeamMat = new THREE.MeshStandardMaterial({ color: 0x70777b, roughness: 0.65, metalness: 0.34 });
+
+const metroLines = [
+  { name: "M1", points: [[-150,0],[0,0],[142,0],[190,0]], height: 9.0 },
+  { name: "M2", points: [[0,-175],[0,-140],[0,0],[0,142],[0,175]], height: 10.0 },
+  { name: "M3", points: [[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]], height: 11.0 },
+  { name: "M4", points: [[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]], height: 12.0 },
+  { name: "M5", points: [[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]], height: 10.5 },
+  { name: "M6", points: [[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]], height: 11.5 },
+] as const;
+
+function addElevatedMetroLine(line: typeof metroLines[number], lineIndex: number) {
+  const pts = line.points.map(([x,z]) => new THREE.Vector3(x, line.height, z));
+  const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
+  const samples = curve.getPoints(100);
+
+  for (let i = 0; i < samples.length - 1; i += 1) {
+    const a = samples[i];
+    const b = samples[i + 1];
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const len = a.distanceTo(b);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.35, len + 0.15), metroTrackMat);
+    seg.position.copy(mid);
+    seg.lookAt(b);
+    cityRoot.add(seg);
+    if (i % 8 === 0) {
+      const support = new THREE.Mesh(new THREE.BoxGeometry(0.6, line.height, 0.6), metroBeamMat);
+      support.position.set(mid.x, line.height / 2, mid.z);
+      cityRoot.add(support);
+    }
+  }
+
+  for (let t = 0.08; t < 1; t += 0.18) {
+    const p = curve.getPoint(t);
+    const station = new THREE.Mesh(
+      new THREE.BoxGeometry(12, 0.65, 5.5),
+      new THREE.MeshStandardMaterial({ color: 0xb9bec0, roughness: 0.65, metalness: 0.18 }),
+    );
+    station.position.copy(p).add(new THREE.Vector3(0, -0.8, 0));
+    cityRoot.add(station);
+  }
+
+  const trainGroup = new THREE.Group();
+  for (let car = 0; car < 3; car += 1) {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(3.1, 2.3, 7.5),
+      new THREE.MeshStandardMaterial({
+        color: [0xd0d7db,0xd5cbc1,0xc8d3c3,0xc8c8d8,0xd7cfaa,0xbfd4d6][lineIndex],
+        roughness: 0.45,
+        metalness: 0.35,
+      }),
+    );
+    body.position.z = car * 8.1;
+    trainGroup.add(body);
+  }
+  cityRoot.add(trainGroup);
+  metroTrains.push({
+    group: trainGroup,
+    curve,
+    speed: 0.000012 + lineIndex * 0.0000015,
+    offset: lineIndex / metroLines.length,
+  });
+
+  const lineLabel = makeCanvasSprite(line.name, 26, 1.0);
+  const lp = curve.getPoint(0.5);
+  lineLabel.position.set(lp.x, lp.y + 4, lp.z);
+  cityRoot.add(lineLabel);
+}
+metroLines.forEach(addElevatedMetroLine);
+
+function updateMetroTrains(now: number) {
+  for (const train of metroTrains) {
+    const t = (train.offset + now * train.speed) % 1;
+    const p = train.curve.getPointAt(t);
+    const ahead = train.curve.getPointAt((t + 0.003) % 1);
+    train.group.position.copy(p);
+    train.group.lookAt(ahead);
   }
 }
 
