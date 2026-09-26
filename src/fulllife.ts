@@ -1,8 +1,53 @@
 import * as THREE from "three";
 
+type FlyState = {
+  id: string;
+  name: string;
+  sex: "F" | "M";
+  ageYears: number;
+  generation: number;
+  alive: boolean;
+  causeOfDeath?: string | null;
+  x: number; y: number; z: number;
+  vx: number; vz: number;
+  action: string;
+  currentLocationId: string;
+  targetLocationId: string;
+  hunger: number;
+  energy: number;
+  stress: number;
+  happiness: number;
+  excitement: number;
+  loneliness: number;
+  health: number;
+  money: number;
+  savings: number;
+  debt: number;
+  jobTitle?: string | null;
+  partnerId?: string | null;
+  affection: number;
+  flirtingWith?: string | null;
+  pregnant?: boolean;
+  children: string[];
+  parents: string[];
+  vehicle?: string | null;
+  ownsHome: boolean;
+  mentalHealthCrisis: boolean;
+  traits: Record<string, number>;
+};
+
+type LocationState = {
+  id: string;
+  type: string;
+  name: string;
+  x: number;
+  z: number;
+};
+
 type CivilizationSnapshot = {
   authoritative: boolean;
   simulationStatus?: string;
+  modelDisclosure?: string;
   worldId: string;
   experimentId: string;
   worldSeed: number | string;
@@ -10,30 +55,31 @@ type CivilizationSnapshot = {
   simulationTime: number;
   simulationAgeSeconds: number;
   timeScale: number;
+  day: number;
+  gameClock: string;
+  gameHour: number;
+  gameMinute: number;
   population: number;
   generation: number;
   births: number;
   deaths: number;
   foodReserve: number;
   moneySupply: number;
+  totalTransactions?: number;
+  daysPerYear?: number;
+  locations?: LocationState[];
+  flies?: FlyState[];
   selectedFly?: {
     id: string;
     neuralActivity?: number[];
     sensorySummary?: string;
     motorSummary?: string;
   } | null;
-  events: Array<{ id?: string; time?: string; text: string; source?: "simulation" | "human" }>;
-  versions?: {
-    worldEngineVersion?: string;
-    brainVersion?: string;
-    physicsVersion?: string;
-    geneticsVersion?: string;
-    economicVersion?: string;
-  };
+  events: Array<{ id?: string; time?: string; day?: number; text: string; source?: "simulation" | "human"; type?: string }>;
+  versions?: Record<string, string>;
 };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-
 const connection = $("connection");
 const connectionLabel = $("connection-label");
 const worldAge = $("world-age");
@@ -45,9 +91,27 @@ const deaths = $("deaths");
 const food = $("food");
 const money = $("money");
 const events = $("events");
-const experiment = $("experiment");
 const brainGrid = $("brain-grid");
 const brainNote = $("brain-note");
+const gameClockEl = $("game-clock");
+const gameDayEl = $("game-day");
+
+const flyIdEl = $("fly-id");
+const flyAgeEl = $("fly-age");
+const flyActionEl = $("fly-action");
+const flyJobEl = $("fly-job");
+const flyPartnerEl = $("fly-partner");
+const flyChildrenEl = $("fly-children");
+const flyMoneyEl = $("fly-money");
+const flyDebtEl = $("fly-debt");
+const flyStressEl = $("fly-stress");
+const flyHappyEl = $("fly-happy");
+const flyExciteEl = $("fly-excite");
+const flyHealthEl = $("fly-health");
+const stressMeter = $("stress-meter");
+const happyMeter = $("happy-meter");
+const exciteMeter = $("excite-meter");
+const healthMeter = $("health-meter");
 
 for (let i = 0; i < 100; i += 1) {
   const cell = document.createElement("div");
@@ -55,18 +119,16 @@ for (let i = 0; i < 100; i += 1) {
   brainGrid.appendChild(cell);
 }
 
+function num(value: number, digits = 0): string {
+  return Number.isFinite(value)
+    ? new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(value)
+    : "—";
+}
+
 function formatAge(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "—";
   const days = Math.floor(totalSeconds / 86400);
-  if (days >= 365) return `${Math.floor(days / 365)}y ${days % 365}d`;
-  if (days > 0) return `${days}d ${Math.floor((totalSeconds % 86400) / 3600)}h`;
-  const hours = Math.floor(totalSeconds / 3600);
-  if (hours > 0) return `${hours}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
-  return `${Math.floor(totalSeconds / 60)}m`;
-}
-
-function num(value: number): string {
-  return Number.isFinite(value) ? new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value) : "—";
+  return `Day ${days + 1}`;
 }
 
 function setConnection(state: "authoritative" | "offline" | "connecting", label: string) {
@@ -74,120 +136,167 @@ function setConnection(state: "authoritative" | "offline" | "connecting", label:
   connectionLabel.textContent = label;
 }
 
+const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-v2-production.up.railway.app").replace(/\/$/, "");
+let snapshot: CivilizationSnapshot | null = null;
+let selectedFlyId: string | null = null;
+let latestFlyStates = new Map<string, FlyState>();
+
+function renderInspector(fly: FlyState | null) {
+  if (!fly) {
+    flyIdEl.textContent = "click a fly";
+    flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
+      flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent =
+      flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
+    for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
+    return;
+  }
+  flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
+  flyAgeEl.textContent = `${fly.ageYears.toFixed(1)}y · ${fly.sex} · Gen ${fly.generation}`;
+  flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
+  flyJobEl.textContent = fly.jobTitle || (fly.ageYears < 18 ? "child" : fly.ageYears > 75 ? "retired" : "unemployed");
+  flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
+  flyChildrenEl.textContent = String(fly.children?.length || 0);
+  flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} FC`;
+  flyDebtEl.textContent = `${num(fly.debt, 1)} FC · ${fly.vehicle || "no vehicle"}`;
+  flyStressEl.textContent = `${num(fly.stress, 1)}%`;
+  flyHappyEl.textContent = `${num(fly.happiness, 1)}%`;
+  flyExciteEl.textContent = `${num(fly.excitement, 1)}%`;
+  flyHealthEl.textContent = `${num(fly.health, 1)}%`;
+  stressMeter.style.width = `${fly.stress}%`;
+  happyMeter.style.width = `${fly.happiness}%`;
+  exciteMeter.style.width = `${fly.excitement}%`;
+  healthMeter.style.width = `${fly.health}%`;
+
+  const activity = [
+    fly.stress / 100,
+    fly.hunger / 100,
+    fly.excitement / 100,
+    fly.happiness / 100,
+    fly.energy / 100,
+  ];
+  ([...brainGrid.children] as HTMLElement[]).forEach((cell, i) => {
+    const a = activity[i % activity.length] ?? 0;
+    cell.style.background = `rgba(102,227,157,${0.05 + a * 0.9})`;
+    cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.65})` : "none";
+  });
+  brainNote.textContent =
+    `${fly.id}: stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. Synthetic cognitive bands, not biological neural recordings.`;
+}
+
 function renderSnapshot(s: CivilizationSnapshot) {
-  const brainPending = s.simulationStatus === "WAITING_FOR_BRAIN_RUNTIME";
+  snapshot = s;
   setConnection(
     s.authoritative ? "authoritative" : "offline",
-    s.authoritative
-      ? (brainPending ? "PERSISTENT CORE LIVE · BRAIN PENDING" : "AUTHORITATIVE LIVE")
-      : "NON-AUTHORITATIVE",
+    s.authoritative ? "SYNTHETIC CIVILIZATION LIVE" : "NON-AUTHORITATIVE",
   );
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = num(s.population);
   generation.textContent = num(s.generation);
-  speed.textContent = `${num(s.timeScale)}×`;
+  speed.textContent = "1h = 1m";
   births.textContent = num(s.births);
   deaths.textContent = num(s.deaths);
   food.textContent = num(s.foodReserve);
-  money.textContent = `${num(s.moneySupply)} FC`;
+  money.textContent = `${num(s.moneySupply, 0)} FC`;
+  gameClockEl.textContent = s.gameClock || "--:--";
+  gameDayEl.textContent = `DAY ${s.day || 1}`;
 
-  const eventRows = (s.events || []).slice(-14).reverse();
-  events.replaceChildren(...eventRows.map((e) => {
+  const rows = (s.events || []).slice(-16).reverse();
+  events.replaceChildren(...rows.map((e) => {
     const row = document.createElement("div");
-    const prefix = e.source === "human" ? "[HUMAN INTERVENTION] " : "";
-    row.textContent = `${e.time ? e.time + " · " : ""}${prefix}${e.text}`;
+    const icon =
+      e.type === "birth" ? "🐣 " :
+      e.type === "relationship" ? "❤ " :
+      e.type === "flirt" ? "✨ " :
+      e.type === "breakup" ? "💔 " :
+      e.type === "accident" ? "⚠ " :
+      e.type === "death" ? "† " :
+      e.type === "job" ? "▣ " :
+      e.type === "vehicle_purchase" ? "◆ " : "";
+    row.textContent = `D${e.day ?? s.day} ${e.time || ""} · ${icon}${e.text}`;
     return row;
   }));
-  if (!eventRows.length) events.textContent = "No authoritative events yet.";
+  if (!rows.length) events.textContent = "Civilization is running; no recent events.";
 
-  const versions = s.versions || {};
-  experiment.replaceChildren(
-    ...[
-      `World: ${s.worldId || "—"}`,
-      `Experiment: ${s.experimentId || "—"}`,
-      `World seed: ${String(s.worldSeed ?? "—")}`,
-      `World engine: ${versions.worldEngineVersion || "—"}`,
-      `Brain: ${versions.brainVersion || "FlyWire / MANC baseline"}`,
-      `Physics: ${versions.physicsVersion || "—"}`,
-    ].map((text) => {
-      const div = document.createElement("div");
-      div.textContent = text;
-      return div;
-    }),
-  );
+  latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
+  syncFlyMeshes(s.flies || []);
+  updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0);
 
-  const cells = [...brainGrid.children] as HTMLElement[];
-  const neural = s.selectedFly?.neuralActivity || [];
-  cells.forEach((cell, i) => {
-    const a = Math.max(0, Math.min(1, neural[i] ?? 0));
-    cell.style.background = `rgba(102,227,157,${0.05 + a * 0.9})`;
-    cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.7})` : "none";
-  });
-  brainNote.textContent = s.selectedFly
-    ? `${s.selectedFly.id} · sensory: ${s.selectedFly.sensorySummary || "sampled"} · motor: ${s.selectedFly.motorSummary || "sampled"}`
-    : "No fly selected. Neural telemetry is sampled and must come from the real brain pipeline; this UI does not invent explanations.";
+  if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
+    renderInspector(latestFlyStates.get(selectedFlyId) || null);
+  } else {
+    const firstLiving = (s.flies || []).find((f) => f.alive) || null;
+    if (firstLiving && !selectedFlyId) selectedFlyId = firstLiving.id;
+    renderInspector(firstLiving);
+  }
 }
 
-const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-v2-production.up.railway.app").replace(/\/$/, "");
-
 async function fetchSnapshot() {
-  setConnection("connecting", "CONNECTING");
   try {
     const response = await fetch(`${apiBase}/api/civilization/state`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const snapshot = await response.json() as CivilizationSnapshot;
-    renderSnapshot(snapshot);
+    renderSnapshot(await response.json() as CivilizationSnapshot);
   } catch {
     setConnection("offline", "WORKER OFFLINE");
-    events.textContent = "No persistent civilization worker is connected yet. The UI will not fabricate offline progress.";
+    events.textContent = "Persistent civilization worker is unavailable.";
   }
 }
-
 void fetchSnapshot();
-window.setInterval(fetchSnapshot, 3000);
+window.setInterval(fetchSnapshot, 1000);
 
-// -----------------------------------------------------------------------------
-// Observer-only miniature city visualization.
-// This scene contains architecture/lighting only. It deliberately does NOT spawn
-// fake moving flies, traffic, births, transactions, or simulated events.
-// -----------------------------------------------------------------------------
+// ---------- Three.js city ----------
 const host = $("world");
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x07100e, 65, 230);
+scene.background = new THREE.Color(0x91b6cf);
+scene.fog = new THREE.Fog(0x91b6cf, 90, 235);
 
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 500);
-camera.position.set(58, 47, 72);
-camera.lookAt(0, 3, 0);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
+renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xcce8dd, 0x102018, 1.45));
-const sun = new THREE.DirectionalLight(0xffe7bd, 2.15);
-sun.position.set(-45, 85, 20);
+const hemi = new THREE.HemisphereLight(0xdff2ff, 0x33402d, 1.6);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffe6bd, 2.7);
+sun.position.set(-65, 90, 45);
 scene.add(sun);
+const moon = new THREE.DirectionalLight(0x7e9ddb, 0.1);
+moon.position.set(50, 60, -55);
+scene.add(moon);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(260, 260),
-  new THREE.MeshStandardMaterial({ color: 0x183229, roughness: 1 }),
-);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x53775b, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), groundMat);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x202724, roughness: 1 });
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x252a2d, roughness: 0.96 });
+const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb1afa7, roughness: 1 });
+const laneMat = new THREE.MeshBasicMaterial({ color: 0xe1d8a9 });
 for (let i = -60; i <= 60; i += 30) {
-  const roadA = new THREE.Mesh(new THREE.BoxGeometry(10, 0.08, 150), roadMat);
-  roadA.position.set(i, 0.05, 0);
+  const sideA = new THREE.Mesh(new THREE.BoxGeometry(14, 0.05, 154), sidewalkMat);
+  sideA.position.set(i, 0.03, 0);
+  scene.add(sideA);
+  const roadA = new THREE.Mesh(new THREE.BoxGeometry(9, 0.07, 154), roadMat);
+  roadA.position.set(i, 0.07, 0);
   scene.add(roadA);
-  const roadB = new THREE.Mesh(new THREE.BoxGeometry(150, 0.08, 10), roadMat);
-  roadB.position.set(0, 0.05, i);
+  const lineA = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 154), laneMat);
+  lineA.position.set(i, 0.12, 0);
+  scene.add(lineA);
+
+  const sideB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.05, 14), sidewalkMat);
+  sideB.position.set(0, 0.031, i);
+  scene.add(sideB);
+  const roadB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.07, 9), roadMat);
+  roadB.position.set(0, 0.071, i);
   scene.add(roadB);
+  const lineB = new THREE.Mesh(new THREE.BoxGeometry(154, 0.01, 0.12), laneMat);
+  lineB.position.set(0, 0.121, i);
+  scene.add(lineB);
 }
 
 function seeded(n: number) {
@@ -195,78 +304,333 @@ function seeded(n: number) {
   return x - Math.floor(x);
 }
 
-const buildingMats = [
-  new THREE.MeshStandardMaterial({ color: 0xc8d2c9, roughness: 0.9 }),
-  new THREE.MeshStandardMaterial({ color: 0x9cae9f, roughness: 0.9 }),
-  new THREE.MeshStandardMaterial({ color: 0xb7a98b, roughness: 0.95 }),
-  new THREE.MeshStandardMaterial({ color: 0x7e9187, roughness: 0.92 }),
-];
+const windowMaterials: THREE.MeshStandardMaterial[] = [];
+const streetLights: THREE.PointLight[] = [];
 
-let idx = 1;
+function addBuilding(x: number, z: number, w: number, d: number, h: number, seed: number, special = false) {
+  const group = new THREE.Group();
+  const wallColor = [
+    0xb6afa1, 0x9da8a0, 0xc3b99d, 0x858f8c, 0xb7a6a0, 0xa1a7b3,
+  ][Math.floor(seeded(seed) * 6)];
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.82, metalness: 0.02 }),
+  );
+  body.position.y = h / 2;
+  group.add(body);
+
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(w + 0.35, 0.35, d + 0.35),
+    new THREE.MeshStandardMaterial({ color: 0x50585a, roughness: 0.9 }),
+  );
+  roof.position.y = h + 0.18;
+  group.add(roof);
+
+  const floorCount = Math.max(2, Math.floor(h / 3));
+  const colsX = Math.max(2, Math.floor(w / 2.6));
+  const colsZ = Math.max(2, Math.floor(d / 2.6));
+  const windowGeo = new THREE.BoxGeometry(0.95, 1.15, 0.08);
+  const sideWindowGeo = new THREE.BoxGeometry(0.08, 1.15, 0.95);
+
+  for (let floor = 0; floor < floorCount; floor += 1) {
+    const wy = 1.8 + floor * 2.8;
+    if (wy > h - 0.7) continue;
+    for (let c = 0; c < colsX; c += 1) {
+      const wx = -w / 2 + 1.3 + c * ((w - 2.6) / Math.max(1, colsX - 1));
+      for (const face of [-1, 1]) {
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x294351,
+          emissive: 0xffd77f,
+          emissiveIntensity: seeded(seed + floor * 17 + c * 7 + face) > 0.48 ? 0 : 0,
+          roughness: 0.3,
+          metalness: 0.25,
+        });
+        windowMaterials.push(mat);
+        const win = new THREE.Mesh(windowGeo, mat);
+        win.position.set(wx, wy, face * (d / 2 + 0.045));
+        group.add(win);
+      }
+    }
+    for (let c = 0; c < colsZ; c += 1) {
+      const wz = -d / 2 + 1.3 + c * ((d - 2.6) / Math.max(1, colsZ - 1));
+      for (const face of [-1, 1]) {
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x294351,
+          emissive: 0xffd77f,
+          emissiveIntensity: 0,
+          roughness: 0.3,
+          metalness: 0.25,
+        });
+        windowMaterials.push(mat);
+        const win = new THREE.Mesh(sideWindowGeo, mat);
+        win.position.set(face * (w / 2 + 0.045), wy, wz);
+        group.add(win);
+      }
+    }
+  }
+
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(1.45, 2.5, 0.12),
+    new THREE.MeshStandardMaterial({ color: special ? 0x5f3f2e : 0x3d342d, roughness: 0.75 }),
+  );
+  door.position.set(0, 1.25, d / 2 + 0.07);
+  group.add(door);
+  const handle = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xc7aa68, metalness: 0.75, roughness: 0.25 }),
+  );
+  handle.position.set(0.45, 1.25, d / 2 + 0.15);
+  group.add(handle);
+
+  group.position.set(x, 0, z);
+  scene.add(group);
+  return group;
+}
+
+let bseed = 1;
 for (let x = -52; x <= 52; x += 15) {
   for (let z = -52; z <= 52; z += 15) {
     if (Math.abs((x + 60) % 30) < 8 || Math.abs((z + 60) % 30) < 8) continue;
-    const h = 7 + seeded(idx++) * 24;
-    const w = 7 + seeded(idx++) * 4;
-    const d = 7 + seeded(idx++) * 4;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildingMats[Math.floor(seeded(idx++) * buildingMats.length)]);
-    mesh.position.set(x, h / 2, z);
-    scene.add(mesh);
+    if (Math.hypot(x, z) < 17) continue;
+    const h = 9 + seeded(bseed++) * 23;
+    const w = 8 + seeded(bseed++) * 3.5;
+    const d = 8 + seeded(bseed++) * 3.5;
+    addBuilding(x, z, w, d, h, bseed++);
   }
 }
 
-const park = new THREE.Group();
-for (let i = 0; i < 34; i += 1) {
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.18, 1.7, 6),
-    new THREE.MeshStandardMaterial({ color: 0x664f38 }),
-  );
-  const crown = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.9 + seeded(i + 300) * 0.5, 1),
-    new THREE.MeshStandardMaterial({ color: 0x3d7652, roughness: 1 }),
-  );
-  const x = -76 + seeded(i + 100) * 30;
-  const z = -35 + seeded(i + 200) * 70;
-  trunk.position.set(x, 0.85, z);
-  crown.position.set(x, 2.1, z);
-  park.add(trunk, crown);
-}
-scene.add(park);
+const specialBuildings = [
+  { x: -9, z: 5, w: 11, d: 9, h: 7 },
+  { x: 31, z: 5, w: 12, d: 10, h: 17 },
+  { x: -31, z: 8, w: 13, d: 11, h: 11 },
+  { x: 8, z: 34, w: 12, d: 10, h: 15 },
+  { x: -13, z: 34, w: 10, d: 9, h: 10 },
+  { x: 15, z: 11, w: 9, d: 8, h: 7 },
+];
+specialBuildings.forEach((b, i) => addBuilding(b.x, b.z, b.w, b.d, b.h, 900 + i * 13, true));
 
-let targetYaw = -0.55;
-let targetPitch = 0.42;
-let distance = 98;
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x624731, roughness: 1 });
+const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7652, roughness: 1 });
+for (let i = 0; i < 55; i += 1) {
+  const x = -82 + seeded(i + 100) * 164;
+  const z = -82 + seeded(i + 200) * 164;
+  if (Math.abs((x + 60) % 30) < 8 || Math.abs((z + 60) % 30) < 8) continue;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, 1.8, 7), trunkMat);
+  const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85 + seeded(i + 300) * 0.65, 1), leafMat);
+  trunk.position.set(x, 0.9, z);
+  crown.position.set(x, 2.2, z);
+  scene.add(trunk, crown);
+}
+
+for (let i = -54; i <= 54; i += 18) {
+  for (const z of [-7, 7]) {
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.1, 3.5, 7),
+      new THREE.MeshStandardMaterial({ color: 0x34383a, metalness: 0.5, roughness: 0.5 }),
+    );
+    pole.position.set(i, 1.75, z);
+    scene.add(pole);
+    const bulb = new THREE.PointLight(0xffd59a, 0, 14, 2);
+    bulb.position.set(i, 3.4, z);
+    scene.add(bulb);
+    streetLights.push(bulb);
+  }
+}
+
+// ---------- fly rendering ----------
+type FlyVisual = {
+  group: THREE.Group;
+  target: THREE.Vector3;
+  current: THREE.Vector3;
+  halo: THREE.Mesh;
+};
+
+const flyVisuals = new Map<string, FlyVisual>();
+const flyPickables: THREE.Object3D[] = [];
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x33261f, roughness: 0.55 });
+const abdomenMat = new THREE.MeshStandardMaterial({ color: 0x5a3f2a, roughness: 0.65 });
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0xa51e24, emissive: 0x440000, emissiveIntensity: 0.6 });
+const wingMat = new THREE.MeshStandardMaterial({
+  color: 0xdcecff,
+  transparent: true,
+  opacity: 0.48,
+  roughness: 0.15,
+  metalness: 0,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+
+function createFlyVisual(id: string): FlyVisual {
+  const group = new THREE.Group();
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), bodyMat);
+  thorax.scale.set(1, 0.82, 1.05);
+  thorax.userData.flyId = id;
+  group.add(thorax);
+
+  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.38, 12, 10), abdomenMat);
+  abdomen.scale.set(0.9, 0.78, 1.35);
+  abdomen.position.z = 0.52;
+  abdomen.userData.flyId = id;
+  group.add(abdomen);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), bodyMat);
+  head.position.z = -0.48;
+  head.userData.flyId = id;
+  group.add(head);
+
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 9, 7), eyeMat);
+    eye.position.set(sx * 0.22, 0.05, -0.7);
+    eye.userData.flyId = id;
+    group.add(eye);
+
+    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 14), wingMat);
+    wing.scale.set(1.35, 0.55, 1);
+    wing.rotation.set(Math.PI / 2.7, 0, sx * 0.72);
+    wing.position.set(sx * 0.42, 0.26, 0.06);
+    wing.userData.flyId = id;
+    group.add(wing);
+  }
+
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(0.62, 0.82, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffe48a, transparent: true, opacity: 0, side: THREE.DoubleSide }),
+  );
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = -0.58;
+  group.add(halo);
+
+  group.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh && obj !== halo) flyPickables.push(obj);
+  });
+  scene.add(group);
+  return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo };
+}
+
+function syncFlyMeshes(flies: FlyState[]) {
+  const active = new Set<string>();
+  for (const fly of flies) {
+    if (!fly.alive) continue;
+    active.add(fly.id);
+    let visual = flyVisuals.get(fly.id);
+    if (!visual) {
+      visual = createFlyVisual(fly.id);
+      visual.current.set(fly.x, fly.y, fly.z);
+      visual.group.position.copy(visual.current);
+      flyVisuals.set(fly.id, visual);
+    }
+    visual.target.set(fly.x, fly.y, fly.z);
+    const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
+    visual.group.scale.setScalar(ageScale);
+    visual.halo.material.opacity = selectedFlyId === fly.id ? 0.85 : 0;
+    if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
+      visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
+    }
+  }
+
+  for (const [id, visual] of flyVisuals) {
+    if (!active.has(id)) {
+      scene.remove(visual.group);
+      flyVisuals.delete(id);
+    }
+  }
+}
+
+function updateDayNight(hour: number, minute: number) {
+  const t = hour + minute / 60;
+  const sunHeight = Math.sin(((t - 6) / 24) * Math.PI * 2);
+  const daylight = THREE.MathUtils.clamp((sunHeight + 0.18) * 1.2, 0.04, 1);
+  const night = 1 - daylight;
+
+  const dayColor = new THREE.Color(0x91b6cf);
+  const duskColor = new THREE.Color(t > 17 && t < 20 ? 0xd28c6a : 0x11182d);
+  const sky = dayColor.clone().lerp(duskColor, night);
+  scene.background = sky;
+  (scene.fog as THREE.Fog).color.copy(sky);
+
+  hemi.intensity = 0.22 + daylight * 1.45;
+  sun.intensity = daylight * 2.8;
+  moon.intensity = night * 0.55;
+  sun.position.set(Math.cos((t / 24) * Math.PI * 2) * 80, Math.max(-12, sunHeight * 95), Math.sin((t / 24) * Math.PI * 2) * 80);
+
+  windowMaterials.forEach((m, i) => {
+    const occupied = seeded(i * 1.73 + Math.floor(t * 2)) > 0.4;
+    m.emissiveIntensity = night * (occupied ? 1.5 : 0.08);
+    m.color.setHex(night > 0.5 && occupied ? 0x6e5b43 : 0x294351);
+  });
+  streetLights.forEach((l) => { l.intensity = night * 5.2; });
+}
+
+let targetYaw = -0.72;
+let targetPitch = 0.46;
+let distance = 112;
 let dragging = false;
+let moved = false;
 let lastX = 0;
 let lastY = 0;
+const orbitTarget = new THREE.Vector3(0, 4, 0);
 
 renderer.domElement.addEventListener("pointerdown", (e) => {
   dragging = true;
+  moved = false;
   lastX = e.clientX;
   lastY = e.clientY;
+  renderer.domElement.style.cursor = "grabbing";
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener("pointermove", (e) => {
   if (!dragging) return;
-  targetYaw -= (e.clientX - lastX) * 0.003;
-  targetPitch = Math.max(0.16, Math.min(1.1, targetPitch + (e.clientY - lastY) * 0.0025));
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+  targetYaw -= dx * 0.003;
+  targetPitch = Math.max(0.12, Math.min(1.18, targetPitch + dy * 0.0025));
   lastX = e.clientX;
   lastY = e.clientY;
 });
-renderer.domElement.addEventListener("pointerup", () => { dragging = false; });
+renderer.domElement.addEventListener("pointerup", () => {
+  dragging = false;
+  renderer.domElement.style.cursor = "grab";
+});
 renderer.domElement.addEventListener("wheel", (e) => {
-  distance = Math.max(45, Math.min(170, distance + e.deltaY * 0.05));
+  distance = Math.max(26, Math.min(180, distance + e.deltaY * 0.06));
 }, { passive: true });
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+renderer.domElement.addEventListener("click", (e) => {
+  if (moved) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObjects(flyPickables, false)[0];
+  const id = hit?.object?.userData?.flyId as string | undefined;
+  if (!id) return;
+  selectedFlyId = id;
+  const fly = latestFlyStates.get(id) || null;
+  renderInspector(fly);
+  for (const [fid, visual] of flyVisuals) visual.halo.material.opacity = fid === id ? 0.85 : 0;
+  if (fly) orbitTarget.set(fly.x, Math.max(2, fly.y), fly.z);
+});
 
 function animate() {
   requestAnimationFrame(animate);
+
+  for (const visual of flyVisuals.values()) {
+    visual.current.lerp(visual.target, 0.09);
+    visual.group.position.copy(visual.current);
+    const wingBeat = Math.sin(performance.now() * 0.035) * 0.08;
+    visual.group.rotation.z = wingBeat;
+  }
+
   const cp = Math.cos(targetPitch);
   camera.position.set(
-    Math.sin(targetYaw) * cp * distance,
-    Math.sin(targetPitch) * distance,
-    Math.cos(targetYaw) * cp * distance,
+    orbitTarget.x + Math.sin(targetYaw) * cp * distance,
+    orbitTarget.y + Math.sin(targetPitch) * distance,
+    orbitTarget.z + Math.cos(targetYaw) * cp * distance,
   );
-  camera.lookAt(0, 3, 0);
+  camera.lookAt(orbitTarget);
   renderer.render(scene, camera);
 }
 animate();
