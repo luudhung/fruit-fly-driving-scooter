@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fly Civilization — Full Life</title>
+  <meta name="description" content="Read-only observer for the autonomous fruit-fly civilization experiment." />
+  <style>
+    :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.78);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.55);--ok:#66e39d;--warn:#f0c56a}
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    #world{position:fixed;inset:0;background:
+      radial-gradient(circle at 50% 25%,rgba(64,120,90,.12),transparent 34%),
+      linear-gradient(180deg,#0b1714 0%,#07100e 100%)}
+    #world canvas{width:100%;height:100%;display:block}
+    .topbar{position:fixed;z-index:10;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+    .brand,.status,.card{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(18px);box-shadow:0 18px 48px rgba(0,0,0,.24)}
+    .brand{padding:11px 13px;border-radius:14px}
+    .brand b{font-size:16px;letter-spacing:-.025em}
+    .brand small{display:block;margin-top:4px;font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+    .status{margin-left:auto;padding:9px 11px;border-radius:999px;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.07em;display:flex;align-items:center;gap:7px}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 12px rgba(240,197,106,.7)}
+    .status[data-state="authoritative"] .dot{background:var(--ok);box-shadow:0 0 12px rgba(102,227,157,.7)}
+    .status[data-state="offline"] .dot{background:#ef6b6b;box-shadow:0 0 12px rgba(239,107,107,.7)}
+    .left{position:fixed;z-index:9;left:14px;top:78px;width:min(360px,calc(100vw - 28px));display:grid;gap:10px}
+    .right{position:fixed;z-index:9;right:14px;top:78px;width:min(330px,calc(100vw - 28px));display:grid;gap:10px}
+    .card{border-radius:16px;overflow:hidden}
+    .head{padding:10px 12px;border-bottom:1px solid var(--line);font:850 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line)}
+    .stat{padding:11px 12px;background:rgba(7,16,14,.92)}
+    .stat span{display:block;font-size:9px;color:var(--muted);margin-bottom:5px}
+    .stat b{font:850 16px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .events{padding:10px 12px;max-height:180px;overflow:auto;display:grid;gap:6px;font:600 9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(236,245,241,.67)}
+    .brain-grid{padding:10px 12px;display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+    .neuron{aspect-ratio:1;border-radius:3px;background:rgba(255,255,255,.06)}
+    .legend{padding:0 12px 11px;font-size:9px;line-height:1.45;color:var(--muted)}
+    .bottom{position:fixed;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);width:min(760px,calc(100vw - 28px))}
+    .notice{padding:10px 12px;border-radius:14px;font-size:9px;line-height:1.45;color:rgba(236,245,241,.62)}
+    .notice b{color:#fff}
+    @media(max-width:900px){.right{display:none}.left{top:74px}.bottom{bottom:8px}.brand small{display:none}}
+  </style>
+</head>
+<body>
+  <div id="world"></div>
+  <div class="topbar">
+    <div class="brand"><b>Fly Civilization — Full Life</b><small>read-only autonomous civilization observer</small></div>
+    <div class="status" id="connection" data-state="connecting"><span class="dot"></span><span id="connection-label">CONNECTING</span></div>
+  </div>
+
+  <aside class="left">
+    <section class="card">
+      <div class="head">Civilization</div>
+      <div class="stats">
+        <div class="stat"><span>World age</span><b id="world-age">—</b></div>
+        <div class="stat"><span>Population</span><b id="population">—</b></div>
+        <div class="stat"><span>Generation</span><b id="generation">—</b></div>
+        <div class="stat"><span>Simulation speed</span><b id="speed">—</b></div>
+        <div class="stat"><span>Births</span><b id="births">—</b></div>
+        <div class="stat"><span>Deaths</span><b id="deaths">—</b></div>
+        <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
+        <div class="stat"><span>Money supply</span><b id="money">—</b></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="head">Observed events</div>
+      <div class="events" id="events"><div>Waiting for authoritative event stream…</div></div>
+    </section>
+  </aside>
+
+  <aside class="right">
+    <section class="card">
+      <div class="head">Selected brain activity</div>
+      <div class="brain-grid" id="brain-grid"></div>
+      <div class="legend" id="brain-note">No fly selected. Neural telemetry is sampled and must come from the real brain pipeline; this UI does not invent explanations.</div>
+    </section>
+    <section class="card">
+      <div class="head">Experiment identity</div>
+      <div class="events" id="experiment">
+        <div>World seed: —</div>
+        <div>Brain: FlyWire / MANC baseline</div>
+        <div>Mode: observer only</div>
+      </div>
+    </section>
+  </aside>
+
+  <div class="bottom">
+    <div class="card notice"><b>Scientific honesty:</b> this page never fabricates 24/7 progress. Until a persistent simulation worker is connected, the status remains offline/local and closing the browser stops any local-only visualization.</div>
+  </div>
+
+  <script type="module" src="/src/fulllife.ts"></script>
+</body>
+</html>
