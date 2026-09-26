@@ -828,17 +828,9 @@ for (let row = 0; row < 7; row += 1) {
 
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
-  for (let z = -150; z <= 150; z += 48) {
+  for (let z = -150; z <= 150; z += 72) {
     if (x > 95 && Math.abs(x - riverX) < 25) continue;
     addTree(x + 7.2, z + 4, 0.72);
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.07, 0.11, 4, 7),
-      new THREE.MeshStandardMaterial({ color: 0x34383a, metalness: 0.5, roughness: 0.5 }),
-    );
-    pole.position.set(x - 6.2, 2, z);
-    cityRoot.add(pole);
-    // Point lights are intentionally omitted in performance mode; 100+ dynamic lights
-    // were one of the largest GPU costs on integrated/mobile GPUs.
   }
 }
 
@@ -865,22 +857,18 @@ const metroLines = [
 function addElevatedMetroLine(line: typeof metroLines[number], lineIndex: number) {
   const pts = line.points.map(([x,z]) => new THREE.Vector3(x, line.height, z));
   const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
-  const samples = curve.getPoints(28);
+  // One low-poly tube per metro line replaces dozens of individual track boxes.
+  const track = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 28, 0.82, 4, false),
+    metroTrackMat,
+  );
+  cityRoot.add(track);
 
-  for (let i = 0; i < samples.length - 1; i += 1) {
-    const a = samples[i];
-    const b = samples[i + 1];
-    const mid = a.clone().add(b).multiplyScalar(0.5);
-    const len = a.distanceTo(b);
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.35, len + 0.15), metroTrackMat);
-    seg.position.copy(mid);
-    seg.lookAt(b);
-    cityRoot.add(seg);
-    if (i % 8 === 0) {
-      const support = new THREE.Mesh(new THREE.BoxGeometry(0.6, line.height, 0.6), metroBeamMat);
-      support.position.set(mid.x, line.height / 2, mid.z);
-      cityRoot.add(support);
-    }
+  for (let t = 0.1; t < 1; t += 0.2) {
+    const p = curve.getPoint(t);
+    const support = new THREE.Mesh(new THREE.BoxGeometry(0.6, line.height, 0.6), metroBeamMat);
+    support.position.set(p.x, line.height / 2, p.z);
+    cityRoot.add(support);
   }
 
   for (let t = 0.08; t < 1; t += 0.18) {
@@ -920,6 +908,14 @@ function addElevatedMetroLine(line: typeof metroLines[number], lineIndex: number
   cityRoot.add(lineLabel);
 }
 metroLines.forEach(addElevatedMetroLine);
+
+// Most city objects never move. Freeze their local matrices so Three.js does not
+// rebuild hundreds of static transforms every rendered frame.
+cityRoot.traverse((obj) => {
+  obj.updateMatrix();
+  obj.matrixAutoUpdate = false;
+});
+for (const train of metroTrains) train.group.matrixAutoUpdate = true;
 
 function updateMetroTrains(now: number) {
   for (const train of metroTrains) {
@@ -1060,6 +1056,11 @@ function createFlyVisual(id: string): FlyVisual {
   group.add(status);
 
   flyPickables.push(thorax, abdomen);
+  // Child geometry is static relative to the fly; only the parent group moves.
+  group.children.forEach((child) => {
+    child.updateMatrix();
+    child.matrixAutoUpdate = false;
+  });
   scene.add(group);
   return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status };
 }
