@@ -16,6 +16,7 @@ export default defineConfig({
         bench: resolve(__dirname, "bench.html"),
         motorbike: resolve(__dirname, "motorbike.html"),
         upstream: resolve(__dirname, "upstream.html"),
+        openworld: resolve(__dirname, "openworld.html"),
       },
     },
   },
