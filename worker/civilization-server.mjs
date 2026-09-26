@@ -11,6 +11,8 @@ const GAME_SECONDS_PER_REAL_SECOND = Number(process.env.CIV_TIME_SCALE || 60);
 const INITIAL_POPULATION = Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || 40));
 const MAX_POPULATION = Math.max(INITIAL_POPULATION, Number(process.env.CIV_MAX_POPULATION || 180));
 const DATABASE_URL = process.env.DATABASE_URL;
+const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
+const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(process.env.NEURAL_SYNC_INTERVAL_MS || 1000));
 const CHECKPOINT_EVERY_MS = 5000;
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
 
@@ -83,6 +85,8 @@ const clients = new Set();
 let state = null;
 let tickBusy = false;
 let checkpointAt = 0;
+let neuralSyncBusy = false;
+let lastNeuralSyncAt = 0;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -170,6 +174,27 @@ function createBrainInstance(flyId, mother = null, father = null) {
     decisionCount: 0,
     lastDecision: "resting",
     lastConfidence: 0.5,
+    fullConnectome: {
+      connected: false,
+      lastSyncAt: 0,
+      neuralStepsTotal: 0,
+      activeNeurons: 0,
+      activity: 0,
+      locomotionX: 0,
+      locomotionZ: 0,
+      approachDrive: 0,
+      avoidDrive: 0,
+      socialDrive: 0,
+      restDrive: 0,
+      exploreDrive: 0,
+      consumeDrive: 0,
+      motorDrive: 0,
+      confidence: 0,
+      fullConnectome: false,
+      neurons: 0,
+      edges: 0,
+      steppedThisSync: false,
+    },
   };
 }
 
@@ -471,6 +496,27 @@ async function initDb() {
       fly.brain.dynamic = fly.brain.dynamic || { fatigue: 0.2, arousal: 0.35, curiosity: 0.5, rewardExpectation: 0, stressLoad: 0.2 };
       fly.brain.plasticity = fly.brain.plasticity || { learningRate: 0.36, noveltyBias: 0.48, socialBias: 0.5, riskBias: 0.42, persistence: 0.58 };
       fly.brain.rngState = Number(fly.brain.rngState || fly.brain.seed || hashText(fly.id)) >>> 0;
+      fly.brain.fullConnectome = fly.brain.fullConnectome || {
+        connected: false,
+        lastSyncAt: 0,
+        neuralStepsTotal: 0,
+        activeNeurons: 0,
+        activity: 0,
+        locomotionX: 0,
+        locomotionZ: 0,
+        approachDrive: 0,
+        avoidDrive: 0,
+        socialDrive: 0,
+        restDrive: 0,
+        exploreDrive: 0,
+        consumeDrive: 0,
+        motorDrive: 0,
+        confidence: 0,
+        fullConnectome: false,
+        neurons: 0,
+        edges: 0,
+        steppedThisSync: false,
+      };
       fly.homeTier = Number(fly.homeTier || (fly.ownsHome ? 1 : 0));
       if (!Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) {
         const base = location(fly.homeId);
@@ -521,6 +567,135 @@ function nearestCompatiblePartner(fly) {
   return bestScore > 0.55 ? best : null;
 }
 
+
+function neuralDrive(fly, key) {
+  const fc = fly.brain?.fullConnectome;
+  if (!fc?.connected) return 0;
+  const value = Number(fc[key] || 0);
+  return Number.isFinite(value) ? clamp(value, 0, 1) : 0;
+}
+
+function applyFullConnectomeBias(fly, action, utility) {
+  const fc = fly.brain?.fullConnectome;
+  if (!fc?.connected) return utility;
+
+  const approach = neuralDrive(fly, "approachDrive");
+  const avoid = neuralDrive(fly, "avoidDrive");
+  const social = neuralDrive(fly, "socialDrive");
+  const rest = neuralDrive(fly, "restDrive");
+  const explore = neuralDrive(fly, "exploreDrive");
+  const consume = neuralDrive(fly, "consumeDrive");
+  const motor = neuralDrive(fly, "motorDrive");
+
+  let neural = 0;
+  if (action.includes("food") || action.includes("meal") || action.includes("grocer")) neural += consume * 38;
+  if (action.includes("social") || action.includes("cafe")) neural += social * 38;
+  if (action.includes("rest") || action.includes("home") || action.includes("sleep")) neural += rest * 42;
+  if (action.includes("walk") || action.includes("explor") || action.includes("exercise")) neural += explore * 30 + motor * 14;
+  if (action.includes("work") || action.includes("school")) neural += approach * 28 + motor * 12;
+  if (action.includes("care")) neural += avoid * 22 + approach * 10;
+  if (action.includes("smoke")) neural += avoid * 15 + rest * 16;
+  neural -= avoid * (action.includes("work") || action.includes("exercise") ? 10 : 0);
+
+  return utility * 0.58 + neural;
+}
+
+function socialSignalFor(fly) {
+  if (fly.partnerId) return 1;
+  if (fly.flirtingWith) return 0.82;
+  return clamp(1 - fly.loneliness / 130 + fly.traits.sociability * 0.35, 0, 1);
+}
+
+async function syncFullConnectomeBrains() {
+  if (!state || neuralSyncBusy || Date.now() - lastNeuralSyncAt < NEURAL_SYNC_INTERVAL_MS) return;
+  neuralSyncBusy = true;
+  lastNeuralSyncAt = Date.now();
+
+  try {
+    const agents = state.flies
+      .filter((fly) => fly.alive && fly.brain?.id)
+      .map((fly) => {
+        const target = fly.targetLocationId === fly.homeId
+          ? { x: fly.homeX ?? fly.x, z: fly.homeZ ?? fly.z }
+          : location(fly.targetLocationId);
+        return {
+          brain_id: fly.brain.id,
+          parent_brain_ids: fly.brain.lineage?.parentBrainIds || [],
+          hunger: fly.hunger,
+          energy: fly.energy,
+          stress: fly.stress,
+          happiness: fly.happiness,
+          excitement: fly.excitement,
+          loneliness: fly.loneliness,
+          health: fly.health,
+          target_dx: (target?.x ?? fly.x) - fly.x,
+          target_dz: (target?.z ?? fly.z) - fly.z,
+          social_signal: socialSignalFor(fly),
+          reward: clamp(fly.brain.dynamic?.rewardExpectation || 0, -1, 1),
+          sleeping: fly.action?.includes("rest") && (gameClock().hour >= 22 || gameClock().hour < 6),
+        };
+      });
+
+    if (!agents.length) return;
+
+    const response = await fetch(`${FLYWIRE_BRAIN_URL}/civilization/brains/sync`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ agents }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!response.ok) throw new Error(`FlyWire worker HTTP ${response.status}`);
+    const payload = await response.json();
+    const outputs = Array.isArray(payload.outputs) ? payload.outputs : [];
+
+    const byId = new Map(state.flies.map((fly) => [fly.brain?.id, fly]));
+    for (const output of outputs) {
+      const fly = byId.get(output.brain_id);
+      if (!fly?.brain) continue;
+      fly.brain.fullConnectome = {
+        connected: true,
+        lastSyncAt: Date.now(),
+        neuralStepsTotal: Number(output.neural_steps_total || 0),
+        activeNeurons: Number(output.active_neurons || 0),
+        activity: Number(output.activity || 0),
+        locomotionX: Number(output.locomotion_x || 0),
+        locomotionZ: Number(output.locomotion_z || 0),
+        approachDrive: Number(output.approach_drive || 0),
+        avoidDrive: Number(output.avoid_drive || 0),
+        socialDrive: Number(output.social_drive || 0),
+        restDrive: Number(output.rest_drive || 0),
+        exploreDrive: Number(output.explore_drive || 0),
+        consumeDrive: Number(output.consume_drive || 0),
+        motorDrive: Number(output.motor_drive || 0),
+        confidence: Number(output.confidence || 0),
+        fullConnectome: Boolean(output.full_connectome),
+        neurons: Number(output.neurons || 0),
+        edges: Number(output.edges || 0),
+        steppedThisSync: Boolean(output.stepped_this_sync),
+        regionActivity: output.region_activity || [],
+      };
+    }
+
+    state.neuralBridge = {
+      connected: true,
+      topologyShared: Boolean(payload.topology_shared),
+      independentDynamicState: Boolean(payload.independent_dynamic_state),
+      registeredBrains: Number(payload.registered_brains || 0),
+      steppedBrains: Number(payload.stepped_brains || 0),
+      schedulerCursor: Number(payload.scheduler_cursor || 0),
+      lastSyncAt: Date.now(),
+    };
+  } catch (error) {
+    state.neuralBridge = {
+      connected: false,
+      error: String(error),
+      lastSyncAt: Date.now(),
+    };
+  } finally {
+    neuralSyncBusy = false;
+  }
+}
+
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
   updateBrainDynamics(fly);
@@ -530,7 +705,8 @@ function brainChooseAction(fly, clock) {
     const learned = Number(brain.memory.locationReward[id] || 0) * 4;
     const novelty = brain.dynamic.curiosity * brain.plasticity.noveltyBias * brainRange(fly, -1.2, 2.4);
     const noise = brainRange(fly, -2.5, 2.5);
-    candidates.push({ id, action, utility: utility + learned + novelty + noise });
+    const combined = applyFullConnectomeBias(fly, action, utility + learned + novelty + noise);
+    candidates.push({ id, action, utility: combined });
   };
 
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.58 + (clock.hour >= 22 || clock.hour < 6 ? 65 : 0));
@@ -612,9 +788,16 @@ function moveFly(fly) {
     return;
   }
   const vehicleBoost = fly.vehicle === "compact car" ? 2.5 : fly.vehicle === "scooter" ? 2.0 : 1;
-  const speed = (0.55 + fly.energy / 260) * vehicleBoost;
-  fly.vx = (dx / dist) * speed;
-  fly.vz = (dz / dist) * speed;
+  const fc = fly.brain?.fullConnectome;
+  const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
+  const neuralTurn = fc?.connected ? clamp(Number(fc.locomotionX || 0), -1, 1) : 0;
+  const speed = (0.42 + fly.energy / 320 + neuralMotor * 0.42) * vehicleBoost;
+  const baseX = dx / dist;
+  const baseZ = dz / dist;
+  const steer = neuralTurn * 0.22;
+  const norm = Math.hypot(baseX + steer * baseZ, baseZ - steer * baseX) || 1;
+  fly.vx = ((baseX + steer * baseZ) / norm) * speed;
+  fly.vz = ((baseZ - steer * baseX) / norm) * speed;
   fly.x += fly.vx;
   fly.z += fly.vz;
   fly.y = 1.4 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.3;
@@ -722,14 +905,16 @@ function payAndFinance(fly, clock) {
 }
 
 function romanceUtility(a, b) {
+  const neuralA = neuralDrive(a, "socialDrive") * 0.20 + neuralDrive(a, "approachDrive") * 0.12 - neuralDrive(a, "avoidDrive") * 0.10;
   const compatibility =
-    (1 - Math.abs(a.traits.sociability - b.traits.sociability)) * 0.22 +
+    (1 - Math.abs(a.traits.sociability - b.traits.sociability)) * 0.18 +
     (1 - Math.abs(a.traits.empathy - b.traits.empathy)) * 0.22 +
     b.traits.attractiveness * 0.18 +
     a.traits.sociability * 0.10 +
     a.traits.empathy * 0.10 +
     (a.loneliness / 100) * 0.10 +
-    (a.excitement / 100) * 0.08;
+    (a.excitement / 100) * 0.06 +
+    neuralA;
   const stressPenalty = (a.stress / 100) * 0.22;
   return clamp(compatibility - stressPenalty, 0, 1);
 }
@@ -1078,6 +1263,25 @@ function compactFly(f) {
     brainParentIds: f.brain?.lineage?.parentBrainIds || [],
     brainDecisionCount: Number(f.brain?.decisionCount || 0),
     brainMemoryCount: Number(f.brain?.memory?.episodes?.length || 0),
+    fullConnectome: f.brain?.fullConnectome ? {
+      connected: Boolean(f.brain.fullConnectome.connected),
+      fullConnectome: Boolean(f.brain.fullConnectome.fullConnectome),
+      neurons: Number(f.brain.fullConnectome.neurons || 0),
+      edges: Number(f.brain.fullConnectome.edges || 0),
+      neuralStepsTotal: Number(f.brain.fullConnectome.neuralStepsTotal || 0),
+      activeNeurons: Number(f.brain.fullConnectome.activeNeurons || 0),
+      activity: Number(f.brain.fullConnectome.activity || 0),
+      confidence: Number(f.brain.fullConnectome.confidence || 0),
+      steppedThisSync: Boolean(f.brain.fullConnectome.steppedThisSync),
+      approachDrive: Number(f.brain.fullConnectome.approachDrive || 0),
+      avoidDrive: Number(f.brain.fullConnectome.avoidDrive || 0),
+      socialDrive: Number(f.brain.fullConnectome.socialDrive || 0),
+      restDrive: Number(f.brain.fullConnectome.restDrive || 0),
+      exploreDrive: Number(f.brain.fullConnectome.exploreDrive || 0),
+      consumeDrive: Number(f.brain.fullConnectome.consumeDrive || 0),
+      motorDrive: Number(f.brain.fullConnectome.motorDrive || 0),
+      regionActivity: f.brain.fullConnectome.regionActivity || [],
+    } : null,
     brainDynamic: f.brain ? {
       fatigue: Number((f.brain.dynamic?.fatigue ?? 0).toFixed(3)),
       arousal: Number((f.brain.dynamic?.arousal ?? 0).toFixed(3)),
@@ -1102,7 +1306,7 @@ function getState() {
   return {
     authoritative: true,
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
-    modelDisclosure: "Every fly has its own unique persistent brainId, RNG stream, dynamic state, plasticity and memory. Offspring receive a brand-new independent brain instance; only inherited predispositions/traits and parent brain lineage IDs are carried forward. This is still a synthetic brain model, not a biological FlyWire connectome clone per fly.",
+    modelDisclosure: "Each fly has a unique brainId and an independent full-connectome neural-state buffer (membrane voltage, refractory state, synaptic state, spikes and sensory input) in the FlyWire Rust worker. The immutable FlyWire topology/weights are shared once. Offspring get a fresh dynamic neural state; no parent neural activity or memory buffer is reused. Full-connectome brains are CPU time-sliced round-robin, so they do not all advance at biological real-time simultaneously.",
     worldId: WORLD_ID,
     experimentId: EXPERIMENT_ID,
     worldSeed: String(WORLD_SEED),
@@ -1121,6 +1325,7 @@ function getState() {
     foodReserve: state.foodReserve,
     moneySupply,
     totalTransactions: state.totalTransactions,
+    neuralBridge: state.neuralBridge || { connected: false },
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
     flies: state.flies.map(compactFly),
@@ -1151,6 +1356,7 @@ async function tick() {
       state.simulationAgeSeconds += GAME_SECONDS_PER_REAL_SECOND;
       const clock = gameClock();
       for (const fly of state.flies) tickFly(fly, clock);
+      void syncFullConnectomeBrains();
 
       // periodic city-wide events
       if (clock.hour === 6 && clock.minute < 2 && rand() < 0.12) {
