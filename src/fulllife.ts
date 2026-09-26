@@ -145,7 +145,7 @@ function setConnection(state: "authoritative" | "offline" | "connecting", label:
   connectionLabel.textContent = label;
 }
 
-const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-v2-production.up.railway.app").replace(/\/$/, "");
+const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-production.up.railway.app").replace(/\/$/, "");
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
 let latestFlyStates = new Map<string, FlyState>();
