@@ -57,6 +57,7 @@ function tick(){
   behavior.innerHTML=
     '<b>'+modeLabel(t.mode)+'</b>'+
     '<span>energy '+Math.round(t.energy)+'%</span>'+
+    '<span>hunger '+pct(t.hunger)+'</span>'+
     '<span>odor '+pct(t.foodOdor)+'</span>'+
     '<span>danger '+pct(t.danger)+'</span>';
 
@@ -72,6 +73,7 @@ function tick(){
     '<div><span>brain feed</span><b>'+t.brainFeed.toFixed(2)+'</b></div>',
     '<div><span>DN activity</span><b>'+t.brainActivity.toFixed(4)+'</b></div>',
     '<div><span>food consumed</span><b>'+t.foodEaten.toFixed(1)+'</b></div>',
+    '<div><span>food patches</span><b>'+t.resourcePatches+'</b></div>',
     '<div><span>takeoff / land</span><b>'+t.takeoffs+' / '+t.landings+'</b></div>',
     '<div class="wide"><span>FlyWire</span><b>'+fmt(latestBrain.neurons)+' neurons · '+fmt(latestBrain.edges)+' edges</b></div>',
     '<div class="wide"><span>MANC</span><b>'+fmt(latestBrain.vncNeurons)+' neurons · '+fmt(latestBrain.vncEdges)+' edges</b></div>',
