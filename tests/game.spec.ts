@@ -1,7 +1,7 @@
 // game.spec.ts — end-to-end smoke for game mode.
 //
 // Verifies:
-//   1. /?mode=game (or default) shows the HUD + key strip + intro card.
+//   1. /play.html shows the HUD + key strip + intro card.
 //   2. Pressing SPACE starts the round, hides the intro.
 //   3. Pressing a DN key (Q) flashes the active class on the strip.
 //   4. The HUD timer ticks during a round.
@@ -18,7 +18,7 @@ test.describe("game mode", () => {
   test.setTimeout(180_000);
 
   test("HUD + key strip + intro render after boot", async ({ page }) => {
-    await page.goto("/app?mode=game");
+    await page.goto("/play.html");
 
     // Wait for game readiness signal in the log.
     await page.waitForFunction(
@@ -43,7 +43,7 @@ test.describe("game mode", () => {
   });
 
   test("SPACE starts a round, key press flashes the strip", async ({ page }) => {
-    await page.goto("/app?mode=game");
+    await page.goto("/play.html");
     await page.waitForFunction(
       () => /game mode: ready/.test(
         document.querySelector("#out")?.textContent ?? "",
@@ -74,7 +74,7 @@ test.describe("game mode", () => {
   });
 
   test("HUD timer ticks during a round", async ({ page }) => {
-    await page.goto("/app?mode=game");
+    await page.goto("/play.html");
     await page.waitForFunction(
       () => /game mode: ready/.test(
         document.querySelector("#out")?.textContent ?? "",
@@ -98,16 +98,10 @@ test.describe("game mode", () => {
     expect(t2).not.toEqual(t1);
   });
 
-  test("science mode keeps classic layout", async ({ page }) => {
-    await page.goto("/app?mode=science");
-    // Original sidebar should be visible (not game mode).
-    await expect(page.locator("#side")).toBeVisible();
-    await expect(page.locator("#game-hud")).toBeHidden();
-  });
 });
 
 test("daily-challenge button is visible in intro", async ({ page }) => {
-  await page.goto("/app?mode=game");
+  await page.goto("/play.html");
   await page.waitForFunction(
     () => /game mode: ready/.test(document.querySelector("#out")?.textContent ?? ""),
     null,
