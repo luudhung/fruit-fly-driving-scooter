@@ -32,7 +32,8 @@
     "deploy:hf": "npm run build:slim && cp space/README.md space/.gitattributes NOTICE LICENSE LICENSE-FLYBODY LIMITATIONS.md dist/ && rm -f dist/_headers && hf upload abgunaydin/webgpu-fly dist . --repo-type=space",
     "deploy:vercel": "npm run build && vercel --prod",
     "deploy:r2": "bash tools/upload_to_r2.sh",
-    "prebuild": "node tools/prepare-vercel-assets.mjs"
+    "prebuild": "node tools/prepare-vercel-assets.mjs",
+    "start:civilization": "node worker/civilization-server.mjs"
   },
   "license": "MIT",
   "devDependencies": {
@@ -45,6 +46,7 @@
   "dependencies": {
     "@mujoco/mujoco": "^3.8.0",
     "@types/three": "^0.184.0",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "pg": "^8.13.1"
   }
 }
