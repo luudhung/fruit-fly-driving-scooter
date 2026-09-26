@@ -19,6 +19,7 @@ const MAP_VERSION = 2;
 const CURRENCY_CODE = "WC";
 const CURRENCY_NAME = "Hansdrex WingCoin";
 const CITY_NAME = "Hansdrex City of Fruit Fly";
+const WEATHER_UPDATE_GAME_SECONDS = 45 * 60;
 
 if (!DATABASE_URL) {
   console.error("[civilization] DATABASE_URL is required.");
@@ -462,6 +463,92 @@ function createFly(index, parents = null) {
   };
 }
 
+function makeWeather(previous = null) {
+  const roll = rand();
+  let condition =
+    roll < 0.46 ? "clear" :
+    roll < 0.68 ? "cloudy" :
+    roll < 0.86 ? "rain" :
+    roll < 0.95 ? "heavy_rain" : "thunderstorm";
+
+  if (previous?.condition === "thunderstorm" && rand() < 0.62) condition = "heavy_rain";
+  if (previous?.condition === "heavy_rain" && rand() < 0.45) condition = "rain";
+
+  const precipitation =
+    condition === "thunderstorm" ? randRange(0.78, 1) :
+    condition === "heavy_rain" ? randRange(0.55, 0.85) :
+    condition === "rain" ? randRange(0.2, 0.58) : 0;
+  const wind =
+    condition === "thunderstorm" ? randRange(0.72, 1) :
+    condition === "heavy_rain" ? randRange(0.45, 0.8) :
+    condition === "rain" ? randRange(0.25, 0.6) :
+    randRange(0.05, 0.34);
+  const cloudCover =
+    condition === "clear" ? randRange(0.02, 0.24) :
+    condition === "cloudy" ? randRange(0.45, 0.75) :
+    randRange(0.7, 1);
+  const temperatureC = randRange(18, 34) - precipitation * 4;
+  const scenicPotential = clamp((1 - cloudCover) * 0.75 + (condition === "cloudy" ? 0.22 : 0) + randRange(-0.12, 0.18), 0, 1);
+
+  return {
+    condition,
+    precipitation,
+    wind,
+    cloudCover,
+    temperatureC,
+    scenicPotential,
+    startedAt: state?.simulationAgeSeconds || 0,
+    nextChangeAt: (state?.simulationAgeSeconds || 0) + WEATHER_UPDATE_GAME_SECONDS * randRange(0.7, 1.5),
+    lightning: condition === "thunderstorm" ? randRange(0.45, 1) : 0,
+  };
+}
+
+function weatherDanger() {
+  const w = state?.weather;
+  if (!w) return 0;
+  return clamp(
+    Number(w.precipitation || 0) * 0.52 +
+    Number(w.wind || 0) * 0.38 +
+    Number(w.lightning || 0) * 0.32,
+    0,
+    1,
+  );
+}
+
+function weatherLabel(weather = state?.weather) {
+  if (!weather) return "clear";
+  return String(weather.condition || "clear").replaceAll("_", " ");
+}
+
+function isSunsetWindow(clock = gameClock()) {
+  return clock.hour === 17 || clock.hour === 18;
+}
+
+function sunsetQuality() {
+  if (!isSunsetWindow()) return 0;
+  const w = state.weather;
+  if (!w) return 0.5;
+  if (w.condition === "thunderstorm" || w.condition === "heavy_rain") return 0.05;
+  return clamp(Number(w.scenicPotential || 0.5) * (1 - Number(w.precipitation || 0) * 0.7), 0, 1);
+}
+
+function updateWeather(clock) {
+  if (!state.weather) state.weather = makeWeather();
+  if (state.simulationAgeSeconds >= Number(state.weather.nextChangeAt || 0)) {
+    const previous = state.weather.condition;
+    state.weather = makeWeather(state.weather);
+    emit("weather", `Hansdrex weather changed from ${String(previous).replaceAll("_"," ")} to ${weatherLabel()}.`, {
+      previous,
+      weather: state.weather,
+    });
+  }
+
+  state.weather.sunset = {
+    active: isSunsetWindow(clock),
+    quality: sunsetQuality(),
+  };
+}
+
 function freshState() {
   const s = {
     worldId: WORLD_ID,
@@ -491,8 +578,10 @@ function freshState() {
     economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 },
     mapVersion: MAP_VERSION,
     currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
+    weather: null,
   };
   state = s;
+  state.weather = makeWeather();
   for (let i = 0; i < INITIAL_POPULATION; i += 1) state.flies.push(createFly(i));
   s.generation = 1;
   return s;
@@ -591,6 +680,7 @@ async function initDb() {
     state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 };
     state.mapVersion = MAP_VERSION;
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
+    state.weather = state.weather || makeWeather();
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
     state.nextBrainId = Number(state.nextBrainId || (state.flies.length + 1));
@@ -848,12 +938,13 @@ function nearestTransitStation(x, z) {
 
 function chooseTravelMode(fly, dest) {
   const distance = Math.hypot(dest.x - fly.x, dest.z - fly.z);
-  if (distance < 38) return "walk";
+  const danger = weatherDanger();
+  if (distance < 38 && danger < 0.48) return "walk";
   if (fly.vehicle === "compact car" && fly.money > 1.2 && neuralDrive(fly, "avoidDrive") < 0.84) return "car";
   if (fly.vehicle === "scooter" && fly.money > 0.6 && distance < 150) return "scooter";
   const from = nearestTransitStation(fly.x, fly.z);
   const to = nearestTransitStation(dest.x, dest.z);
-  if (distance > 68 && from.station && to.station && fly.money >= 1.5) {
+  if ((distance > 68 || danger >= 0.48) && from.station && to.station && fly.money >= 1.5) {
     if (!fly.transitPass) {
       fly.money -= 1.5;
       fly.expensesLifetime += 1.5;
@@ -1048,6 +1139,19 @@ function brainChooseAction(fly, clock) {
     }
   }
 
+  const danger = weatherDanger();
+  if (danger > 0.46) {
+    add(fly.homeId, "sheltering from bad weather", danger * 110 + fly.traits.risk * -12 + neuralDrive(fly, "avoidDrive") * 36);
+    if (fly.currentLocationId !== "metro-central") {
+      add("metro-central", "taking sheltered metro", danger * 72 + neuralDrive(fly, "avoidDrive") * 24);
+    }
+  }
+
+  const sunset = sunsetQuality();
+  if (sunset > 0.48 && !fly.illness && fly.energy > 25 && fly.stress > 22) {
+    add("park", "watching Hansdrex sunset", sunset * 72 + fly.stress * 0.24 + neuralDrive(fly, "exploreDrive") * 18);
+  }
+
   const startup = startupReadiness(fly);
   if (startup > 0.50 && fly.money + fly.savings > 180) {
     add("bank", "planning a business at Hansdrex Bank", startup * 105 + fly.traits.ambition * 18);
@@ -1189,12 +1293,18 @@ function moveFly(fly) {
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
   const baseSpeed = (0.42 + fly.energy / 320 + neuralMotor * 0.42) * vehicleBoost;
+  const danger = weatherDanger();
+  const weatherFactor =
+    fly.transitMode === "metro" ? 1 :
+    fly.transitMode === "car" ? (1 - danger * 0.18) :
+    fly.transitMode === "scooter" ? (1 - danger * 0.42) :
+    (1 - danger * 0.58);
 
   // Goal direction is authoritative. Neural motor output may alter effort,
   // but can no longer rotate the fly away from its committed destination.
   const ux = dx / dist;
   const uz = dz / dist;
-  const step = Math.min(baseSpeed, dist);
+  const step = Math.min(Math.max(0.08, baseSpeed * weatherFactor), dist);
   fly.vx = ux * step;
   fly.vz = uz * step;
   fly.x += fly.vx;
@@ -1621,6 +1731,43 @@ function mentalHealthAndMortality(fly) {
     return;
   }
 
+  const danger = weatherDanger();
+  if (fly.traveling && danger > 0.35 && fly.transitMode !== "metro") {
+    const exposure =
+      fly.transitMode === "car" ? 0.22 :
+      fly.transitMode === "scooter" ? 1.0 : 0.72;
+    const weatherAccidentRisk = danger * exposure * 0.0000055;
+    if (brainRand(fly) < weatherAccidentRisk) {
+      const severe = brainRand(fly) < 0.08 + danger * 0.16 + fly.traits.risk * 0.08;
+      if (severe) {
+        fly.alive = false;
+        fly.causeOfDeath = state.weather?.condition === "thunderstorm"
+          ? "storm accident"
+          : "weather-related accident";
+        state.deaths += 1;
+        emit("weather_death", `${fly.id} died in a ${weatherLabel()} travel accident.`, {
+          flyId: fly.id,
+          cause: fly.causeOfDeath,
+          weather: state.weather,
+        });
+        return;
+      }
+      fly.health = clamp(fly.health - brainRange(fly, 12, 38));
+      fly.stress = clamp(fly.stress + 18);
+      fly.targetLocationId = "hospital-central";
+      const hospital = jittered(location("hospital-central"), 2);
+      fly.targetX = hospital.x;
+      fly.targetZ = hospital.z;
+      fly.traveling = true;
+      fly.travelGoalId = "hospital-central";
+      fly.action = "injured by weather";
+      emit("weather_injury", `${fly.id} was injured while traveling in ${weatherLabel()}.`, {
+        flyId: fly.id,
+        weather: state.weather,
+      });
+    }
+  }
+
   if ((Math.abs(fly.vx) + Math.abs(fly.vz)) > 0.02) {
     const trafficRisk = fly.vehicle ? 0.0000035 : 0.0000008;
     const stressRisk = fly.stress > 80 ? 0.0000012 : 0;
@@ -1759,8 +1906,10 @@ function needsAndActivities(fly, clock) {
   }
 
   if (fly.currentLocationId === "park") {
-    fly.stress = clamp(fly.stress - 0.06);
-    fly.excitement = clamp(fly.excitement + 0.015);
+    const sunset = sunsetQuality();
+    fly.stress = clamp(fly.stress - (sunset > 0.48 ? 0.18 : 0.06));
+    fly.excitement = clamp(fly.excitement + (sunset > 0.48 ? 0.09 : 0.015));
+    if (sunset > 0.65) fly.happiness = clamp(fly.happiness + 0.055);
   }
   if (fly.currentLocationId === "cafe") {
     fly.loneliness = clamp(fly.loneliness - 0.04);
@@ -1962,6 +2111,12 @@ function getState() {
     foodReserve: state.foodReserve,
     moneySupply,
     totalTransactions: state.totalTransactions,
+    weather: {
+      ...(state.weather || {}),
+      danger: weatherDanger(),
+      label: weatherLabel(),
+      sunset: state.weather?.sunset || { active: false, quality: 0 },
+    },
     neuralBridge: state.neuralBridge || { connected: false },
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
@@ -1992,6 +2147,7 @@ async function tick() {
     if (!state.paused) {
       state.simulationAgeSeconds += GAME_SECONDS_PER_REAL_SECOND;
       const clock = gameClock();
+      updateWeather(clock);
       for (const fly of state.flies) tickFly(fly, clock);
       void syncFullConnectomeBrains();
 
