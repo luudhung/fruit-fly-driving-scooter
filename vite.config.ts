@@ -18,6 +18,7 @@ export default defineConfig({
         upstream: resolve(__dirname, "upstream.html"),
         openworld: resolve(__dirname, "openworld.html"),
         stock: resolve(__dirname, "stock.html"),
+        fulllife: resolve(__dirname, "fulllife.html"),
       },
     },
   },
