@@ -1154,7 +1154,7 @@ function createHomeVisual(fly: FlyState) {
   door.position.set(0, 0.62, (tier ? 3 + tier * 0.7 : 2.1) / 2 + 0.05);
   group.add(door);
 
-  const label = makeCanvasSprite(tier ? `🏠 ${fly.id.slice(-2)}` : `▣ ${fly.id.slice(-2)}`, 30, 1.1);
+  const label = makeCanvasSprite(`🏠 ${fly.id.slice(-2)}`, 30, 1.1);
   label.position.y = tier ? 4.8 + tier * 0.5 : 3.1;
   group.add(label);
 
@@ -1166,9 +1166,9 @@ function createHomeVisual(fly: FlyState) {
 function syncHomes(flies: FlyState[]) {
   const active = new Set<string>();
   for (const fly of flies) {
-    if (!fly.alive || !Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) continue;
+    if (!fly.alive || !fly.ownsHome || !Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) continue;
     active.add(fly.id);
-    const tier = fly.ownsHome ? Math.max(1, fly.homeTier || 1) : 0;
+    const tier = Math.max(1, fly.homeTier || 1);
     const existing = homeVisuals.get(fly.id);
     if (!existing || existing.tier !== tier) {
       if (existing) scene.remove(existing.group);
@@ -1240,9 +1240,9 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 
 function setCameraOverview() {
   followSelected = false;
-  freePosition.set(86, 54, 105);
-  cameraYaw = -2.43;
-  cameraPitch = -0.34;
+  freePosition.set(210, 145, 285);
+  cameraYaw = -2.48;
+  cameraPitch = -0.38;
   camera.fov = 48;
   camera.updateProjectionMatrix();
 }
@@ -1368,9 +1368,9 @@ function updateFreeCamera(dt: number) {
     freePosition.addScaledVector(moveRight, strafeAxis * speed);
     freePosition.y += verticalAxis * speed * 0.75;
 
-    freePosition.x = THREE.MathUtils.clamp(freePosition.x, -245, 245);
-    freePosition.z = THREE.MathUtils.clamp(freePosition.z, -245, 245);
-    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 155);
+    freePosition.x = THREE.MathUtils.clamp(freePosition.x, -340, 340);
+    freePosition.z = THREE.MathUtils.clamp(freePosition.z, -340, 340);
+    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 260);
   }
 
   camera.position.copy(freePosition);
@@ -1389,6 +1389,8 @@ function animate(now = performance.now()) {
     const wingBeat = Math.sin(now * 0.035) * 0.08;
     visual.group.rotation.z = wingBeat;
   }
+
+  updateMetroTrains(now);
 
   if (rain.visible) {
     rain.position.x = camera.position.x;
