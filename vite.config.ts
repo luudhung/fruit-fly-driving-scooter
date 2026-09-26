@@ -14,7 +14,6 @@ export default defineConfig({
         play: resolve(__dirname, "play.html"),
         bench: resolve(__dirname, "bench.html"),
         upstream: resolve(__dirname, "upstream.html"),
-        openworld: resolve(__dirname, "openworld.html"),
         stock: resolve(__dirname, "stock.html"),
         fulllife: resolve(__dirname, "fulllife.html"),
       },

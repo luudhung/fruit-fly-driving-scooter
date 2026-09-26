@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>FlyBrain Playground</title>
-  <meta name="description" content="Choose an autonomous experiment for the FlyWire fruit-fly brain: open world, synthetic stock trading, or a persistent full-life civilization." />
+  <meta name="description" content="Choose an autonomous experiment for the FlyWire fruit-fly brain: synthetic stock trading or a persistent full-life civilization." />
   <style>
     :root{color-scheme:dark}
     *{box-sizing:border-box}
@@ -17,12 +17,11 @@
     .eyebrow{font:760 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;color:#83a7ff;text-transform:uppercase}
     h1{margin:12px 0 10px;font-size:clamp(38px,6vw,76px);letter-spacing:-.055em;line-height:.94}
     .intro{max-width:760px;margin:0 0 30px;color:rgba(244,247,249,.58);font-size:14px;line-height:1.6}
-    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
     .card{position:relative;min-height:300px;padding:24px;border-radius:24px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.035);text-decoration:none;color:inherit;overflow:hidden;transition:.22s ease;box-shadow:0 20px 70px rgba(0,0,0,.18)}
     .card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.055)}
-    .orb{position:absolute;width:210px;height:210px;border-radius:50%;filter:blur(8px);opacity:.22;right:-60px;top:-65px;background:#5687ff}
-    .card:nth-child(2) .orb{background:#f0b34d}
-    .card:nth-child(3) .orb{background:#57d98b}
+    .orb{position:absolute;width:210px;height:210px;border-radius:50%;filter:blur(8px);opacity:.22;right:-60px;top:-65px;background:#f0b34d}
+    .card:nth-child(2) .orb{background:#57d98b}
     .num{font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.34);letter-spacing:.12em}
     h2{margin:92px 0 8px;font-size:28px;letter-spacing:-.04em}
     .desc{max-width:290px;color:rgba(255,255,255,.52);font-size:13px;line-height:1.55}
@@ -37,20 +36,14 @@
     <h1>What should the fly do?</h1>
     <p class="intro">Choose an environment to see the same fly brain connected to different sensory → neural activity → action loops. The behavioral adapters are experimental and are not validated biological models.</p>
     <section class="grid">
-      <a class="card" href="./openworld.html">
-        <span class="orb"></span><div class="num">01 · ECOLOGY</div>
-        <h2>Open World</h2>
-        <div class="desc">Fly autonomously, walk, find food, avoid danger, and respond to an open environment.</div>
-        <div class="go">ENTER OPEN WORLD →</div>
-      </a>
       <a class="card" href="./stock.html">
-        <span class="orb"></span><div class="num">02 · MARKET LAB</div>
+        <span class="orb"></span><div class="num">01 · MARKET LAB</div>
         <h2>Stock Trader</h2>
         <div class="desc">A 3D trading room with simulated charts. The brain chooses UP / DOWN / WAIT; repeated losses raise stress and may trigger a smoke break.</div>
         <div class="go">OPEN TRADING DESK →</div>
       </a>
       <a class="card" href="./fulllife.html">
-        <span class="orb"></span><div class="num">03 · CIVILIZATION</div>
+        <span class="orb"></span><div class="num">02 · CIVILIZATION</div>
         <h2>Full Life</h2>
         <div class="desc">Enter a persistent synthetic fly civilization with accelerated day and night, aging, relationships, economy, and life events.</div>
         <div class="go">ENTER FULL LIFE →</div>

@@ -6,7 +6,8 @@
 - Removed the legacy `app.html?mode=science` Science Mode entry and its dedicated `src/main.ts` runtime.
 - Removed the motorcycle preview entry and its dedicated motorbike source files.
 - Removed stale navigation/build hooks and retargeted remaining game tests to `play.html`.
-- Kept shared full-brain assets/runtime modules required by Open World, Stock Trader, Full Life and Play.
+- Removed Open World from the landing page and Vite build, then deleted its dedicated page, brain adapter, runtime entry, and world renderer.
+- Kept shared full-brain assets/runtime modules required by Stock Trader, Full Life and Play.
 
 ## 2026-09-25
 

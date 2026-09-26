@@ -233,7 +233,6 @@ src/
   room.ts              three.js scene, retinal render, camera
   evolution.ts         WebGPU ARS gait evolver
   game.ts              game mode + deterministic replay URLs
-  openworld.ts         autonomous ecology experiment adapter
   stock.ts             market-decision experiment adapter
   fulllife.ts          long-running civilization/life observer
 
