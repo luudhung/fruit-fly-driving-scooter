@@ -1,6 +1,7 @@
 import http from "node:http";
 import process from "node:process";
-import { Pool } from "pg";
+import pg from "pg";
+const { Pool } = pg;
 
 const PORT = Number(process.env.PORT || 3000);
 const WORLD_ID = process.env.CIV_WORLD_ID || "WORLD-A";
