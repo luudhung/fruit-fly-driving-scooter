@@ -17,6 +17,7 @@ export default defineConfig({
         motorbike: resolve(__dirname, "motorbike.html"),
         upstream: resolve(__dirname, "upstream.html"),
         openworld: resolve(__dirname, "openworld.html"),
+        stock: resolve(__dirname, "stock.html"),
       },
     },
   },

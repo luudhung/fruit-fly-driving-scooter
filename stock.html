@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FlyBrain Stock Trader</title>
+  <meta name="description" content="A 3D synthetic-market experiment where the FlyWire fruit-fly brain predicts up/down and reacts to trading stress." />
+  <style>
+    :root{color-scheme:dark}
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070a0d;color:#f1f6f3;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    #world{position:fixed;inset:0}
+    #world canvas{display:block;width:100%;height:100%}
+    .shade{position:fixed;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.32),transparent 28%,transparent 70%,rgba(0,0,0,.35))}
+    .top{position:fixed;z-index:5;left:0;right:0;top:0;padding:15px 17px;display:flex;gap:12px;align-items:flex-start;pointer-events:none}
+    .brand{font-weight:850;font-size:18px;letter-spacing:-.03em;text-shadow:0 2px 16px #000}
+    .brand small{display:block;margin-top:4px;font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.13em;color:rgba(255,255,255,.48);text-transform:uppercase}
+    .live{margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:rgba(6,9,12,.66);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.11);font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}
+    .dot{width:7px;height:7px;border-radius:50%;background:#e4b44f;box-shadow:0 0 12px #e4b44f}
+    .live[data-state="running"] .dot{background:#58df8b;box-shadow:0 0 12px #58df8b}
+    .live[data-state="error"] .dot{background:#ff6767;box-shadow:0 0 12px #ff6767}
+    .panel{position:fixed;z-index:5;left:15px;bottom:15px;width:min(450px,calc(100vw - 30px));border:1px solid rgba(255,255,255,.1);border-radius:17px;background:rgba(5,8,10,.74);backdrop-filter:blur(20px) saturate(125%);overflow:hidden;box-shadow:0 22px 65px rgba(0,0,0,.3)}
+    .brain{padding:11px 13px;display:flex;gap:11px;align-items:center;border-bottom:1px solid rgba(255,255,255,.07)}
+    #retina{width:128px;height:32px;border-radius:5px;image-rendering:pixelated;border:1px solid rgba(255,255,255,.09);background:#020304}
+    #brain-detail{font-size:9px;color:rgba(255,255,255,.45);line-height:1.4}
+    #call{padding:10px 13px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.07);font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+    #decision{font-size:20px;letter-spacing:-.03em}
+    #decision[data-side="UP"]{color:#65e395} #decision[data-side="DOWN"]{color:#ff7474} #decision[data-side="WAIT"]{color:#e8c46e}
+    #call-note{color:rgba(255,255,255,.42);font-weight:650}
+    #telemetry{padding:11px 13px 12px;display:grid;grid-template-columns:1fr 1fr;gap:7px 16px}
+    .metric{display:flex;justify-content:space-between;gap:10px;font-size:10px}.metric span{color:rgba(255,255,255,.42)}.metric b{text-align:right;font-weight:680}
+    .wide{grid-column:1/-1}
+    .log{padding:9px 13px 12px;border-top:1px solid rgba(255,255,255,.07)}
+    .log-title{font:800 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:rgba(255,255,255,.36);margin-bottom:6px}
+    #events{font:520 9px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.5);display:grid;gap:3px;max-height:54px;overflow:hidden}
+    .home{position:fixed;z-index:6;right:15px;bottom:15px;text-decoration:none;color:#f1f6f3;padding:10px 12px;border:1px solid rgba(255,255,255,.11);border-radius:10px;background:rgba(5,8,10,.68);backdrop-filter:blur(14px);font-size:10px;font-weight:750}
+    .notice{position:fixed;z-index:5;right:15px;top:64px;width:min(320px,calc(100vw - 30px));padding:10px 12px;border:1px solid rgba(255,255,255,.09);border-radius:13px;background:rgba(5,8,10,.58);backdrop-filter:blur(14px);font-size:9px;line-height:1.45;color:rgba(255,255,255,.42)}
+    .notice b{color:rgba(255,255,255,.72)}
+    @media(max-width:720px){.notice{display:none}.home{display:none}.panel{left:9px;bottom:9px;width:calc(100vw - 18px)}.top{padding:11px}.wide{display:none}}
+  </style>
+</head>
+<body>
+  <div id="world"></div><div class="shade"></div>
+  <header class="top">
+    <div class="brand">FlyBrain Stock Trader<small>synthetic market · autonomous experiment</small></div>
+    <div class="live" id="brain-live" data-state="loading"><span class="dot"></span><span id="brain-status">LOADING FULL BRAIN</span></div>
+  </header>
+  <aside class="notice"><b>Market Lab:</b> biểu đồ giá được tạo giả lập trong trình duyệt. FlyWire activity được ánh xạ thành UP / DOWN / WAIT. Đây là thí nghiệm hành vi, không phải lời khuyên hay mô hình dự đoán thị trường thật.</aside>
+  <section class="panel">
+    <div class="brain"><canvas id="retina" width="64" height="16"></canvas><div><b style="font-size:10px">chart retina · 64×16</b><div id="brain-detail">Starting full FlyWire brain…</div></div></div>
+    <div id="call"><b id="decision" data-side="WAIT">WAIT</b><span id="call-note">waiting for brain activity</span></div>
+    <div id="telemetry"></div>
+    <div class="log"><div class="log-title">TRADING TAPE</div><div id="events"></div></div>
+  </section>
+  <a class="home" href="./">← MODES</a>
+  <script type="module" src="/src/stock.ts"></script>
+</body>
+</html>
