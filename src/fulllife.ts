@@ -37,6 +37,25 @@ type FlyState = {
   brainParentIds?: string[];
   brainDecisionCount?: number;
   brainMemoryCount?: number;
+  fullConnectome?: {
+    connected: boolean;
+    fullConnectome: boolean;
+    neurons: number;
+    edges: number;
+    neuralStepsTotal: number;
+    activeNeurons: number;
+    activity: number;
+    confidence: number;
+    steppedThisSync: boolean;
+    approachDrive: number;
+    avoidDrive: number;
+    socialDrive: number;
+    restDrive: number;
+    exploreDrive: number;
+    consumeDrive: number;
+    motorDrive: number;
+    regionActivity?: number[];
+  } | null;
   brainDynamic?: {
     fatigue: number;
     arousal: number;
@@ -86,6 +105,16 @@ type CivilizationSnapshot = {
   moneySupply: number;
   totalTransactions?: number;
   daysPerYear?: number;
+  neuralBridge?: {
+    connected?: boolean;
+    topologyShared?: boolean;
+    independentDynamicState?: boolean;
+    registeredBrains?: number;
+    steppedBrains?: number;
+    schedulerCursor?: number;
+    lastSyncAt?: number;
+    error?: string;
+  };
   locations?: LocationState[];
   flies?: FlyState[];
   selectedFly?: {
@@ -118,6 +147,8 @@ const gameDayEl = $("game-day");
 const flyIdEl = $("fly-id");
 const flyBrainIdEl = $("fly-brain-id");
 const flyBrainHistoryEl = $("fly-brain-history");
+const flyConnectomeEl = $("fly-connectome");
+const flyNeuralStepsEl = $("fly-neural-steps");
 const flyAgeEl = $("fly-age");
 const flyActionEl = $("fly-action");
 const flyBrainEl = $("fly-brain");
@@ -169,6 +200,8 @@ function renderInspector(fly: FlyState | null) {
     flyIdEl.textContent = "click a fly";
     flyBrainIdEl.textContent = "—";
     flyBrainHistoryEl.textContent = "—";
+    flyConnectomeEl.textContent = "—";
+    flyNeuralStepsEl.textContent = "—";
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
@@ -178,6 +211,13 @@ function renderInspector(fly: FlyState | null) {
   flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
   flyBrainIdEl.textContent = fly.brainId || "legacy brain pending";
   flyBrainHistoryEl.textContent = `${num(fly.brainDecisionCount || 0)} decisions · ${num(fly.brainMemoryCount || 0)} memories`;
+  const fc = fly.fullConnectome;
+  flyConnectomeEl.textContent = fc?.connected && fc.fullConnectome
+    ? `${num(fc.neurons)} neurons · ${num(fc.edges)} edges`
+    : "connecting…";
+  flyNeuralStepsEl.textContent = fc?.connected
+    ? `${num(fc.neuralStepsTotal)} · ${num(fc.activeNeurons)} active${fc.steppedThisSync ? " · stepped" : " · cached"}`
+    : "—";
   flyAgeEl.textContent = `${fly.ageYears.toFixed(1)}y · ${fly.sex} · Gen ${fly.generation}`;
   flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
   flyBrainEl.textContent = `${fly.brainDecision || fly.action} · ${Math.round((fly.brainConfidence ?? 0) * 100)}%`;
@@ -209,14 +249,19 @@ function renderInspector(fly: FlyState | null) {
     cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.65})` : "none";
   });
   brainNote.textContent =
-    `${fly.brainId || "brain"} / ${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. These are synthetic decision-model bands, not biological FlyWire recordings.`;
+    `${fly.brainId || "brain"} / ${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. Full-connectome drives are read from this fly’s independent Rust Sim buffer; the green grid remains a compact visualization, not a neuron-by-neuron anatomical map.`;
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
   snapshot = s;
+  const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
   setConnection(
     s.authoritative ? "authoritative" : "offline",
-    s.authoritative ? "SYNTHETIC CIVILIZATION LIVE" : "NON-AUTHORITATIVE",
+    s.authoritative
+      ? (neuralLive
+          ? `FULL CONNECTOME · ${s.neuralBridge?.registeredBrains || 0} BRAINS`
+          : "CIVILIZATION LIVE · CONNECTING BRAINS")
+      : "NON-AUTHORITATIVE",
   );
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = num(s.population);
