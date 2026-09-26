@@ -31,6 +31,14 @@ pub(crate) struct CivilizationBrainSense {
     #[serde(default)]
     pub reward: f64,
     #[serde(default)]
+    pub weather_danger: f64,
+    #[serde(default)]
+    pub precipitation: f64,
+    #[serde(default)]
+    pub wind: f64,
+    #[serde(default)]
+    pub sunset_quality: f64,
+    #[serde(default)]
     pub sleeping: bool,
 }
 
@@ -188,6 +196,10 @@ impl MultiBrainRegistry {
         let health_pressure = clamp64((100.0 - sense.health) / 100.0, 0.0, 1.0);
         let social = clamp64(sense.social_signal, 0.0, 1.0);
         let reward = clamp64((sense.reward + 1.0) * 0.5, 0.0, 1.0);
+        let weather_danger = clamp64(sense.weather_danger, 0.0, 1.0);
+        let precipitation = clamp64(sense.precipitation, 0.0, 1.0);
+        let wind = clamp64(sense.wind, 0.0, 1.0);
+        let sunset = clamp64(sense.sunset_quality, 0.0, 1.0);
 
         let body_drive = 0.08
             + hunger * 0.42
@@ -197,7 +209,10 @@ impl MultiBrainRegistry {
             + loneliness * 0.18
             + health_pressure * 0.30
             + social * 0.18
-            + reward * 0.12;
+            + reward * 0.12
+            + weather_danger * 0.20
+            + precipitation * 0.10
+            + wind * 0.08;
 
         for (k, &i) in p.sensory.iter().enumerate() {
             let lane = k % 8;
@@ -209,7 +224,11 @@ impl MultiBrainRegistry {
                 4 => loneliness,
                 5 => health_pressure,
                 6 => social,
-                _ => reward,
+                7 => reward,
+                8 => weather_danger,
+                9 => precipitation,
+                10 => wind,
+                _ => sunset,
             };
             ext[i] = ((body_drive * 0.35 + channel * 1.15) * sleep_gain) as f32;
         }
@@ -231,12 +250,14 @@ impl MultiBrainRegistry {
             let left_visual = clamp64(0.22 + (-dx).max(0.0) * 0.75 + dz.abs() * 0.10, 0.0, 1.5);
             let right_visual = clamp64(0.22 + dx.max(0.0) * 0.75 + dz.abs() * 0.10, 0.0, 1.5);
             let sleep_gain = if sense.sleeping { 0.22 } else { 1.0 };
+            let visibility = clamp64(1.0 - sense.precipitation * 0.55 - sense.weather_danger * 0.18, 0.2, 1.0);
+            let sunset_glow = clamp64(sense.sunset_quality, 0.0, 1.0) * 0.18;
 
             for (k, &i) in partitions.optic_left.iter().enumerate() {
-                input[i] = ((left_visual + ((k % 17) as f64 / 17.0) * 0.08) * sleep_gain) as f32;
+                input[i] = (((left_visual + ((k % 17) as f64 / 17.0) * 0.08) * visibility + sunset_glow) * sleep_gain) as f32;
             }
             for (k, &i) in partitions.optic_right.iter().enumerate() {
-                input[i] = ((right_visual + (((k * 7) % 19) as f64 / 19.0) * 0.08) * sleep_gain) as f32;
+                input[i] = (((right_visual + (((k * 7) % 19) as f64 / 19.0) * 0.08) * visibility + sunset_glow) * sleep_gain) as f32;
             }
 
             let channels = [
@@ -248,6 +269,10 @@ impl MultiBrainRegistry {
                 clamp64((100.0 - sense.health) / 100.0, 0.0, 1.0),
                 clamp64(sense.social_signal, 0.0, 1.0),
                 clamp64((sense.reward + 1.0) * 0.5, 0.0, 1.0),
+                clamp64(sense.weather_danger, 0.0, 1.0),
+                clamp64(sense.precipitation, 0.0, 1.0),
+                clamp64(sense.wind, 0.0, 1.0),
+                clamp64(sense.sunset_quality, 0.0, 1.0),
             ];
             for (k, &i) in partitions.sensory.iter().enumerate() {
                 input[i] = ((0.08 + channels[k % channels.len()] * 1.35) * sleep_gain) as f32;
