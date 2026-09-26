@@ -412,14 +412,36 @@ for (let x = -52; x <= 52; x += 15) {
 }
 
 const specialBuildings = [
-  { x: -9, z: 5, w: 11, d: 9, h: 7 },
-  { x: 31, z: 5, w: 12, d: 10, h: 17 },
-  { x: -31, z: 8, w: 13, d: 11, h: 11 },
-  { x: 8, z: 34, w: 12, d: 10, h: 15 },
-  { x: -13, z: 34, w: 10, d: 9, h: 10 },
-  { x: 15, z: 11, w: 9, d: 8, h: 7 },
+  { x: -10, z: 6, w: 11, d: 9, h: 7 },
+  { x: 34, z: 6, w: 12, d: 10, h: 17 },
+  { x: -34, z: 9, w: 13, d: 11, h: 11 },
+  { x: 8, z: 37, w: 12, d: 10, h: 15 },
+  { x: -15, z: 37, w: 10, d: 9, h: 10 },
+  { x: 16, z: 12, w: 9, d: 8, h: 7 },
+  { x: 5, z: 20, w: 10, d: 8, h: 7 },
+  { x: -22, z: -15, w: 11, d: 9, h: 7 },
+  { x: 24, z: -17, w: 9, d: 8, h: 7 },
+  { x: 43, z: 25, w: 12, d: 10, h: 8 },
+  { x: -43, z: 23, w: 11, d: 9, h: 10 },
+  { x: -5, z: -42, w: 16, d: 12, h: 9 },
+  { x: 22, z: 43, w: 12, d: 10, h: 9 },
+  { x: 38, z: -8, w: 12, d: 10, h: 8 },
 ];
 specialBuildings.forEach((b, i) => addBuilding(b.x, b.z, b.w, b.d, b.h, 900 + i * 13, true));
+
+const farmSoil = new THREE.MeshStandardMaterial({ color: 0x6e5738, roughness: 1 });
+const cropMat = new THREE.MeshStandardMaterial({ color: 0x6f8f45, roughness: 1 });
+for (let row = 0; row < 6; row += 1) {
+  const soil = new THREE.Mesh(new THREE.BoxGeometry(22, 0.08, 1.5), farmSoil);
+  soil.position.set(-68, 0.08, -10 + row * 3.2);
+  scene.add(soil);
+  for (let col = 0; col < 11; col += 1) {
+    const crop = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.85, 6), cropMat);
+    crop.position.set(-78 + col * 2, 0.52, -10 + row * 3.2);
+    scene.add(crop);
+  }
+}
+
 
 const locationLabels = [
   { name: "MARKET", x: -10, z: 6, y: 8 },
