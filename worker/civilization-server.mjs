@@ -416,6 +416,8 @@ function createFly(index, parents = null) {
     partnerId: null,
     affection: 0,
     relationshipSince: null,
+    familyWaitYears: null,
+    familyReadiness: 0,
     flirtingWith: null,
     pregnancyBy: null,
     pregnancyDueAt: null,
@@ -445,6 +447,7 @@ function createFly(index, parents = null) {
     traveling: false,
     smoking: false,
     exercising: false,
+    sleeping: false,
     lastPaidDay: -1,
     lastRentDay: -1,
     lastSocialTick: 0,
@@ -632,6 +635,9 @@ async function initDb() {
       fly.traveling = Boolean(fly.traveling);
       fly.smoking = Boolean(fly.smoking);
       fly.exercising = Boolean(fly.exercising);
+      fly.sleeping = Boolean(fly.sleeping);
+      fly.familyWaitYears = Number.isFinite(fly.familyWaitYears) ? fly.familyWaitYears : null;
+      fly.familyReadiness = Number(fly.familyReadiness || 0);
       fly.thirst = Number.isFinite(fly.thirst) ? fly.thirst : 25;
       fly.caffeine = Number.isFinite(fly.caffeine) ? fly.caffeine : 0;
       fly.sleepDebt = Number.isFinite(fly.sleepDebt) ? fly.sleepDebt : 0;
@@ -1011,7 +1017,9 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
-  add(fly.homeId, "resting at home", (100 - fly.energy) * 0.58 + (clock.hour >= 22 || clock.hour < 6 ? 65 : 0));
+  const circadianSleep = clock.hour >= 22 || clock.hour < 6;
+  add(fly.homeId, "sleeping", (100 - fly.energy) * 0.88 + fly.sleepDebt * 0.72 + (circadianSleep ? 82 : -12) - fly.caffeine * 0.42);
+  add(fly.homeId, "resting at home", (100 - fly.energy) * 0.42 + fly.stress * 0.20 + (circadianSleep ? 20 : 0));
   add("market", "buying food", fly.hunger * 0.8 + (fly.money > 5 ? 8 : -35));
   add("cafe", "drinking Hansdrex coffee", (100 - fly.energy) * 0.58 + fly.sleepDebt * 0.46 + fly.thirst * 0.18 + (fly.money > 5 ? 8 : -30));
   add("tea-house", "drinking tea", fly.thirst * 0.48 + fly.stress * 0.28 + fly.loneliness * 0.12);
@@ -1084,6 +1092,7 @@ function chooseDestination(fly, clock) {
   fly.action = chosen.action;
   fly.smoking = chosen.action === "smoke break";
   fly.exercising = chosen.action === "exercising";
+  fly.sleeping = chosen.action === "sleeping";
 
   const dest = chosen.id === fly.homeId
     ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
@@ -1265,11 +1274,15 @@ function socialLife(fly, clock) {
       const old = fly.partnerId;
       fly.partnerId = null;
       fly.relationshipSince = null;
+      fly.familyWaitYears = null;
+      fly.familyReadiness = 0;
       fly.affection = 0;
       const other = state.flies.find((f) => f.id === old);
       if (other?.partnerId === fly.id) {
         other.partnerId = null;
         other.relationshipSince = null;
+        other.familyWaitYears = null;
+        other.familyReadiness = 0;
         other.affection = 0;
       }
       fly.happiness = clamp(fly.happiness - 15);
@@ -1303,6 +1316,33 @@ function socialLife(fly, clock) {
     candidate.partnerId = fly.id;
     fly.affection = candidate.affection = randRange(45, 72);
     fly.relationshipSince = candidate.relationshipSince = gameYears();
+
+    const waitPreference = (person, other) => {
+      const approach = neuralDrive(person, "approachDrive");
+      const avoid = neuralDrive(person, "avoidDrive");
+      const social = neuralDrive(person, "socialDrive");
+      const rest = neuralDrive(person, "restDrive");
+      const security = clamp((person.money + person.savings - person.debt) / 4000, 0, 1);
+      const patience = person.brain.plasticity.persistence;
+      const risk = person.traits.risk;
+      const familyDrive = clamp(
+        person.traits.empathy * 0.18 +
+        person.traits.fertility * 0.17 +
+        social * 0.16 +
+        approach * 0.15 +
+        security * 0.12 +
+        person.happiness / 100 * 0.10 -
+        avoid * 0.15 -
+        person.stress / 100 * 0.10,
+        0,
+        1,
+      );
+      const baseWait = 0.06 + patience * 0.42 + (1 - risk) * 0.18 + (1 - familyDrive) * 0.42 + rest * 0.08;
+      return clamp(baseWait + brainRange(person, -0.06, 0.10), 0.03, 1.15);
+    };
+    fly.familyWaitYears = waitPreference(fly, candidate);
+    candidate.familyWaitYears = waitPreference(candidate, fly);
+    fly.familyReadiness = candidate.familyReadiness = 0;
     fly.flirtingWith = candidate.flirtingWith = null;
     fly.happiness = clamp(fly.happiness + 15);
     candidate.happiness = clamp(candidate.happiness + 15);
@@ -1326,13 +1366,102 @@ function reproduction(fly) {
   const partner = state.flies.find((f) => f.id === fly.partnerId && f.alive);
   if (!partner || partner.sex !== "M" || partner.ageYears < 18 || partner.ageYears > 75) return;
   if (state.flies.filter((f) => f.alive).length >= MAX_POPULATION) return;
-  if (fly.affection < 45 || fly.health < 45 || fly.stress > 85) return;
 
-  const p = 0.00035 * (0.35 + fly.traits.fertility) * (0.35 + partner.traits.fertility);
-  if (rand() < p) {
+  const relationshipYears = Math.max(0, gameYears() - Number(fly.relationshipSince || gameYears()));
+  const waitA = Number(fly.familyWaitYears ?? 0.25);
+  const waitB = Number(partner.familyWaitYears ?? 0.25);
+  const mutualWait = Math.max(waitA, waitB);
+
+  const financialSecurity = clamp(
+    ((fly.money + fly.savings - fly.debt) + (partner.money + partner.savings - partner.debt)) / 6500,
+    0,
+    1,
+  );
+  const housingSecurity = (fly.ownsHome || partner.ownsHome) ? 1 : 0.35;
+  const affection = clamp((fly.affection + partner.affection) / 200, 0, 1);
+  const health = clamp((fly.health + partner.health) / 200, 0, 1);
+  const stressPenalty = clamp((fly.stress + partner.stress) / 200, 0, 1);
+  const fertility = clamp((fly.traits.fertility + partner.traits.fertility) / 2, 0, 1);
+
+  const neuralA =
+    neuralDrive(fly, "socialDrive") * 0.24 +
+    neuralDrive(fly, "approachDrive") * 0.22 -
+    neuralDrive(fly, "avoidDrive") * 0.24 +
+    neuralDrive(fly, "restDrive") * 0.05;
+  const neuralB =
+    neuralDrive(partner, "socialDrive") * 0.24 +
+    neuralDrive(partner, "approachDrive") * 0.22 -
+    neuralDrive(partner, "avoidDrive") * 0.24 +
+    neuralDrive(partner, "restDrive") * 0.05;
+
+  const timeMaturity = clamp(relationshipYears / Math.max(0.03, mutualWait), 0, 1.4);
+  const readinessA = clamp(
+    timeMaturity * 0.24 +
+    affection * 0.20 +
+    financialSecurity * 0.12 +
+    housingSecurity * 0.07 +
+    health * 0.10 +
+    fertility * 0.08 +
+    neuralA -
+    stressPenalty * 0.16 -
+    fly.children.length * 0.04,
+    0,
+    1,
+  );
+  const readinessB = clamp(
+    timeMaturity * 0.24 +
+    affection * 0.20 +
+    financialSecurity * 0.12 +
+    housingSecurity * 0.07 +
+    health * 0.10 +
+    fertility * 0.08 +
+    neuralB -
+    stressPenalty * 0.16 -
+    partner.children.length * 0.04,
+    0,
+    1,
+  );
+
+  fly.familyReadiness = readinessA;
+  partner.familyReadiness = readinessB;
+
+  if (relationshipYears < mutualWait || readinessA < 0.58 || readinessB < 0.58) return;
+  if (fly.health < 42 || partner.health < 42 || fly.stress > 88 || partner.stress > 88) return;
+
+  fly.brainDecision = `considering a child with ${partner.id}`;
+  partner.brainDecision = `considering a child with ${fly.id}`;
+  fly.brainConfidence = readinessA;
+  partner.brainConfidence = readinessB;
+
+  const conceptionChance =
+    0.00016 *
+    (0.45 + fertility) *
+    (0.50 + (readinessA + readinessB) / 2) *
+    (0.65 + Math.min(0.7, relationshipYears));
+
+  if (brainRand(fly) < conceptionChance && brainRand(partner) < 0.55 + readinessB * 0.35) {
     fly.pregnancyBy = partner.id;
     fly.pregnancyDueAt = gameYears() + 0.72;
-    emit("pregnancy", `${fly.id} became pregnant with ${partner.id}.`, { flyId: fly.id, partnerId: partner.id });
+    brainRemember(fly, "family_decision", {
+      partnerId: partner.id,
+      relationshipYears,
+      waitYears: mutualWait,
+      readiness: readinessA,
+    });
+    brainRemember(partner, "family_decision", {
+      partnerId: fly.id,
+      relationshipYears,
+      waitYears: mutualWait,
+      readiness: readinessB,
+    });
+    emit("pregnancy", `${fly.id} and ${partner.id} mutually chose to start a family after ${relationshipYears.toFixed(2)} relationship years.`, {
+      flyId: fly.id,
+      partnerId: partner.id,
+      relationshipYears,
+      mutualWait,
+      readinessA,
+      readinessB,
+    });
   }
 }
 
@@ -1436,28 +1565,112 @@ function mentalHealthAndMortality(fly) {
 
 function needsAndActivities(fly, clock) {
   fly.hunger = clamp(fly.hunger + 0.055);
-  const sleeping = (clock.hour >= 22 || clock.hour < 6) && fly.currentLocationId === fly.homeId;
-  fly.energy = clamp(fly.energy + (sleeping ? 0.16 : -0.038));
+  fly.thirst = clamp(fly.thirst + 0.082);
+  fly.caffeine = clamp(fly.caffeine - 0.075);
+  const atHome = fly.currentLocationId === fly.homeId;
+  const sleeping = Boolean(fly.sleeping && atHome && !fly.traveling);
+  fly.sleeping = sleeping;
 
-  if (fly.currentLocationId === "market" && fly.hunger > 35 && fly.money >= 3.5) {
-    if (rand() < 0.14) {
-      const cost = randRange(3.5, 8.5);
+  if (sleeping) {
+    fly.energy = clamp(fly.energy + 0.25);
+    fly.sleepDebt = clamp(fly.sleepDebt - 0.22);
+    fly.stress = clamp(fly.stress - 0.045);
+    fly.excitement = clamp(fly.excitement - 0.055);
+  } else {
+    const caffeineBoost = Math.min(0.04, fly.caffeine * 0.00055);
+    fly.energy = clamp(fly.energy - 0.043 + caffeineBoost);
+    const late = clock.hour >= 23 || clock.hour < 5;
+    fly.sleepDebt = clamp(fly.sleepDebt + (late ? 0.035 : 0.006));
+  }
+
+  if (fly.thirst > 85) {
+    fly.energy = clamp(fly.energy - 0.05);
+    fly.stress = clamp(fly.stress + 0.045);
+    fly.health = clamp(fly.health - 0.012);
+  }
+
+  const foodPlaces = ["market","grocery","bakery","restaurant","night-market"];
+  if (foodPlaces.includes(fly.currentLocationId) && fly.hunger > 28 && fly.money >= 3.5) {
+    const business = state.businesses?.[fly.currentLocationId];
+    if (brainRand(fly) < 0.12 && (!business || business.inventory > 0)) {
+      const cost = business?.price ? business.price * brainRange(fly, 0.9, 1.08) : brainRange(fly, 3.5, 9.5);
       fly.money -= cost;
       fly.expensesLifetime += cost;
-      fly.hunger = clamp(fly.hunger - randRange(28, 52));
+      fly.hunger = clamp(fly.hunger - brainRange(fly, 28, 52));
+      fly.thirst = clamp(fly.thirst - brainRange(fly, 8, 20));
       fly.happiness = clamp(fly.happiness + 2);
+      if (business) {
+        business.cash += cost;
+        business.inventory = Math.max(0, business.inventory - 1);
+      }
       state.foodReserve = Math.max(0, state.foodReserve - 1);
       state.totalTransactions += 1;
     }
   }
 
-  if (fly.currentLocationId === "clinic" && fly.health < 75 && fly.money >= 12 && rand() < 0.04) {
-    const cost = 12;
+  if (fly.currentLocationId === "cafe" && fly.action === "drinking Hansdrex coffee" &&
+      state.simulationAgeSeconds - fly.lastCoffeeAt > 2700 && fly.money >= 5) {
+    const cost = state.businesses.cafe?.price || 5;
     fly.money -= cost;
-    fly.health = clamp(fly.health + randRange(8, 20));
-    fly.stress = clamp(fly.stress - 8);
+    fly.expensesLifetime += cost;
+    fly.caffeine = clamp(fly.caffeine + 58);
+    fly.energy = clamp(fly.energy + 16);
+    fly.excitement = clamp(fly.excitement + 8);
+    fly.thirst = clamp(fly.thirst - 24);
+    fly.stress = clamp(fly.stress - 2);
+    fly.lastCoffeeAt = state.simulationAgeSeconds;
+    state.businesses.cafe.cash += cost;
+    state.totalTransactions += 1;
+
+    if (clock.hour >= 18 || clock.hour < 4) {
+      fly.sleepDebt = clamp(fly.sleepDebt + 9);
+      fly.stress = clamp(fly.stress + 1.5);
+    }
+    brainRemember(fly, "coffee", { hour: clock.hour, caffeine: fly.caffeine, cost });
+  }
+
+  if (["hospital-central","hospital-east","clinic"].includes(fly.currentLocationId) &&
+      (fly.health < 78 || fly.illness) && fly.money >= 12 && brainRand(fly) < 0.055) {
+    const cost = fly.currentLocationId.startsWith("hospital") ? 26 : 12;
+    fly.money -= cost;
+    fly.health = clamp(fly.health + brainRange(fly, 10, 26));
+    fly.stress = clamp(fly.stress - 10);
+    fly.illness = brainRand(fly) < 0.82 ? null : fly.illness;
     fly.expensesLifetime += cost;
     state.totalTransactions += 1;
+  }
+
+  if (!fly.illness && fly.health < 82 && brainRand(fly) < 0.00022 + fly.sleepDebt * 0.0000025) {
+    fly.illness = brainRand(fly) < 0.55 ? "viral fatigue" : "respiratory illness";
+    fly.sickDays += 1;
+    fly.stress = clamp(fly.stress + 8);
+    fly.energy = clamp(fly.energy - 10);
+    emit("illness", `${fly.id} became ill with ${fly.illness}.`, { flyId: fly.id, illness: fly.illness });
+  }
+
+  if (fly.currentLocationId === "gym" && fly.action === "exercising") {
+    fly.stress = clamp(fly.stress - 0.22);
+    fly.health = clamp(fly.health + 0.025);
+    fly.energy = clamp(fly.energy - 0.06);
+    fly.thirst = clamp(fly.thirst + 0.09);
+  }
+
+  if (location(fly.currentLocationId).type === "nightlife" && nightlifeOpen(clock)) {
+    if (state.simulationAgeSeconds - fly.lastLeisureAt > 1800 && fly.money >= 4) {
+      const place = state.businesses?.[fly.currentLocationId];
+      const spend = place?.price || brainRange(fly, 4, 10);
+      fly.money -= spend;
+      fly.expensesLifetime += spend;
+      fly.stress = clamp(fly.stress - brainRange(fly, 5, 12));
+      fly.happiness = clamp(fly.happiness + brainRange(fly, 4, 10));
+      fly.excitement = clamp(fly.excitement + brainRange(fly, 7, 16));
+      fly.loneliness = clamp(fly.loneliness - brainRange(fly, 4, 12));
+      fly.energy = clamp(fly.energy - brainRange(fly, 3, 8));
+      fly.sleepDebt = clamp(fly.sleepDebt + brainRange(fly, 2, 7));
+      fly.lastLeisureAt = state.simulationAgeSeconds;
+      if (place) place.cash += spend;
+      state.totalTransactions += 1;
+    }
   }
 
   if (fly.currentLocationId === "park") {
@@ -1467,6 +1680,10 @@ function needsAndActivities(fly, clock) {
   if (fly.currentLocationId === "cafe") {
     fly.loneliness = clamp(fly.loneliness - 0.04);
     fly.happiness = clamp(fly.happiness + 0.025);
+  }
+  if (fly.smoking) {
+    fly.stress = clamp(fly.stress - 0.16);
+    fly.health = clamp(fly.health - 0.018);
   }
 }
 
@@ -1565,6 +1782,10 @@ function compactFly(f) {
     currentLocationId: f.currentLocationId,
     targetLocationId: f.targetLocationId,
     hunger: Number(f.hunger.toFixed(1)),
+    thirst: Number((f.thirst || 0).toFixed(1)),
+    caffeine: Number((f.caffeine || 0).toFixed(1)),
+    sleepDebt: Number((f.sleepDebt || 0).toFixed(1)),
+    sleeping: Boolean(f.sleeping),
     energy: Number(f.energy.toFixed(1)),
     stress: Number(f.stress.toFixed(1)),
     happiness: Number(f.happiness.toFixed(1)),
@@ -1577,6 +1798,9 @@ function compactFly(f) {
     jobTitle: f.jobTitle,
     partnerId: f.partnerId,
     affection: Number(f.affection.toFixed(1)),
+    relationshipYears: f.relationshipSince == null ? null : Number(Math.max(0, gameYears() - f.relationshipSince).toFixed(3)),
+    familyWaitYears: f.familyWaitYears == null ? null : Number(f.familyWaitYears.toFixed(3)),
+    familyReadiness: Number((f.familyReadiness || 0).toFixed(3)),
     flirtingWith: f.flirtingWith,
     pregnant: Boolean(f.pregnancyDueAt),
     children: f.children,
