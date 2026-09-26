@@ -370,7 +370,7 @@ function stopCryptoSocket(){
 }
 
 function ingestCryptoTrade(nextPrice:number,eventTime:number){
-  if(remoteWorkerOnline)return;
+  if(workerConnected)return;
   if(!Number.isFinite(nextPrice)||nextPrice<=0)return;
   const prev=price||nextPrice;
   price=nextPrice;
@@ -392,7 +392,7 @@ function ingestCryptoTrade(nextPrice:number,eventTime:number){
 }
 
 function startCryptoSocket(){
-  if(remoteWorkerOnline)return;
+  if(workerConnected)return;
   stopCryptoSocket();
   feedState="loading";feedDetail="opening BTCUSDT WebSocket";renderFeedState();
   const ws=new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
@@ -475,7 +475,7 @@ function renderFeedState(){
 }
 
 function switchSymbol(next:string){
-  if(remoteWorkerOnline&&next!=="BTCUSDT"){
+  if(workerConnected&&next!=="BTCUSDT"){
     addEvent("24/7 worker is currently locked to BTCUSDT · switch ignored");
     return;
   }
