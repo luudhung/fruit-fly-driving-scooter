@@ -28,6 +28,7 @@ const brainCoverageEl=document.getElementById("brain-coverage") as HTMLElement;
 const brainActiveEl=document.getElementById("brain-active") as HTMLElement;
 const brainEdgesEl=document.getElementById("brain-edges") as HTMLElement;
 const brainVncEl=document.getElementById("brain-vnc") as HTMLElement;
+const workerStatusEl=document.getElementById("worker-status") as HTMLElement;
 const brainFullBadgeEl=document.getElementById("brain-full-badge") as HTMLElement;
 const brainRegionsEl=document.getElementById("brain-regions") as HTMLElement;
 let brainLayout:BrainLayout|null=null;
@@ -91,6 +92,10 @@ let feedDetail="connecting";
 let cryptoSocket:WebSocket|null=null;
 let cryptoReconnectTimer:number|null=null;
 let cryptoTradeCounter=0;
+let remoteWorkerOnline=false;
+let remoteWorkerLastSeen=0;
+let remoteWorkerMode="";
+let remoteBrainSteps=0;
 let stress=18;
 let breakMode=false;
 let deskSmokeStartedAt:number|null=null;
@@ -326,6 +331,7 @@ function openPosition(side:"LONG"|"SHORT",confidence:number){
 }
 
 function onFreshMarketTick(){
+  if(remoteWorkerOnline)return;
   if(!breakMode&&position&&tick-position.openedTick>=MAX_HOLD_TICKS) closePosition("time exit");
 
   const absMove=returns.length?Math.abs(returns[returns.length-1]):0;
@@ -352,6 +358,7 @@ function stopCryptoSocket(){
 }
 
 function ingestCryptoTrade(nextPrice:number,eventTime:number){
+  if(remoteWorkerOnline)return;
   if(!Number.isFinite(nextPrice)||nextPrice<=0)return;
   const prev=price||nextPrice;
   price=nextPrice;
@@ -373,6 +380,7 @@ function ingestCryptoTrade(nextPrice:number,eventTime:number){
 }
 
 function startCryptoSocket(){
+  if(remoteWorkerOnline)return;
   stopCryptoSocket();
   feedState="loading";feedDetail="opening BTCUSDT WebSocket";renderFeedState();
   const ws=new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
@@ -455,6 +463,10 @@ function renderFeedState(){
 }
 
 function switchSymbol(next:string){
+  if(remoteWorkerOnline&&next!=="BTCUSDT"){
+    addEvent("24/7 worker is currently locked to BTCUSDT · switch ignored");
+    return;
+  }
   if(next===symbol)return;
   closePosition("symbol switch");
   stopCryptoSocket();
@@ -1039,6 +1051,10 @@ function drawBrainMonitor(){
 
 function renderBrainFrame(frame:BrainActivityFrame){
   brainFrame=frame;
+  if(remoteWorkerOnline){
+    drawBrainMonitor();
+    return;
+  }
   brainCoverageEl.textContent=frame.simulatedNeurons.toLocaleString()+" / "+frame.simulatedNeurons.toLocaleString()+" neurons";
   brainActiveEl.textContent=frame.activeNeurons.toLocaleString();
   brainFullBadgeEl.textContent="FULL · SIMULATED";
@@ -1052,14 +1068,158 @@ function renderBrainFrame(frame:BrainActivityFrame){
   drawBrainMonitor();
 }
 
+
+function renderRemoteBrainRegions(regions:any[]){
+  if(!Array.isArray(regions)||!regions.length)return;
+  const maxMean=Math.max(.00001,...regions.map(r=>Number(r.mean)||0));
+  brainRegionsEl.innerHTML=regions
+    .filter(r=>Number(r.count)>0)
+    .map(r=>{
+      const mean=Number(r.mean)||0;
+      const pct=Math.min(100,mean/maxMean*100);
+      return '<div class="brain-region"><div class="brain-region-top"><span>'+String(r.label||"region")+'</span><span>'+Number(r.active||0).toLocaleString()+'/'+Number(r.count||0).toLocaleString()+'</span></div><div class="brain-region-track"><i style="width:'+pct.toFixed(1)+'%"></i></div></div>';
+    }).join("");
+}
+
+function remoteNum(s:any,snake:string,camel?:string,fallback=0){
+  const a=Number(s?.[snake]);
+  if(Number.isFinite(a))return a;
+  if(camel){
+    const b=Number(s?.[camel]);
+    if(Number.isFinite(b))return b;
+  }
+  return fallback;
+}
+
+function applyRemoteWorkerState(s:any){
+  const firstConnect=!remoteWorkerOnline;
+  remoteWorkerOnline=true;
+  remoteWorkerLastSeen=Date.now();
+  remoteWorkerMode=String(s?.mode||"full-flywire-cpu-24x7");
+  remoteBrainSteps=remoteNum(s,"brain_steps_total","brainStepsTotal",0);
+
+  stopCryptoSocket();
+  symbol=String(s?.symbol||"BTCUSDT");
+  price=remoteNum(s,"price",undefined,price);
+  tick=remoteNum(s,"tick",undefined,tick);
+
+  if(Array.isArray(s?.prices)&&s.prices.length){
+    const incoming=s.prices.map(Number).filter(Number.isFinite).slice(-96);
+    prices.splice(0,prices.length,...incoming);
+    rebuildReturns();
+  }
+
+  cash=remoteNum(s,"cash",undefined,cash);
+  marginLocked=remoteNum(s,"margin_locked","marginLocked",marginLocked);
+  totalCashIn=remoteNum(s,"total_cash_in","totalCashIn",totalCashIn);
+  totalCashOut=remoteNum(s,"total_cash_out","totalCashOut",totalCashOut);
+  realizedPnL=remoteNum(s,"realized_pnl","realizedPnL",realizedPnL);
+  stress=remoteNum(s,"stress",undefined,stress);
+  wins=remoteNum(s,"wins",undefined,wins);
+  losses=remoteNum(s,"losses",undefined,losses);
+  peakEquity=remoteNum(s,"peak_equity","peakEquity",peakEquity);
+  breakMode=Boolean(s?.break_mode??s?.resting??false);
+  pendingConfirmations=remoteNum(s,"pending_confirmations","pendingConfirmations",0);
+  pendingSide=(s?.pending_side??s?.pendingSide??null) as "LONG"|"SHORT"|null;
+
+  const smokeSince=remoteNum(s,"desk_smoke_since_ms","deskSmokeSinceMs",0);
+  deskSmokeStartedAt=smokeSince>0
+    ? performance.now()-Math.max(0,Date.now()-smokeSince)
+    : null;
+
+  const p=s?.position;
+  position=p?{
+    side:String(p.side)==="SHORT"?"SHORT":"LONG",
+    entry:Number(p.entry)||0,
+    qty:Number(p.qty)||0,
+    openedTick:Number(p.opened_tick??p.openedTick??0)||0,
+    notional:Number(p.notional)||0,
+    margin:Number(p.margin)||0,
+  }:null;
+
+  lastFetchAt=Date.now();
+  feedState="live";
+  feedDetail="24/7 Railway full-FlyWire worker · "+remoteWorkerMode;
+  renderFeedState();
+
+  const rawDecision=String(s?.decision||"WAIT").toUpperCase();
+  decisionEl.textContent=
+    rawDecision==="LONG"?"BUY":
+    rawDecision==="SHORT"?"SHORT":
+    rawDecision==="BREAK"?"BREAK":
+    rawDecision==="STUDY"?"STUDY":"HOLD";
+  decisionEl.dataset.side=rawDecision==="LONG"?"UP":rawDecision==="SHORT"?"DOWN":"WAIT";
+  const conf=remoteNum(s,"confidence",undefined,0);
+  const sig=remoteNum(s,"signal",undefined,0);
+  callNoteEl.textContent=
+    "24/7 full brain · "+Math.round(conf*100)+"% confidence · signal "+sig.toFixed(2)+
+    " · "+remoteBrainSteps.toLocaleString()+" LIF steps";
+
+  const neurons=remoteNum(s,"brain_neurons","brainNeurons",0);
+  const edges=remoteNum(s,"brain_edges","brainEdges",0);
+  const activity=remoteNum(s,"activity",undefined,0);
+  latestBrain={...latestBrain,stage:"running",message:"24/7 full FlyWire CPU worker online",neurons,edges,activity,signal:sig};
+
+  brainLiveEl.dataset.state="running";
+  brainStatusEl.textContent="24/7 FULL BRAIN ONLINE";
+  brainDetailEl.textContent="server CPU LIF persists when this tab is closed";
+  brainFullBadgeEl.textContent="FULL · 24/7 CPU";
+  brainCoverageEl.textContent=neurons.toLocaleString()+" / "+neurons.toLocaleString()+" neurons";
+  brainEdgesEl.textContent=edges.toLocaleString();
+
+  const regions=s?.brain_regions??s?.brainRegions;
+  if(Array.isArray(regions)){
+    renderRemoteBrainRegions(regions);
+    brainActiveEl.textContent=regions.reduce((sum:number,r:any)=>sum+(Number(r.active)||0),0).toLocaleString();
+  }
+
+  workerStatusEl.textContent="ONLINE · persistent";
+  workerStatusEl.style.color="#80e4ab";
+
+  if(Array.isArray(s?.recent_events)){
+    eventLines.splice(0,eventLines.length,...s.recent_events.slice(0,8).map(String));
+    eventsEl.innerHTML=eventLines.map(x=>"<div>"+x+"</div>").join("");
+  }
+
+  tickerButtons.forEach(b=>b.classList.toggle("active",b.dataset.symbol===symbol));
+  updateChart();
+  updateFundsCard();
+  updateStressHud();
+
+  if(firstConnect)addEvent("● 24/7 FULL FlyWire worker connected · browser is spectator");
+}
+
+async function pollRemoteWorker(){
+  try{
+    const res=await fetch("/api/worker-state",{cache:"no-store"});
+    if(!res.ok)throw new Error("worker HTTP "+res.status);
+    const s=await res.json();
+    if(!String(s?.mode||"").includes("full-flywire"))throw new Error("worker is not full-FlyWire mode");
+    applyRemoteWorkerState(s);
+  }catch(error){
+    const wasOnline=remoteWorkerOnline;
+    remoteWorkerOnline=false;
+    workerStatusEl.textContent="OFFLINE / NOT CONFIGURED";
+    workerStatusEl.style.color="#ff9a8e";
+    if(wasOnline){
+      addEvent("24/7 worker disconnected · browser fallback resumed");
+      startCryptoSocket();
+    }
+  }finally{
+    window.setTimeout(()=>void pollRemoteWorker(),1500);
+  }
+}
+
 const brain=new StockBrain({
   getSnapshot:()=>({prices:[...prices],momentum:momentum(),volatility:volatility(),stress,tick,resting:breakMode}),
   onStatus(status){
-    latestBrain={...latestBrain,...status};
-    brainLiveEl.dataset.state=status.stage;
-    brainStatusEl.textContent=status.stage==="running"?"FULL BRAIN ONLINE":status.stage==="error"?"BRAIN ERROR":"LOADING FULL BRAIN";
-    brainDetailEl.textContent=status.message;
-    if(status.neurons){
+    if(!remoteWorkerOnline){
+      latestBrain={...latestBrain,...status};
+      brainLiveEl.dataset.state=status.stage;
+      brainStatusEl.textContent=status.stage==="running"?"FULL BRAIN ONLINE":status.stage==="error"?"BRAIN ERROR":"LOADING FULL BRAIN";
+      brainDetailEl.textContent=status.message;
+    }
+    if(status.neurons&&!remoteWorkerOnline){
       brainCoverageEl.textContent=status.neurons.toLocaleString()+" / "+status.neurons.toLocaleString()+" neurons";
       brainEdgesEl.textContent=(status.edges||0).toLocaleString();
       brainFullBadgeEl.textContent="FULL · SIMULATED";
@@ -1111,6 +1271,16 @@ function updateStressHud(){
 }
 
 function updateBreakBehavior(dt:number,time:number){
+  if(remoteWorkerOnline){
+    const target=breakMode?windowFlyPosition:deskFlyPosition;
+    const targetPos=target.clone();
+    targetPos.y+=breakMode?Math.sin(time*.8)*.015:Math.sin(time*2.1)*.025;
+    fly.position.lerp(targetPos,1-Math.exp(-dt*(breakMode?1.05:1.45)));
+    fly.rotation.y=THREE.MathUtils.damp(fly.rotation.y,0,3.5,dt);
+    fly.rotation.z=THREE.MathUtils.damp(fly.rotation.z,breakMode?0:Math.sin(time*.85)*.018,3.2,dt);
+    updateStressHud();
+    return;
+  }
   const now=performance.now();
 
   if(!breakMode&&stress>=SMOKE_ENTER_STRESS&&deskSmokeStartedAt===null){
