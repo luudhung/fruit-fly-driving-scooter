@@ -14,6 +14,10 @@ type FlyState = {
   currentLocationId: string;
   targetLocationId: string;
   hunger: number;
+  thirst?: number;
+  caffeine?: number;
+  sleepDebt?: number;
+  sleeping?: boolean;
   energy: number;
   stress: number;
   happiness: number;
@@ -26,11 +30,21 @@ type FlyState = {
   jobTitle?: string | null;
   partnerId?: string | null;
   affection: number;
+  relationshipYears?: number | null;
+  familyWaitYears?: number | null;
+  familyReadiness?: number;
   flirtingWith?: string | null;
   pregnant?: boolean;
   children: string[];
   parents: string[];
   vehicle?: string | null;
+  transitMode?: string;
+  illness?: string | null;
+  socialClass?: string;
+  businessId?: string | null;
+  businessEquity?: number;
+  creditScore?: number;
+  bankLoan?: number;
   ownsHome: boolean;
   brainId?: string;
   brainSeed?: number;
@@ -82,6 +96,19 @@ type LocationState = {
   z: number;
 };
 
+type WeatherState = {
+  condition?: string;
+  label?: string;
+  precipitation?: number;
+  wind?: number;
+  cloudCover?: number;
+  temperatureC?: number;
+  scenicPotential?: number;
+  lightning?: number;
+  danger?: number;
+  sunset?: { active?: boolean; quality?: number };
+};
+
 type CivilizationSnapshot = {
   authoritative: boolean;
   simulationStatus?: string;
@@ -104,6 +131,7 @@ type CivilizationSnapshot = {
   foodReserve: number;
   moneySupply: number;
   totalTransactions?: number;
+  weather?: WeatherState;
   daysPerYear?: number;
   neuralBridge?: {
     connected?: boolean;
@@ -143,6 +171,10 @@ const brainGrid = $("brain-grid");
 const brainNote = $("brain-note");
 const gameClockEl = $("game-clock");
 const gameDayEl = $("game-day");
+const weatherIconEl = $("weather-icon");
+const weatherLabelEl = $("weather-label");
+const weatherRiskEl = $("weather-risk");
+const temperatureEl = $("temperature");
 
 const flyIdEl = $("fly-id");
 const flyBrainIdEl = $("fly-brain-id");
@@ -158,6 +190,12 @@ const flyPartnerEl = $("fly-partner");
 const flyChildrenEl = $("fly-children");
 const flyMoneyEl = $("fly-money");
 const flyDebtEl = $("fly-debt");
+const flySleepEl = $("fly-sleep");
+const flyNeedsEl = $("fly-needs");
+const flyRelationshipEl = $("fly-relationship");
+const flyFamilyEl = $("fly-family");
+const flyClassEl = $("fly-class");
+const flyBusinessEl = $("fly-business");
 const flyStressEl = $("fly-stress");
 const flyHappyEl = $("fly-happy");
 const flyExciteEl = $("fly-excite");
@@ -204,7 +242,8 @@ function renderInspector(fly: FlyState | null) {
     flyNeuralStepsEl.textContent = "—";
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
-      flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
+      flySleepEl.textContent = flyNeedsEl.textContent = flyRelationshipEl.textContent = flyFamilyEl.textContent =
+      flyClassEl.textContent = flyBusinessEl.textContent = flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
     for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
     return;
   }
@@ -225,8 +264,20 @@ function renderInspector(fly: FlyState | null) {
   flyHomeEl.textContent = fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
-  flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} FC`;
-  flyDebtEl.textContent = `${num(fly.debt, 1)} FC · ${fly.vehicle || "no vehicle"}`;
+  flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} WC`;
+  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0), 1)} WC · ${fly.vehicle || fly.transitMode || "walk"}`;
+  flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
+  flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
+  flyRelationshipEl.textContent = fly.partnerId
+    ? `${fly.partnerId} · ${num(fly.relationshipYears || 0, 2)}y`
+    : (fly.flirtingWith ? `flirting ${fly.flirtingWith}` : "single");
+  flyFamilyEl.textContent = fly.partnerId
+    ? `${Math.round((fly.familyReadiness || 0) * 100)}% ready · wait ${num(fly.familyWaitYears || 0, 2)}y`
+    : "—";
+  flyClassEl.textContent = fly.socialClass || "working";
+  flyBusinessEl.textContent = fly.businessId
+    ? `${fly.businessId} · equity ${num(fly.businessEquity || 0)} WC`
+    : `no business · credit ${num(fly.creditScore || 0)}`;
   flyStressEl.textContent = `${num(fly.stress, 1)}%`;
   flyHappyEl.textContent = `${num(fly.happiness, 1)}%`;
   flyExciteEl.textContent = `${num(fly.excitement, 1)}%`;
@@ -270,9 +321,21 @@ function renderSnapshot(s: CivilizationSnapshot) {
   births.textContent = num(s.births);
   deaths.textContent = num(s.deaths);
   food.textContent = num(s.foodReserve);
-  money.textContent = `${num(s.moneySupply, 0)} FC`;
+  money.textContent = `${num(s.moneySupply, 0)} WC`;
   gameClockEl.textContent = s.gameClock || "--:--";
   gameDayEl.textContent = `DAY ${s.day || 1}`;
+  const weather = s.weather || {};
+  const condition = weather.condition || "clear";
+  const weatherIcon =
+    condition === "thunderstorm" ? "⛈️" :
+    condition === "heavy_rain" ? "🌧️" :
+    condition === "rain" ? "🌦️" :
+    condition === "cloudy" ? "☁️" :
+    weather.sunset?.active && (weather.sunset?.quality || 0) > 0.45 ? "🌇" : "☀️";
+  weatherIconEl.textContent = weatherIcon;
+  weatherLabelEl.textContent = (weather.label || condition).toUpperCase().replaceAll("_", " ");
+  weatherRiskEl.textContent = `${Math.round((weather.danger || 0) * 100)}%`;
+  temperatureEl.textContent = `${num(weather.temperatureC || 0, 1)}°C`;
 
   const rows = (s.events || []).slice(-16).reverse();
   events.replaceChildren(...rows.map((e) => {
@@ -283,6 +346,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "flirt" ? "✨ " :
       e.type === "breakup" ? "💔 " :
       e.type === "accident" ? "⚠ " :
+      e.type === "weather" ? "🌦 " :
+      e.type === "weather_injury" ? "🌧 " :
+      e.type === "weather_death" ? "⛈ " :
       e.type === "death" ? "† " :
       e.type === "job" ? "▣ " :
       e.type === "vehicle_purchase" ? "◆ " : "";
@@ -294,7 +360,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
   syncFlyMeshes(s.flies || []);
   syncHomes(s.flies || []);
-  updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0);
+  updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
 
   if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
     renderInspector(latestFlyStates.get(selectedFlyId) || null);
@@ -343,6 +409,32 @@ scene.add(sun);
 const moon = new THREE.DirectionalLight(0x7e9ddb, 0.1);
 moon.position.set(50, 60, -55);
 scene.add(moon);
+
+const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 320, 1.4);
+weatherFlash.position.set(0, 95, 0);
+scene.add(weatherFlash);
+
+const rainCount = 1600;
+const rainPositions = new Float32Array(rainCount * 3);
+for (let i = 0; i < rainCount; i += 1) {
+  rainPositions[i * 3] = (Math.random() - 0.5) * 190;
+  rainPositions[i * 3 + 1] = Math.random() * 95;
+  rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 190;
+}
+const rainGeometry = new THREE.BufferGeometry();
+rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+const rainMaterial = new THREE.PointsMaterial({
+  color: 0xb9d8e8,
+  size: 0.19,
+  transparent: true,
+  opacity: 0,
+  depthWrite: false,
+});
+const rain = new THREE.Points(rainGeometry, rainMaterial);
+rain.visible = false;
+scene.add(rain);
+let activeWeather: WeatherState = {};
+let nextLightningAt = 0;
 
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x53775b, roughness: 1 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), groundMat);
@@ -609,13 +701,20 @@ function updateSpriteText(sprite: THREE.Sprite, text: string) {
 
 function flyStatusEmoji(fly: FlyState) {
   if (fly.mentalHealthCrisis) return "⚠️";
-  if (fly.flirtingWith) return "💕";
-  if (fly.partnerId) return "❤️";
+  if (fly.sleeping || fly.action === "sleeping") return "💤";
+  if (fly.illness) return "🤒";
+  if (fly.transitMode === "metro" && fly.action && fly.action !== "resting") return "🚇";
+  if (fly.transitMode === "car" && fly.action && fly.action !== "resting") return "🚗";
+  if (fly.action?.includes("coffee")) return "☕";
   if (fly.smoking) return "🚬";
   if (fly.exercising) return "🏃";
   if (fly.action === "working") return "💼";
-  if (fly.action.includes("food") || fly.action.includes("meal")) return "🍎";
-  if (fly.action.includes("home") || fly.action.includes("rest")) return "🏠";
+  if (fly.action?.includes("sunset")) return "🌇";
+  if (fly.flirtingWith) return "💕";
+  if (fly.action?.includes("relationship") || fly.action?.includes("romance")) return "❤️";
+  if (fly.action?.includes("food") || fly.action?.includes("meal") || fly.action?.includes("dinner")) return "🍎";
+  if (fly.action?.includes("home") || fly.action?.includes("rest")) return "🏠";
+  if (fly.action?.includes("storm") || fly.action?.includes("weather")) return "🌧️";
   return "";
 }
 
@@ -777,21 +876,30 @@ function syncHomes(flies: FlyState[]) {
   }
 }
 
-function updateDayNight(hour: number, minute: number) {
+function updateDayNight(hour: number, minute: number, weather: WeatherState = {}) {
+  activeWeather = weather;
   const t = hour + minute / 60;
   const sunHeight = Math.sin(((t - 6) / 24) * Math.PI * 2);
   const daylight = THREE.MathUtils.clamp((sunHeight + 0.18) * 1.2, 0.04, 1);
   const night = 1 - daylight;
 
   const dayColor = new THREE.Color(0x91b6cf);
-  const duskColor = new THREE.Color(t > 17 && t < 20 ? 0xd28c6a : 0x11182d);
-  const sky = dayColor.clone().lerp(duskColor, night);
+  const sunsetQuality = weather.sunset?.active ? (weather.sunset?.quality || 0) : 0;
+  const duskColor = new THREE.Color(
+    sunsetQuality > 0.45 ? 0xe27f52 :
+    t > 17 && t < 20 ? 0xbc836d : 0x11182d
+  );
+  const cloud = THREE.MathUtils.clamp(weather.cloudCover || 0, 0, 1);
+  const storm = weather.condition === "thunderstorm" ? 1 : weather.condition === "heavy_rain" ? 0.7 : 0;
+  const overcast = new THREE.Color(storm > 0 ? 0x35424f : 0x6f8290);
+  const baseSky = dayColor.clone().lerp(duskColor, Math.max(night, sunsetQuality * 0.68));
+  const sky = baseSky.lerp(overcast, cloud * (0.42 + storm * 0.35));
   scene.background = sky;
   (scene.fog as THREE.Fog).color.copy(sky);
 
   hemi.intensity = 0.22 + daylight * 1.45;
-  sun.intensity = daylight * 2.8;
-  moon.intensity = night * 0.55;
+  sun.intensity = daylight * 2.8 * (1 - cloud * 0.62);
+  moon.intensity = night * 0.55 * (1 - cloud * 0.4);
   sun.position.set(Math.cos((t / 24) * Math.PI * 2) * 80, Math.max(-12, sunHeight * 95), Math.sin((t / 24) * Math.PI * 2) * 80);
 
   windowMaterials.forEach((m, i) => {
@@ -799,7 +907,10 @@ function updateDayNight(hour: number, minute: number) {
     m.emissiveIntensity = night * (occupied ? 1.5 : 0.08);
     m.color.setHex(night > 0.5 && occupied ? 0x6e5b43 : 0x294351);
   });
-  streetLights.forEach((l) => { l.intensity = night * 5.2; });
+  streetLights.forEach((l) => { l.intensity = Math.max(night, storm * 0.42) * 5.2; });
+  const rainLevel = THREE.MathUtils.clamp(weather.precipitation || 0, 0, 1);
+  rain.visible = rainLevel > 0.04;
+  rainMaterial.opacity = rainLevel * 0.78;
 }
 
 // ---------- free-roam camera ----------
@@ -968,6 +1079,29 @@ function animate(now = performance.now()) {
     visual.group.position.copy(visual.current);
     const wingBeat = Math.sin(now * 0.035) * 0.08;
     visual.group.rotation.z = wingBeat;
+  }
+
+  if (rain.visible) {
+    rain.position.x = camera.position.x;
+    rain.position.z = camera.position.z;
+    const pos = rainGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 0; i < rainCount; i += 1) {
+      let y = pos.getY(i) - dt * (38 + (activeWeather.precipitation || 0) * 55);
+      if (y < 0) y += 95;
+      pos.setY(i, y);
+    }
+    pos.needsUpdate = true;
+  }
+
+  if (activeWeather.condition === "thunderstorm") {
+    if (now >= nextLightningAt) {
+      weatherFlash.intensity = 12 + Math.random() * 18;
+      nextLightningAt = now + 900 + Math.random() * 4200;
+    } else {
+      weatherFlash.intensity *= 0.78;
+    }
+  } else {
+    weatherFlash.intensity = 0;
   }
 
   updateFreeCamera(dt);
