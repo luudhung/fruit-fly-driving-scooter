@@ -802,21 +802,53 @@ function updateDayNight(hour: number, minute: number) {
   streetLights.forEach((l) => { l.intensity = night * 5.2; });
 }
 
-let targetYaw = -0.72;
-let targetPitch = 0.46;
-let distance = 112;
+// ---------- free-roam camera ----------
+let cameraYaw = -0.7;
+let cameraPitch = -0.28;
 let dragging = false;
 let moved = false;
 let lastX = 0;
 let lastY = 0;
-const orbitTarget = new THREE.Vector3(0, 4, 0);
+let followSelected = false;
+let lastFrameAt = performance.now();
+const pressed = new Set<string>();
+const freePosition = new THREE.Vector3(86, 54, 105);
+const lookDirection = new THREE.Vector3();
+const moveForward = new THREE.Vector3();
+const moveRight = new THREE.Vector3();
+const worldUp = new THREE.Vector3(0, 1, 0);
 
+function setCameraOverview() {
+  followSelected = false;
+  freePosition.set(86, 54, 105);
+  cameraYaw = -2.43;
+  cameraPitch = -0.34;
+  camera.fov = 48;
+  camera.updateProjectionMatrix();
+}
+
+function cameraForward(out = new THREE.Vector3()) {
+  const cp = Math.cos(cameraPitch);
+  return out.set(
+    Math.sin(cameraYaw) * cp,
+    Math.sin(cameraPitch),
+    Math.cos(cameraYaw) * cp,
+  ).normalize();
+}
+
+setCameraOverview();
+camera.position.copy(freePosition);
+
+renderer.domElement.tabIndex = 0;
+renderer.domElement.style.outline = "none";
 renderer.domElement.addEventListener("pointerdown", (e) => {
   dragging = true;
   moved = false;
   lastX = e.clientX;
   lastY = e.clientY;
+  followSelected = false;
   renderer.domElement.style.cursor = "grabbing";
+  renderer.domElement.focus();
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener("pointermove", (e) => {
@@ -824,8 +856,8 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   const dx = e.clientX - lastX;
   const dy = e.clientY - lastY;
   if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
-  targetYaw -= dx * 0.003;
-  targetPitch = Math.max(0.12, Math.min(1.18, targetPitch + dy * 0.0025));
+  cameraYaw -= dx * 0.0032;
+  cameraPitch = Math.max(-1.46, Math.min(1.2, cameraPitch - dy * 0.0028));
   lastX = e.clientX;
   lastY = e.clientY;
 });
@@ -834,8 +866,35 @@ renderer.domElement.addEventListener("pointerup", () => {
   renderer.domElement.style.cursor = "grab";
 });
 renderer.domElement.addEventListener("wheel", (e) => {
-  distance = Math.max(26, Math.min(180, distance + e.deltaY * 0.06));
-}, { passive: true });
+  e.preventDefault();
+  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.018, 24, 78);
+  camera.updateProjectionMatrix();
+}, { passive: false });
+
+const movementKeys = new Set([
+  "KeyW","KeyA","KeyS","KeyD",
+  "ArrowUp","ArrowDown","ArrowLeft","ArrowRight",
+  "KeyQ","KeyE","ShiftLeft","ShiftRight",
+]);
+addEventListener("keydown", (e) => {
+  if (movementKeys.has(e.code)) {
+    pressed.add(e.code);
+    e.preventDefault();
+    followSelected = false;
+  }
+  if (e.code === "KeyF" && selectedFlyId) {
+    followSelected = !followSelected;
+    e.preventDefault();
+  }
+  if (e.code === "KeyC") {
+    setCameraOverview();
+    e.preventDefault();
+  }
+});
+addEventListener("keyup", (e) => {
+  pressed.delete(e.code);
+  if (movementKeys.has(e.code)) e.preventDefault();
+});
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -851,27 +910,67 @@ renderer.domElement.addEventListener("click", (e) => {
   selectedFlyId = id;
   const fly = latestFlyStates.get(id) || null;
   renderInspector(fly);
-  for (const [fid, visual] of flyVisuals) (visual.halo.material as THREE.MeshBasicMaterial).opacity = fid === id ? 0.85 : 0;
-  if (fly) orbitTarget.set(fly.x, Math.max(2, fly.y), fly.z);
+  for (const [fid, visual] of flyVisuals) {
+    (visual.halo.material as THREE.MeshBasicMaterial).opacity = fid === id ? 0.85 : 0;
+  }
 });
 
-function animate() {
+function updateFreeCamera(dt: number) {
+  if (followSelected && selectedFlyId) {
+    const visual = flyVisuals.get(selectedFlyId);
+    if (visual) {
+      const desired = visual.current.clone().add(new THREE.Vector3(-7, 4.8, 8));
+      freePosition.lerp(desired, Math.min(1, dt * 3.2));
+      const toward = visual.current.clone().sub(freePosition).normalize();
+      cameraYaw = Math.atan2(toward.x, toward.z);
+      cameraPitch = Math.asin(THREE.MathUtils.clamp(toward.y, -1, 1));
+    }
+  } else {
+    cameraForward(moveForward);
+    moveForward.y = 0;
+    if (moveForward.lengthSq() < 1e-5) moveForward.set(0, 0, -1);
+    moveForward.normalize();
+    moveRight.crossVectors(moveForward, worldUp).normalize();
+
+    let forwardAxis = 0;
+    let strafeAxis = 0;
+    let verticalAxis = 0;
+    if (pressed.has("KeyW") || pressed.has("ArrowUp")) forwardAxis += 1;
+    if (pressed.has("KeyS") || pressed.has("ArrowDown")) forwardAxis -= 1;
+    if (pressed.has("KeyD") || pressed.has("ArrowRight")) strafeAxis += 1;
+    if (pressed.has("KeyA") || pressed.has("ArrowLeft")) strafeAxis -= 1;
+    if (pressed.has("KeyE")) verticalAxis += 1;
+    if (pressed.has("KeyQ")) verticalAxis -= 1;
+
+    const sprint = pressed.has("ShiftLeft") || pressed.has("ShiftRight");
+    const speed = (sprint ? 52 : 22) * dt;
+    freePosition.addScaledVector(moveForward, forwardAxis * speed);
+    freePosition.addScaledVector(moveRight, strafeAxis * speed);
+    freePosition.y += verticalAxis * speed * 0.75;
+
+    freePosition.x = THREE.MathUtils.clamp(freePosition.x, -245, 245);
+    freePosition.z = THREE.MathUtils.clamp(freePosition.z, -245, 245);
+    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 155);
+  }
+
+  camera.position.copy(freePosition);
+  cameraForward(lookDirection);
+  camera.lookAt(freePosition.clone().add(lookDirection));
+}
+
+function animate(now = performance.now()) {
   requestAnimationFrame(animate);
+  const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
+  lastFrameAt = now;
 
   for (const visual of flyVisuals.values()) {
     visual.current.lerp(visual.target, 0.09);
     visual.group.position.copy(visual.current);
-    const wingBeat = Math.sin(performance.now() * 0.035) * 0.08;
+    const wingBeat = Math.sin(now * 0.035) * 0.08;
     visual.group.rotation.z = wingBeat;
   }
 
-  const cp = Math.cos(targetPitch);
-  camera.position.set(
-    orbitTarget.x + Math.sin(targetYaw) * cp * distance,
-    orbitTarget.y + Math.sin(targetPitch) * distance,
-    orbitTarget.z + Math.cos(targetYaw) * cp * distance,
-  );
-  camera.lookAt(orbitTarget);
+  updateFreeCamera(dt);
   renderer.render(scene, camera);
 }
 animate();
