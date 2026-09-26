@@ -4,48 +4,58 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Fly Civilization — Full Life</title>
-  <meta name="description" content="Read-only observer for the autonomous fruit-fly civilization experiment." />
+  <meta name="description" content="Persistent synthetic fruit-fly civilization with accelerated day/night, aging, relationships, economy and life events." />
   <style>
-    :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.78);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.55);--ok:#66e39d;--warn:#f0c56a}
+    :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.84);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.58);--ok:#66e39d;--warn:#f0c56a}
     *{box-sizing:border-box}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    #world{position:fixed;inset:0;background:
-      radial-gradient(circle at 50% 25%,rgba(64,120,90,.12),transparent 34%),
-      linear-gradient(180deg,#0b1714 0%,#07100e 100%)}
+    #world{position:fixed;inset:0;background:#07100e}
     #world canvas{width:100%;height:100%;display:block}
     .topbar{position:fixed;z-index:10;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
-    .brand,.status,.card{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(18px);box-shadow:0 18px 48px rgba(0,0,0,.24)}
+    .brand,.status,.card,.clock-pill{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(18px);box-shadow:0 18px 48px rgba(0,0,0,.24)}
     .brand{padding:11px 13px;border-radius:14px}
     .brand b{font-size:16px;letter-spacing:-.025em}
     .brand small{display:block;margin-top:4px;font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+    .clock-pill{padding:10px 12px;border-radius:14px;min-width:118px;text-align:center}
+    .clock-pill b{display:block;font:900 18px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .clock-pill span{display:block;margin-top:4px;font:700 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);letter-spacing:.08em}
     .status{margin-left:auto;padding:9px 11px;border-radius:999px;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.07em;display:flex;align-items:center;gap:7px}
     .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 12px rgba(240,197,106,.7)}
     .status[data-state="authoritative"] .dot{background:var(--ok);box-shadow:0 0 12px rgba(102,227,157,.7)}
     .status[data-state="offline"] .dot{background:#ef6b6b;box-shadow:0 0 12px rgba(239,107,107,.7)}
-    .left{position:fixed;z-index:9;left:14px;top:78px;width:min(360px,calc(100vw - 28px));display:grid;gap:10px}
-    .right{position:fixed;z-index:9;right:14px;top:78px;width:min(330px,calc(100vw - 28px));display:grid;gap:10px}
+    .left{position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
+    .right{position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
     .card{border-radius:16px;overflow:hidden}
     .head{padding:10px 12px;border-bottom:1px solid var(--line);font:850 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
     .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line)}
-    .stat{padding:11px 12px;background:rgba(7,16,14,.92)}
+    .stat{padding:10px 12px;background:rgba(7,16,14,.92)}
     .stat span{display:block;font-size:9px;color:var(--muted);margin-bottom:5px}
-    .stat b{font:850 16px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
-    .events{padding:10px 12px;max-height:180px;overflow:auto;display:grid;gap:6px;font:600 9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(236,245,241,.67)}
+    .stat b{font:850 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .events{padding:10px 12px;max-height:190px;overflow:auto;display:grid;gap:6px;font:600 9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(236,245,241,.70)}
     .brain-grid{padding:10px 12px;display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
     .neuron{aspect-ratio:1;border-radius:3px;background:rgba(255,255,255,.06)}
     .legend{padding:0 12px 11px;font-size:9px;line-height:1.45;color:var(--muted)}
-    .bottom{position:fixed;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);width:min(760px,calc(100vw - 28px))}
-    .notice{padding:10px 12px;border-radius:14px;font-size:9px;line-height:1.45;color:rgba(236,245,241,.62)}
+    .inspector{padding:11px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+    .field span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+    .field b{display:block;margin-top:3px;font:800 11px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
+    .meter{height:5px;margin-top:5px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+    .meter i{display:block;height:100%;width:0;background:rgba(255,255,255,.72)}
+    .bottom{position:fixed;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);width:min(820px,calc(100vw - 28px));pointer-events:none}
+    .notice{padding:10px 12px;border-radius:14px;font-size:9px;line-height:1.45;color:rgba(236,245,241,.64)}
     .notice b{color:#fff}
-    @media(max-width:900px){.right{display:none}.left{top:74px}.bottom{bottom:8px}.brand small{display:none}}
+    .hint{position:fixed;z-index:8;left:50%;top:14px;transform:translateX(-50%);font:700 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.45);pointer-events:none}
+    @media(max-width:980px){.right{display:none}.hint{display:none}}
+    @media(max-width:650px){.clock-pill{display:none}.brand small{display:none}.left{top:72px}}
   </style>
 </head>
 <body>
   <div id="world"></div>
   <div class="topbar">
-    <div class="brand"><b>Fly Civilization — Full Life</b><small>read-only autonomous civilization observer</small></div>
+    <div class="brand"><b>Fly Civilization — Full Life</b><small>persistent synthetic society · 1 game hour = 1 real minute</small></div>
+    <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div>
     <div class="status" id="connection" data-state="connecting"><span class="dot"></span><span id="connection-label">CONNECTING</span></div>
   </div>
+  <div class="hint">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK A FLY TO INSPECT</div>
 
   <aside class="left">
     <section class="card">
@@ -54,7 +64,7 @@
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <div class="stat"><span>Population</span><b id="population">—</b></div>
         <div class="stat"><span>Generation</span><b id="generation">—</b></div>
-        <div class="stat"><span>Simulation speed</span><b id="speed">—</b></div>
+        <div class="stat"><span>Clock speed</span><b id="speed">—</b></div>
         <div class="stat"><span>Births</span><b id="births">—</b></div>
         <div class="stat"><span>Deaths</span><b id="deaths">—</b></div>
         <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
@@ -62,29 +72,38 @@
       </div>
     </section>
     <section class="card">
-      <div class="head">Observed events</div>
-      <div class="events" id="events"><div>Waiting for authoritative event stream…</div></div>
+      <div class="head">Life events</div>
+      <div class="events" id="events"><div>Waiting for civilization events…</div></div>
     </section>
   </aside>
 
   <aside class="right">
     <section class="card">
-      <div class="head">Selected brain activity</div>
-      <div class="brain-grid" id="brain-grid"></div>
-      <div class="legend" id="brain-note">No fly selected. Neural telemetry is sampled and must come from the real brain pipeline; this UI does not invent explanations.</div>
+      <div class="head">Selected fly</div>
+      <div class="inspector">
+        <div class="field"><span>ID</span><b id="fly-id">click a fly</b></div>
+        <div class="field"><span>Age / sex</span><b id="fly-age">—</b></div>
+        <div class="field"><span>Action</span><b id="fly-action">—</b></div>
+        <div class="field"><span>Job</span><b id="fly-job">—</b></div>
+        <div class="field"><span>Partner</span><b id="fly-partner">—</b></div>
+        <div class="field"><span>Children</span><b id="fly-children">—</b></div>
+        <div class="field"><span>Cash / savings</span><b id="fly-money">—</b></div>
+        <div class="field"><span>Debt / vehicle</span><b id="fly-debt">—</b></div>
+        <div class="field"><span>Stress</span><b id="fly-stress">—</b><div class="meter"><i id="stress-meter"></i></div></div>
+        <div class="field"><span>Happiness</span><b id="fly-happy">—</b><div class="meter"><i id="happy-meter"></i></div></div>
+        <div class="field"><span>Excitement</span><b id="fly-excite">—</b><div class="meter"><i id="excite-meter"></i></div></div>
+        <div class="field"><span>Health</span><b id="fly-health">—</b><div class="meter"><i id="health-meter"></i></div></div>
+      </div>
     </section>
     <section class="card">
-      <div class="head">Experiment identity</div>
-      <div class="events" id="experiment">
-        <div>World seed: —</div>
-        <div>Brain: FlyWire / MANC baseline</div>
-        <div>Mode: observer only</div>
-      </div>
+      <div class="head">Synthetic cognitive activity</div>
+      <div class="brain-grid" id="brain-grid"></div>
+      <div class="legend" id="brain-note">Activity bands reflect modeled drives (stress, hunger, excitement, happiness, energy), not biological neural recordings.</div>
     </section>
   </aside>
 
   <div class="bottom">
-    <div class="card notice"><b>Scientific honesty:</b> this page never fabricates 24/7 progress. Until a persistent simulation worker is connected, the status remains offline/local and closing the browser stops any local-only visualization.</div>
+    <div class="card notice"><b>Model disclosure:</b> this is now a persistent synthetic civilization. The relationships, reproduction, mood, finances, aging, accidents and mortality are modeled behaviors saved server-side; they are not claims about real fruit-fly psychology or a full FlyWire multi-brain simulation.</div>
   </div>
 
   <script type="module" src="/src/fulllife.ts"></script>
