@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:pages": "npm run build && cp dist/motorbike.html dist/index.html",
+    "build:pages": "npm run build",
     "typecheck": "tsc --noEmit",
     "check:py": "PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q tools",
     "check:rs": "cargo check --locked --manifest-path tools/cpu-bench/Cargo.toml",

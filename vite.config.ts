@@ -11,10 +11,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        app: resolve(__dirname, "app.html"),
         play: resolve(__dirname, "play.html"),
         bench: resolve(__dirname, "bench.html"),
-        motorbike: resolve(__dirname, "motorbike.html"),
         upstream: resolve(__dirname, "upstream.html"),
         openworld: resolve(__dirname, "openworld.html"),
         stock: resolve(__dirname, "stock.html"),

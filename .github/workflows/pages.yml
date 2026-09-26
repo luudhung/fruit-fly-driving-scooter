@@ -76,7 +76,7 @@ jobs:
       - name: Install web dependencies
         run: npm ci
 
-      - name: Build Science Mode
+      - name: Build site
         env:
           VITE_BASE_PATH: /fruit-fly-driving-scooter/
           VITE_BRAIN_URL: /fruit-fly-driving-scooter/brain.bin
@@ -87,20 +87,6 @@ jobs:
           VITE_ASSET_MANIFEST_URL: /fruit-fly-driving-scooter/assets.json
         run: |
           npm run build
-          cat > dist/index.html <<'HTML'
-          <!doctype html>
-          <html>
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width,initial-scale=1">
-              <meta http-equiv="refresh" content="0; url=./app.html?mode=science">
-              <title>FlyBrain Motorbike — Full Brain</title>
-            </head>
-            <body>
-              <a href="./app.html?mode=science">Open full brain Science Mode</a>
-            </body>
-          </html>
-          HTML
           touch dist/.nojekyll
 
       - name: Upload Pages artifact
