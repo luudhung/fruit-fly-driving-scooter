@@ -5,6 +5,7 @@ COPY worker24/src ./src
 RUN cargo build --release
 
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.title="FlyBrain Worker24"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/target/release/flybrain-worker /usr/local/bin/flybrain-worker
 
