@@ -38,6 +38,10 @@ const retinaCanvas=document.getElementById("retina") as HTMLCanvasElement;
 const retinaCtx=retinaCanvas.getContext("2d")!;
 const retinaImage=retinaCtx.createImageData(64,16);
 const tickerButtons=Array.from(document.querySelectorAll<HTMLButtonElement>("[data-symbol]"));
+const WORKER_URL="https://flybrain-worker-production.up.railway.app";
+let workerConnected=false;
+let workerLastSync=0;
+let workerSyncBusy=false;
 
 interface MarketPoint{t:number;p:number}
 interface MarketResponse{
@@ -103,9 +107,114 @@ let pendingSide:"LONG"|"SHORT"|null=null;
 let pendingConfirmations=0;
 let lastDecisionTick=-1;
 let latestBrain:StockBrainStatus={stage:"loading",message:"Starting full FlyWire brain…"};
+let lastBrainTelemetryPost=0;
 
 function clamp(v:number,min=0,max=1){return Math.max(min,Math.min(max,v));}
 function money(v:number){return (v<0?"-":"")+"$"+Math.abs(v).toFixed(2);}
+type WorkerState={
+  price:number;
+  prices:number[];
+  cash:number;
+  marginLocked:number;
+  realizedPnL:number;
+  position:Position|null;
+  wins:number;
+  losses:number;
+  stress:number;
+  peakEquity:number;
+  totalCashIn:number;
+  totalCashOut:number;
+  unrealizedPnL:number;
+  equity:number;
+  freeCash:number;
+  mode:string;
+  tape?:string[];
+  fullBrain?:{online:boolean;lastSeen:number;neurons:number;edges:number;signal:number;activity:number;regions?:Record<string,number>};
+};
+
+async function workerFetch(path:string,init?:RequestInit){
+  const res=await fetch(WORKER_URL+path,{cache:"no-store",...init});
+  if(!res.ok)throw new Error("worker "+res.status);
+  return res.json();
+}
+
+function applyWorkerState(s:WorkerState){
+  workerConnected=true;
+  workerLastSync=Date.now();
+
+  if(Number.isFinite(s.price)&&s.price>0)price=s.price;
+  if(Array.isArray(s.prices)&&s.prices.length){
+    prices.splice(0,prices.length,...s.prices.slice(-96));
+    rebuildReturns();
+  }
+
+  cash=Number(s.cash??cash);
+  marginLocked=Number(s.marginLocked??marginLocked);
+  realizedPnL=Number(s.realizedPnL??realizedPnL);
+  position=s.position??null;
+  wins=Number(s.wins??wins);
+  losses=Number(s.losses??losses);
+  stress=Number(s.stress??stress);
+  peakEquity=Number(s.peakEquity??peakEquity);
+  totalCashIn=Number(s.totalCashIn??totalCashIn);
+  totalCashOut=Number(s.totalCashOut??totalCashOut);
+
+  if(Array.isArray(s.tape)&&s.tape.length){
+    eventLines.splice(0,eventLines.length,...s.tape.slice(0,8));
+    eventsEl.innerHTML=eventLines.map(x=>"<div>"+x+"</div>").join("");
+  }
+  updateChart();
+}
+
+async function syncWorkerState(){
+  if(workerSyncBusy)return;
+  workerSyncBusy=true;
+  try{
+    const s=await workerFetch("/state") as WorkerState;
+    applyWorkerState(s);
+  }catch(error){
+    workerConnected=false;
+    feedDetail="24/7 worker unavailable · browser-only fallback";
+  }finally{
+    workerSyncBusy=false;
+  }
+}
+
+async function postBrainDecision(d:StockBrainDecision){
+  try{
+    await workerFetch("/brain/decision",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({side:d.side,confidence:d.confidence,signal:d.signal,activity:d.activity,tick:d.tick})
+    });
+    await syncWorkerState();
+  }catch{
+    workerConnected=false;
+  }
+}
+
+async function postBrainTelemetry(status:StockBrainStatus){
+  const now=Date.now();
+  if(now-lastBrainTelemetryPost<2000)return;
+  lastBrainTelemetryPost=now;
+  try{
+    await workerFetch("/brain/telemetry",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({
+        neurons:status.neurons||0,
+        edges:status.edges||0,
+        signal:status.signal||0,
+        activity:status.activity||0,
+        regions:status.regions||{}
+      })
+    });
+    workerConnected=true;
+  }catch{
+    workerConnected=false;
+  }
+}
+
 
 function addEvent(line:string){
   eventLines.unshift(line);
@@ -821,6 +930,14 @@ function updateChart(){
 }
 
 function handleDecision(d:StockBrainDecision){
+  if(workerConnected){
+    decisionEl.textContent=d.side==="UP"?"BUY":d.side==="DOWN"?"SHORT":"HOLD";
+    decisionEl.dataset.side=d.side;
+    callNoteEl.textContent=Math.round(d.confidence*100)+"% confidence · full brain → 24/7 worker";
+    void postBrainDecision(d);
+    return;
+  }
+
   if(breakMode){
     decisionEl.textContent="BREAK";
     decisionEl.dataset.side="WAIT";
@@ -1092,6 +1209,8 @@ function updateHud(){
     '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':deskSmokeStartedAt!==null?'DESK SMOKE':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
     '<div class="metric"><span>feed poll</span><b>'+staleSec+'s ago</b></div>',
+    '<div class="metric"><span>24/7 worker</span><b>'+(workerConnected?'ONLINE':'FALLBACK')+'</b></div>',
+    '<div class="metric"><span>state sync</span><b>'+(workerLastSync?Math.floor((Date.now()-workerLastSync)/1000)+'s ago':'—')+'</b></div>',
     '<div class="metric"><span>DN activity</span><b>'+(latestBrain.activity??0).toFixed(4)+'</b></div>',
     '<div class="metric"><span>volatility</span><b>'+(volatility()*100).toFixed(3)+'%</b></div>',
     '<div class="metric wide"><span>FlyWire</span><b>'+fmt(latestBrain.neurons)+' neurons · '+fmt(latestBrain.edges)+' edges</b></div>',
@@ -1101,11 +1220,17 @@ function updateHud(){
 
 const clock=new THREE.Clock();
 let feedAccumulator=999;
+let workerAccumulator=999;
 function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(.05,clock.getDelta());
   const time=clock.elapsedTime;
   feedAccumulator+=dt;
+  workerAccumulator+=dt;
+  if(workerAccumulator>=2){
+    workerAccumulator=0;
+    void syncWorkerState();
+  }
   if(feedAccumulator>=6){
     feedAccumulator=0;
     if(symbol!=="BTCUSDT")void fetchMarket();
@@ -1121,6 +1246,7 @@ animate();
 
 renderFeedState();
 updateChart();
+void syncWorkerState();
 startCryptoSocket();
 addEvent("sunset city-view trading desk ready · BTC live stream connecting");
 addEvent("full FlyWire trader · starting capital $100,000 · leveraged paper account");
