@@ -33,13 +33,23 @@ interface MarketResponse{
   source:string;
   error?:string;
 }
-type Position={side:"LONG"|"SHORT";entry:number;qty:number;openedTick:number};
+type Position={
+  side:"LONG"|"SHORT";
+  entry:number;
+  qty:number;
+  openedTick:number;
+  notional:number;
+  margin:number;
+};
 
-const STARTING_EQUITY=10_000;
-const TRADE_NOTIONAL=2_000;
-const MAX_HOLD_TICKS=6;
-const BREAK_ENTER_STRESS=78;
-const BREAK_EXIT_STRESS=42;
+const STARTING_CASH=100_000;
+const MAX_LEVERAGE=4;
+const BASE_RISK_FRACTION=.55;
+const CONF_RISK_MULT=1.20;
+const MIN_NOTIONAL=12_000;
+const MAX_HOLD_TICKS=18;
+const BREAK_ENTER_STRESS=63;
+const BREAK_EXIT_STRESS=28;
 const prices:number[]=[];
 const returns:number[]=[];
 const eventLines:string[]=[];
@@ -56,6 +66,10 @@ let cryptoReconnectTimer:number|null=null;
 let cryptoTradeCounter=0;
 let stress=18;
 let breakMode=false;
+let cash=STARTING_CASH;
+let marginLocked=0;
+let totalCashIn=STARTING_CASH;
+let totalCashOut=0;
 let wins=0;
 let losses=0;
 let realizedPnL=0;
@@ -100,36 +114,78 @@ function unrealizedPnL(){
   return (price-position.entry)*position.qty*direction;
 }
 
-function equity(){return STARTING_EQUITY+realizedPnL+unrealizedPnL();}
+function freeCash(){return cash-marginLocked;}
+function equity(){return cash+unrealizedPnL();}
+function buyingPower(){return Math.max(10_000,Math.abs(equity())*MAX_LEVERAGE);}
 
 function closePosition(reason:string){
   if(!position||!price)return;
   const closed=position;
   const direction=closed.side==="LONG"?1:-1;
   const pnl=(price-closed.entry)*closed.qty*direction;
+
   realizedPnL+=pnl;
+  cash+=pnl;
+  marginLocked=Math.max(0,marginLocked-closed.margin);
+
   if(pnl>=0){
     wins++;
-    stress=Math.max(0,stress-(7+Math.min(8,pnl/20)));
+    totalCashIn+=closed.margin+pnl;
+    stress=Math.max(0,stress-(5+Math.min(9,pnl/500)));
   }else{
     losses++;
-    stress=Math.min(100,stress+(10+Math.min(18,Math.abs(pnl)/14)));
+    totalCashIn+=closed.margin;
+    totalCashOut+=Math.abs(pnl);
+    stress=Math.min(100,stress+(14+Math.min(30,Math.abs(pnl)/250)));
   }
-  addEvent((pnl>=0?"✓ ":"✕ ")+closed.side+" closed "+money(pnl)+" · "+reason);
+
+  addEvent(
+    (pnl>=0?"✓ ":"✕ ")+closed.side+" closed "+money(pnl)+
+    " · IN "+money(closed.margin+Math.max(0,pnl))+
+    (pnl<0?" · OUT "+money(Math.abs(pnl)):"")+
+    " · "+reason
+  );
   position=null;
 }
 
 function openPosition(side:"LONG"|"SHORT",confidence:number){
   if(!price)return;
-  const qty=TRADE_NOTIONAL/price;
-  position={side,entry:price,qty,openedTick:tick};
-  addEvent("→ "+side+" "+symbol+" @ "+price.toFixed(2)+" · "+Math.round(confidence*100)+"% brain confidence");
+
+  const desiredNotional=Math.max(
+    MIN_NOTIONAL,
+    Math.abs(equity())*(BASE_RISK_FRACTION+confidence*CONF_RISK_MULT)
+  );
+  const notional=Math.min(desiredNotional,buyingPower());
+  const qty=notional/price;
+  const margin=notional/MAX_LEVERAGE;
+
+  marginLocked+=margin;
+  totalCashOut+=margin;
+  position={side,entry:price,qty,openedTick:tick,notional,margin};
+
+  stress=Math.min(100,stress+5+confidence*9);
+  addEvent(
+    "→ "+side+" "+symbol+" @ "+price.toFixed(2)+
+    " · OUT "+money(margin)+" margin"+
+    " · notion "+money(notional)+
+    " · "+Math.round(confidence*100)+"%"
+  );
 }
 
 function onFreshMarketTick(){
   if(!breakMode&&position&&tick-position.openedTick>=MAX_HOLD_TICKS) closePosition("time exit");
+
   const absMove=returns.length?Math.abs(returns[returns.length-1]):0;
-  stress=Math.min(100,stress+Math.max(0,absMove-.0025)*650);
+  let stressDelta=Math.min(4,absMove*6000);
+
+  if(position){
+    const floatingLoss=Math.max(0,-unrealizedPnL());
+    const exposure=position.notional/Math.max(1,Math.abs(equity()));
+    stressDelta+=Math.min(7,floatingLoss/800);
+    stressDelta+=Math.min(.8,exposure*.08);
+  }
+
+  stress=Math.min(100,stress+stressDelta);
 }
 
 function stopCryptoSocket(){
@@ -153,8 +209,7 @@ function ingestCryptoTrade(nextPrice:number,eventTime:number){
     while(prices.length>96)prices.shift();
     rebuildReturns();
     tick++;
-    const move=prev?Math.abs((nextPrice-prev)/prev):0;
-    stress=Math.min(100,stress+Math.max(0,move-.00018)*1450);
+    void prev;
     onFreshMarketTick();
     updateChart();
   }
@@ -694,13 +749,13 @@ function updateChart(){
   sideCtx.fillText("FLY FUND",28,48);
   sideCtx.fillStyle="#8ea4af";sideCtx.font="650 16px ui-monospace, monospace";
   const lines=[
-    "EQUITY  "+money(equity()),
+    "CASH     "+money(cash),
+    "FREE     "+money(freeCash()),
+    "EQUITY   "+money(equity()),
     "REALIZED "+money(realizedPnL),
+    "IN/OUT   "+money(totalCashIn)+" / "+money(totalCashOut),
     "POSITION "+(position?.side||"FLAT"),
-    "W / L  "+wins+" / "+losses,
-    "STRESS "+Math.round(stress)+"/100",
-    "MODE "+(breakMode?"WINDOW BREAK":"TRADING"),
-    "BRAIN SIGNAL",
+    "STRESS   "+Math.round(stress)+"/100",
     breakMode?"REST":(decisionEl.textContent||"HOLD")
   ];
   lines.forEach((line,i)=>{
@@ -801,7 +856,7 @@ function updateBreakBehavior(dt:number,time:number){
   fly.rotation.y=THREE.MathUtils.damp(fly.rotation.y,targetYaw,3.5,dt);
   fly.rotation.z=THREE.MathUtils.damp(fly.rotation.z,breakMode?0:Math.sin(time*.85)*.018,3.2,dt);
 
-  stress=Math.max(0,stress-dt*(breakMode?2.8:.12));
+  stress=Math.max(0,stress-dt*(breakMode?3.6:.02));
   updateStressHud();
 }
 
@@ -813,9 +868,15 @@ function updateHud(){
     '<div class="metric"><span>symbol / price</span><b>'+symbol+' '+(price?price.toFixed(2):'—')+'</b></div>',
     '<div class="metric"><span>last move</span><b>'+(change>=0?'+':'')+change.toFixed(3)+'%</b></div>',
     '<div class="metric"><span>position</span><b>'+(position?.side||'FLAT')+'</b></div>',
+    '<div class="metric"><span>notional</span><b>'+(position?money(position.notional):'$0.00')+'</b></div>',
     '<div class="metric"><span>unrealized</span><b>'+money(unrealizedPnL())+'</b></div>',
-    '<div class="metric"><span>equity</span><b>'+money(equity())+'</b></div>',
     '<div class="metric"><span>realized</span><b>'+money(realizedPnL)+'</b></div>',
+    '<div class="metric"><span>cash</span><b>'+money(cash)+'</b></div>',
+    '<div class="metric"><span>free cash</span><b>'+money(freeCash())+'</b></div>',
+    '<div class="metric"><span>margin locked</span><b>'+money(marginLocked)+'</b></div>',
+    '<div class="metric"><span>equity</span><b>'+money(equity())+'</b></div>',
+    '<div class="metric"><span>money in</span><b>'+money(totalCashIn)+'</b></div>',
+    '<div class="metric"><span>money out</span><b>'+money(totalCashOut)+'</b></div>',
     '<div class="metric"><span>W / L</span><b>'+wins+' / '+losses+'</b></div>',
     '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
@@ -851,9 +912,9 @@ renderFeedState();
 updateChart();
 startCryptoSocket();
 addEvent("NYC sunset trading desk ready · BTC live stream connecting");
-addEvent("full FlyWire trader evaluates live BTC samples · paper capital $10,000");
+addEvent("full FlyWire trader · starting capital $100,000 · leveraged paper account");
 addEvent("16 independent traffic neural agents driving below");
-addEvent("stress 62 → smoking · stress 78 → city break · return at 42");
+addEvent("stress 45 tense · 62 smoking · 63 city break · return at 28");
 
 window.addEventListener("resize",()=>{
   camera.aspect=innerWidth/innerHeight;
