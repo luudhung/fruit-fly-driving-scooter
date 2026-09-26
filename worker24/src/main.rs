@@ -4,7 +4,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -19,7 +18,6 @@ use tokio::{
     sync::{watch, RwLock},
     time::sleep,
 };
-use tokio_tungstenite::connect_async;
 use tower_http::cors::{Any, CorsLayer};
 
 const MAGIC: &[u8] = b"WGFLYBRN";
@@ -828,36 +826,76 @@ fn save_state(path: &Path, state: &PersistedState) {
     }
 }
 
-async fn market_loop(tx: watch::Sender<(f64, u64)>) {
-    loop {
-        match connect_async("wss://stream.binance.com:9443/ws/btcusdt@trade").await {
-            Ok((mut ws, _)) => {
-                eprintln!("BTCUSDT websocket connected");
-                while let Some(msg) = ws.next().await {
-                    let Ok(msg) = msg else { break; };
-                    if !msg.is_text() {
-                        continue;
-                    }
-                    let Ok(v) = serde_json::from_str::<Value>(msg.to_text().unwrap_or("")) else {
-                        continue;
-                    };
-                    let price = v
-                        .get("p")
-                        .and_then(|x| x.as_str())
-                        .and_then(|x| x.parse::<f64>().ok())
-                        .unwrap_or(0.0);
-                    let t = v
-                        .get("T")
-                        .and_then(|x| x.as_u64())
-                        .unwrap_or_else(now_ms);
-                    if price > 0.0 {
-                        let _ = tx.send((price, t));
+async fn fetch_market_price(client: &reqwest::Client) -> Result<f64, String> {
+    // Prefer BTC/USDT directly when Kraken exposes it in this region/account.
+    for pair in ["XBTUSDT", "XBTUSD"] {
+        let url = format!("https://api.kraken.com/0/public/Ticker?pair={pair}");
+        if let Ok(res) = client.get(&url).send().await {
+            if res.status().is_success() {
+                if let Ok(v) = res.json::<Value>().await {
+                    if let Some(obj) = v.get("result").and_then(|x| x.as_object()) {
+                        if let Some(first) = obj.values().next() {
+                            if let Some(px) = first
+                                .get("c")
+                                .and_then(|x| x.as_array())
+                                .and_then(|x| x.first())
+                                .and_then(|x| x.as_str())
+                                .and_then(|x| x.parse::<f64>().ok())
+                            {
+                                if px > 0.0 {
+                                    return Ok(px);
+                                }
+                            }
+                        }
                     }
                 }
             }
-            Err(e) => eprintln!("BTC websocket error: {e}"),
         }
-        sleep(Duration::from_secs(2)).await;
+    }
+
+    // Final fallback: BTC/USD spot. For this paper experiment USD is used only
+    // as a price feed when USDT is unavailable; the brain still sees raw chart pixels.
+    let res = client
+        .get("https://api.coinbase.com/v2/prices/BTC-USD/spot")
+        .send()
+        .await
+        .map_err(|e| format!("coinbase request: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("coinbase HTTP {}", res.status()));
+    }
+    let v = res
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("coinbase json: {e}"))?;
+    let px = v
+        .get("data")
+        .and_then(|x| x.get("amount"))
+        .and_then(|x| x.as_str())
+        .and_then(|x| x.parse::<f64>().ok())
+        .ok_or_else(|| "coinbase missing BTC price".to_string())?;
+    if px <= 0.0 {
+        return Err("coinbase returned non-positive BTC price".into());
+    }
+    Ok(px)
+}
+
+async fn market_loop(tx: watch::Sender<(f64, u64)>) {
+    let client = reqwest::Client::builder()
+        .user_agent("FlyBrain-24x7/1.0")
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("http client");
+
+    loop {
+        match fetch_market_price(&client).await {
+            Ok(price) => {
+                let _ = tx.send((price, now_ms()));
+            }
+            Err(e) => {
+                eprintln!("BTC market feed error: {e}");
+            }
+        }
+        sleep(Duration::from_secs(1)).await;
     }
 }
 
