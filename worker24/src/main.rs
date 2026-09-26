@@ -38,10 +38,7 @@ const A_SYN: f32 = 0.81873;
 
 const STARTING_CASH: f64 = 100_000.0;
 const MAX_LEVERAGE: f64 = 4.0;
-const BASE_RISK_FRACTION: f64 = 0.55;
-const CONF_RISK_MULT: f64 = 1.20;
-const MIN_NOTIONAL: f64 = 12_000.0;
-const MAX_HOLD_TICKS: u64 = 18;
+const MAX_BRAIN_HOLD_TICKS: u64 = 180;
 const SMOKE_ENTER_STRESS: f64 = 62.0;
 const SMOKE_CLEAR_STRESS: f64 = 54.0;
 const BREAK_ENTER_STRESS: f64 = 78.0;
@@ -132,6 +129,16 @@ struct PersistedState {
     confidence: f64,
     signal: f64,
     activity: f64,
+    #[serde(default)]
+    brain_size_signal: f64,
+    #[serde(default)]
+    brain_risk_fraction: f64,
+    #[serde(default)]
+    brain_notional: f64,
+    #[serde(default)]
+    brain_patience_signal: f64,
+    #[serde(default)]
+    brain_hold_ticks: u64,
     pending_side: Option<String>,
     pending_confirmations: u32,
 
@@ -172,6 +179,11 @@ impl PersistedState {
             confidence: 0.0,
             signal: 0.0,
             activity: 0.0,
+            brain_size_signal: 0.0,
+            brain_risk_fraction: 0.0,
+            brain_notional: 0.0,
+            brain_patience_signal: 0.0,
+            brain_hold_ticks: 1,
             pending_side: None,
             pending_confirmations: 0,
             brain_neurons: 0,
@@ -279,18 +291,23 @@ impl PersistedState {
         self.position = None;
     }
 
-    fn open_position(&mut self, side: &str, confidence: f64) {
+    fn open_position(&mut self, side: &str, confidence: f64, requested_notional: f64) {
         if self.price <= 0.0 {
             return;
         }
-        let dd = self.drawdown_pct();
-        let caution_scale = (1.0 - dd * 1.6).max(0.30);
-        let desired = MIN_NOTIONAL.max(
-            self.equity().abs()
-                * (BASE_RISK_FRACTION + confidence * CONF_RISK_MULT)
-                * caution_scale,
-        );
-        let notional = desired.min(self.buying_power());
+
+        // The connectome chooses the exact stake. The account only enforces
+        // its available buying-power boundary.
+        let max_notional = self.buying_power();
+        let notional = clamp64(requested_notional, 0.0, max_notional);
+        if notional < 0.01 {
+            self.add_event(format!(
+                "· BRAIN SKIP {} · chose only USD {:.4} notional",
+                side, notional
+            ));
+            return;
+        }
+
         let qty = notional / self.price;
         let margin = notional / MAX_LEVERAGE;
 
@@ -306,14 +323,16 @@ impl PersistedState {
         });
         self.stress = (self.stress + 5.0 + confidence * 9.0).min(100.0);
         self.add_event(format!(
-            "→ {} BTCUSDT @ {:.2} · margin {:.2} · notional {:.2} · {:.0}%",
+            "→ {} BTCUSDT @ {:.2} · BRAIN CHOSE USD {:.2} notional · margin {:.2} · hold {} ticks · {:.0}%",
             side,
             self.price,
-            margin,
             notional,
+            margin,
+            self.brain_hold_ticks,
             confidence * 100.0
         ));
     }
+
 }
 
 struct Sim {
@@ -414,6 +433,14 @@ fn now_ms() -> u64 {
 
 fn clamp64(v: f64, min: f64, max: f64) -> f64 {
     v.max(min).min(max)
+}
+
+fn neural_unit(rate: f64, gain: f64) -> f64 {
+    if !rate.is_finite() || rate <= 0.0 {
+        0.0
+    } else {
+        clamp64(1.0 - (-rate * gain).exp(), 0.0, 1.0)
+    }
 }
 
 fn sample_evenly(values: &[usize], max: usize) -> Vec<usize> {
@@ -743,8 +770,9 @@ async fn simulation_loop(
 
             if !state.break_mode {
                 if let Some(p) = &state.position {
-                    if state.tick.saturating_sub(p.opened_tick) >= MAX_HOLD_TICKS {
-                        state.close_position("time exit");
+                    let brain_hold = state.brain_hold_ticks.max(1);
+                    if state.tick.saturating_sub(p.opened_tick) >= brain_hold {
+                        state.close_position("brain-selected hold time elapsed");
                     }
                 }
             }
@@ -854,6 +882,49 @@ async fn simulation_loop(
         let threshold = 0.105 + (vol * 2.5).clamp(0.0, 0.13);
         let confidence = clamp64(signal.abs() * 0.88 + activity * 9.5, 0.0, 1.0);
 
+        // Independent full-connectome readouts choose exact stake size and patience.
+        let central_mean = if partitions.region_counts[4] > 0 && steps_per_cycle > 0 {
+            region_spikes[4] as f64 / (partitions.region_counts[4] * steps_per_cycle) as f64
+        } else { 0.0 };
+        let motor_mean = if partitions.region_counts[6] > 0 && steps_per_cycle > 0 {
+            region_spikes[6] as f64 / (partitions.region_counts[6] * steps_per_cycle) as f64
+        } else { 0.0 };
+        let intrinsic_mean = if partitions.region_counts[3] > 0 && steps_per_cycle > 0 {
+            region_spikes[3] as f64 / (partitions.region_counts[3] * steps_per_cycle) as f64
+        } else { 0.0 };
+        let ascending_mean = if partitions.region_counts[2] > 0 && steps_per_cycle > 0 {
+            region_spikes[2] as f64 / (partitions.region_counts[2] * steps_per_cycle) as f64
+        } else { 0.0 };
+
+        let central_drive = neural_unit(central_mean, 95.0);
+        let motor_drive = neural_unit(motor_mean, 110.0);
+        let intrinsic_drive = neural_unit(intrinsic_mean, 90.0);
+        let ascending_drive = neural_unit(ascending_mean, 90.0);
+
+        let brain_size_signal = clamp64(
+            central_drive * 0.34
+                + motor_drive * 0.26
+                + neural_unit(mbon, 120.0) * 0.20
+                + signal.abs() * 0.20,
+            0.0,
+            1.0,
+        );
+        let brain_patience_signal = clamp64(
+            intrinsic_drive * 0.46
+                + ascending_drive * 0.34
+                + (1.0 - signal.abs()) * 0.20,
+            0.0,
+            1.0,
+        );
+
+        let max_buying_power = state.buying_power();
+        state.brain_size_signal = brain_size_signal;
+        state.brain_risk_fraction = brain_size_signal;
+        state.brain_notional = (max_buying_power * brain_size_signal * 100.0).round() / 100.0;
+        state.brain_patience_signal = brain_patience_signal;
+        state.brain_hold_ticks = 1
+            + (brain_patience_signal * (MAX_BRAIN_HOLD_TICKS - 1) as f64).round() as u64;
+
         state.signal = signal;
         state.activity = activity;
         state.confidence = confidence;
@@ -921,7 +992,8 @@ async fn simulation_loop(
                         if state.position.is_some() {
                             state.close_position("brain reversed after confirmation");
                         }
-                        state.open_position(side, confidence);
+                        let chosen_notional = state.brain_notional;
+                        state.open_position(side, confidence, chosen_notional);
                         state.decision = side.into();
                     } else {
                         state.decision = "STUDY".into();
