@@ -112,6 +112,7 @@ let pendingSide:"LONG"|"SHORT"|null=null;
 let pendingConfirmations=0;
 let lastDecisionTick=-1;
 let latestBrain:StockBrainStatus={stage:"loading",message:"Starting full FlyWire brain…"};
+let latestWorkerMode="AUTONOMOUS_SERVER";
 let lastBrainTelemetryPost=0;
 
 function clamp(v:number,min=0,max=1){return Math.max(min,Math.min(max,v));}
@@ -146,6 +147,7 @@ async function workerFetch(path:string,init?:RequestInit){
 function applyWorkerState(s:WorkerState){
   workerConnected=true;
   workerLastSync=Date.now();
+  latestWorkerMode=String(s.mode||"AUTONOMOUS_SERVER");
 
   if(Number.isFinite(s.price)&&s.price>0)price=s.price;
   if(Array.isArray(s.prices)&&s.prices.length){
@@ -1331,6 +1333,77 @@ function updateBreakBehavior(dt:number,time:number){
   updateStressHud();
 }
 
+function brainLevel(v:number){
+  if(!Number.isFinite(v)||v<=0)return 0;
+  return clamp(Math.log10(1+v*7000)/2.2,0,1);
+}
+
+function drawBrainMonitor(){
+  const regions=latestBrain.regions||{};
+  const full=latestBrain.stage==="running"&&latestBrain.fullBrainLoaded===true;
+  const serverOnly=!full&&latestWorkerMode==="AUTONOMOUS_SERVER";
+
+  brainModeBadgeEl.dataset.mode=full?"full":"server";
+  brainModeBadgeEl.textContent=full?"FULL FLYWIRE":serverOnly?"SERVER AUTONOMOUS":"CONNECTING";
+
+  if(full){
+    const simulated=latestBrain.simulatedNeurons||latestBrain.neurons||0;
+    const total=latestBrain.neurons||0;
+    brainCoverageEl.textContent=
+      "Full connectome simulated: "+simulated.toLocaleString()+" / "+total.toLocaleString()+
+      " neurons · "+(latestBrain.edges||0).toLocaleString()+
+      " edges. Market adapter stimulates optic/sensory populations; decision readout uses DN/MBON.";
+  }else if(serverOnly){
+    brainCoverageEl.textContent=
+      "24/7 worker is trading while the browser is closed. Full FlyWire WebGPU is offline; this mode does not claim full-brain emulation.";
+  }else{
+    brainCoverageEl.textContent="Loading FlyWire connectome…";
+  }
+
+  for(const el of brainRegionFills){
+    const key=el.dataset.brainRegion||"";
+    const value=Number(regions[key]||0);
+    el.style.width=(brainLevel(value)*100).toFixed(1)+"%";
+  }
+  for(const el of brainRegionValues){
+    const key=el.dataset.brainValue||"";
+    const value=Number(regions[key]||0);
+    el.textContent=value.toFixed(4);
+  }
+
+  const ctx=brainMapCtx,w=brainMapCanvas.width,h=brainMapCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle="#0c1419";ctx.fillRect(0,0,w,h);
+
+  const glow=(name:string)=>brainLevel(Number(regions[name]||0));
+  const left=glow("opticLeft"),right=glow("opticRight"),sens=glow("sensory");
+  const dnL=glow("dnLeft"),dnR=glow("dnRight"),mb=glow("mbon");
+
+  function lobe(cx:number,cy:number,rx:number,ry:number,intensity:number){
+    const g=ctx.createRadialGradient(cx,cy,4,cx,cy,Math.max(rx,ry));
+    const alpha=.14+.78*intensity;
+    g.addColorStop(0,"rgba(121,214,163,"+alpha+")");
+    g.addColorStop(1,"rgba(48,93,77,.08)");
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="rgba(180,220,205,.18)";ctx.lineWidth=2;ctx.stroke();
+  }
+
+  lobe(82,76,62,48,left);
+  lobe(218,76,62,48,right);
+  lobe(150,98,56,39,sens);
+  lobe(122,138,31,22,dnL);
+  lobe(178,138,31,22,dnR);
+  lobe(150,65,34,22,mb);
+
+  ctx.fillStyle="rgba(226,239,234,.72)";
+  ctx.font="700 13px ui-monospace, monospace";
+  ctx.textAlign="center";
+  ctx.fillText("L",82,80);ctx.fillText("R",218,80);
+  ctx.font="700 11px ui-monospace, monospace";
+  ctx.fillText("MBON",150,69);ctx.fillText("DN",150,143);
+}
+
 function updateFundsCard(){
   const eq=equity();
   const upnl=unrealizedPnL();
@@ -1356,6 +1429,7 @@ function updateFundsCard(){
 
 function updateHud(){
   updateFundsCard();
+  drawBrainMonitor();
   const prev=prices.length>1?prices[prices.length-2]:price;
   const change=price&&prev?((price-prev)/prev*100):0;
   const staleSec=lastFetchAt?Math.floor((Date.now()-lastFetchAt)/1000):0;
