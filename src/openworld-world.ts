@@ -26,6 +26,8 @@ export interface OpenWorldSensory {
 }
 
 export interface OpenWorldTelemetry extends OpenWorldSensory {
+  hunger: number;
+  resourcePatches: number;
   speed: number;
   heading: number;
   brainTurn: number;
@@ -49,6 +51,7 @@ interface FoodPatch {
   maxEnergy: number;
   odor: number;
   radius: number;
+  regenRate: number;
 }
 
 interface Creature {
@@ -201,6 +204,8 @@ export class OpenWorld {
     const animal = this.nearestCreature();
     return {
       ...sensory,
+      hunger: this.hunger,
+      resourcePatches: this.foods.filter((f)=>f.energy>1).length,
       speed: this.speed,
       heading: this.heading,
       brainTurn: this.brain.turn,
@@ -343,44 +348,117 @@ export class OpenWorld {
   }
 
   private buildFoods() {
-    const add = (name: string, x: number, z: number, color: number, odor: number, kind: "fruit"|"flower"|"sugar") => {
+    const add = (
+      name: string,
+      x: number,
+      z: number,
+      color: number,
+      odor: number,
+      kind: "fruit"|"flower"|"sugar",
+      scale = 1,
+    ) => {
       const g = new THREE.Group();
       g.position.set(x, 0, z);
+
       if (kind === "fruit") {
         const fruitMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
         for (let i = 0; i < 5; i++) {
-          const f = mesh(new THREE.SphereGeometry(0.75, 14, 10), fruitMat,
-            Math.sin(i*2.2)*0.75, 0.55 + (i%2)*0.28, Math.cos(i*2.2)*0.75);
-          f.scale.set(1.0, 0.72, 1.15);
-          g.add(f);
+          const fruit = mesh(
+            new THREE.SphereGeometry(0.62 * scale, 12, 9),
+            fruitMat,
+            Math.sin(i*2.2)*0.62*scale,
+            0.46*scale + (i%2)*0.23*scale,
+            Math.cos(i*2.2)*0.62*scale,
+          );
+          fruit.scale.set(1.0, 0.72, 1.15);
+          g.add(fruit);
         }
       } else if (kind === "flower") {
         const petalMat = new THREE.MeshStandardMaterial({ color, roughness: 0.72 });
         for (let i = 0; i < 8; i++) {
           const a = i / 8 * Math.PI * 2;
-          const p = mesh(new THREE.SphereGeometry(0.42, 10, 7), petalMat, Math.cos(a)*0.65, 0.75, Math.sin(a)*0.65);
+          const p = mesh(
+            new THREE.SphereGeometry(0.34*scale, 9, 6),
+            petalMat,
+            Math.cos(a)*0.52*scale,
+            0.62*scale,
+            Math.sin(a)*0.52*scale,
+          );
           p.scale.set(1.4, 0.35, 0.75);
           p.rotation.y = -a;
           g.add(p);
         }
-        g.add(mesh(new THREE.SphereGeometry(0.34, 10, 7), new THREE.MeshStandardMaterial({ color: 0xf2c84a }), 0, 0.8, 0));
+        g.add(mesh(
+          new THREE.SphereGeometry(0.28*scale, 9, 6),
+          new THREE.MeshStandardMaterial({ color: 0xf2c84a }),
+          0, 0.66*scale, 0,
+        ));
       } else {
-        const plate = mesh(new THREE.CylinderGeometry(1.25, 1.35, 0.16, 24), new THREE.MeshStandardMaterial({ color: 0xe5dfd1 }), 0, 0.1, 0);
+        const plate = mesh(
+          new THREE.CylinderGeometry(1.0*scale, 1.08*scale, 0.14, 20),
+          new THREE.MeshStandardMaterial({ color: 0xe5dfd1 }),
+          0, 0.08, 0,
+        );
         g.add(plate);
-        const syrup = mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.04, 24), new THREE.MeshStandardMaterial({ color, roughness: 0.25 }), 0, 0.2, 0);
+        const syrup = mesh(
+          new THREE.CylinderGeometry(0.72*scale, 0.72*scale, 0.035, 20),
+          new THREE.MeshStandardMaterial({ color, roughness: 0.25 }),
+          0, 0.17, 0,
+        );
         g.add(syrup);
       }
+
       this.scene.add(g);
-      this.foods.push({ name, node:g, energy:100, maxEnergy:100, odor, radius:1.5 });
+      const maxEnergy = 90 + odor * 45;
+      this.foods.push({
+        name,
+        node: g,
+        energy: maxEnergy,
+        maxEnergy,
+        odor,
+        radius: 1.6 * scale,
+        regenRate: 0.22 + odor * 0.09,
+      });
     };
 
-    add("overripe banana", -30, 34, 0xe2bd43, 1.0, "fruit");
-    add("watermelon scraps", 38, 8, 0xc7474f, 0.82, "fruit");
-    add("mango", -55, -45, 0xf0a83a, 0.95, "fruit");
-    add("sugar water", 15, -25, 0xd1aa6b, 1.15, "sugar");
-    add("nectar flower", 70, 45, 0xdd6d9d, 0.7, "flower");
-    add("fermenting plum", -8, 72, 0x7c496d, 1.25, "fruit");
-    add("orange peel", 62, -72, 0xef8f2f, 0.85, "fruit");
+    // Dense central resources: the fly should encounter food within seconds,
+    // not after crossing an empty map.
+    add("banana mash", 6, 5, 0xe2bd43, 1.25, "fruit", 0.9);
+    add("sugar drop", -6, 3, 0xd1aa6b, 1.35, "sugar", 0.8);
+    add("fermenting berry", 10, -7, 0x93435d, 1.2, "fruit", 0.75);
+    add("nectar flower", -12, -5, 0xe978a2, 0.95, "flower", 1.0);
+    add("apple scrap", 17, 10, 0xb94f44, 1.0, "fruit", 0.8);
+    add("juice puddle", -18, 11, 0xd49055, 1.28, "sugar", 0.9);
+    add("ripe plum", 2, 19, 0x78446f, 1.12, "fruit", 0.85);
+    add("flower nectar", -5, -19, 0xe9a65d, 0.92, "flower", 1.05);
+
+    const resources: Array<[string,number,number,number,number,"fruit"|"flower"|"sugar",number]> = [
+      ["overripe banana",-30,34,0xe2bd43,1.18,"fruit",1.0],
+      ["watermelon scraps",38,8,0xc7474f,1.0,"fruit",1.0],
+      ["mango",-55,-45,0xf0a83a,1.12,"fruit",1.0],
+      ["sugar water",15,-25,0xd1aa6b,1.35,"sugar",1.0],
+      ["nectar flower",70,45,0xdd6d9d,0.88,"flower",1.1],
+      ["fermenting plum",-8,72,0x7c496d,1.38,"fruit",1.0],
+      ["orange peel",62,-72,0xef8f2f,1.02,"fruit",0.95],
+      ["grape cluster",-42,4,0x6e497c,1.12,"fruit",0.9],
+      ["pear scrap",28,42,0xa8b957,0.92,"fruit",0.9],
+      ["peach scrap",-67,21,0xe78967,1.0,"fruit",0.95],
+      ["fruit juice",52,31,0xd47a45,1.22,"sugar",0.9],
+      ["sap drop",-38,-28,0xc9945e,1.1,"sugar",0.85],
+      ["rotten fig",44,-36,0x765a45,1.3,"fruit",0.9],
+      ["flower patch",-28,-61,0xe779b0,0.86,"flower",1.25],
+      ["flower patch",8,-58,0xf3c75d,0.84,"flower",1.2],
+      ["flower patch",52,63,0xc77bd1,0.9,"flower",1.25],
+      ["melon rind",-75,-8,0x7fad58,0.9,"fruit",1.0],
+      ["compost fruit",-72,60,0x8a633c,1.4,"fruit",1.15],
+      ["cola drop",78,6,0x76513d,1.28,"sugar",0.85],
+      ["jam smear",76,-26,0xa83f4c,1.3,"sugar",0.9],
+      ["fallen berries",-3,45,0xa63d60,1.2,"fruit",0.9],
+      ["fallen berries",34,-68,0x93425f,1.18,"fruit",0.9],
+      ["nectar clump",-61,74,0xe49a51,0.9,"flower",1.2],
+      ["nectar clump",83,72,0xf0d46e,0.86,"flower",1.2],
+    ];
+    for (const r of resources) add(...r);
   }
 
   private buildCreatures() {
@@ -546,7 +624,7 @@ export class OpenWorld {
       const dx=f.node.position.x-this.fly.position.x;
       const dz=f.node.position.z-this.fly.position.z;
       const d=Math.max(0.3,Math.hypot(dx,dz));
-      const o=(f.odor*(f.energy/f.maxEnergy))*Math.min(1,18/(d*d*0.13+1));
+      const o=(f.odor*(f.energy/f.maxEnergy))*Math.min(1,55/(d*d*0.085+1));
       odor+=o;
       if(d<distance){best=f;distance=d;angle=wrapAngle(Math.atan2(dx,-dz)-this.heading);}
     }
@@ -653,8 +731,13 @@ export class OpenWorld {
   private chooseMode(s:OpenWorldSensory) {
     const prev=this.mode;
 
-    if(this.mode==="feed"){
-      if(!this.currentFood || this.currentFood.energy<=0 || s.danger>0.2 || this.stateAge>8) {
+    // Metabolic constraints outrank neural motor intent. A zero-energy fly
+    // cannot keep powered flight just because DN activity remains high.
+    if(this.energy<=0.5){
+      if(this.fly.position.y<=GROUND_Y+0.18) this.mode="rest";
+      else this.mode="fly"; // flight branch below becomes an unpowered glide.
+    } else if(this.mode==="feed"){
+      if(!this.currentFood || this.currentFood.energy<=0 || s.danger>0.2 || (this.energy>92 && this.stateAge>3)) {
         this.mode=s.danger>0.2?"fly":"walk";
       }
     } else if(this.mode==="fly"){
@@ -667,22 +750,31 @@ export class OpenWorld {
         this.brain.lift>0.10 ||
         this.brain.activity>0.012;
       const wantsFoodLanding =
-        s.foodOdor>0.62 &&
-        s.foodDistance<7 &&
-        this.hunger>0.42;
+        s.foodOdor>0.35 &&
+        s.foodDistance<10 &&
+        (this.hunger>0.30 || this.energy<55);
 
-      if(!minimumFlight && !brainStillWantsFlight && s.danger<0.12 && (this.energy<30 || wantsFoodLanding)) {
-        this.mode="walk";
+      // Hunger/low energy is a homeostatic constraint, so it can request a
+      // landing even while the connectome continues producing motor output.
+      if(!minimumFlight && s.danger<0.12 && (this.energy<14 || wantsFoodLanding)) {
+        if(s.altitude<0.35 && s.foodDistance<2.4) {
+          this.mode="feed";
+          this.currentFood=this.nearestFood().food;
+        } else if(!brainStillWantsFlight || this.energy<14 || wantsFoodLanding) {
+          // Stay in fly mode until the physics branch actually reaches ground;
+          // target altitude is forced down there.
+          this.mode="fly";
+        }
       }
     } else if(s.danger>0.20 || this.brain.escape>0.10){
       this.mode="fly";
-    } else if(s.foodDistance<1.55 && s.altitude<0.45 && (this.hunger>0.38 || this.brain.feed>0.48)){
+    } else if(s.foodDistance<2.4 && s.altitude<0.55 && (this.hunger>0.24 || this.energy<65 || this.brain.feed>0.28)){
       this.mode="feed";
       this.currentFood=this.nearestFood().food;
-    } else if(this.energy<16 && s.danger<0.1){
+    } else if(this.energy<6 && s.danger<0.1){
       this.mode="rest";
     } else if(this.mode==="rest"){
-      if(this.energy>32 || s.danger>0.1 || this.stateAge>10)this.mode=s.danger>0.1?"fly":"walk";
+      if(this.energy>=9 || s.danger>0.1 || this.stateAge>18)this.mode=s.danger>0.1?"fly":"walk";
     } else {
       // The old threshold (lift > 0.58) almost never fired with the live
       // connectome. Use a lower, still-neural gate and require several
@@ -690,7 +782,7 @@ export class OpenWorld {
       const neuralTakeoff =
         this.brain.ready &&
         this.elapsed>=this.nextTakeoffEarliest &&
-        this.energy>28 &&
+        this.energy>22 &&
         this.stateAge>4 &&
         (this.brain.lift>0.10 || this.brain.activity>0.012 || this.brain.drive>0.42);
 
@@ -715,8 +807,21 @@ export class OpenWorld {
 
   private step(dt:number) {
     this.elapsed+=dt; this.stateAge+=dt; this.updateCreatures(dt);
-    this.hunger=clamp01(this.hunger+dt*(this.mode==="fly"?0.0045:0.0022));
-    this.energy=Math.max(0,this.energy-dt*(this.mode==="fly"?0.48:this.mode==="walk"?0.12:0.035));
+
+    // Slowly regenerate depleted resource patches so the sandbox can run for
+    // hours without becoming an empty world.
+    for(const food of this.foods){
+      if(food!==this.currentFood || this.mode!=="feed"){
+        food.energy=Math.min(food.maxEnergy,food.energy+food.regenRate*dt);
+        const scale=0.32+0.68*(food.energy/food.maxEnergy);
+        food.node.scale.setScalar(scale);
+      }
+    }
+
+    this.hunger=clamp01(this.hunger+dt*(this.mode==="fly"?0.0055:0.0028));
+    this.hunger=Math.max(this.hunger,clamp01((55-this.energy)/55));
+    const drain=this.mode==="fly"?0.58:this.mode==="walk"?0.14:this.mode==="feed"?0.04:0.015;
+    this.energy=Math.max(0,this.energy-dt*drain);
 
     const sensory=this.getSensorySnapshot();
     this.chooseMode(sensory);
@@ -731,8 +836,9 @@ export class OpenWorld {
     const danger=this.nearestDanger();
     // Sensory adapters only bias the body toward/away from stimuli; the
     // full connectome output remains the dominant continuous steering term.
-    if(food.food && this.hunger>0.35 && food.distance<28 && danger.strength<0.18){
-      desiredTurn+=THREE.MathUtils.clamp(food.angle*0.38,-0.65,0.65)*this.hunger;
+    if(food.food && (this.hunger>0.22 || this.energy<65) && food.distance<52 && danger.strength<0.18){
+      const foodUrgency=Math.max(this.hunger,clamp01((65-this.energy)/65));
+      desiredTurn+=THREE.MathUtils.clamp(food.angle*0.62,-0.9,0.9)*(0.55+foodUrgency*0.75);
     } else {
       desiredTurn+=this.wanderBias*(0.25+0.5*(1-this.brain.drive));
     }
@@ -746,9 +852,10 @@ export class OpenWorld {
       this.speed=THREE.MathUtils.damp(this.speed,0,7,dt);
       this.proboscis.scale.y=THREE.MathUtils.damp(this.proboscis.scale.y,1.35,8,dt);
       if(this.currentFood && this.currentFood.energy>0){
-        const bite=Math.min(this.currentFood.energy,dt*5.2);
+        const bite=Math.min(this.currentFood.energy,dt*8.0);
         this.currentFood.energy-=bite; this.foodEaten+=bite;
-        this.energy=Math.min(100,this.energy+bite*0.55); this.hunger=Math.max(0,this.hunger-bite*0.018);
+        this.energy=Math.min(100,this.energy+bite*0.82);
+        this.hunger=Math.max(0,this.hunger-bite*0.028);
         const scale=0.35+0.65*(this.currentFood.energy/this.currentFood.maxEnergy);
         this.currentFood.node.scale.setScalar(scale);
         if(this.currentFood.energy<=0)this.emit("finished "+this.currentFood.name);
@@ -757,31 +864,62 @@ export class OpenWorld {
       this.proboscis.scale.y=THREE.MathUtils.damp(this.proboscis.scale.y,0.18,10,dt);
       if(this.mode==="walk"){
         this.fly.position.y=THREE.MathUtils.damp(this.fly.position.y,GROUND_Y,8,dt);
-        const targetSpeed=0.45+this.brain.drive*1.15+this.hunger*0.4;
+        const energyFactor=THREE.MathUtils.clamp(this.energy/18,0.18,1);
+        const targetSpeed=(0.35+this.brain.drive*1.0+this.hunger*0.55)*energyFactor;
         this.speed=THREE.MathUtils.damp(this.speed,targetSpeed,3.5,dt);
         this.heading=wrapAngle(this.heading+desiredTurn*dt*1.45);
         this.verticalSpeed=0;
       } else if(this.mode==="fly"){
-        const targetSpeed=2.2+this.brain.drive*3.2+danger.strength*2.2;
-        this.speed=THREE.MathUtils.damp(this.speed,targetSpeed,2.8,dt);
-        this.heading=wrapAngle(this.heading+desiredTurn*dt*(1.3+this.speed*0.08));
-        let targetAlt=3.6+this.brain.lift*9.5+danger.strength*5.5;
-        // Do not immediately dive for food during the first part of a flight.
-        if(this.stateAge>10 && food.food && this.hunger>0.45 && food.distance<9)targetAlt=0.45;
+        const exhausted=this.energy<=0.5;
+        const lowEnergy=this.energy<14;
+        const wantsFood=
+          !!food.food &&
+          (this.hunger>0.30 || this.energy<55) &&
+          food.distance<12 &&
+          danger.strength<0.16;
+
+        const power=exhausted?0:THREE.MathUtils.clamp(this.energy/18,0.25,1);
+        const targetSpeed=exhausted
+          ? 0.8
+          : (2.0+this.brain.drive*3.0+danger.strength*2.2)*power;
+        this.speed=THREE.MathUtils.damp(this.speed,targetSpeed,exhausted?4.5:2.8,dt);
+        this.heading=wrapAngle(this.heading+desiredTurn*dt*(1.15+this.speed*0.08));
+
+        let targetAlt=3.4+this.brain.lift*9.0+danger.strength*5.5;
+        if(exhausted || lowEnergy || (this.stateAge>6 && wantsFood)) targetAlt=0.12;
         targetAlt=Math.min(14,targetAlt);
+
         const alt=this.fly.position.y-GROUND_Y;
-        this.verticalSpeed=THREE.MathUtils.damp(this.verticalSpeed,(targetAlt-alt)*0.95,3.0,dt);
+        if(exhausted){
+          // No powered lift at zero energy: glide/fall to the ground.
+          this.verticalSpeed=THREE.MathUtils.damp(this.verticalSpeed,-2.1,4.5,dt);
+        }else{
+          this.verticalSpeed=THREE.MathUtils.damp(this.verticalSpeed,(targetAlt-alt)*0.95,3.0,dt);
+        }
         this.fly.position.y=Math.max(GROUND_Y,this.fly.position.y+this.verticalSpeed*dt);
-        if(this.stateAge>10 && targetAlt<0.6 && this.fly.position.y<GROUND_Y+0.3){
-          this.mode="walk";
+
+        if(targetAlt<0.6 && this.fly.position.y<GROUND_Y+0.28){
+          if(food.food && food.distance<2.7 && (this.hunger>0.24 || this.energy<65)){
+            this.mode="feed";
+            this.currentFood=food.food;
+            this.emit("landed on "+food.food.name+" · feeding");
+          }else if(exhausted || lowEnergy){
+            this.mode="rest";
+            this.emit(exhausted?"energy depleted · forced landing":"low energy · landed to recover");
+          }else{
+            this.mode="walk";
+            this.emit("landed near "+(food.food?.name??"ground"));
+          }
           this.landings++;
           this.nextTakeoffEarliest=this.elapsed+7;
           this.stateAge=0;
-          this.emit("landed near "+(food.food?.name??"ground"));
+          this.verticalSpeed=0;
         }
       } else {
         this.speed=THREE.MathUtils.damp(this.speed,0,4,dt);
-        this.energy=Math.min(100,this.energy+dt*0.55);
+        // Rest is only a small emergency recovery reserve. Food is required
+        // for substantial energy restoration.
+        this.energy=Math.min(10,this.energy+dt*0.22);
       }
     }
 
@@ -807,10 +945,10 @@ export class OpenWorld {
   }
 
   private animateBody(dt:number) {
-    const wingPower=this.mode==="fly"?1:0;
+    const wingPower=this.mode==="fly"?THREE.MathUtils.clamp(this.energy/8,0,1):0;
     for(let i=0;i<this.wings.length;i++){
       const side=i===0?-1:1;
-      const flap=this.mode==="fly"?Math.sin(this.elapsed*47)*0.52:Math.sin(this.elapsed*2.2)*0.025;
+      const flap=this.mode==="fly"?Math.sin(this.elapsed*(18+29*wingPower))*0.52*wingPower:Math.sin(this.elapsed*2.2)*0.025;
       this.wings[i].rotation.z=side*(0.52+flap);
       this.wings[i].rotation.x=-0.4+wingPower*Math.sin(this.elapsed*47+0.7)*0.08;
     }
