@@ -32,6 +32,16 @@
     #decision{font-size:20px;letter-spacing:-.03em}
     #decision[data-side="UP"]{color:#168e53} #decision[data-side="DOWN"]{color:#d34c4c} #decision[data-side="WAIT"]{color:#ae7a24}
     #call-note{color:rgba(25,42,54,.5);font-weight:680}
+    .stress-panel{padding:10px 13px 11px;border-bottom:1px solid rgba(21,40,54,.08);background:rgba(245,249,251,.52)}
+    .stress-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;color:rgba(25,42,54,.54)}
+    #stress-value{margin-left:auto;color:#20333f}
+    #stress-state{min-width:74px;text-align:right;color:#168e53}
+    #stress-state[data-state="tense"]{color:#ae7a24}
+    #stress-state[data-state="smoking"]{color:#c66b2e}
+    #stress-state[data-state="break"]{color:#d34c4c}
+    .stress-track{height:9px;border-radius:999px;background:rgba(28,52,66,.10);overflow:hidden;position:relative}
+    #stress-fill{display:block;height:100%;width:18%;border-radius:inherit;background:linear-gradient(90deg,#24a96b 0%,#d9a633 64%,#df5656 100%);transition:width .25s ease}
+    .stress-thresholds{display:flex;justify-content:space-between;margin-top:5px;font:700 7px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(25,42,54,.32);letter-spacing:.06em}
     #telemetry{padding:11px 13px 12px;display:grid;grid-template-columns:1fr 1fr;gap:7px 16px}
     .metric{display:flex;justify-content:space-between;gap:10px;font-size:10px}.metric span{color:rgba(25,42,54,.48)}.metric b{text-align:right;font-weight:720;color:#1f303b}
     .wide{grid-column:1/-1}
@@ -72,6 +82,11 @@
   <section class="panel">
     <div class="brain"><canvas id="retina" width="64" height="16"></canvas><div><b style="font-size:10px">market retina · 64×16</b><div id="brain-detail">Starting full FlyWire brain…</div></div></div>
     <div id="call"><b id="decision" data-side="WAIT">HOLD</b><span id="call-note">waiting for brain activity</span></div>
+    <div class="stress-panel">
+      <div class="stress-head"><span>STRESS LOAD</span><b id="stress-value">18 / 100</b><span id="stress-state" data-state="calm">TRADING</span></div>
+      <div class="stress-track"><i id="stress-fill"></i></div>
+      <div class="stress-thresholds"><span>CALM</span><span>SMOKE 62</span><span>BREAK 78</span><span>RETURN 42</span></div>
+    </div>
     <div id="telemetry"></div>
     <div class="log"><div class="log-title">PAPER TRADING TAPE</div><div id="events"></div></div>
   </section>

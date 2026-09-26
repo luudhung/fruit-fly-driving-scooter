@@ -10,6 +10,7 @@ export interface StockSnapshot {
   volatility: number;
   stress: number;
   tick: number;
+  resting?: boolean;
 }
 
 export interface StockBrainStatus {
@@ -161,6 +162,7 @@ export class StockBrain {
   private makeRetina(snapshot:StockSnapshot){
     const w=64,h=16,pixels=new Uint8Array(w*h*4);
     for(let i=0;i<pixels.length;i+=4){pixels[i]=5;pixels[i+1]=8;pixels[i+2]=10;pixels[i+3]=255;}
+    if(snapshot.resting)return {pixels,w,h};
     const prices=snapshot.prices.slice(-w);
     if(prices.length<2)return {pixels,w,h};
     let min=Infinity,max=-Infinity;
@@ -186,6 +188,10 @@ export class StockBrain {
   private applyInput(s:StockSnapshot){
     if(!this.ext)return;
     this.ext.fill(0);
+    if(s.resting){
+      for(const i of this.sensory)this.ext[i]=.035;
+      return;
+    }
     const trend=clamp(Math.abs(s.momentum)*8,0,1);
     const calm=1-clamp(s.volatility*12,0,1);
     const base=.22+calm*.08;
@@ -220,13 +226,20 @@ export class StockBrain {
 
       this.emit({
         stage:"running",
-        message:this.vncInfo?"FlyWire + MANC online · reading chart":"FlyWire online · MANC loading · reading chart",
+        message:snapshot.resting
+          ? (this.vncInfo?"FlyWire + MANC online · stress break · retina away from chart":"FlyWire online · stress break · retina away from chart")
+          : (this.vncInfo?"FlyWire + MANC online · reading chart":"FlyWire online · MANC loading · reading chart"),
         neurons:this.brain.header.numNeurons,
         edges:this.brain.header.numEdges,
         vncNeurons:this.vncInfo?.neurons,
         vncEdges:this.vncInfo?.edges,
         activity,signal,
       });
+
+      if(snapshot.resting){
+        await new Promise(r=>setTimeout(r,48));
+        continue;
+      }
 
       const now=performance.now();
       if(now-this.lastDecisionAt>900){

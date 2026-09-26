@@ -11,6 +11,9 @@ const brainStatusEl=document.getElementById("brain-status") as HTMLSpanElement;
 const brainDetailEl=document.getElementById("brain-detail") as HTMLDivElement;
 const brainLiveEl=document.getElementById("brain-live") as HTMLDivElement;
 const feedStatusEl=document.getElementById("feed-status") as HTMLSpanElement;
+const stressFillEl=document.getElementById("stress-fill") as HTMLElement;
+const stressValueEl=document.getElementById("stress-value") as HTMLElement;
+const stressStateEl=document.getElementById("stress-state") as HTMLElement;
 const retinaCanvas=document.getElementById("retina") as HTMLCanvasElement;
 const retinaCtx=retinaCanvas.getContext("2d")!;
 const retinaImage=retinaCtx.createImageData(64,16);
@@ -35,6 +38,8 @@ type Position={side:"LONG"|"SHORT";entry:number;qty:number;openedTick:number};
 const STARTING_EQUITY=10_000;
 const TRADE_NOTIONAL=2_000;
 const MAX_HOLD_TICKS=6;
+const BREAK_ENTER_STRESS=78;
+const BREAK_EXIT_STRESS=42;
 const prices:number[]=[];
 const returns:number[]=[];
 const eventLines:string[]=[];
@@ -47,6 +52,7 @@ let lastFetchAt=0;
 let feedState:"loading"|"live"|"delayed"|"error"="loading";
 let feedDetail="connecting";
 let stress=18;
+let breakMode=false;
 let wins=0;
 let losses=0;
 let realizedPnL=0;
@@ -118,7 +124,7 @@ function openPosition(side:"LONG"|"SHORT",confidence:number){
 }
 
 function onFreshMarketTick(){
-  if(position&&tick-position.openedTick>=MAX_HOLD_TICKS) closePosition("time exit");
+  if(!breakMode&&position&&tick-position.openedTick>=MAX_HOLD_TICKS) closePosition("time exit");
   const absMove=returns.length?Math.abs(returns[returns.length-1]):0;
   stress=Math.min(100,stress+Math.max(0,absMove-.0025)*650);
 }
@@ -374,8 +380,10 @@ back.position.set(0,2.15,1.0);back.rotation.x=-.09;back.castShadow=true;chair.ad
 chair.position.z=1.62;scene.add(chair);
 
 const fly=new THREE.Group();
-fly.position.set(0,2.05,1.32);
-fly.rotation.y=Math.PI;
+const deskFlyPosition=new THREE.Vector3(0,2.05,1.32);
+const windowFlyPosition=new THREE.Vector3(3.15,1.55,-4.35);
+fly.position.copy(deskFlyPosition);
+fly.rotation.y=0;
 const bodyMat=material(0x4a4032,.57,.05);
 const darkMat=material(0x242321,.52,.04);
 const eyeMat=material(0xa52228,.32,.18);
@@ -435,11 +443,15 @@ function spawnSmoke(){
 }
 
 function updateSmoking(dt:number,time:number){
-  if(stress>62)smoking=true;
-  if(stress<40)smoking=false;
+  if(breakMode||stress>62)smoking=true;
+  if(!breakMode&&stress<40)smoking=false;
+
+  const cigaretteOffset=new THREE.Vector3(.12,.12,-1.18).applyAxisAngle(new THREE.Vector3(0,1,0),fly.rotation.y);
+  cigarette.position.copy(fly.position).add(cigaretteOffset);
+  cigarette.rotation.y=fly.rotation.y;
   cigarette.visible=smoking;ember.visible=smoking;
   if(smoking){
-    cigarette.position.y=2.08+Math.sin(time*2.3)*.025;
+    cigarette.position.y+=Math.sin(time*2.3)*.018;
     smokeClock+=dt;
     if(smokeClock>.22){smokeClock=0;spawnSmoke();}
   }
@@ -479,7 +491,7 @@ function updateChart(){
   chartCtx.font="750 19px ui-monospace, monospace";
   chartCtx.fillText((m>=0?"+":"")+m.toFixed(2)+"% momentum",28,76);
   chartCtx.fillStyle="#667781";chartCtx.font="650 15px ui-monospace, monospace";
-  chartCtx.fillText(feedState==="live"?"REAL MARKET FEED · PAPER ONLY":feedState.toUpperCase()+" · PAPER ONLY",28,h-22);
+  chartCtx.fillText(breakMode?"STRESS BREAK · MARKET WATCH PAUSED":feedState==="live"?"REAL MARKET FEED · PAPER ONLY":feedState.toUpperCase()+" · PAPER ONLY",28,h-22);
 
   const pnl=unrealizedPnL();
   chartCtx.fillStyle="#1d303b";chartCtx.font="700 17px ui-monospace, monospace";
@@ -498,9 +510,9 @@ function updateChart(){
     "POSITION "+(position?.side||"FLAT"),
     "W / L  "+wins+" / "+losses,
     "STRESS "+Math.round(stress)+"/100",
-    "",
+    "MODE "+(breakMode?"WINDOW BREAK":"TRADING"),
     "BRAIN SIGNAL",
-    decisionEl.textContent||"HOLD"
+    breakMode?"REST":(decisionEl.textContent||"HOLD")
   ];
   lines.forEach((line,i)=>{
     sideCtx.fillStyle=i===7?(decisionEl.dataset.side==="DOWN"?"#ff8d8d":decisionEl.dataset.side==="UP"?"#77e5a9":"#e3c77b"):"#dbe7ec";
@@ -511,6 +523,12 @@ function updateChart(){
 }
 
 function handleDecision(d:StockBrainDecision){
+  if(breakMode){
+    decisionEl.textContent="BREAK";
+    decisionEl.dataset.side="WAIT";
+    callNoteEl.textContent="away from desk · watching New York · trading paused";
+    return;
+  }
   const label=d.side==="UP"?"BUY":d.side==="DOWN"?"SHORT":"HOLD";
   decisionEl.textContent=label;
   decisionEl.dataset.side=d.side;
@@ -534,7 +552,7 @@ function handleDecision(d:StockBrainDecision){
 }
 
 const brain=new StockBrain({
-  getSnapshot:()=>({prices:[...prices],momentum:momentum(),volatility:volatility(),stress,tick}),
+  getSnapshot:()=>({prices:[...prices],momentum:momentum(),volatility:volatility(),stress,tick,resting:breakMode}),
   onStatus(status){
     latestBrain={...latestBrain,...status};
     brainLiveEl.dataset.state=status.stage;
@@ -555,6 +573,49 @@ void brain.start();
 
 function fmt(n:number|undefined){return n==null?"—":n.toLocaleString();}
 
+function updateStressHud(){
+  stressFillEl.style.width=clamp(stress,0,100).toFixed(1)+"%";
+  stressValueEl.textContent=Math.round(stress)+" / 100";
+  let state:"calm"|"tense"|"smoking"|"break"="calm";
+  let label="TRADING";
+  if(breakMode){state="break";label="WINDOW BREAK";}
+  else if(stress>=62){state="smoking";label="SMOKING";}
+  else if(stress>=45){state="tense";label="TENSE";}
+  stressStateEl.dataset.state=state;
+  stressStateEl.textContent=label;
+}
+
+function updateBreakBehavior(dt:number,time:number){
+  if(!breakMode&&stress>=BREAK_ENTER_STRESS){
+    breakMode=true;
+    if(position)closePosition("stress break");
+    decisionEl.textContent="BREAK";
+    decisionEl.dataset.side="WAIT";
+    callNoteEl.textContent="too stressed · leaving desk to watch New York";
+    addEvent("☕ STRESS BREAK · leaves desk, city view + cigarette");
+    updateChart();
+  }else if(breakMode&&stress<=BREAK_EXIT_STRESS){
+    breakMode=false;
+    lastDecisionTick=-1;
+    decisionEl.textContent="HOLD";
+    decisionEl.dataset.side="WAIT";
+    callNoteEl.textContent="calmed down · returning to trading desk";
+    addEvent("↩ CALM AGAIN · returns to desk and resumes trading");
+    updateChart();
+  }
+
+  const target=breakMode?windowFlyPosition:deskFlyPosition;
+  const targetPos=target.clone();
+  targetPos.y+=breakMode?Math.sin(time*.8)*.015:Math.sin(time*2.1)*.025;
+  fly.position.lerp(targetPos,1-Math.exp(-dt*(breakMode?1.05:1.45)));
+  const targetYaw=0;
+  fly.rotation.y=THREE.MathUtils.damp(fly.rotation.y,targetYaw,3.5,dt);
+  fly.rotation.z=THREE.MathUtils.damp(fly.rotation.z,breakMode?0:Math.sin(time*.85)*.018,3.2,dt);
+
+  stress=Math.max(0,stress-dt*(breakMode?2.8:.12));
+  updateStressHud();
+}
+
 function updateHud(){
   const prev=prices.length>1?prices[prices.length-2]:price;
   const change=price&&prev?((price-prev)/prev*100):0;
@@ -567,7 +628,7 @@ function updateHud(){
     '<div class="metric"><span>equity</span><b>'+money(equity())+'</b></div>',
     '<div class="metric"><span>realized</span><b>'+money(realizedPnL)+'</b></div>',
     '<div class="metric"><span>W / L</span><b>'+wins+' / '+losses+'</b></div>',
-    '<div class="metric"><span>stress / smoke</span><b>'+Math.round(stress)+' · '+(smoking?'YES':'NO')+'</b></div>',
+    '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
     '<div class="metric"><span>feed poll</span><b>'+staleSec+'s ago</b></div>',
     '<div class="metric"><span>DN activity</span><b>'+(latestBrain.activity??0).toFixed(4)+'</b></div>',
@@ -588,9 +649,7 @@ function animate(){
     feedAccumulator=0;
     void fetchMarket();
   }
-  stress=Math.max(0,stress-dt*.12);
-  fly.position.y=2.05+Math.sin(time*2.1)*.025;
-  fly.rotation.z=Math.sin(time*.85)*.018;
+  updateBreakBehavior(dt,time);
   updateSmoking(dt,time);
   controls.update();
   updateHud();
@@ -602,7 +661,7 @@ renderFeedState();
 updateChart();
 addEvent("NYC trading desk ready · real feed connecting");
 addEvent("brain evaluates every market tick · paper capital $10,000");
-addEvent("stress > 62 → cigarette auto-on");
+addEvent("stress 62 → smoking · stress 78 → city break · return at 42");
 
 window.addEventListener("resize",()=>{
   camera.aspect=innerWidth/innerHeight;
