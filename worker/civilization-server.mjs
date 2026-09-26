@@ -7,11 +7,15 @@ const PORT = Number(process.env.PORT || 3000);
 const WORLD_ID = process.env.CIV_WORLD_ID || "WORLD-A";
 const EXPERIMENT_ID = process.env.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(process.env.CIV_WORLD_SEED || 948291);
-const TIME_SCALE = Number(process.env.CIV_TIME_SCALE || 1);
+const GAME_SECONDS_PER_REAL_SECOND = Number(process.env.CIV_TIME_SCALE || 60);
+const INITIAL_POPULATION = Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || 40));
+const MAX_POPULATION = Math.max(INITIAL_POPULATION, Number(process.env.CIV_MAX_POPULATION || 180));
 const DATABASE_URL = process.env.DATABASE_URL;
+const CHECKPOINT_EVERY_MS = 5000;
+const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
 
 if (!DATABASE_URL) {
-  console.error("[civilization] DATABASE_URL is required. Refusing to fake persistence.");
+  console.error("[civilization] DATABASE_URL is required.");
   process.exit(1);
 }
 
@@ -22,14 +26,39 @@ const pool = new Pool({
 });
 
 const VERSION = {
-  worldEngineVersion: "civilization-core-0.1.0",
-  brainVersion: "FlyWire/MANC browser baseline — server brain runtime not connected",
-  physicsVersion: "not-connected",
-  geneticsVersion: "not-enabled",
-  economicVersion: "not-enabled",
+  worldEngineVersion: "synthetic-civilization-0.3.0",
+  brainVersion: "synthetic cognitive drives + inherited traits",
+  physicsVersion: "city-kinematics-0.3.0",
+  geneticsVersion: "heritable-traits-0.2.0",
+  economicVersion: "household-economy-0.2.0",
 };
 
+const LOCATIONS = [
+  { id: "apt-north", type: "home", name: "North Apartments", x: -40, z: -38 },
+  { id: "apt-east", type: "home", name: "East Apartments", x: 42, z: -32 },
+  { id: "apt-south", type: "home", name: "South Apartments", x: 35, z: 42 },
+  { id: "apt-west", type: "home", name: "West Apartments", x: -42, z: 35 },
+  { id: "market", type: "food", name: "Central Market", x: -9, z: 5 },
+  { id: "cafe", type: "social", name: "Nectar Cafe", x: 15, z: 11 },
+  { id: "park", type: "social", name: "Wing Park", x: 0, z: -23 },
+  { id: "office", type: "job", name: "Archive Office", x: 31, z: 5 },
+  { id: "factory", type: "job", name: "Sugar Works", x: -31, z: 8 },
+  { id: "lab", type: "job", name: "City Lab", x: 8, z: 34 },
+  { id: "clinic", type: "service", name: "Clinic", x: -13, z: 34 },
+  { id: "garage", type: "service", name: "Garage", x: 35, z: -4 },
+];
+
+const JOBS = [
+  { id: "office", locationId: "office", title: "clerk", wage: 5.2 },
+  { id: "factory", locationId: "factory", title: "processor", wage: 4.4 },
+  { id: "lab", locationId: "lab", title: "researcher", wage: 6.4 },
+  { id: "market", locationId: "market", title: "vendor", wage: 4.8 },
+];
+
 const clients = new Set();
+let state = null;
+let tickBusy = false;
+let checkpointAt = 0;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -43,6 +72,203 @@ function json(res, status, body) {
   res.end(payload);
 }
 
+function clamp(v, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function location(id) {
+  return LOCATIONS.find((l) => l.id === id) || LOCATIONS[0];
+}
+
+function homeLocations() {
+  return LOCATIONS.filter((l) => l.type === "home");
+}
+
+function rand() {
+  state.rngState = (Math.imul(state.rngState >>> 0, 1664525) + 1013904223) >>> 0;
+  return state.rngState / 4294967296;
+}
+
+function randRange(a, b) {
+  return a + (b - a) * rand();
+}
+
+function pick(items) {
+  return items[Math.floor(rand() * items.length)] ?? items[0];
+}
+
+function jittered(loc, radius = 3) {
+  const a = rand() * Math.PI * 2;
+  const r = Math.sqrt(rand()) * radius;
+  return { x: loc.x + Math.cos(a) * r, z: loc.z + Math.sin(a) * r };
+}
+
+function gameClock() {
+  const sec = ((state.simulationAgeSeconds % 86400) + 86400) % 86400;
+  const hour = Math.floor(sec / 3600);
+  const minute = Math.floor((sec % 3600) / 60);
+  return {
+    day: Math.floor(state.simulationAgeSeconds / 86400) + 1,
+    hour,
+    minute,
+    text: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+  };
+}
+
+function gameYears() {
+  return state.simulationAgeSeconds / (86400 * DAYS_PER_YEAR);
+}
+
+function inheritedTrait(a, b, key, min = 0, max = 1) {
+  if (!a || !b) return randRange(0.25, 0.8);
+  const mean = ((a.traits[key] ?? 0.5) + (b.traits[key] ?? 0.5)) / 2;
+  return clamp(mean + randRange(-0.08, 0.08), min, max);
+}
+
+function createFly(index, parents = null) {
+  const homes = homeLocations();
+  const mother = parents?.[0] || null;
+  const father = parents?.[1] || null;
+  const home = mother?.homeId ? location(mother.homeId) : pick(homes);
+  const pos = jittered(home, 5);
+  const generation = parents ? Math.max(mother.generation, father.generation) + 1 : 1;
+  const initialAge = parents ? 0 : randRange(16, 72);
+  const sex = rand() < 0.5 ? "F" : "M";
+  const id = `FLY-${String(state.nextFlyId++).padStart(5, "0")}`;
+  const traits = {
+    sociability: inheritedTrait(mother, father, "sociability"),
+    risk: inheritedTrait(mother, father, "risk"),
+    ambition: inheritedTrait(mother, father, "ambition"),
+    empathy: inheritedTrait(mother, father, "empathy"),
+    resilience: inheritedTrait(mother, father, "resilience"),
+    attractiveness: inheritedTrait(mother, father, "attractiveness"),
+    fertility: inheritedTrait(mother, father, "fertility", 0.05, 0.95),
+    thrift: inheritedTrait(mother, father, "thrift"),
+    health: inheritedTrait(mother, father, "health", 0.3, 0.98),
+  };
+  const job = initialAge >= 18 && initialAge <= 75 && rand() < 0.78 ? pick(JOBS) : null;
+  return {
+    id,
+    name: `Fly ${index + 1}`,
+    sex,
+    generation,
+    bornAtGameYears: gameYears() - initialAge,
+    ageYears: initialAge,
+    alive: true,
+    causeOfDeath: null,
+    x: pos.x,
+    y: randRange(1.0, 3.8),
+    z: pos.z,
+    vx: 0,
+    vz: 0,
+    targetX: pos.x,
+    targetZ: pos.z,
+    homeId: home.id,
+    currentLocationId: home.id,
+    targetLocationId: home.id,
+    action: "resting",
+    actionUntil: 0,
+    hunger: randRange(10, 48),
+    energy: randRange(45, 95),
+    stress: randRange(5, 34),
+    happiness: randRange(42, 82),
+    excitement: randRange(10, 50),
+    loneliness: randRange(5, 45),
+    health: randRange(72, 100),
+    money: randRange(80, 650),
+    savings: randRange(0, 1000),
+    debt: rand() < 0.15 ? randRange(50, 400) : 0,
+    salaryEarnedToday: 0,
+    salaryLifetime: 0,
+    expensesLifetime: 0,
+    jobId: job?.id || null,
+    jobTitle: job?.title || null,
+    wage: job?.wage || 0,
+    partnerId: null,
+    affection: 0,
+    relationshipSince: null,
+    flirtingWith: null,
+    pregnancyBy: null,
+    pregnancyDueAt: null,
+    children: [],
+    parents: parents ? [mother.id, father.id] : [],
+    friends: [],
+    vehicle: null,
+    ownsHome: false,
+    homeEquity: 0,
+    lastPaidDay: -1,
+    lastRentDay: -1,
+    lastSocialTick: 0,
+    lastEventTick: 0,
+    mentalHealthCrisis: false,
+    traits,
+  };
+}
+
+function freshState() {
+  const s = {
+    worldId: WORLD_ID,
+    experimentId: EXPERIMENT_ID,
+    worldSeed: WORLD_SEED,
+    rngState: (WORLD_SEED >>> 0) || 1,
+    simulationAgeSeconds: 0,
+    timeScale: GAME_SECONDS_PER_REAL_SECOND,
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    paused: false,
+    nextFlyId: 1,
+    flies: [],
+    births: 0,
+    deaths: 0,
+    foodReserve: 12000,
+    generation: 1,
+    totalTransactions: 0,
+    events: [],
+    eventSeq: 1,
+    locations: LOCATIONS,
+  };
+  state = s;
+  for (let i = 0; i < INITIAL_POPULATION; i += 1) state.flies.push(createFly(i));
+  s.generation = 1;
+  return s;
+}
+
+function appendMemoryEvent(type, text, payload = {}) {
+  const e = {
+    id: String(state.eventSeq++),
+    time: gameClock().text,
+    day: gameClock().day,
+    source: "simulation",
+    type,
+    text,
+    payload,
+  };
+  state.events.push(e);
+  if (state.events.length > 160) state.events.splice(0, state.events.length - 160);
+  const packet = `event: world-event\ndata: ${JSON.stringify(e)}\n\n`;
+  for (const client of clients) {
+    try { client.write(packet); } catch { clients.delete(client); }
+  }
+}
+
+async function persistEvent(e) {
+  try {
+    await pool.query(
+      `INSERT INTO civilization_events (world_id, source, event_type, message, payload)
+       VALUES ($1,$2,$3,$4,$5::jsonb)`,
+      [WORLD_ID, e.source || "simulation", e.type || "event", e.text, JSON.stringify(e.payload || {})],
+    );
+  } catch (error) {
+    console.error("[civilization] event persist failed", error);
+  }
+}
+
+function emit(type, text, payload = {}) {
+  appendMemoryEvent(type, text, payload);
+  const e = state.events[state.events.length - 1];
+  void persistEvent(e);
+}
+
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS civilization_worlds (
@@ -52,14 +278,14 @@ async function initDb() {
       started_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL,
       simulation_age_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-      time_scale DOUBLE PRECISION NOT NULL DEFAULT 1,
+      time_scale DOUBLE PRECISION NOT NULL DEFAULT 60,
       population INTEGER NOT NULL DEFAULT 0,
-      generation INTEGER NOT NULL DEFAULT 0,
+      generation INTEGER NOT NULL DEFAULT 1,
       births INTEGER NOT NULL DEFAULT 0,
       deaths INTEGER NOT NULL DEFAULT 0,
       food_reserve DOUBLE PRECISION NOT NULL DEFAULT 0,
       money_supply DOUBLE PRECISION NOT NULL DEFAULT 0,
-      simulation_status TEXT NOT NULL DEFAULT 'WAITING_FOR_BRAIN_RUNTIME',
+      simulation_status TEXT NOT NULL DEFAULT 'SYNTHETIC_CIVILIZATION_LIVE',
       paused BOOLEAN NOT NULL DEFAULT FALSE
     )
   `);
@@ -76,107 +302,567 @@ async function initDb() {
     )
   `);
 
-  const existing = await pool.query(
-    "SELECT world_id FROM civilization_worlds WHERE world_id = $1",
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS civilization_state (
+      world_id TEXT PRIMARY KEY,
+      state_json JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const snapshot = await pool.query(
+    "SELECT state_json FROM civilization_state WHERE world_id = $1",
     [WORLD_ID],
   );
 
-  if (!existing.rowCount) {
-    await pool.query(
-      `INSERT INTO civilization_worlds
-       (world_id, experiment_id, world_seed, started_at, updated_at, time_scale, simulation_status)
-       VALUES ($1,$2,$3,NOW(),NOW(),$4,'WAITING_FOR_BRAIN_RUNTIME')`,
-      [WORLD_ID, EXPERIMENT_ID, WORLD_SEED, TIME_SCALE],
-    );
-    await appendEvent(
-      "world_created",
-      "Persistent civilization core created. No fly behavior has been fabricated; server brain runtime is not connected yet.",
-      "simulation",
-      { seed: WORLD_SEED },
-    );
+  if (snapshot.rowCount && snapshot.rows[0].state_json?.flies?.length) {
+    state = snapshot.rows[0].state_json;
+    state.timeScale = GAME_SECONDS_PER_REAL_SECOND;
+    state.locations = LOCATIONS;
+    state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
+    state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
+    state.eventSeq = Number(state.eventSeq || 1);
+    emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
-    await appendEvent(
-      "server_resumed",
-      "Persistent civilization core resumed from PostgreSQL.",
-      "simulation",
-      {},
-    );
+    freshState();
+    emit("world_created", `Synthetic civilization started with ${state.flies.length} flies.`, { seed: WORLD_SEED });
+    await checkpoint(true);
   }
 }
 
-async function appendEvent(eventType, message, source = "simulation", payload = {}) {
-  const result = await pool.query(
-    `INSERT INTO civilization_events (world_id, source, event_type, message, payload)
-     VALUES ($1,$2,$3,$4,$5::jsonb)
-     RETURNING id, created_at, source, event_type, message, payload`,
-    [WORLD_ID, source, eventType, message, JSON.stringify(payload)],
-  );
-  const event = result.rows[0];
-  const packet = `event: world-event\ndata: ${JSON.stringify(event)}\n\n`;
-  for (const client of clients) {
-    try { client.write(packet); } catch { clients.delete(client); }
+function ageOf(fly) {
+  return Math.max(0, gameYears() - fly.bornAtGameYears);
+}
+
+function nearestCompatiblePartner(fly) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (const other of state.flies) {
+    if (!other.alive || other.id === fly.id) continue;
+    if (other.ageYears < 18 || other.ageYears > 85 || fly.ageYears < 18 || fly.ageYears > 85) continue;
+    const dx = fly.x - other.x;
+    const dz = fly.z - other.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > 90) continue;
+    const compatibility =
+      (1 - Math.abs(fly.traits.sociability - other.traits.sociability)) * 0.35 +
+      (1 - Math.abs(fly.traits.empathy - other.traits.empathy)) * 0.25 +
+      other.traits.attractiveness * 0.25 +
+      rand() * 0.15;
+    if (compatibility > bestScore) {
+      bestScore = compatibility;
+      best = other;
+    }
   }
-  return event;
+  return bestScore > 0.55 ? best : null;
+}
+
+function chooseDestination(fly, clock) {
+  if (!fly.alive) return;
+  if (fly.actionUntil > state.simulationAgeSeconds) return;
+
+  const home = location(fly.homeId);
+  const age = fly.ageYears;
+
+  if (fly.health < 30) {
+    fly.targetLocationId = "clinic";
+    fly.action = "seeking care";
+  } else if (fly.energy < 18 || clock.hour >= 22 || clock.hour < 6) {
+    fly.targetLocationId = fly.homeId;
+    fly.action = "going home";
+  } else if (fly.hunger > 67) {
+    fly.targetLocationId = "market";
+    fly.action = "looking for food";
+  } else if (fly.loneliness > 58 || fly.excitement > 70) {
+    fly.targetLocationId = rand() < 0.55 ? "cafe" : "park";
+    fly.action = "socializing";
+  } else if (fly.jobId && age >= 18 && age <= 75 && clock.hour >= 8 && clock.hour < 17) {
+    const job = JOBS.find((j) => j.id === fly.jobId);
+    fly.targetLocationId = job?.locationId || "office";
+    fly.action = "working";
+  } else if (fly.stress > 72) {
+    fly.targetLocationId = rand() < 0.7 ? "park" : fly.homeId;
+    fly.action = "recovering";
+  } else {
+    const options = ["park", "cafe", "market", fly.homeId];
+    fly.targetLocationId = pick(options);
+    fly.action = pick(["wandering", "exploring", "socializing", "resting"]);
+  }
+
+  const dest = fly.targetLocationId === fly.homeId ? home : location(fly.targetLocationId);
+  const p = jittered(dest, 3.5);
+  fly.targetX = p.x;
+  fly.targetZ = p.z;
+  fly.actionUntil = state.simulationAgeSeconds + randRange(900, 3600);
+}
+
+function moveFly(fly) {
+  const dx = fly.targetX - fly.x;
+  const dz = fly.targetZ - fly.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.45) {
+    fly.vx = 0;
+    fly.vz = 0;
+    fly.currentLocationId = fly.targetLocationId;
+    return;
+  }
+  const vehicleBoost = fly.vehicle ? 1.9 : 1;
+  const speed = (0.15 + fly.energy / 900) * vehicleBoost;
+  fly.vx = (dx / dist) * speed;
+  fly.vz = (dz / dist) * speed;
+  fly.x += fly.vx;
+  fly.z += fly.vz;
+  fly.y = 1.3 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.25;
+}
+
+function payAndFinance(fly, clock) {
+  const day = clock.day;
+  if (clock.hour === 17 && clock.minute < 2 && fly.jobId && fly.lastPaidDay !== day && fly.ageYears >= 18 && fly.ageYears <= 75) {
+    const base = fly.wage * 8;
+    const bonus = base * fly.traits.ambition * randRange(0, 0.18);
+    const gross = base + bonus;
+    fly.money += gross;
+    fly.salaryEarnedToday += gross;
+    fly.salaryLifetime += gross;
+    fly.lastPaidDay = day;
+    fly.happiness = clamp(fly.happiness + 3);
+    state.totalTransactions += 1;
+    if (rand() < 0.05) emit("salary", `${fly.id} received salary ${gross.toFixed(1)} FC.`, { flyId: fly.id, amount: gross });
+  }
+
+  if (clock.hour === 0 && clock.minute < 2 && fly.lastRentDay !== day) {
+    const rent = fly.ownsHome ? 3 : 14;
+    const utilities = 4;
+    const expense = rent + utilities;
+    if (fly.money >= expense) {
+      fly.money -= expense;
+    } else {
+      fly.debt += expense - Math.max(0, fly.money);
+      fly.money = 0;
+      fly.stress = clamp(fly.stress + 8);
+    }
+    fly.expensesLifetime += expense;
+    fly.lastRentDay = day;
+
+    const saveTarget = Math.max(0, fly.money * fly.traits.thrift * 0.22);
+    fly.money -= saveTarget;
+    fly.savings += saveTarget;
+
+    if (fly.debt > 0 && fly.savings > 60) {
+      const payment = Math.min(fly.debt, fly.savings * 0.15);
+      fly.debt -= payment;
+      fly.savings -= payment;
+    }
+
+    if (!fly.ownsHome && fly.savings > 4500 && fly.traits.ambition > 0.52) {
+      fly.savings -= 3200;
+      fly.ownsHome = true;
+      fly.homeEquity = 3200;
+      emit("home_purchase", `${fly.id} bought a home.`, { flyId: fly.id });
+    }
+
+    if (!fly.vehicle && fly.savings > 900 && fly.traits.risk + fly.traits.ambition > 1.0 && rand() < 0.25) {
+      fly.savings -= 650;
+      fly.vehicle = rand() < 0.65 ? "compact car" : "scooter";
+      emit("vehicle_purchase", `${fly.id} bought a ${fly.vehicle}.`, { flyId: fly.id, vehicle: fly.vehicle });
+    }
+  }
+}
+
+function socialLife(fly, clock) {
+  if (!fly.alive) return;
+  if (!["social", "food"].includes(location(fly.currentLocationId).type)) return;
+  if (state.simulationAgeSeconds - fly.lastSocialTick < 600) return;
+  fly.lastSocialTick = state.simulationAgeSeconds;
+
+  const partner = fly.partnerId ? state.flies.find((f) => f.id === fly.partnerId && f.alive) : null;
+
+  if (partner) {
+    const closeness = 4 + fly.traits.empathy * 5;
+    fly.affection = clamp(fly.affection + randRange(-2, closeness), 0, 100);
+    fly.loneliness = clamp(fly.loneliness - 8);
+    fly.happiness = clamp(fly.happiness + 2.5);
+    fly.excitement = clamp(fly.excitement + randRange(-3, 5));
+    if (fly.affection < 12 && fly.stress > 70 && rand() < 0.08) {
+      const old = fly.partnerId;
+      fly.partnerId = null;
+      fly.relationshipSince = null;
+      fly.affection = 0;
+      const other = state.flies.find((f) => f.id === old);
+      if (other?.partnerId === fly.id) {
+        other.partnerId = null;
+        other.relationshipSince = null;
+        other.affection = 0;
+      }
+      fly.happiness = clamp(fly.happiness - 15);
+      fly.loneliness = clamp(fly.loneliness + 20);
+      emit("breakup", `${fly.id} and ${old} broke up.`, { flyId: fly.id, partnerId: old });
+    }
+    return;
+  }
+
+  if (fly.ageYears < 18 || fly.ageYears > 85) return;
+  const candidate = nearestCompatiblePartner(fly);
+  if (!candidate || candidate.partnerId) return;
+  fly.flirtingWith = candidate.id;
+  fly.excitement = clamp(fly.excitement + 9);
+  candidate.excitement = clamp(candidate.excitement + 7);
+
+  if (rand() < 0.06 + fly.traits.sociability * 0.12) {
+    emit("flirt", `${fly.id} flirted with ${candidate.id} at ${location(fly.currentLocationId).name}.`, { flyId: fly.id, otherId: candidate.id });
+  }
+
+  const chemistry = (
+    fly.traits.attractiveness + candidate.traits.attractiveness +
+    fly.traits.empathy + candidate.traits.empathy
+  ) / 4;
+
+  if (chemistry > 0.48 && rand() < 0.035 + chemistry * 0.08) {
+    fly.partnerId = candidate.id;
+    candidate.partnerId = fly.id;
+    fly.affection = candidate.affection = randRange(45, 72);
+    fly.relationshipSince = candidate.relationshipSince = gameYears();
+    fly.flirtingWith = candidate.flirtingWith = null;
+    fly.happiness = clamp(fly.happiness + 15);
+    candidate.happiness = clamp(candidate.happiness + 15);
+    fly.loneliness = clamp(fly.loneliness - 30);
+    candidate.loneliness = clamp(candidate.loneliness - 30);
+    emit("relationship", `${fly.id} and ${candidate.id} started a relationship.`, { flyId: fly.id, partnerId: candidate.id });
+  }
+}
+
+function reproduction(fly) {
+  if (!fly.alive || fly.sex !== "F" || fly.pregnancyDueAt) return;
+  if (!fly.partnerId || fly.ageYears < 18 || fly.ageYears > 52) return;
+  const partner = state.flies.find((f) => f.id === fly.partnerId && f.alive);
+  if (!partner || partner.sex !== "M" || partner.ageYears < 18 || partner.ageYears > 75) return;
+  if (state.flies.filter((f) => f.alive).length >= MAX_POPULATION) return;
+  if (fly.affection < 45 || fly.health < 45 || fly.stress > 85) return;
+
+  const p = 0.00035 * (0.35 + fly.traits.fertility) * (0.35 + partner.traits.fertility);
+  if (rand() < p) {
+    fly.pregnancyBy = partner.id;
+    fly.pregnancyDueAt = gameYears() + 0.72;
+    emit("pregnancy", `${fly.id} became pregnant with ${partner.id}.`, { flyId: fly.id, partnerId: partner.id });
+  }
+}
+
+function completePregnancy(fly) {
+  if (!fly.pregnancyDueAt || gameYears() < fly.pregnancyDueAt) return;
+  const father = state.flies.find((f) => f.id === fly.pregnancyBy);
+  fly.pregnancyDueAt = null;
+  const fatherId = fly.pregnancyBy;
+  fly.pregnancyBy = null;
+  if (!father || !father.alive || state.flies.filter((f) => f.alive).length >= MAX_POPULATION) return;
+
+  const litter = rand() < 0.14 ? 2 : 1;
+  for (let i = 0; i < litter && state.flies.filter((f) => f.alive).length < MAX_POPULATION; i += 1) {
+    const child = createFly(state.flies.length, [fly, father]);
+    state.flies.push(child);
+    fly.children.push(child.id);
+    father.children.push(child.id);
+    state.births += 1;
+    state.generation = Math.max(state.generation, child.generation);
+    emit("birth", `${child.id} was born to ${fly.id} and ${fatherId}.`, { childId: child.id, motherId: fly.id, fatherId });
+  }
+}
+
+function mentalHealthAndMortality(fly) {
+  if (!fly.alive) return;
+  const oldStress = fly.stress;
+  const support = (fly.partnerId ? 22 : 0) + Math.min(25, fly.friends.length * 4);
+  const debtPressure = Math.min(25, fly.debt / 80);
+  const unemploymentPressure = !fly.jobId && fly.ageYears >= 18 && fly.ageYears <= 70 ? 5 : 0;
+
+  fly.stress = clamp(
+    fly.stress +
+    fly.hunger * 0.0016 +
+    debtPressure * 0.003 +
+    unemploymentPressure * 0.002 -
+    fly.traits.resilience * 0.07 -
+    support * 0.002,
+  );
+  fly.happiness = clamp(
+    fly.happiness +
+    (fly.partnerId ? 0.025 : -0.01) +
+    fly.excitement * 0.0004 -
+    fly.stress * 0.0007 -
+    fly.loneliness * 0.0005,
+  );
+  fly.loneliness = clamp(fly.loneliness + (fly.partnerId ? -0.03 : 0.018) - fly.traits.sociability * 0.008);
+  fly.excitement = clamp(fly.excitement - 0.02);
+
+  fly.mentalHealthCrisis = fly.stress > 92 && fly.happiness < 12 && fly.loneliness > 70;
+
+  if (fly.mentalHealthCrisis && rand() < 0.000006 && fly.traits.resilience < 0.55 && support < 18) {
+    fly.alive = false;
+    fly.causeOfDeath = "suicide";
+    state.deaths += 1;
+    emit("death", `${fly.id} died after a severe mental-health crisis.`, { flyId: fly.id, cause: "suicide" });
+    return;
+  }
+
+  const ageRisk = fly.ageYears > 82 ? (fly.ageYears - 82) * 0.000004 : 0;
+  const healthRisk = fly.health < 25 ? (25 - fly.health) * 0.000006 : 0;
+  if (fly.ageYears >= 100 || rand() < ageRisk + healthRisk) {
+    fly.alive = false;
+    fly.causeOfDeath = fly.ageYears >= 100 ? "old age" : "natural causes";
+    state.deaths += 1;
+    emit("death", `${fly.id} died at age ${fly.ageYears.toFixed(1)}.`, { flyId: fly.id, cause: fly.causeOfDeath });
+    return;
+  }
+
+  if ((Math.abs(fly.vx) + Math.abs(fly.vz)) > 0.02) {
+    const trafficRisk = fly.vehicle ? 0.0000035 : 0.0000008;
+    const stressRisk = fly.stress > 80 ? 0.0000012 : 0;
+    if (rand() < trafficRisk + stressRisk) {
+      if (rand() < 0.18 + fly.traits.risk * 0.12) {
+        fly.alive = false;
+        fly.causeOfDeath = "traffic accident";
+        state.deaths += 1;
+        emit("accident", `${fly.id} died in a traffic accident.`, { flyId: fly.id, cause: "traffic accident" });
+        return;
+      }
+      fly.health = clamp(fly.health - randRange(18, 48));
+      fly.stress = clamp(fly.stress + 20);
+      fly.targetLocationId = "clinic";
+      const clinic = jittered(location("clinic"), 2);
+      fly.targetX = clinic.x;
+      fly.targetZ = clinic.z;
+      fly.action = "injured";
+      emit("accident", `${fly.id} was injured in a traffic accident.`, { flyId: fly.id });
+    }
+  }
+
+  if (oldStress < 90 && fly.stress >= 90 && rand() < 0.1) {
+    emit("crisis", `${fly.id} entered a severe stress crisis.`, { flyId: fly.id, stress: fly.stress });
+  }
+}
+
+function needsAndActivities(fly, clock) {
+  fly.hunger = clamp(fly.hunger + 0.055);
+  const sleeping = (clock.hour >= 22 || clock.hour < 6) && fly.currentLocationId === fly.homeId;
+  fly.energy = clamp(fly.energy + (sleeping ? 0.16 : -0.038));
+
+  if (fly.currentLocationId === "market" && fly.hunger > 35 && fly.money >= 3.5) {
+    if (rand() < 0.14) {
+      const cost = randRange(3.5, 8.5);
+      fly.money -= cost;
+      fly.expensesLifetime += cost;
+      fly.hunger = clamp(fly.hunger - randRange(28, 52));
+      fly.happiness = clamp(fly.happiness + 2);
+      state.foodReserve = Math.max(0, state.foodReserve - 1);
+      state.totalTransactions += 1;
+    }
+  }
+
+  if (fly.currentLocationId === "clinic" && fly.health < 75 && fly.money >= 12 && rand() < 0.04) {
+    const cost = 12;
+    fly.money -= cost;
+    fly.health = clamp(fly.health + randRange(8, 20));
+    fly.stress = clamp(fly.stress - 8);
+    fly.expensesLifetime += cost;
+    state.totalTransactions += 1;
+  }
+
+  if (fly.currentLocationId === "park") {
+    fly.stress = clamp(fly.stress - 0.06);
+    fly.excitement = clamp(fly.excitement + 0.015);
+  }
+  if (fly.currentLocationId === "cafe") {
+    fly.loneliness = clamp(fly.loneliness - 0.04);
+    fly.happiness = clamp(fly.happiness + 0.025);
+  }
+}
+
+function tickFly(fly, clock) {
+  if (!fly.alive) return;
+  fly.ageYears = ageOf(fly);
+  if (fly.ageYears < 18) {
+    fly.jobId = null;
+    fly.jobTitle = null;
+    fly.wage = 0;
+  } else if (!fly.jobId && fly.ageYears <= 75 && rand() < 0.00025 * (0.4 + fly.traits.ambition)) {
+    const job = pick(JOBS);
+    fly.jobId = job.id;
+    fly.jobTitle = job.title;
+    fly.wage = job.wage;
+    emit("job", `${fly.id} found work as a ${job.title}.`, { flyId: fly.id, job: job.title });
+  }
+
+  if (fly.ageYears > 75 && fly.jobId) {
+    fly.jobId = null;
+    fly.jobTitle = "retired";
+    fly.wage = 0;
+    emit("retirement", `${fly.id} retired at age ${fly.ageYears.toFixed(1)}.`, { flyId: fly.id });
+  }
+
+  chooseDestination(fly, clock);
+  moveFly(fly);
+  needsAndActivities(fly, clock);
+  payAndFinance(fly, clock);
+  socialLife(fly, clock);
+  reproduction(fly);
+  completePregnancy(fly);
+  mentalHealthAndMortality(fly);
+}
+
+async function checkpoint(force = false) {
+  if (!force && Date.now() - checkpointAt < CHECKPOINT_EVERY_MS) return;
+  checkpointAt = Date.now();
+  state.updatedAt = new Date().toISOString();
+  const living = state.flies.filter((f) => f.alive);
+  const moneySupply = living.reduce((sum, f) => sum + f.money + f.savings - f.debt, 0);
+  await pool.query(
+    `INSERT INTO civilization_state (world_id, state_json, updated_at)
+     VALUES ($1,$2::jsonb,NOW())
+     ON CONFLICT (world_id)
+     DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()`,
+    [WORLD_ID, JSON.stringify(state)],
+  );
+  await pool.query(
+    `INSERT INTO civilization_worlds
+      (world_id, experiment_id, world_seed, started_at, updated_at, simulation_age_seconds, time_scale, population, generation, births, deaths, food_reserve, money_supply, simulation_status, paused)
+     VALUES ($1,$2,$3,NOW(),NOW(),$4,$5,$6,$7,$8,$9,$10,$11,'SYNTHETIC_CIVILIZATION_LIVE',$12)
+     ON CONFLICT (world_id) DO UPDATE SET
+       updated_at=NOW(),
+       simulation_age_seconds=EXCLUDED.simulation_age_seconds,
+       time_scale=EXCLUDED.time_scale,
+       population=EXCLUDED.population,
+       generation=EXCLUDED.generation,
+       births=EXCLUDED.births,
+       deaths=EXCLUDED.deaths,
+       food_reserve=EXCLUDED.food_reserve,
+       money_supply=EXCLUDED.money_supply,
+       simulation_status='SYNTHETIC_CIVILIZATION_LIVE',
+       paused=EXCLUDED.paused`,
+    [
+      WORLD_ID, EXPERIMENT_ID, WORLD_SEED,
+      state.simulationAgeSeconds, state.timeScale, living.length, state.generation,
+      state.births, state.deaths, state.foodReserve, moneySupply, state.paused,
+    ],
+  );
+}
+
+function compactFly(f) {
+  return {
+    id: f.id,
+    name: f.name,
+    sex: f.sex,
+    ageYears: Number(f.ageYears.toFixed(2)),
+    generation: f.generation,
+    alive: f.alive,
+    causeOfDeath: f.causeOfDeath,
+    x: Number(f.x.toFixed(2)),
+    y: Number(f.y.toFixed(2)),
+    z: Number(f.z.toFixed(2)),
+    vx: Number(f.vx.toFixed(3)),
+    vz: Number(f.vz.toFixed(3)),
+    action: f.action,
+    currentLocationId: f.currentLocationId,
+    targetLocationId: f.targetLocationId,
+    hunger: Number(f.hunger.toFixed(1)),
+    energy: Number(f.energy.toFixed(1)),
+    stress: Number(f.stress.toFixed(1)),
+    happiness: Number(f.happiness.toFixed(1)),
+    excitement: Number(f.excitement.toFixed(1)),
+    loneliness: Number(f.loneliness.toFixed(1)),
+    health: Number(f.health.toFixed(1)),
+    money: Number(f.money.toFixed(1)),
+    savings: Number(f.savings.toFixed(1)),
+    debt: Number(f.debt.toFixed(1)),
+    jobTitle: f.jobTitle,
+    partnerId: f.partnerId,
+    affection: Number(f.affection.toFixed(1)),
+    flirtingWith: f.flirtingWith,
+    pregnant: Boolean(f.pregnancyDueAt),
+    children: f.children,
+    parents: f.parents,
+    vehicle: f.vehicle,
+    ownsHome: f.ownsHome,
+    mentalHealthCrisis: f.mentalHealthCrisis,
+    traits: f.traits,
+  };
+}
+
+function getState() {
+  const living = state.flies.filter((f) => f.alive);
+  const moneySupply = living.reduce((sum, f) => sum + f.money + f.savings - f.debt, 0);
+  const clock = gameClock();
+  const selected = living[0] || null;
+  return {
+    authoritative: true,
+    simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
+    modelDisclosure: "Synthetic civilization model. Behavior is modeled and persistent; it is not a biological FlyWire multi-brain simulation.",
+    worldId: WORLD_ID,
+    experimentId: EXPERIMENT_ID,
+    worldSeed: String(WORLD_SEED),
+    serverTime: new Date().toISOString(),
+    simulationTime: state.simulationAgeSeconds,
+    simulationAgeSeconds: state.simulationAgeSeconds,
+    timeScale: state.timeScale,
+    day: clock.day,
+    gameClock: clock.text,
+    gameHour: clock.hour,
+    gameMinute: clock.minute,
+    population: living.length,
+    generation: state.generation,
+    births: state.births,
+    deaths: state.deaths,
+    foodReserve: state.foodReserve,
+    moneySupply,
+    totalTransactions: state.totalTransactions,
+    daysPerYear: DAYS_PER_YEAR,
+    locations: LOCATIONS,
+    flies: state.flies.map(compactFly),
+    selectedFly: selected ? {
+      id: selected.id,
+      sensorySummary: selected.action,
+      motorSummary: selected.vehicle ? `moving with ${selected.vehicle}` : "walking/flying",
+      neuralActivity: Array.from({ length: 100 }, (_, i) => {
+        const band = i % 5;
+        if (band === 0) return selected.stress / 100;
+        if (band === 1) return selected.hunger / 100;
+        if (band === 2) return selected.excitement / 100;
+        if (band === 3) return selected.happiness / 100;
+        return selected.energy / 100;
+      }),
+    } : null,
+    events: state.events.slice(-40),
+    versions: VERSION,
+  };
 }
 
 async function tick() {
+  if (tickBusy || !state) return;
+  tickBusy = true;
   try {
-    await pool.query(
-      `UPDATE civilization_worlds
-       SET simulation_age_seconds = simulation_age_seconds + CASE WHEN paused THEN 0 ELSE $2 END,
-           updated_at = NOW()
-       WHERE world_id = $1`,
-      [WORLD_ID, TIME_SCALE],
-    );
+    if (!state.paused) {
+      state.simulationAgeSeconds += GAME_SECONDS_PER_REAL_SECOND;
+      const clock = gameClock();
+      for (const fly of state.flies) tickFly(fly, clock);
+
+      // periodic city-wide events
+      if (clock.hour === 6 && clock.minute < 2 && rand() < 0.12) {
+        emit("weather", "A new synthetic day begins across Fly City.", { day: clock.day });
+      }
+
+      if (state.foodReserve < 2000 && rand() < 0.002) {
+        state.foodReserve += 4000;
+        emit("supply", "Central Market restocked food supplies.", { foodReserve: state.foodReserve });
+      }
+
+      if (state.flies.filter((f) => f.alive).length < 8 && state.flies.length < MAX_POPULATION) {
+        for (let i = 0; i < 6; i += 1) state.flies.push(createFly(state.flies.length));
+        emit("migration", "New migrants arrived to prevent total population collapse.", {});
+      }
+    }
+    await checkpoint(false);
   } catch (error) {
     console.error("[civilization] tick failed", error);
+  } finally {
+    tickBusy = false;
   }
-}
-
-async function getState() {
-  const worldResult = await pool.query(
-    "SELECT * FROM civilization_worlds WHERE world_id = $1",
-    [WORLD_ID],
-  );
-  if (!worldResult.rowCount) throw new Error("world missing");
-  const w = worldResult.rows[0];
-
-  const eventResult = await pool.query(
-    `SELECT id, created_at, source, event_type, message, payload
-     FROM civilization_events
-     WHERE world_id = $1
-     ORDER BY id DESC
-     LIMIT 30`,
-    [WORLD_ID],
-  );
-
-  return {
-    authoritative: true,
-    simulationStatus: w.simulation_status,
-    worldId: w.world_id,
-    experimentId: w.experiment_id,
-    worldSeed: String(w.world_seed),
-    serverTime: new Date().toISOString(),
-    simulationTime: Number(w.simulation_age_seconds),
-    simulationAgeSeconds: Number(w.simulation_age_seconds),
-    timeScale: Number(w.time_scale),
-    population: Number(w.population),
-    generation: Number(w.generation),
-    births: Number(w.births),
-    deaths: Number(w.deaths),
-    foodReserve: Number(w.food_reserve),
-    moneySupply: Number(w.money_supply),
-    selectedFly: null,
-    events: eventResult.rows.reverse().map((e) => ({
-      id: String(e.id),
-      time: new Date(e.created_at).toISOString(),
-      text: e.message,
-      source: e.source,
-      type: e.event_type,
-      payload: e.payload,
-    })),
-    versions: VERSION,
-  };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -199,7 +885,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: "fruit-fly-civilization-core",
         worldId: WORLD_ID,
-        simulationStatus: "WAITING_FOR_BRAIN_RUNTIME",
+        simulationStatus: state ? "SYNTHETIC_CIVILIZATION_LIVE" : "STARTING",
+        population: state?.flies?.filter((f) => f.alive).length || 0,
       });
     } catch (error) {
       json(res, 503, { ok: false, error: String(error) });
@@ -209,7 +896,7 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/api/civilization/state") {
     try {
-      json(res, 200, await getState());
+      json(res, 200, getState());
     } catch (error) {
       json(res, 500, { error: String(error) });
     }
@@ -236,14 +923,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 await initDb();
-setInterval(tick, 1000).unref();
+setInterval(() => void tick(), 1000);
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[civilization] persistent core listening on :${PORT} world=${WORLD_ID}`);
+  console.log(`[civilization] synthetic persistent world listening on :${PORT} world=${WORLD_ID} pop=${state.flies.filter((f) => f.alive).length}`);
 });
 
 async function shutdown(signal) {
-  console.log(`[civilization] ${signal}; closing gracefully`);
+  console.log(`[civilization] ${signal}; checkpointing`);
+  try { await checkpoint(true); } catch {}
   server.close();
   await pool.end();
   process.exit(0);
