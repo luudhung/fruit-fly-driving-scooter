@@ -1,7 +1,14 @@
 {
-  "name":"flybrain-247-worker",
-  "private":true,
-  "type":"module",
-  "engines":{"node":">=22"},
-  "scripts":{"start":"node server.mjs"}
+  "name": "flybrain-247-worker",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "redis": "^5.8.2"
+  }
 }
