@@ -39,11 +39,6 @@ const A_SYN: f32 = 0.81873;
 const STARTING_CASH: f64 = 100_000.0;
 const MAX_LEVERAGE: f64 = 4.0;
 const MAX_BRAIN_HOLD_TICKS: u64 = 180;
-const SMOKE_ENTER_STRESS: f64 = 62.0;
-const SMOKE_CLEAR_STRESS: f64 = 54.0;
-const BREAK_ENTER_STRESS: f64 = 78.0;
-const BREAK_EXIT_STRESS: f64 = 28.0;
-const MIN_DESK_SMOKE_MS: u64 = 7_000;
 
 const SUPER_CLASS_LABELS: [&str; 11] = [
     "unknown",
@@ -139,6 +134,14 @@ struct PersistedState {
     brain_patience_signal: f64,
     #[serde(default)]
     brain_hold_ticks: u64,
+    #[serde(default)]
+    brain_trade_drive: f64,
+    #[serde(default)]
+    brain_smoke_drive: f64,
+    #[serde(default)]
+    brain_break_drive: f64,
+    #[serde(default)]
+    brain_behavior: String,
     pending_side: Option<String>,
     pending_confirmations: u32,
 
@@ -184,6 +187,10 @@ impl PersistedState {
             brain_notional: 0.0,
             brain_patience_signal: 0.0,
             brain_hold_ticks: 1,
+            brain_trade_drive: 0.0,
+            brain_smoke_drive: 0.0,
+            brain_break_drive: 0.0,
+            brain_behavior: "TRADE".into(),
             pending_side: None,
             pending_confirmations: 0,
             brain_neurons: 0,
@@ -779,49 +786,11 @@ async fn simulation_loop(
         }
 
         let now = now_ms();
-        if !state.break_mode
-            && state.stress >= SMOKE_ENTER_STRESS
-            && state.desk_smoke_since_ms.is_none()
-        {
-            state.desk_smoke_since_ms = Some(now);
-            state.add_event(format!("🚬 DESK SMOKE · stress {:.0}", state.stress));
-        }
-
-        if !state.break_mode
-            && state.desk_smoke_since_ms.is_some()
-            && state.stress < SMOKE_CLEAR_STRESS
-        {
-            state.desk_smoke_since_ms = None;
-            state.add_event("✓ CALMER · cigarette out");
-        }
-
-        let smoke_elapsed = state
-            .desk_smoke_since_ms
-            .map(|t| now.saturating_sub(t))
-            .unwrap_or(0);
-
-        if !state.break_mode
-            && state.stress >= BREAK_ENTER_STRESS
-            && state.desk_smoke_since_ms.is_some()
-            && smoke_elapsed >= MIN_DESK_SMOKE_MS
-        {
-            state.break_mode = true;
-            state.decision = "BREAK".into();
-            state.add_event("☕ CITY BREAK · position stays open");
-        } else if state.break_mode && state.stress <= BREAK_EXIT_STRESS {
-            state.break_mode = false;
-            state.desk_smoke_since_ms = None;
-            state.pending_side = None;
-            state.pending_confirmations = 0;
-            state.decision = "WAIT".into();
-            state.add_event("↩ CALM AGAIN · resumes trading");
-        }
-
         state.stress = (state.stress
-            - if state.break_mode {
-                3.6 * interval_ms as f64 / 1000.0
-            } else {
-                0.02 * interval_ms as f64 / 1000.0
+            - match state.brain_behavior.as_str() {
+                "BREAK" => 3.6 * interval_ms as f64 / 1000.0,
+                "SMOKE" => 0.35 * interval_ms as f64 / 1000.0,
+                _ => 0.02 * interval_ms as f64 / 1000.0,
             })
             .max(0.0);
 
@@ -895,6 +864,12 @@ async fn simulation_loop(
         let ascending_mean = if partitions.region_counts[2] > 0 && steps_per_cycle > 0 {
             region_spikes[2] as f64 / (partitions.region_counts[2] * steps_per_cycle) as f64
         } else { 0.0 };
+        let sensory_mean = if partitions.region_counts[1] > 0 && steps_per_cycle > 0 {
+            region_spikes[1] as f64 / (partitions.region_counts[1] * steps_per_cycle) as f64
+        } else { 0.0 };
+        let endocrine_mean = if partitions.region_counts[7] > 0 && steps_per_cycle > 0 {
+            region_spikes[7] as f64 / (partitions.region_counts[7] * steps_per_cycle) as f64
+        } else { 0.0 };
 
         let central_drive = neural_unit(central_mean, 95.0);
         let motor_drive = neural_unit(motor_mean, 110.0);
@@ -924,6 +899,67 @@ async fn simulation_loop(
         state.brain_patience_signal = brain_patience_signal;
         state.brain_hold_ticks = 1
             + (brain_patience_signal * (MAX_BRAIN_HOLD_TICKS - 1) as f64).round() as u64;
+
+        // Behavior is chosen by competing neural drives, not by hard-coded stress cutoffs.
+        // Stress/volatility only enter as sensory stimulation upstream of the connectome.
+        let sensory_drive = neural_unit(sensory_mean, 105.0);
+        let endocrine_drive = neural_unit(endocrine_mean, 120.0);
+        let mbon_drive = neural_unit(mbon, 120.0);
+
+        let trade_drive = clamp64(
+            signal.abs() * 0.36 + central_drive * 0.30 + motor_drive * 0.24 + mbon_drive * 0.10,
+            0.0,
+            1.0,
+        );
+        let smoke_drive = clamp64(
+            endocrine_drive * 0.42 + sensory_drive * 0.34 + mbon_drive * 0.24,
+            0.0,
+            1.0,
+        );
+        let break_drive = clamp64(
+            intrinsic_drive * 0.38 + ascending_drive * 0.32 + endocrine_drive * 0.20
+                + (1.0 - motor_drive) * 0.10,
+            0.0,
+            1.0,
+        );
+
+        state.brain_trade_drive = trade_drive;
+        state.brain_smoke_drive = smoke_drive;
+        state.brain_break_drive = break_drive;
+
+        let behavior = if break_drive >= smoke_drive && break_drive >= trade_drive {
+            "BREAK"
+        } else if smoke_drive >= trade_drive {
+            "SMOKE"
+        } else {
+            "TRADE"
+        };
+
+        if behavior != state.brain_behavior {
+            state.add_event(format!(
+                "🧠 BEHAVIOR {} · trade {:.3} / smoke {:.3} / break {:.3}",
+                behavior, trade_drive, smoke_drive, break_drive
+            ));
+        }
+        state.brain_behavior = behavior.into();
+
+        match behavior {
+            "BREAK" => {
+                state.break_mode = true;
+                state.desk_smoke_since_ms = None;
+                state.decision = "BREAK".into();
+            }
+            "SMOKE" => {
+                state.break_mode = false;
+                if state.desk_smoke_since_ms.is_none() {
+                    state.desk_smoke_since_ms = Some(now);
+                }
+            }
+            _ => {
+                state.break_mode = false;
+                state.desk_smoke_since_ms = None;
+            }
+        }
 
         state.signal = signal;
         state.activity = activity;
