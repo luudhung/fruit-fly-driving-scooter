@@ -394,6 +394,7 @@ function createFly(index, parents = null) {
     action: "resting",
     actionUntil: 0,
     hunger: randRange(10, 48),
+    thirst: randRange(8, 42),
     energy: randRange(45, 95),
     stress: randRange(5, 34),
     happiness: randRange(42, 82),
@@ -419,6 +420,18 @@ function createFly(index, parents = null) {
     parents: parents ? [mother.id, father.id] : [],
     friends: [],
     vehicle: null,
+    transitMode: "walk",
+    transitPass: false,
+    illness: null,
+    sickDays: 0,
+    nightlifeLastDay: -1,
+    businessId: null,
+    businessEquity: 0,
+    creditScore: Math.round(randRange(520, 780)),
+    bankLoan: 0,
+    businessFailures: 0,
+    businessSuccesses: 0,
+    socialClass: "working",
     ownsHome: false,
     homeTier: 0,
     homeEquity: 0,
@@ -462,6 +475,12 @@ function freshState() {
     eventSeq: 1,
     locations: LOCATIONS,
     businesses: JSON.parse(JSON.stringify(BUSINESSES)),
+    enterprises: {},
+    nextEnterpriseId: 1,
+    bank: { reserves: 250000, loansOutstanding: 0, defaults: 0 },
+    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 },
+    mapVersion: MAP_VERSION,
+    currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
   };
   state = s;
   for (let i = 0; i < INITIAL_POPULATION; i += 1) state.flies.push(createFly(i));
@@ -556,6 +575,12 @@ async function initDb() {
     state.timeScale = GAME_SECONDS_PER_REAL_SECOND;
     state.locations = LOCATIONS;
     state.businesses = state.businesses || JSON.parse(JSON.stringify(BUSINESSES));
+    state.enterprises = state.enterprises || {};
+    state.nextEnterpriseId = Number(state.nextEnterpriseId || 1);
+    state.bank = state.bank || { reserves: 250000, loansOutstanding: 0, defaults: 0 };
+    state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0 };
+    state.mapVersion = MAP_VERSION;
+    state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
     state.nextBrainId = Number(state.nextBrainId || (state.flies.length + 1));
@@ -604,6 +629,19 @@ async function initDb() {
       fly.traveling = Boolean(fly.traveling);
       fly.smoking = Boolean(fly.smoking);
       fly.exercising = Boolean(fly.exercising);
+      fly.thirst = Number.isFinite(fly.thirst) ? fly.thirst : 25;
+      fly.transitMode = fly.transitMode || "walk";
+      fly.transitPass = Boolean(fly.transitPass);
+      fly.illness = fly.illness || null;
+      fly.sickDays = Number(fly.sickDays || 0);
+      fly.nightlifeLastDay = Number.isFinite(fly.nightlifeLastDay) ? fly.nightlifeLastDay : -1;
+      fly.businessId = fly.businessId || null;
+      fly.businessEquity = Number(fly.businessEquity || 0);
+      fly.creditScore = Number(fly.creditScore || 650);
+      fly.bankLoan = Number(fly.bankLoan || 0);
+      fly.businessFailures = Number(fly.businessFailures || 0);
+      fly.businessSuccesses = Number(fly.businessSuccesses || 0);
+      fly.socialClass = fly.socialClass || "working";
     }
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
