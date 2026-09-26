@@ -32,6 +32,18 @@ type FlyState = {
   parents: string[];
   vehicle?: string | null;
   ownsHome: boolean;
+  brainId?: string;
+  brainSeed?: number;
+  brainParentIds?: string[];
+  brainDecisionCount?: number;
+  brainMemoryCount?: number;
+  brainDynamic?: {
+    fatigue: number;
+    arousal: number;
+    curiosity: number;
+    rewardExpectation: number;
+    stressLoad: number;
+  } | null;
   homeTier?: number;
   homeX?: number;
   homeZ?: number;
@@ -104,6 +116,8 @@ const gameClockEl = $("game-clock");
 const gameDayEl = $("game-day");
 
 const flyIdEl = $("fly-id");
+const flyBrainIdEl = $("fly-brain-id");
+const flyBrainHistoryEl = $("fly-brain-history");
 const flyAgeEl = $("fly-age");
 const flyActionEl = $("fly-action");
 const flyBrainEl = $("fly-brain");
@@ -153,6 +167,8 @@ let latestFlyStates = new Map<string, FlyState>();
 function renderInspector(fly: FlyState | null) {
   if (!fly) {
     flyIdEl.textContent = "click a fly";
+    flyBrainIdEl.textContent = "—";
+    flyBrainHistoryEl.textContent = "—";
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
@@ -160,6 +176,8 @@ function renderInspector(fly: FlyState | null) {
     return;
   }
   flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
+  flyBrainIdEl.textContent = fly.brainId || "legacy brain pending";
+  flyBrainHistoryEl.textContent = `${num(fly.brainDecisionCount || 0)} decisions · ${num(fly.brainMemoryCount || 0)} memories`;
   flyAgeEl.textContent = `${fly.ageYears.toFixed(1)}y · ${fly.sex} · Gen ${fly.generation}`;
   flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
   flyBrainEl.textContent = `${fly.brainDecision || fly.action} · ${Math.round((fly.brainConfidence ?? 0) * 100)}%`;
@@ -191,7 +209,7 @@ function renderInspector(fly: FlyState | null) {
     cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.65})` : "none";
   });
   brainNote.textContent =
-    `${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. These are synthetic decision-model bands, not biological FlyWire recordings.`;
+    `${fly.brainId || "brain"} / ${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. These are synthetic decision-model bands, not biological FlyWire recordings.`;
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
