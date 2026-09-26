@@ -86,6 +86,9 @@ let wins=0;
 let losses=0;
 let realizedPnL=0;
 let position:Position|null=null;
+let peakEquity=STARTING_CASH;
+let pendingSide:"LONG"|"SHORT"|null=null;
+let pendingConfirmations=0;
 let lastDecisionTick=-1;
 let latestBrain:StockBrainStatus={stage:"loading",message:"Starting full FlyWire brain…"};
 
@@ -129,6 +132,21 @@ function unrealizedPnL(){
 function freeCash(){return cash-marginLocked;}
 function equity(){return cash+unrealizedPnL();}
 function buyingPower(){return Math.max(10_000,Math.abs(equity())*MAX_LEVERAGE);}
+function drawdownPct(){
+  peakEquity=Math.max(peakEquity,equity());
+  return peakEquity>0?Math.max(0,(peakEquity-equity())/peakEquity):0;
+}
+function requiredConfirmations(){
+  const dd=drawdownPct();
+  if(dd>=.30)return 4;
+  if(dd>=.15)return 3;
+  if(dd>=.05)return 2;
+  return 1;
+}
+function requiredConfidence(){
+  const dd=drawdownPct();
+  return clamp(.52+Math.min(.28,dd*.9),.52,.80);
+}
 
 function closePosition(reason:string){
   if(!position||!price)return;
@@ -163,9 +181,11 @@ function closePosition(reason:string){
 function openPosition(side:"LONG"|"SHORT",confidence:number){
   if(!price)return;
 
+  const dd=drawdownPct();
+  const cautionScale=Math.max(.30,1-dd*1.6);
   const desiredNotional=Math.max(
     MIN_NOTIONAL,
-    Math.abs(equity())*(BASE_RISK_FRACTION+confidence*CONF_RISK_MULT)
+    Math.abs(equity())*(BASE_RISK_FRACTION+confidence*CONF_RISK_MULT)*cautionScale
   );
   const notional=Math.min(desiredNotional,buyingPower());
   const qty=notional/price;
@@ -530,14 +550,19 @@ function seededWeights(seed:number){
 }
 function makeCar(color:number){
   const g=new THREE.Group();
+  const wheels:THREE.Mesh[]=[];
   const body=new THREE.Mesh(new THREE.BoxGeometry(1.05,.36,.55),material(color,.55,.12));
   body.position.y=.32;g.add(body);
   const cabin=new THREE.Mesh(new THREE.BoxGeometry(.55,.28,.48),material(0xb8d0dc,.25,.24));
   cabin.position.set(-.08,.62,0);g.add(cabin);
   for(const sx of [-.32,.32])for(const sz of [-.31,.31]){
     const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.10,12),material(0x1f2022,.8,.05));
-    wheel.rotation.x=Math.PI/2;wheel.position.set(sx,.18,sz);g.add(wheel);
+    wheel.rotation.x=Math.PI/2;
+    wheel.position.set(sx,.18,sz);
+    wheels.push(wheel);
+    g.add(wheel);
   }
+  g.userData.wheels=wheels;
   return g;
 }
 for(let i=0;i<16;i++){
@@ -546,7 +571,8 @@ for(let i=0;i<16;i++){
   const dir:(1|-1)=i%2===0?1:-1;
   const mesh=makeCar(carColors[i%carColors.length]);
   mesh.position.set(-20+(i*3.15)%40,.12,roadZ+lane);
-  mesh.rotation.y=dir===1?Math.PI/2:-Math.PI/2;
+  // Car geometry is long on local X, so heading 0 / PI aligns it with the road.
+  mesh.rotation.y=dir===1?0:Math.PI;
   scene.add(mesh);
   traffic.push({
     mesh,brain:new TrafficBrain(i+1,seededWeights(9001+i*7919)),
@@ -570,6 +596,11 @@ function updateTraffic(dt:number,time:number){
     car.speed=clamp(car.speed,.45,6.4);
     car.mesh.position.x+=car.dir*car.speed*dt;
     car.mesh.position.z=THREE.MathUtils.damp(car.mesh.position.z,car.roadZ+car.lane+action.steer,4,dt);
+    const heading=car.dir===1?0:Math.PI;
+    car.mesh.rotation.y=THREE.MathUtils.damp(car.mesh.rotation.y,heading,8,dt);
+    const wheels=(car.mesh.userData.wheels||[]) as THREE.Mesh[];
+    const spin=car.dir*car.speed*dt/.13;
+    for(const wheel of wheels)wheel.rotateY(-spin);
     if(car.dir===1&&car.mesh.position.x>22)car.mesh.position.x=-22;
     if(car.dir===-1&&car.mesh.position.x<-22)car.mesh.position.x=22;
   }
@@ -781,7 +812,7 @@ function handleDecision(d:StockBrainDecision){
   if(breakMode){
     decisionEl.textContent="BREAK";
     decisionEl.dataset.side="WAIT";
-    callNoteEl.textContent="away from desk · watching New York · trading paused";
+    callNoteEl.textContent="away from desk · watching city view · trading paused";
     return;
   }
   const label=d.side==="UP"?"BUY":d.side==="DOWN"?"SHORT":"HOLD";
@@ -794,11 +825,16 @@ function handleDecision(d:StockBrainDecision){
   lastDecisionTick=d.tick;
 
   if(d.side==="WAIT"){
-    addEvent("· HOLD "+symbol+" @ "+price.toFixed(2));
+    pendingSide=null;
+    pendingConfirmations=0;
+    addEvent("· HOLD "+symbol+" @ "+price.toFixed(2)+" · equity "+money(equity()));
     return;
   }
   const desired=d.side==="UP"?"LONG":"SHORT";
+
   if(position?.side===desired){
+    pendingSide=null;
+    pendingConfirmations=0;
     addEvent(
       "· KEEP "+desired+" "+symbol+
       " · entry "+position.entry.toFixed(2)+
@@ -808,7 +844,42 @@ function handleDecision(d:StockBrainDecision){
     );
     return;
   }
-  if(position)closePosition("brain reversed");
+
+  const need=requiredConfirmations();
+  const minConfidence=requiredConfidence();
+
+  if(d.confidence<minConfidence){
+    pendingSide=null;
+    pendingConfirmations=0;
+    callNoteEl.textContent=
+      "drawdown discipline · need "+Math.round(minConfidence*100)+"% confidence · current "+Math.round(d.confidence*100)+"%";
+    addEvent(
+      "· STUDY "+desired+" · confidence "+Math.round(d.confidence*100)+
+      "% < "+Math.round(minConfidence*100)+"% · drawdown "+(drawdownPct()*100).toFixed(1)+"%"
+    );
+    return;
+  }
+
+  if(pendingSide===desired)pendingConfirmations++;
+  else{
+    pendingSide=desired;
+    pendingConfirmations=1;
+  }
+
+  if(pendingConfirmations<need){
+    callNoteEl.textContent=
+      "studying "+desired+" · confirmation "+pendingConfirmations+"/"+need+
+      " · drawdown "+(drawdownPct()*100).toFixed(1)+"%";
+    addEvent(
+      "· STUDY "+desired+" · confirm "+pendingConfirmations+"/"+need+
+      " · equity "+money(equity())
+    );
+    return;
+  }
+
+  pendingSide=null;
+  pendingConfirmations=0;
+  if(position)closePosition("brain reversed after confirmation");
   openPosition(desired,d.confidence);
 }
 
@@ -876,10 +947,11 @@ function updateBreakBehavior(dt:number,time:number){
     smokeElapsed>=MIN_DESK_SMOKE_MS
   ){
     breakMode=true;
-    if(position)closePosition("stress break");
+    // Stress breaks pause new decisions only. Existing exposure stays open,
+    // so margin/free cash do not magically reset and PnL keeps moving.
     decisionEl.textContent="BREAK";
     decisionEl.dataset.side="WAIT";
-    callNoteEl.textContent="stress stayed high after desk smoke · leaving for New York view";
+    callNoteEl.textContent="stress stayed high after desk smoke · leaving for city view";
     addEvent("☕ WINDOW BREAK · stress stayed high after desk smoke");
     updateChart();
   }else if(breakMode&&stress<=BREAK_EXIT_STRESS){
@@ -947,6 +1019,9 @@ function updateHud(){
     '<div class="metric"><span>money in</span><b>'+money(totalCashIn)+'</b></div>',
     '<div class="metric"><span>money out</span><b>'+money(totalCashOut)+'</b></div>',
     '<div class="metric"><span>W / L</span><b>'+wins+' / '+losses+'</b></div>',
+    '<div class="metric"><span>drawdown</span><b>'+(drawdownPct()*100).toFixed(2)+'%</b></div>',
+    '<div class="metric"><span>peak equity</span><b>'+money(peakEquity)+'</b></div>',
+    '<div class="metric"><span>discipline</span><b>'+requiredConfirmations()+'x · ≥'+Math.round(requiredConfidence()*100)+'%</b></div>',
     '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':deskSmokeStartedAt!==null?'DESK SMOKE':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
     '<div class="metric"><span>feed poll</span><b>'+staleSec+'s ago</b></div>',
@@ -980,7 +1055,7 @@ animate();
 renderFeedState();
 updateChart();
 startCryptoSocket();
-addEvent("NYC sunset trading desk ready · BTC live stream connecting");
+addEvent("sunset city-view trading desk ready · BTC live stream connecting");
 addEvent("full FlyWire trader · starting capital $100,000 · leveraged paper account");
 addEvent("16 independent traffic neural agents driving below");
 addEvent("stress 45 tense · 62 desk smoke · 78 break after ≥7s smoking · return at 28");
