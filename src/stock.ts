@@ -56,8 +56,11 @@ const BASE_RISK_FRACTION=.55;
 const CONF_RISK_MULT=1.20;
 const MIN_NOTIONAL=12_000;
 const MAX_HOLD_TICKS=18;
-const BREAK_ENTER_STRESS=63;
+const SMOKE_ENTER_STRESS=62;
+const SMOKE_CLEAR_STRESS=54;
+const BREAK_ENTER_STRESS=78;
 const BREAK_EXIT_STRESS=28;
+const MIN_DESK_SMOKE_MS=7000;
 const prices:number[]=[];
 const returns:number[]=[];
 const eventLines:string[]=[];
@@ -74,6 +77,7 @@ let cryptoReconnectTimer:number|null=null;
 let cryptoTradeCounter=0;
 let stress=18;
 let breakMode=false;
+let deskSmokeStartedAt:number|null=null;
 let cash=STARTING_CASH;
 let marginLocked=0;
 let totalCashIn=STARTING_CASH;
@@ -690,8 +694,7 @@ function spawnSmoke(){
 }
 
 function updateSmoking(dt:number,time:number){
-  if(breakMode||stress>62)smoking=true;
-  if(!breakMode&&stress<40)smoking=false;
+  smoking=breakMode||deskSmokeStartedAt!==null||stress>=SMOKE_ENTER_STRESS;
 
   const cigaretteOffset=new THREE.Vector3(.12,.12,-1.18).applyAxisAngle(new THREE.Vector3(0,1,0),fly.rotation.y);
   cigarette.position.copy(fly.position).add(cigaretteOffset);
@@ -836,24 +839,52 @@ function updateStressHud(){
   stressValueEl.textContent=Math.round(stress)+" / 100";
   let state:"calm"|"tense"|"smoking"|"break"="calm";
   let label="TRADING";
-  if(breakMode){state="break";label="WINDOW BREAK";}
-  else if(stress>=62){state="smoking";label="SMOKING";}
-  else if(stress>=45){state="tense";label="TENSE";}
+  if(breakMode){
+    state="break";
+    label="WINDOW BREAK";
+  }else if(deskSmokeStartedAt!==null||stress>=SMOKE_ENTER_STRESS){
+    state="smoking";
+    const elapsed=deskSmokeStartedAt===null?0:performance.now()-deskSmokeStartedAt;
+    const remain=Math.max(0,Math.ceil((MIN_DESK_SMOKE_MS-elapsed)/1000));
+    label=remain>0?"DESK SMOKE "+remain+"s":"DESK SMOKE";
+  }else if(stress>=45){
+    state="tense";
+    label="TENSE";
+  }
   stressStateEl.dataset.state=state;
   stressStateEl.textContent=label;
 }
 
 function updateBreakBehavior(dt:number,time:number){
-  if(!breakMode&&stress>=BREAK_ENTER_STRESS){
+  const now=performance.now();
+
+  if(!breakMode&&stress>=SMOKE_ENTER_STRESS&&deskSmokeStartedAt===null){
+    deskSmokeStartedAt=now;
+    addEvent("🚬 DESK SMOKE · stress "+Math.round(stress)+" · keeps trading at desk");
+  }
+
+  if(!breakMode&&deskSmokeStartedAt!==null&&stress<SMOKE_CLEAR_STRESS){
+    deskSmokeStartedAt=null;
+    addEvent("✓ CALMER · puts cigarette out and keeps trading");
+  }
+
+  const smokeElapsed=deskSmokeStartedAt===null?0:now-deskSmokeStartedAt;
+  if(
+    !breakMode&&
+    stress>=BREAK_ENTER_STRESS&&
+    deskSmokeStartedAt!==null&&
+    smokeElapsed>=MIN_DESK_SMOKE_MS
+  ){
     breakMode=true;
     if(position)closePosition("stress break");
     decisionEl.textContent="BREAK";
     decisionEl.dataset.side="WAIT";
-    callNoteEl.textContent="too stressed · leaving desk to watch New York";
-    addEvent("☕ STRESS BREAK · leaves desk, city view + cigarette");
+    callNoteEl.textContent="stress stayed high after desk smoke · leaving for New York view";
+    addEvent("☕ WINDOW BREAK · stress stayed high after desk smoke");
     updateChart();
   }else if(breakMode&&stress<=BREAK_EXIT_STRESS){
     breakMode=false;
+    deskSmokeStartedAt=null;
     lastDecisionTick=-1;
     decisionEl.textContent="HOLD";
     decisionEl.dataset.side="WAIT";
@@ -916,7 +947,7 @@ function updateHud(){
     '<div class="metric"><span>money in</span><b>'+money(totalCashIn)+'</b></div>',
     '<div class="metric"><span>money out</span><b>'+money(totalCashOut)+'</b></div>',
     '<div class="metric"><span>W / L</span><b>'+wins+' / '+losses+'</b></div>',
-    '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':smoking?'SMOKING':'TRADING')+'</b></div>',
+    '<div class="metric"><span>behavior</span><b>'+(breakMode?'CITY BREAK':deskSmokeStartedAt!==null?'DESK SMOKE':smoking?'SMOKING':'TRADING')+'</b></div>',
     '<div class="metric"><span>market tick</span><b>'+tick+'</b></div>',
     '<div class="metric"><span>feed poll</span><b>'+staleSec+'s ago</b></div>',
     '<div class="metric"><span>DN activity</span><b>'+(latestBrain.activity??0).toFixed(4)+'</b></div>',
@@ -952,7 +983,7 @@ startCryptoSocket();
 addEvent("NYC sunset trading desk ready · BTC live stream connecting");
 addEvent("full FlyWire trader · starting capital $100,000 · leveraged paper account");
 addEvent("16 independent traffic neural agents driving below");
-addEvent("stress 45 tense · 62 smoking · 63 city break · return at 28");
+addEvent("stress 45 tense · 62 desk smoke · 78 break after ≥7s smoking · return at 28");
 
 window.addEventListener("resize",()=>{
   camera.aspect=innerWidth/innerHeight;
