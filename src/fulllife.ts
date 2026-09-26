@@ -32,6 +32,13 @@ type FlyState = {
   parents: string[];
   vehicle?: string | null;
   ownsHome: boolean;
+  homeTier?: number;
+  homeX?: number;
+  homeZ?: number;
+  brainDecision?: string;
+  brainConfidence?: number;
+  smoking?: boolean;
+  exercising?: boolean;
   mentalHealthCrisis: boolean;
   traits: Record<string, number>;
 };
@@ -99,7 +106,9 @@ const gameDayEl = $("game-day");
 const flyIdEl = $("fly-id");
 const flyAgeEl = $("fly-age");
 const flyActionEl = $("fly-action");
+const flyBrainEl = $("fly-brain");
 const flyJobEl = $("fly-job");
+const flyHomeEl = $("fly-home");
 const flyPartnerEl = $("fly-partner");
 const flyChildrenEl = $("fly-children");
 const flyMoneyEl = $("fly-money");
@@ -145,7 +154,7 @@ function renderInspector(fly: FlyState | null) {
   if (!fly) {
     flyIdEl.textContent = "click a fly";
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
-      flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent =
+      flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
     for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
     return;
@@ -153,7 +162,9 @@ function renderInspector(fly: FlyState | null) {
   flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
   flyAgeEl.textContent = `${fly.ageYears.toFixed(1)}y · ${fly.sex} · Gen ${fly.generation}`;
   flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
+  flyBrainEl.textContent = `${fly.brainDecision || fly.action} · ${Math.round((fly.brainConfidence ?? 0) * 100)}%`;
   flyJobEl.textContent = fly.jobTitle || (fly.ageYears < 18 ? "child" : fly.ageYears > 75 ? "retired" : "unemployed");
+  flyHomeEl.textContent = fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} FC`;
@@ -180,7 +191,7 @@ function renderInspector(fly: FlyState | null) {
     cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.65})` : "none";
   });
   brainNote.textContent =
-    `${fly.id}: stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. Synthetic cognitive bands, not biological neural recordings.`;
+    `${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. These are synthetic decision-model bands, not biological FlyWire recordings.`;
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
@@ -219,6 +230,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
 
   latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
   syncFlyMeshes(s.flies || []);
+  syncHomes(s.flies || []);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0);
 
   if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
@@ -409,6 +421,26 @@ const specialBuildings = [
 ];
 specialBuildings.forEach((b, i) => addBuilding(b.x, b.z, b.w, b.d, b.h, 900 + i * 13, true));
 
+const locationLabels = [
+  { name: "MARKET", x: -10, z: 6, y: 8 },
+  { name: "CAFE", x: 16, z: 12, y: 8 },
+  { name: "FARM", x: -68, z: -4, y: 5 },
+  { name: "BAKERY", x: 5, z: 20, y: 8 },
+  { name: "GROCERY", x: -22, z: -15, y: 8 },
+  { name: "SHOP", x: 24, z: -17, y: 8 },
+  { name: "GYM", x: 43, z: 25, y: 8 },
+  { name: "CLINIC", x: -15, z: 37, y: 11 },
+  { name: "GARAGE", x: 38, z: -8, y: 9 },
+  { name: "LAB", x: 8, z: 37, y: 16 },
+  { name: "WAREHOUSE", x: -5, z: -42, y: 10 },
+];
+for (const l of locationLabels) {
+  const s = makeCanvasSprite(l.name, 26, 1.4);
+  s.position.set(l.x, l.y, l.z);
+  scene.add(s);
+}
+
+
 const trunkMat = new THREE.MeshStandardMaterial({ color: 0x624731, roughness: 1 });
 const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7652, roughness: 1 });
 for (let i = 0; i < 55; i += 1) {
@@ -443,7 +475,64 @@ type FlyVisual = {
   target: THREE.Vector3;
   current: THREE.Vector3;
   halo: THREE.Mesh;
+  status: THREE.Sprite;
 };
+
+
+function makeCanvasSprite(text: string, fontSize = 54, scale = 2.2): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `700 ${fontSize}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
+  ctx.fillStyle = "white";
+  ctx.shadowColor = "rgba(0,0,0,.55)";
+  ctx.shadowBlur = 8;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.scale.set(scale * 2, scale, 1);
+  sprite.userData.text = text;
+  return sprite;
+}
+
+function updateSpriteText(sprite: THREE.Sprite, text: string) {
+  if (sprite.userData.text === text) return;
+  const old = (sprite.material as THREE.SpriteMaterial).map;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "700 54px system-ui, Apple Color Emoji, Segoe UI Emoji";
+  ctx.fillStyle = "white";
+  ctx.shadowColor = "rgba(0,0,0,.55)";
+  ctx.shadowBlur = 8;
+  ctx.fillText(text, 128, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  (sprite.material as THREE.SpriteMaterial).map = texture;
+  (sprite.material as THREE.SpriteMaterial).needsUpdate = true;
+  old?.dispose();
+  sprite.userData.text = text;
+}
+
+function flyStatusEmoji(fly: FlyState) {
+  if (fly.mentalHealthCrisis) return "⚠️";
+  if (fly.flirtingWith) return "💕";
+  if (fly.partnerId) return "❤️";
+  if (fly.smoking) return "🚬";
+  if (fly.exercising) return "🏃";
+  if (fly.action === "working") return "💼";
+  if (fly.action.includes("food") || fly.action.includes("meal")) return "🍎";
+  if (fly.action.includes("home") || fly.action.includes("rest")) return "🏠";
+  return "";
+}
 
 const flyVisuals = new Map<string, FlyVisual>();
 const flyPickables: THREE.Object3D[] = [];
@@ -500,11 +589,15 @@ function createFlyVisual(id: string): FlyVisual {
   halo.position.y = -0.58;
   group.add(halo);
 
+  const status = makeCanvasSprite("", 54, 1.4);
+  status.position.set(0, 1.45, 0);
+  group.add(status);
+
   group.traverse((obj) => {
     if ((obj as THREE.Mesh).isMesh && obj !== halo) flyPickables.push(obj);
   });
   scene.add(group);
-  return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo };
+  return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status };
 }
 
 function syncFlyMeshes(flies: FlyState[]) {
@@ -523,6 +616,9 @@ function syncFlyMeshes(flies: FlyState[]) {
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     visual.group.scale.setScalar(ageScale);
     (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
+    const emoji = flyStatusEmoji(fly);
+    updateSpriteText(visual.status, emoji);
+    visual.status.visible = Boolean(emoji);
     if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
       visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
     }
@@ -532,6 +628,66 @@ function syncFlyMeshes(flies: FlyState[]) {
     if (!active.has(id)) {
       scene.remove(visual.group);
       flyVisuals.delete(id);
+    }
+  }
+}
+
+
+type HomeVisual = { group: THREE.Group; tier: number };
+const homeVisuals = new Map<string, HomeVisual>();
+
+function createHomeVisual(fly: FlyState) {
+  const tier = fly.ownsHome ? Math.max(1, fly.homeTier || 1) : 0;
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(tier ? 3.2 + tier * 0.8 : 2.2, tier ? 2.2 + tier * 0.7 : 1.7, tier ? 3 + tier * 0.7 : 2.1),
+    new THREE.MeshStandardMaterial({ color: tier >= 3 ? 0xd8c7a5 : tier >= 2 ? 0xb8c7c1 : 0xaaa69e, roughness: 0.9 }),
+  );
+  body.position.y = (tier ? 2.2 + tier * 0.7 : 1.7) / 2;
+  group.add(body);
+
+  const roof = new THREE.Mesh(
+    new THREE.ConeGeometry(tier ? 2.9 + tier * 0.65 : 2.0, 1.35, 4),
+    new THREE.MeshStandardMaterial({ color: tier >= 3 ? 0x6f4f3c : 0x594b43, roughness: 0.95 }),
+  );
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = (tier ? 2.2 + tier * 0.7 : 1.7) + 0.65;
+  group.add(roof);
+
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(0.65, 1.2, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x4b342b, roughness: 0.8 }),
+  );
+  door.position.set(0, 0.62, (tier ? 3 + tier * 0.7 : 2.1) / 2 + 0.05);
+  group.add(door);
+
+  const label = makeCanvasSprite(tier ? `🏠 ${fly.id.slice(-2)}` : `▣ ${fly.id.slice(-2)}`, 30, 1.1);
+  label.position.y = tier ? 4.8 + tier * 0.5 : 3.1;
+  group.add(label);
+
+  group.position.set(fly.homeX || 0, 0, fly.homeZ || 0);
+  scene.add(group);
+  return { group, tier };
+}
+
+function syncHomes(flies: FlyState[]) {
+  const active = new Set<string>();
+  for (const fly of flies) {
+    if (!fly.alive || !Number.isFinite(fly.homeX) || !Number.isFinite(fly.homeZ)) continue;
+    active.add(fly.id);
+    const tier = fly.ownsHome ? Math.max(1, fly.homeTier || 1) : 0;
+    const existing = homeVisuals.get(fly.id);
+    if (!existing || existing.tier !== tier) {
+      if (existing) scene.remove(existing.group);
+      homeVisuals.set(fly.id, createHomeVisual(fly));
+    } else {
+      existing.group.position.set(fly.homeX!, 0, fly.homeZ!);
+    }
+  }
+  for (const [id, hv] of homeVisuals) {
+    if (!active.has(id)) {
+      scene.remove(hv.group);
+      homeVisuals.delete(id);
     }
   }
 }
