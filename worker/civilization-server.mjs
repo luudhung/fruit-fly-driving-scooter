@@ -812,6 +812,192 @@ async function syncFullConnectomeBrains() {
   }
 }
 
+function isShiftHour(job, hour) {
+  if (!job) return false;
+  if (job.shiftStart <= job.shiftEnd) return hour >= job.shiftStart && hour < job.shiftEnd;
+  return hour >= job.shiftStart || hour < job.shiftEnd;
+}
+
+function nearestTransitStation(x, z) {
+  let best = null;
+  let distance = Infinity;
+  for (const loc of LOCATIONS) {
+    if (loc.type !== "transit") continue;
+    const d = Math.hypot(loc.x - x, loc.z - z);
+    if (d < distance) {
+      best = loc;
+      distance = d;
+    }
+  }
+  return { station: best, distance };
+}
+
+function chooseTravelMode(fly, dest) {
+  const distance = Math.hypot(dest.x - fly.x, dest.z - fly.z);
+  if (distance < 38) return "walk";
+  if (fly.vehicle === "compact car" && fly.money > 1.2 && neuralDrive(fly, "avoidDrive") < 0.84) return "car";
+  if (fly.vehicle === "scooter" && fly.money > 0.6 && distance < 150) return "scooter";
+  const from = nearestTransitStation(fly.x, fly.z);
+  const to = nearestTransitStation(dest.x, dest.z);
+  if (distance > 68 && from.station && to.station && fly.money >= 1.5) {
+    if (!fly.transitPass) {
+      fly.money -= 1.5;
+      fly.expensesLifetime += 1.5;
+      state.totalTransactions += 1;
+    }
+    return "metro";
+  }
+  return "walk";
+}
+
+function nightlifeOpen(clock) {
+  return clock.hour >= 18 || clock.hour < 3;
+}
+
+function netWorth(fly) {
+  const business = fly.businessId ? state.enterprises?.[fly.businessId] : null;
+  const equity = business?.status === "operating"
+    ? Math.max(0, Number(business.cash || 0) + Number(business.assetValue || 0) - Number(business.loanBalance || 0))
+    : 0;
+  fly.businessEquity = equity;
+  return fly.money + fly.savings + fly.homeEquity + equity - fly.debt - fly.bankLoan;
+}
+
+function updateSocialClass(fly) {
+  const worth = netWorth(fly);
+  const prev = fly.socialClass;
+  fly.socialClass =
+    worth < 0 ? "distressed" :
+    worth < 350 ? "low income" :
+    worth < 1800 ? "working" :
+    worth < 6500 ? "middle" :
+    worth < 18000 ? "affluent" :
+    worth < 60000 ? "wealthy" : "elite";
+  if (prev && prev !== fly.socialClass && brainRand(fly) < 0.08) {
+    emit("class_mobility", `${fly.id} moved from ${prev} to ${fly.socialClass} class.`, {
+      flyId: fly.id,
+      from: prev,
+      to: fly.socialClass,
+      netWorth: worth,
+    });
+  }
+  return worth;
+}
+
+function startupReadiness(fly) {
+  if (fly.ageYears < 18 || fly.ageYears > 75 || fly.businessId) return 0;
+  const approach = neuralDrive(fly, "approachDrive");
+  const avoid = neuralDrive(fly, "avoidDrive");
+  const explore = neuralDrive(fly, "exploreDrive");
+  const liquidity = clamp((fly.money + fly.savings) / 2200, 0, 1);
+  const credit = clamp((fly.creditScore - 450) / 400, 0, 1);
+  const failurePenalty = Math.min(0.35, fly.businessFailures * 0.08);
+  return clamp(
+    fly.traits.ambition * 0.25 +
+    fly.traits.risk * 0.20 +
+    approach * 0.18 +
+    explore * 0.12 +
+    liquidity * 0.10 +
+    credit * 0.10 +
+    fly.brain.plasticity.persistence * 0.08 -
+    avoid * 0.16 -
+    fly.stress / 100 * 0.08 -
+    failurePenalty,
+    0,
+    1,
+  );
+}
+
+function chooseStartupType(fly) {
+  const scored = STARTUP_TYPES.map((type) => {
+    const familiar = Number(fly.brain.memory.locationReward[type.locationId] || 0);
+    const sectorRisk = type.sector === "nightlife" || type.sector === "manufacturing" ? 0.12 : 0.04;
+    return {
+      type,
+      score:
+        fly.traits.ambition * 0.25 +
+        fly.traits.risk * sectorRisk +
+        neuralDrive(fly, "exploreDrive") * 0.18 +
+        neuralDrive(fly, "approachDrive") * 0.16 +
+        familiar * 0.08 +
+        brainRange(fly, -0.08, 0.08),
+    };
+  }).sort((a, b) => b.score - a.score);
+  return scored[0]?.type || STARTUP_TYPES[0];
+}
+
+function attemptStartup(fly) {
+  if (fly.businessId || fly.currentLocationId !== "bank") return;
+  const readiness = startupReadiness(fly);
+  if (readiness < 0.56) return;
+
+  const type = chooseStartupType(fly);
+  const ownCapital = Math.min(type.baseCapital * 0.55, fly.money + fly.savings * 0.45);
+  const needed = Math.max(0, type.baseCapital - ownCapital);
+  const neuralRisk = fly.traits.risk * 0.45 + neuralDrive(fly, "approachDrive") * 0.35 - neuralDrive(fly, "avoidDrive") * 0.25;
+  const approvalScore =
+    fly.creditScore / 850 * 0.42 +
+    fly.traits.ambition * 0.16 +
+    fly.traits.thrift * 0.12 +
+    Math.max(0, neuralRisk) * 0.14 +
+    state.economy.index * 0.10 -
+    fly.debt / 5000 * 0.08;
+
+  fly.brainDecision = `requesting Hansdrex Bank funding for ${type.sector}`;
+  fly.brainConfidence = readiness;
+
+  if (needed > 0 && (approvalScore < 0.48 || state.bank.reserves < needed)) {
+    fly.creditScore = Math.max(300, fly.creditScore - 4);
+    brainRemember(fly, "loan_rejected", { sector: type.sector, needed, approvalScore });
+    if (brainRand(fly) < 0.18) {
+      emit("loan_rejected", `${fly.id} was denied a Hansdrex Bank startup loan.`, {
+        flyId: fly.id, sector: type.sector, approvalScore,
+      });
+    }
+    return;
+  }
+
+  const takeFromCash = Math.min(fly.money, ownCapital);
+  fly.money -= takeFromCash;
+  const restCapital = Math.max(0, ownCapital - takeFromCash);
+  fly.savings = Math.max(0, fly.savings - restCapital);
+  if (needed > 0) {
+    fly.bankLoan += needed;
+    state.bank.reserves -= needed;
+    state.bank.loansOutstanding += needed;
+  }
+
+  const id = `BIZ-${String(state.nextEnterpriseId++).padStart(5, "0")}`;
+  state.enterprises[id] = {
+    id,
+    name: `Hansdrex ${type.sector[0].toUpperCase() + type.sector.slice(1)} ${id.slice(-3)}`,
+    ownerId: fly.id,
+    sector: type.sector,
+    locationId: type.locationId,
+    foundedDay: gameClock().day,
+    cash: type.baseCapital,
+    assetValue: type.baseCapital * 0.55,
+    loanBalance: needed,
+    employees: [],
+    revenueLifetime: 0,
+    expensesLifetime: 0,
+    profitToday: 0,
+    margin: type.margin,
+    reputation: 0.5,
+    status: "operating",
+    badDays: 0,
+  };
+  fly.businessId = id;
+  fly.jobId = null;
+  fly.jobTitle = "founder / owner";
+  fly.wage = 0;
+  fly.happiness = clamp(fly.happiness + 14);
+  fly.stress = clamp(fly.stress + 8);
+  emit("startup", `${fly.id} founded ${state.enterprises[id].name} with ${needed.toFixed(0)} ${CURRENCY_CODE} bank financing.`, {
+    flyId: fly.id, businessId: id, sector: type.sector, loan: needed,
+  });
+}
+
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
   updateBrainDynamics(fly);
@@ -827,17 +1013,39 @@ function brainChooseAction(fly, clock) {
 
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.58 + (clock.hour >= 22 || clock.hour < 6 ? 65 : 0));
   add("market", "buying food", fly.hunger * 0.8 + (fly.money > 5 ? 8 : -35));
+  add("cafe", "drinking Hansdrex coffee", (100 - fly.energy) * 0.58 + fly.sleepDebt * 0.46 + fly.thirst * 0.18 + (fly.money > 5 ? 8 : -30));
+  add("tea-house", "drinking tea", fly.thirst * 0.48 + fly.stress * 0.28 + fly.loneliness * 0.12);
+  add("restaurant", "eating dinner", fly.hunger * 0.66 + fly.happiness * 0.08 + (fly.money > 12 ? 8 : -28));
   add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
   add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
   add("park", "taking a walk", fly.stress * 0.55 + fly.traits.resilience * 15);
   add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
-  add("clinic", "seeking care", (100 - fly.health) * 1.3);
+  add("clinic", "seeking care", (100 - fly.health) * 1.05 + (fly.illness ? 55 : 0));
+  add("hospital-central", "going to Hansdrex hospital", (100 - fly.health) * 1.28 + (fly.illness ? 72 : 0));
   add("corner-shop", "shopping", fly.excitement * 0.28 + Math.min(25, fly.money / 30));
 
-  if (fly.jobId && age >= 18 && age <= 75 && clock.hour >= 8 && clock.hour < 17) {
+  if (fly.jobId && age >= 18 && age <= 75) {
     const job = JOBS.find((j) => j.id === fly.jobId);
-    if (job) add(job.locationId, "working", 88 + fly.traits.ambition * 25 - fly.stress * 0.25);
+    if (job && isShiftHour(job, clock.hour)) {
+      add(job.locationId, "working", 88 + fly.traits.ambition * 25 - fly.stress * 0.25 - fly.sleepDebt * 0.18);
+    }
+  }
+
+  const startup = startupReadiness(fly);
+  if (startup > 0.50 && fly.money + fly.savings > 180) {
+    add("bank", "planning a business at Hansdrex Bank", startup * 105 + fly.traits.ambition * 18);
+  }
+
+  if (nightlifeOpen(clock) && age >= 18 && fly.money > 8 && fly.energy > 18) {
+    const nightDrive = fly.stress * 0.35 + fly.loneliness * 0.32 + fly.excitement * 0.28 +
+      fly.traits.sociability * 20 + neuralDrive(fly, "socialDrive") * 24 - fly.sleepDebt * 0.30;
+    add("night-market", "exploring Hansdrex Night Market", nightDrive * 0.92);
+    add("arcade", "playing at Hansdrex Arcade", nightDrive * 0.78 + brain.plasticity.noveltyBias * 12);
+    add("music-hall", "going to a Hansdrex concert", nightDrive * 0.88 + fly.excitement * 0.12);
+    add("nightclub", "nightclubbing", nightDrive + fly.traits.risk * 15);
+    add("rooftop", "relaxing at Hansdrex Sky Lounge", nightDrive * 0.72 + fly.traits.ambition * 10);
+    add("cinema", "watching a movie", fly.stress * 0.31 + fly.excitement * 0.24 + fly.loneliness * 0.15);
   }
 
   if (fly.stress > 76 && fly.traits.resilience < 0.45) {
@@ -883,6 +1091,7 @@ function chooseDestination(fly, clock) {
   const p = jittered(dest, chosen.id === fly.homeId ? 1.4 : 3.8);
   fly.targetX = p.x;
   fly.targetZ = p.z;
+  fly.transitMode = chooseTravelMode(fly, dest);
   fly.traveling = true;
   fly.actionUntil = 0;
 }
@@ -903,7 +1112,10 @@ function moveFly(fly) {
     }
     return;
   }
-  const vehicleBoost = fly.vehicle === "compact car" ? 2.5 : fly.vehicle === "scooter" ? 2.0 : 1;
+  const vehicleBoost =
+    fly.transitMode === "metro" ? 5.8 :
+    fly.transitMode === "car" ? 2.8 :
+    fly.transitMode === "scooter" ? 2.15 : 1;
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
   const neuralTurn = fc?.connected ? clamp(Number(fc.locomotionX || 0), -1, 1) : 0;
