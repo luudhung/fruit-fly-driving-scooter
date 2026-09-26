@@ -249,7 +249,7 @@ function buildApartmentBlocks() {
 }
 
 function buildGroundHouseLots() {
-  const lots=[]; const safeZ=[-125,-75,-25,25,75,125], offsets=[-32,-16,0,16,32]; let n=1;
+  const lots=[]; const safeZ=[-132,-118,-82,-68,-32,-18,18,32,68,82,118,132], offsets=[-48,-32,-16,0,16,32,48]; let n=1;
   for(const [zone,cx,basePrice] of [["W",-220,8200],["E",220,9800]]){
     for(let zi=0;zi<safeZ.length;zi+=1) for(let oi=0;oi<offsets.length;oi+=1){
       const premium=1+zi*0.022+oi*0.014;
@@ -281,6 +281,19 @@ function migrateGroundHousesToSafeLots(previousMapVersion) {
     for(const memberId of hh.members||[]){const member=state.flies.find((f)=>f.id===memberId);if(!member)continue;member.housingType="house";member.housingUnitId=lot.id;member.homeX=lot.x;member.homeZ=lot.z;member.ownsHome=true;}
   }
   state.housing.houseLots=safeLots;
+}
+
+function migrateResidentNavigation(previousMapVersion) {
+  if(previousMapVersion>=MAP_VERSION) return;
+  for(const fly of state.flies){
+    if(!fly.alive) continue;
+    const base=fly.currentLocationId===fly.homeId
+      ? {x:Number(fly.homeX??location(fly.homeId).x),z:Number(fly.homeZ??location(fly.homeId).z)}
+      : location(fly.currentLocationId);
+    const p=legalDestinationPoint(base);
+    fly.x=p.x;fly.z=p.z;fly.targetX=p.x;fly.targetZ=p.z;fly.finalTargetX=p.x;fly.finalTargetZ=p.z;
+    fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.metroLineId=null;fly.transitStage=null;fly.transitMode="walk";fly.travelStuckTicks=0;
+  }
 }
 
 function rebalancePopulationToTarget() {
@@ -1156,6 +1169,7 @@ async function initDb() {
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
     ensureHousingState();
     migrateGroundHousesToSafeLots(previousMapVersion);
+    migrateResidentNavigation(previousMapVersion);
     state.mapVersion=MAP_VERSION;
     state.weather = state.weather || makeWeather();
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
@@ -2080,10 +2094,11 @@ function moveFly(fly) {
 
   // Law-aware traffic behavior: vehicles stop at red unless a high-risk, low-awareness
   // brain chooses to violate the signal. Violations are recorded and enforceable.
-  if(["car","scooter"].includes(fly.transitMode)&&shouldStopAtRed(fly)){
+  const controlledCrossing=["car","scooter"].includes(fly.transitMode)||(fly.transitMode==="walk"&&fly.transitStage==="crosswalk");
+  if(controlledCrossing&&shouldStopAtRed({...fly,transitMode:fly.transitMode==="walk"?"scooter":fly.transitMode})){
     const violationUrge=(fly.traits.risk||0)*0.65+(1-(fly.lawAwareness||0.7))*0.55+neuralDrive(fly,"approachDrive")*0.12;
-    if(violationUrge>0.78&&brainRand(fly)<0.035){recordLawViolation(fly,"running a red light",1.1);}
-    else{fly.vx=fly.vz=0;fly.trafficStatus="waiting at red light";fly.stress=clamp(fly.stress+(1-(fly.lawAwareness||0.7))*0.02);return;}
+    if(violationUrge>0.78&&brainRand(fly)<0.02){recordLawViolation(fly,fly.transitMode==="walk"?"crossing against the signal":"running a red light",fly.transitMode==="walk"?0.6:1.1);}
+    else{fly.vx=fly.vz=0;fly.trafficStatus=fly.transitMode==="walk"?"waiting at pedestrian signal":"waiting at red light";fly.stress=clamp(fly.stress+(1-(fly.lawAwareness||0.7))*0.02);return;}
   } else fly.trafficStatus=null;
 
   const ux = dx / dist;
@@ -2111,11 +2126,13 @@ function moveFly(fly) {
     const dest = fly.targetLocationId === fly.homeId
       ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
       : location(fly.targetLocationId);
-    const p = jittered(dest, fly.targetLocationId === fly.homeId ? 1.0 : 2.2);
-    fly.targetX = p.x;
-    fly.targetZ = p.z;
-    fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
-    fly.travelStuckTicks = 0;
+    const p=legalDestinationPoint(dest);
+    const plan=chooseTravelMode(fly,p);
+    fly.routeWaypoints=plan.route||plan.metro?.waypoints||[];
+    fly.routeIndex=0;fly.metroLineId=plan.metro?.lineId||null;fly.transitMode=plan.mode;fly.transitStage=plan.metro?"station-entry":plan.mode;
+    if(fly.routeWaypoints.length){fly.targetX=fly.routeWaypoints[0].x;fly.targetZ=fly.routeWaypoints[0].z;}else{fly.targetX=p.x;fly.targetZ=p.z;}
+    fly.travelLastDistance=Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z);
+    fly.travelStuckTicks=0;
   }
 }
 
@@ -3005,7 +3022,7 @@ function getState() {
     neuralBridge: state.neuralBridge || { connected: false },
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
-    flies: state.flies.map(compactFly),
+    flies: living.map(compactFly),
     selectedFly: selected ? {
       id: selected.id,
       brainId: selected.brain?.id,
