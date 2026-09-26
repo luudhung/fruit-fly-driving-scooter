@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Fly Civilization — Full Life</title>
-  <meta name="description" content="Persistent synthetic fruit-fly civilization with accelerated day/night, aging, relationships, economy and life events." />
+  <title>Hansdrex City of Fruit Fly — Full Life</title>
+  <meta name="description" content="Hansdrex City of Fruit Fly — persistent full-life civilization with independent brains, weather, transport, economy, relationships and city life." />
   <style>
     :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.84);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.58);--ok:#66e39d;--warn:#f0c56a}
     *{box-sizing:border-box}
@@ -51,15 +51,15 @@
 <body>
   <div id="world"></div>
   <div class="topbar">
-    <div class="brand"><b>Fly Civilization — Full Life</b><small>persistent synthetic society · 1 game hour = 1 real minute</small></div>
-    <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div>
+    <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 game hour = 1 real minute</small></div>
+    <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
     <div class="status" id="connection" data-state="connecting"><span class="dot"></span><span id="connection-label">CONNECTING</span></div>
   </div>
   <div class="hint">WASD / ARROWS MOVE · Q/E DOWN/UP · SHIFT SPRINT · DRAG LOOK · SCROLL ZOOM · F FOLLOW FLY · C CITY VIEW</div>
 
   <aside class="left">
     <section class="card">
-      <div class="head">Civilization</div>
+      <div class="head">Hansdrex City</div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <div class="stat"><span>Population</span><b id="population">—</b></div>
@@ -68,7 +68,7 @@
         <div class="stat"><span>Births</span><b id="births">—</b></div>
         <div class="stat"><span>Deaths</span><b id="deaths">—</b></div>
         <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
-        <div class="stat"><span>Money supply</span><b id="money">—</b></div>
+        <div class="stat"><span>WingCoin supply</span><b id="money">—</b></div><div class="stat"><span>Weather risk</span><b id="weather-risk">—</b></div><div class="stat"><span>Temperature</span><b id="temperature">—</b></div>
       </div>
     </section>
     <section class="card">
@@ -95,6 +95,12 @@
         <div class="field"><span>Children</span><b id="fly-children">—</b></div>
         <div class="field"><span>Cash / savings</span><b id="fly-money">—</b></div>
         <div class="field"><span>Debt / vehicle</span><b id="fly-debt">—</b></div>
+        <div class="field"><span>Sleep / caffeine</span><b id="fly-sleep">—</b></div>
+        <div class="field"><span>Hunger / thirst</span><b id="fly-needs">—</b></div>
+        <div class="field"><span>Relationship age</span><b id="fly-relationship">—</b></div>
+        <div class="field"><span>Family readiness</span><b id="fly-family">—</b></div>
+        <div class="field"><span>Social class</span><b id="fly-class">—</b></div>
+        <div class="field"><span>Business / credit</span><b id="fly-business">—</b></div>
         <div class="field"><span>Stress</span><b id="fly-stress">—</b><div class="meter"><i id="stress-meter"></i></div></div>
         <div class="field"><span>Happiness</span><b id="fly-happy">—</b><div class="meter"><i id="happy-meter"></i></div></div>
         <div class="field"><span>Excitement</span><b id="fly-excite">—</b><div class="meter"><i id="excite-meter"></i></div></div>
@@ -109,7 +115,7 @@
   </aside>
 
   <div class="bottom">
-    <div class="card notice"><b>Independent brain model:</b> every fly has a unique persistent <b>brainId</b>, its own RNG stream, dynamic brain state, plasticity and memory. A newborn gets a completely new brain instance with empty memory; only inherited predispositions and parent brain lineage IDs are carried forward. All Full Life decisions use that individual simulated brain state. This is not yet a separate biological FlyWire connectome clone for every fly.</div>
+    <div class="card notice"><b>Hansdrex brain model:</b> each fly has its own persistent brainId and independent full-connectome dynamic state. Travel, sleep, weather avoidance, sunset viewing, work, spending, relationships and family timing are chosen from that individual brain state plus its life history and current environment.</div>
   </div>
 
   <script type="module" src="/src/fulllife.ts"></script>
