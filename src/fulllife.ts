@@ -1134,13 +1134,13 @@ function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
  const bed=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:3.4,.24,horizontal?3.4:len),metroBeamMat);
  bed.position.set(cx,y-.48,cz);cityRoot.add(bed);
  for(const side of [-1,1]){
-   const rail=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:.20,.22,horizontal?.20:len),metroTrackMat);
+   const rail=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:.20,.22,horizontal ? .20 : len),metroTrackMat);
    rail.position.set(cx+(horizontal?0:side*1.05),y-.20,cz+(horizontal?side*1.05:0));cityRoot.add(rail);
  }
  const sleeperCount=Math.max(2,Math.floor(len/4.5));
  for(let i=0;i<=sleeperCount;i++){
    const u=i/sleeperCount,x=a.x+dx*u,z=a.z+dz*u;
-   const sleeper=new THREE.Mesh(new THREE.BoxGeometry(horizontal?.30:3.05,.12,horizontal?3.05:.30),metroSleeperMat);
+   const sleeper=new THREE.Mesh(new THREE.BoxGeometry(horizontal ? .30 : 3.05,.12,horizontal?3.05:.30),metroSleeperMat);
    sleeper.position.set(x,y-.34,z);cityRoot.add(sleeper);
  }
  const supportEvery=26;
