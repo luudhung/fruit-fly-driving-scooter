@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,overlaps,entrance,pedestrianRoute,clearSegment,trainState} from '../worker/city-map.mjs';
+import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,blocked} from '../worker/city-map.mjs';
 test('all building footprints clear roads, water, park and each other',()=>{
  for(let i=0;i<BUILDINGS.length;i++){
   const b=BUILDINGS[i];
@@ -63,4 +63,24 @@ test('downtown is dense around Central Park and tapers toward detached-house dis
  assert.ok(avg(near)>avg(outer)+25,`expected park-edge skyline taller than outskirts: ${avg(near)} vs ${avg(outer)}`);
  const houses=BUILDINGS.filter(b=>b.kind==='house');
  assert.ok(houses.length>=20,`expected detached outer-ring houses, got ${houses.length}`);
+});
+
+test('metro stations expose physical ground access and elevated platforms',()=>{
+ for(const line of METRO_LINES)for(let i=0;i<line.points.length;i++){
+   const g=metroStationGeometry(line,i);
+   assert.ok(Number.isFinite(g.access.x)&&Number.isFinite(g.platform.x));
+   assert.equal(blocked(g.access),false,`${line.id} station ${i} access is blocked`);
+   assert.ok(g.platform.y>g.access.y+4,`${line.id} station ${i} should require stairs`);
+   assert.ok(['x','z'].includes(g.axis));
+ }
+});
+
+test('Central Park interior is a walkable free-roam district, not sidewalk-only',()=>{
+ const start={x:PARK.x-PARK.w/2+12,z:PARK.z+PARK.d/2-14};
+ const end={x:PARK.x+PARK.w/2-12,z:PARK.z-PARK.d/2+14};
+ assert.equal(blocked(start),false);assert.equal(blocked(end),false);
+ const route=pedestrianRoute(start,end);
+ assert.ok(route.length>2);
+ assert.deepEqual({x:route.at(-1).x,z:route.at(-1).z},end);
+ for(let i=1;i<route.length;i++)assert.ok(clearSegment(route[i-1],route[i]));
 });
