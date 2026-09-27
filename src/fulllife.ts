@@ -9,7 +9,7 @@ type FlyState = {
   ageYears: number;
   generation: number;
   alive: boolean;
-  traveling?:boolean; indoors?:boolean; onTrain?:boolean; metroLineId?:string; householdId?:string; housingUnitId?:string; housingType?:string;
+  traveling?:boolean; indoors?:boolean; onTrain?:boolean; metroLineId?:string; transitStage?:string|null; householdId?:string; housingUnitId?:string; housingType?:string;
   wheelRideUntil?:number;
   wheelSeat?:number|null;
   parkedCar?:{x:number;z:number}|null;
