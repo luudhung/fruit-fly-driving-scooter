@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, PARK, WATER, ROADS, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
@@ -304,6 +305,16 @@ let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
 let latestFlyStates = new Map<string, FlyState>();
 
+const residentDirectory=createResidentDirectory((id)=>{
+ const fly=latestFlyStates.get(id);if(!fly?.alive)return;
+ selectedFlyId=id;followSelected=false;renderInspector(fly);
+ const target=new THREE.Vector3(fly.x,Math.max(1,fly.y),fly.z);
+ freePosition.copy(target).add(new THREE.Vector3(-20,24,26));
+ const direction=target.clone().sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
+ document.getElementById("fly-card")?.classList.remove("collapsed");
+ if(matchMedia("(max-width:980px), (pointer:coarse)").matches){document.body.classList.add("mobile-inspector-open");mobileInspectorToggle?.setAttribute("aria-expanded","true");if(mobileInspectorToggle)mobileInspectorToggle.textContent="CLOSE INFO";}
+});
+
 function renderInspector(fly: FlyState | null) {
   if (!fly) {
     flyIdEl.textContent = "click a fly";
@@ -383,16 +394,13 @@ function renderSnapshot(s: CivilizationSnapshot) {
   snapshotReceivedAt=performance.now();
   if(s.mapVersion!==MAP_VERSION){setConnection("connecting","CITY UPDATE AWAITING WORKER");}
   const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
-  setConnection(
-    s.authoritative ? "authoritative" : "offline",
-    s.authoritative
-      ? (neuralLive
-          ? `FULL CONNECTOME · ${s.neuralBridge?.registeredBrains || 0} BRAINS`
-          : "CIVILIZATION LIVE · CONNECTING BRAINS")
-      : "NON-AUTHORITATIVE",
-  );
+  const living=(s.flies||[]).filter(f=>f.alive);
+  residentDirectory.update(living,s.deaths,s.births);
+  setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
+  connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
+  if(!s.authoritative)residentDirectory.offline();
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
-  population.textContent = num(s.population);
+  population.textContent = `${num(living.length)} flies`;
   generation.textContent = num(s.generation);
   speed.textContent = "1s = 2m";
   const activity=document.getElementById("city-activity");if(activity)activity.textContent=s.activity?`${s.activity.working} working · ${s.activity.traveling} traveling · ${s.activity.indoors} indoors`:"Awaiting activity telemetry";
@@ -496,7 +504,8 @@ async function fetchSnapshot() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     renderSnapshot(await response.json() as CivilizationSnapshot);
   } catch {
-    setConnection("offline", "WORKER OFFLINE");
+    residentDirectory.offline();
+    setConnection("offline", `OFFLINE · LAST SEEN ${residentDirectory.count} ALIVE ▾`);
     events.textContent = "Persistent civilization worker is unavailable.";
   }
 }
@@ -1242,6 +1251,7 @@ const movementKeys = new Set([
   "KeyQ","KeyE","ShiftLeft","ShiftRight",
 ]);
 addEventListener("keydown", (e) => {
+  if(document.querySelector<HTMLDialogElement>("#resident-directory")?.open)return;
   if (movementKeys.has(e.code)) {
     pressed.add(e.code);
     e.preventDefault();
