@@ -234,14 +234,16 @@ function costs(mode="walk") {
  for(let iz=0;iz<SIZE;iz++)for(let ix=0;ix<SIZE;ix++) {
   const p={x:MIN+ix*STEP,z:MIN+iz*STEP};
   if(blocked(p))continue;
-  let c=8;
+  // Walking is sidewalk-biased in the city, but Central Park is a genuine free-roam
+  // pedestrian district. Grass/meadows are legal to cross; paths are only cheaper, not mandatory.
+  let c=contains(PARK,p,0)?1.55:8;
   if(mode!=="walk"){walkCosts[iz*SIZE+ix]=ROADS.some(r=>contains(r,p))?1:0;continue;}
   for(const w of walks) {
    const x=Math.max(Math.min(w.a.x,w.b.x),Math.min(Math.max(w.a.x,w.b.x),p.x));
    const z=Math.max(Math.min(w.a.z,w.b.z),Math.min(Math.max(w.a.z,w.b.z),p.z));
-   if(Math.hypot(p.x-x,p.z-z)<1.8){c=1;break;}
+   if(Math.hypot(p.x-x,p.z-z)<1.8){c=contains(PARK,p,0)?0.72:1;break;}
   }
-  if(c>1&&ROADS.some(r=>contains(r,p)))c=18;
+  if(c>1.6&&ROADS.some(r=>contains(r,p)))c=18;
   walkCosts[iz*SIZE+ix]=c;
  }
  costCache.set(mode,walkCosts);return walkCosts;
