@@ -86,7 +86,7 @@ const LOCATIONS = [
   { id: "farm", type: "production", name: "Hansdrex Farm", x: -220, z: 125 },
   { id: "construction", type: "job", name: "Hansdrex Build Yard", x: 220, z: 25 },
   { id: "transit", type: "job", name: "Hansdrex Transit Depot", x: 220, z: -125 },
-  { id: "power", type: "job", name: "Hansdrex Utilities", x: -220, z: -75 },
+  { id: "power", type: "infrastructure", name: "Hansdrex Power Plant", x: -220, z: -75 },
   { id: "recycling", type: "job", name: "Hansdrex Recycling", x: 245, z: 125 },
 
   { id: "metro-central", type: "transit", name: "Hansdrex Central Station", x: 2, z: 0 },
@@ -179,7 +179,10 @@ const JOBS = [
   { id: "post-office", locationId: "post-office", title: "postal worker", wage: 4.9, shiftStart: 8, shiftEnd: 17 },
   { id: "construction", locationId: "construction", title: "builder", wage: 5.6, shiftStart: 7, shiftEnd: 16 },
   { id: "transit", locationId: "transit", title: "metro operator", wage: 5.6, shiftStart: 6, shiftEnd: 15 },
-  { id: "power", locationId: "power", title: "utility technician", wage: 5.9, shiftStart: 7, shiftEnd: 16 },
+  { id: "power", locationId: "power", title: "power plant operator", wage: 6.2, shiftStart: 6, shiftEnd: 14 },
+  { id: "power-evening", locationId: "power", title: "power plant evening operator", wage: 6.4, shiftStart: 14, shiftEnd: 22 },
+  { id: "power-night", locationId: "power", title: "power plant night operator", wage: 6.8, shiftStart: 22, shiftEnd: 6 },
+  { id: "grid-dispatch", locationId: "power", title: "grid dispatcher", wage: 6.9, shiftStart: 8, shiftEnd: 17 },
   { id: "recycling", locationId: "recycling", title: "recycling worker", wage: 4.8, shiftStart: 7, shiftEnd: 16 },
   { id: "night-market", locationId: "night-market", title: "night market vendor", wage: 4.9, shiftStart: 18, shiftEnd: 2 },
   { id: "arcade", locationId: "arcade", title: "arcade attendant", wage: 4.7, shiftStart: 16, shiftEnd: 1 },
@@ -799,6 +802,7 @@ function trainedSkillsForJob(jobId,title=""){
   if(jobId==="doctor"||title==="doctor") return {medicine:0.96,diagnosis:0.93,emergencyCare:0.91};
   if(String(title).includes("nurse")||String(jobId).includes("hospital")) return {medicine:0.76,emergencyCare:0.74};
   if(jobId==="vehicle-showroom") return {sales:0.85,vehicleKnowledge:0.84};
+  if(String(jobId||"").startsWith("power")||jobId==="grid-dispatch") return {electrical:0.94,gridOperations:0.92,safety:0.91,maintenance:0.86};
   return {};
 }
 function ensureProfessionalTraining(fly){
@@ -810,12 +814,11 @@ function ensureProfessionalTraining(fly){
   if(fly.jobId==="police") fly.lawAwareness=Math.max(fly.lawAwareness||0,0.98);
 }
 function recordLawViolation(fly,type,severity=1){
-  fly.lawViolations=Number(fly.lawViolations||0)+1; fly.wantedUntil=state.simulationAgeSeconds+1800*severity; fly.lastViolationAt=state.simulationAgeSeconds;
-  fly.stress=clamp(fly.stress+4*severity); fly.happiness=clamp(fly.happiness-1.5*severity);
-  brainRemember(fly,"law_violation",{type,severity}); emit("law_violation",`${fly.id} violated Hansdrex law: ${type}.`,{flyId:fly.id,type,severity});
+  fly.lawViolations=Number(fly.lawViolations||0)+1;fly.wantedUntil=state.simulationAgeSeconds+1800*severity;fly.lastViolationAt=state.simulationAgeSeconds;fly.stress=clamp(fly.stress+4*severity);fly.happiness=clamp(fly.happiness-1.5*severity);fly.criminalRecord=Array.isArray(fly.criminalRecord)?fly.criminalRecord:[];const evidence=clamp(0.46+severity*0.08+brainRange(fly,-0.08,0.12),0.25,0.98);fly.criminalRecord.push({type,severity,evidence,day:gameClock().day,time:state.simulationAgeSeconds});if(type==="murder"||severity>=5)fly.capitalCharge=true;brainRemember(fly,"law_violation",{type,severity,evidence});emit("law_violation",fly.id+" violated Hansdrex law: "+type+".",{flyId:fly.id,type,severity,evidence});
 }
 function lawEnforcement(fly){
   if(!fly.alive||fly.jobId==="police") return;
+  if(processCriminalJustice(fly))return true;
   if(fly.arrestedUntil&&state.simulationAgeSeconds<fly.arrestedUntil){
     const station=location("police");fly.x=station.x;fly.z=station.z;fly.vx=fly.vz=0;fly.traveling=false;fly.action="detained at Hansdrex Police";fly.stress=clamp(fly.stress+0.03);fly.happiness=clamp(fly.happiness-0.02);return true;
   }
@@ -825,7 +828,7 @@ function lawEnforcement(fly){
     const officer=officers.sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
     if(officer&&(Math.hypot(officer.x-fly.x,officer.z-fly.z)<28||state.simulationAgeSeconds-Number(fly.lastViolationAt||0)>900)){
       const skill=Number(officer.professionSkills?.arrestProcedure||0.7),fine=Math.min(fly.money,20+fly.lawViolations*8);
-      fly.money-=fine;fly.arrestedUntil=state.simulationAgeSeconds+600+skill*600;fly.wantedUntil=0;fly.stress=clamp(fly.stress+18);fly.happiness=clamp(fly.happiness-8);
+      fly.money-=fine;fly.arrestedUntil=state.simulationAgeSeconds+600+skill*600;fly.wantedUntil=0;fly.stress=clamp(fly.stress+18);fly.happiness=clamp(fly.happiness-8);if(fly.capitalCharge&&!fly.trialAt){fly.trialAt=state.simulationAgeSeconds+86400;fly.trialResolved=false;fly.arrestedUntil=Math.max(fly.arrestedUntil,fly.trialAt+3600);}
       officer.brainDecision=`arrested ${fly.id}`; officer.brainConfidence=skill;
       emit("arrest",`${officer.id} arrested ${fly.id}; fine ${fine.toFixed(0)} H$.`,{officerId:officer.id,flyId:fly.id,fine});
       return true;
@@ -840,6 +843,44 @@ function professionalService(fly){
     const patient=state.flies.find((p)=>p.alive&&p.id!==fly.id&&p.currentLocationId==="hospital-central"&&(p.health<82||p.illness));
     if(patient){patient.health=clamp(patient.health+0.12*skill);patient.stress=clamp(patient.stress-0.08*skill);if(patient.health>88&&brainRand(fly)<0.02*skill)patient.illness=null;fly.brainDecision=`treating ${patient.id}`;}
   }
+}
+
+function ensureUtilityState(){
+  state.utilities=state.utilities||{powerPlant:{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0},householdAccounts:{},lastBillingDay:0,disconnectedHouseholds:0};
+  state.utilities.powerPlant=state.utilities.powerPlant||{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0};
+  state.utilities.householdAccounts=state.utilities.householdAccounts||{};ensureHousingState();
+  for(const hh of Object.values(state.housing?.households||{})) state.utilities.householdAccounts[hh.id]=state.utilities.householdAccounts[hh.id]||{balance:0,powerOn:true,overdueDays:0,lastBilledDay:0,lastPaymentDay:0,illegalConnectionUntil:0,usage:0};
+}
+function ensurePowerPlantStaff(){
+  const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId));if(staff.length>=5)return staff;
+  const slots=["power","power-evening","power-night","grid-dispatch","power-evening"],candidates=state.flies.filter((f)=>f.alive&&f.ageYears>=20&&f.ageYears<=68&&!f.businessId&&!f.businessEmployeeOf&&!ids.has(f.jobId)).sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition));
+  while(staff.length<5&&candidates.length){const fly=candidates.shift(),job=JOBS.find((j)=>j.id===slots[staff.length]);if(!fly||!job)break;fly.jobId=job.id;fly.jobTitle=job.title;fly.wage=job.wage;fly.preferredWorkStart=job.shiftStart;fly.preferredWorkHours=(job.shiftEnd-job.shiftStart+24)%24||8;fly.professionSkills=trainedSkillsForJob(job.id,job.title);fly.brainDecision="accepted critical grid job";brainRemember(fly,"critical_infrastructure_job",{jobId:job.id});staff.push(fly);}
+  return staff;
+}
+function householdMembers(hhId){const hh=state.housing?.households?.[hhId];if(!hh)return[];return(hh.members||[]).map((id)=>state.flies.find((f)=>f.id===id&&f.alive)).filter(Boolean);}
+function collectElectricBill(hhId,amount){let remaining=Math.max(0,amount),paid=0;const members=householdMembers(hhId).sort((a,b)=>(b.money+b.savings)-(a.money+a.savings));for(const fly of members){if(remaining<=0)break;const p=Math.min(Math.max(0,fly.money),remaining);fly.money-=p;remaining-=p;paid+=p;}if(remaining>0)for(const fly of members){if(remaining<=0)break;const acc=state.utilities.householdAccounts[hhId];if(!(acc.overdueDays>0||fly.traits.thrift<0.62||neuralDrive(fly,"avoidDrive")>0.58))continue;const p=Math.min(Math.max(0,fly.savings),remaining);fly.savings-=p;remaining-=p;paid+=p;}if(paid>0){state.utilities.powerPlant.cash+=paid;state.utilities.powerPlant.totalRevenue+=paid;state.totalTransactions+=1;}return paid;}
+function householdHasPower(fly){ensureUtilityState();const acc=state.utilities.householdAccounts?.[fly.householdId],illegal=Number(acc?.illegalConnectionUntil||0)>state.simulationAgeSeconds;return Boolean(state.utilities.powerPlant.gridOnline&&(acc?.powerOn!==false||illegal));}
+function billElectricity(clock){
+  ensureUtilityState();if(state.utilities.lastBillingDay===clock.day)return;state.utilities.lastBillingDay=clock.day;const level=Number(state.centralBank?.priceLevel||1);
+  for(const hh of Object.values(state.housing?.households||{})){const acc=state.utilities.householdAccounts[hh.id],members=householdMembers(hh.id);if(!members.length)continue;const tier=Math.max(...members.map((f)=>Number(f.homeTier||0)),0),usage=(hh.housingType==="house"?7.5+tier*2.6:5.5)+Math.max(0,members.length-1)*1.25,bill=usage*0.34*level;acc.usage=usage;acc.balance+=bill;acc.lastBilledDay=clock.day;const paid=collectElectricBill(hh.id,acc.balance);acc.balance=Math.max(0,acc.balance-paid);if(acc.balance>0.5)acc.overdueDays+=1;else{acc.overdueDays=0;acc.lastPaymentDay=clock.day;}const wasOn=acc.powerOn!==false;if(acc.overdueDays>=2||acc.balance>18+members.length*4)acc.powerOn=false;if(!acc.powerOn&&acc.balance<1.5){acc.powerOn=true;acc.overdueDays=0;acc.illegalConnectionUntil=0;emit("power_reconnected","Electricity restored to household "+hh.id+".",{householdId:hh.id});}if(wasOn&&!acc.powerOn)emit("power_cut","Hansdrex Power disconnected household "+hh.id+" for unpaid debt "+acc.balance.toFixed(1)+" "+CURRENCY_CODE+".",{householdId:hh.id,debt:acc.balance});}
+  state.utilities.disconnectedHouseholds=Object.values(state.utilities.householdAccounts).filter((a)=>a.powerOn===false).length;
+}
+function simulatePowerGrid(clock){
+  ensureUtilityState();ensurePowerPlantStaff();const plant=state.utilities.powerPlant,hourKey=clock.day*24+clock.hour;if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId)),onDuty=staff.filter((f)=>f.currentLocationId==="power"&&(String(f.action||"").startsWith("working")||personalWorkWindow(f,JOBS.find((j)=>j.id===f.jobId),clock.hour))),connected=Object.values(state.utilities.householdAccounts).filter((a)=>a.powerOn!==false).length;
+  plant.maintenance=clamp(Number(plant.maintenance||0.9)-weatherDanger()*0.004+onDuty.length*0.0015,0.38,1);plant.capacity=90+onDuty.length*62+plant.maintenance*95;plant.demand=45+connected*1.35+Object.keys(state.businesses||{}).length*4.2;
+  if(plant.fuelReserve<1200&&plant.cash>900){plant.cash-=650;plant.fuelReserve+=6500;emit("power_fuel","Hansdrex Power purchased fuel reserves.",{fuelReserve:plant.fuelReserve});}
+  plant.fuelReserve=Math.max(0,plant.fuelReserve-Math.max(12,plant.demand*0.055));const fuelFactor=plant.fuelReserve>0?1:0.25;plant.generation=Math.min(plant.capacity*plant.maintenance*fuelFactor,plant.demand*1.08);const online=plant.generation>=plant.demand*0.72;if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit("grid_restored","Hansdrex electrical grid returned to stable operation.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit("grid_outage","Hansdrex grid entered a blackout.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}billElectricity(clock);
+}
+function applyPowerEffects(fly,clock){if(!fly.alive||fly.currentLocationId!==fly.homeId)return;const powered=householdHasPower(fly);fly.powerOn=powered;if(powered)return;const night=clock.hour>=19||clock.hour<6;fly.stress=clamp(fly.stress+(night?0.08:0.035));fly.happiness=clamp(fly.happiness-(night?0.035:0.012));if(fly.sleeping){fly.energy=clamp(fly.energy-0.04);fly.sleepDebt=clamp(fly.sleepDebt+0.025);}}
+function simulateCrime(fly){
+  if(!fly.alive||fly.ageYears<18||fly.arrestedUntil)return;ensureUtilityState();const acc=state.utilities.householdAccounts?.[fly.householdId];
+  if(acc?.powerOn===false&&Number(acc.illegalConnectionUntil||0)<=state.simulationAgeSeconds){const desperation=clamp((20-fly.money)/20,0,1)+fly.stress/100*0.45+fly.traits.risk*0.42+(1-fly.lawAwareness)*0.35;if(brainRand(fly)<0.00025*desperation){acc.illegalConnectionUntil=state.simulationAgeSeconds+21600;fly.brainDecision="illegally reconnecting electricity";recordLawViolation(fly,"electricity theft",1.8);emit("power_theft",fly.id+" illegally bypassed a disconnected meter.",{flyId:fly.id,householdId:fly.householdId});}}
+  if(fly.money<2&&fly.hunger>72&&state.businesses?.[fly.currentLocationId]&&brainRand(fly)<0.00018*(0.5+fly.traits.risk)){const b=state.businesses[fly.currentLocationId],stolen=Math.min(Number(b.cash||0),brainRange(fly,3,18));if(stolen>0){b.cash-=stolen;fly.money+=stolen;recordLawViolation(fly,"theft",1.5);emit("crime",fly.id+" stole "+stolen.toFixed(1)+" "+CURRENCY_CODE+".",{flyId:fly.id,type:"theft",amount:stolen});}}
+  const aggression=fly.stress/100*0.40+fly.traits.risk*0.32+(1-fly.traits.empathy)*0.36;if(aggression>0.83&&brainRand(fly)<0.000035){const victim=state.flies.find((v)=>v.alive&&v.id!==fly.id&&v.currentLocationId===fly.currentLocationId&&Math.hypot(v.x-fly.x,v.z-fly.z)<5);if(victim){const damage=brainRange(fly,12,42)*(0.72+fly.traits.risk*0.55);victim.health=clamp(victim.health-damage);victim.stress=clamp(victim.stress+24);if(victim.health<=1&&brainRand(fly)<0.22){victim.alive=false;victim.causeOfDeath="homicide";state.deaths+=1;recordLawViolation(fly,"murder",6);emit("homicide",fly.id+" killed "+victim.id+".",{flyId:fly.id,victimId:victim.id});}else{recordLawViolation(fly,"assault",3);emit("assault",fly.id+" assaulted "+victim.id+".",{flyId:fly.id,victimId:victim.id,damage});}}}
+}
+function processCriminalJustice(fly){
+  if(!fly.alive)return true;const now=state.simulationAgeSeconds;if(fly.executionAt&&now>=fly.executionAt){fly.alive=false;fly.causeOfDeath="capital punishment";state.deaths+=1;state.justice.executions=Number(state.justice.executions||0)+1;emit("execution",fly.id+" was executed after a capital murder conviction.",{flyId:fly.id,sentence:fly.sentence});return true;}
+  if(fly.trialAt&&now>=fly.trialAt&&!fly.trialResolved){const records=Array.isArray(fly.criminalRecord)?fly.criminalRecord:[],capital=records.filter((r)=>r.type==="murder").sort((a,b)=>b.evidence-a.evidence)[0],strongest=records.slice().sort((a,b)=>b.severity-a.severity)[0],evidence=Number((capital||strongest)?.evidence||0),convicted=evidence>=0.62;fly.trialResolved=true;if(!convicted){state.justice.acquittals=Number(state.justice.acquittals||0)+1;fly.arrestedUntil=0;fly.wantedUntil=0;fly.capitalCharge=false;fly.sentence="acquitted";emit("trial",fly.id+" was acquitted.",{flyId:fly.id,evidence});return false;}state.justice.convictions=Number(state.justice.convictions||0)+1;if(capital&&state.justice.deathPenaltyEnabled&&capital.severity>=5){fly.sentence="death sentence";fly.executionAt=now+2*86400;fly.arrestedUntil=fly.executionAt+3600;emit("capital_sentence",fly.id+" received a capital sentence after conviction for murder; a two-day appeal window applies.",{flyId:fly.id,evidence,executionAt:fly.executionAt});}else{const days=Math.max(1,Math.ceil(Number(strongest?.severity||1)*1.5));fly.sentence=days+"-day imprisonment";fly.arrestedUntil=now+days*86400;emit("conviction",fly.id+" was convicted and sentenced to "+days+" game-days.",{flyId:fly.id,evidence,sentenceDays:days});}}return false;
 }
 
 function gameClock() {
@@ -1127,6 +1168,8 @@ function freshState() {
     politics: { parties: [], presidentId: null, presidentPartyId: null, termStartDay: 0, nextElectionDay: 48, electionNumber: 0, campaignActive: false, candidates: [], lastElection: null, nextPartyId: 5 },
     economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1, employed:0, lastLaborPulseHour:-1, inflationRate:0, priceLevel:1 },
     education: { teacherId:null, teacherGeneration:0, lessons:0 },
+    utilities: { powerPlant:{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0}, householdAccounts:{}, lastBillingDay:0, disconnectedHouseholds:0 },
+    justice: { deathPenaltyEnabled:true, executions:0, convictions:0, acquittals:0 },
     mapVersion: MAP_VERSION,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
     housing: null,
@@ -1251,6 +1294,10 @@ async function initDb() {
     state.economy.employed=Number(state.economy.employed||0);
     state.economy.lastLaborPulseHour=Number.isFinite(state.economy.lastLaborPulseHour)?state.economy.lastLaborPulseHour:-1;
     state.education=state.education||{teacherId:null,teacherGeneration:0,lessons:0};
+    state.utilities=state.utilities||{powerPlant:{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0},householdAccounts:{},lastBillingDay:0,disconnectedHouseholds:0};
+    state.utilities.powerPlant=state.utilities.powerPlant||{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0};
+    state.utilities.householdAccounts=state.utilities.householdAccounts||{};
+    state.justice=state.justice||{deathPenaltyEnabled:true,executions:0,convictions:0,acquittals:0};
     state.populationBootstrapVersion = Number(state.populationBootstrapVersion || 0);
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
     ensureHousingState();
@@ -1335,7 +1382,7 @@ async function initDb() {
       fly.businessSuccesses = Number(fly.businessSuccesses || 0);
       fly.socialClass = fly.socialClass || "working";
       fly.lawAwareness = Number.isFinite(fly.lawAwareness) ? fly.lawAwareness : clamp(0.62 + (fly.traits?.empathy||0.5)*0.20 + (1-(fly.traits?.risk||0.5))*0.18,0.25,1);
-      fly.lawViolations = Number(fly.lawViolations||0);
+      fly.lawViolations = Number(fly.lawViolations||0);fly.criminalRecord=Array.isArray(fly.criminalRecord)?fly.criminalRecord:[];fly.capitalCharge=Boolean(fly.capitalCharge);fly.trialAt=Number(fly.trialAt||0);fly.trialResolved=Boolean(fly.trialResolved);fly.executionAt=Number(fly.executionAt||0);fly.sentence=fly.sentence||null;
       fly.wantedUntil = Number(fly.wantedUntil||0);
       fly.arrestedUntil = Number(fly.arrestedUntil||0);
       fly.lastViolationAt = Number(fly.lastViolationAt||0);
@@ -2553,8 +2600,7 @@ function payAndFinance(fly, clock) {
     const housingCost = fly.housingType === "apartment"
       ? Math.max(8, Number(hh?.monthlyHousingCost || 18))
       : Math.max(4, Number(hh?.monthlyHousingCost || 8));
-    const utilities = fly.housingType === "house" ? 7 + (fly.homeTier || 1) * 3 : 5;
-    const expense = housingCost + utilities;
+    const expense = housingCost;
     if (fly.money >= expense) {
       fly.money -= expense;
     } else {
@@ -3230,8 +3276,10 @@ function tickFly(fly, clock) {
   chooseDestination(fly, clock);
   moveFly(fly);
   needsAndActivities(fly, clock);
+  applyPowerEffects(fly,clock);
   productionAndRetail(fly,clock);
   payAndFinance(fly,clock);
+  simulateCrime(fly);
   vehicleShopping(fly);
   if (!fly.traveling && fly.currentLocationId === "bank" && fly.action.includes("business")) {
     attemptStartup(fly);
@@ -3316,6 +3364,11 @@ function compactFly(f) {
     money: Number(f.money.toFixed(1)),
     savings: Number(f.savings.toFixed(1)),
     debt: Number(f.debt.toFixed(1)),
+    utilityDebt:Number((state.utilities?.householdAccounts?.[f.householdId]?.balance||0).toFixed(1)),
+    powerOn:householdHasPower(f),
+    criminalRecordCount:Array.isArray(f.criminalRecord)?f.criminalRecord.length:0,
+    sentence:f.sentence||null,
+    capitalCharge:Boolean(f.capitalCharge),
     jobTitle: f.jobTitle,
     partnerId: f.partnerId,
     affection: Number(f.affection.toFixed(1)),
@@ -3457,6 +3510,8 @@ function getState() {
     },
     treasury:state.treasury,
     politics:state.politics,
+    utilities:{powerPlant:state.utilities?.powerPlant||null,disconnectedHouseholds:Number(state.utilities?.disconnectedHouseholds||0),householdAccounts:Object.keys(state.utilities?.householdAccounts||{}).length},
+    justice:state.justice,
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
         id: b.id,
@@ -3510,6 +3565,7 @@ async function tick() {
       ensureAcademyTeacher();
       for(const fly of state.flies)tickFly(fly,clock);
       simulateEnterprises(clock);
+      simulatePowerGrid(clock);
       updateMonetaryPolicy(clock);
       simulatePoliticalLife(clock);
       void syncFullConnectomeBrains();
