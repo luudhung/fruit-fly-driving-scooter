@@ -20,6 +20,7 @@ export function overlaps(a:Rect,b:Rect,m?:number):boolean;
 export function entrance(p:Point):Point;
 export function blocked(p:Point):boolean;
 export function clearSegment(a:Point,b:Point):boolean;
+export function metroStationGeometry(line:MetroLine,index:number):{track:Point&{y:number};platform:Point&{y:number};access:Point&{y:number};axis:"x"|"z";side:number};
 export function trainState(l:MetroLine,s:number):Point&{y:number;from:number;to:number;direction:number;dwelling:boolean};
 export function pedestrianRoute(a:Point,b:Point,mode?:string):Array<Point&{mode:string;stage:string}>;
 export function parkingPoint(p:Point):Point;
