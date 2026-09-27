@@ -1309,7 +1309,6 @@ async function initDb() {
     ensureAcademyTeacher();
     ensurePoliticalSystem();
     ensureCentralBankBoard();
-    rebalancePopulationToTarget();
     applyWelfareRecovery();
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
@@ -3716,6 +3715,26 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       json(res, 500, { error: String(error) });
     }
+    return;
+  }
+
+  if(url.pathname === "/api/civilization/mortality"){
+    // Read the append-only event archive, which survives checkpoint replacement.
+    const since=url.searchParams.get("since")||new Date(Date.now()-7*86400000).toISOString();
+    if(!Number.isFinite(Date.parse(since))){json(res,400,{error:"invalid_since"});return;}
+    try{
+      const result=await pool.query(`
+        SELECT COALESCE(NULLIF(payload->>'cause',''),
+          CASE event_type WHEN 'homicide' THEN 'homicide' WHEN 'execution' THEN 'capital punishment' ELSE 'unrecorded' END) AS cause,
+          COUNT(*)::int AS count, MIN(created_at) AS first_at, MAX(created_at) AS last_at
+        FROM civilization_events
+        WHERE world_id=$1 AND created_at >= $2::timestamptz
+          AND (event_type IN ('death','weather_death','homicide','execution')
+               OR (event_type='accident' AND message LIKE '% died %'))
+        GROUP BY cause ORDER BY count DESC`,[WORLD_ID,new Date(since).toISOString()]);
+      json(res,200,{worldId:WORLD_ID,since,source:"append-only event archive",causes:result.rows,
+        note:"Event counts may include former competing WORLD-A workers; these are not necessarily the deaths in the current checkpoint."});
+    }catch(error){console.error("[civilization] mortality archive unavailable",error);json(res,503,{error:"mortality_archive_unavailable"});}
     return;
   }
 

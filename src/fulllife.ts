@@ -397,11 +397,11 @@ function renderInspector(fly: FlyState | null) {
 function renderSnapshot(s: CivilizationSnapshot) {
   snapshot = s;
   snapshotReceivedAt=performance.now();
-  if(s.mapVersion!==MAP_VERSION){setConnection("connecting","CITY UPDATE AWAITING WORKER");}
   const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
   const living=(s.flies||[]).filter(f=>f.alive);
   residentDirectory.update(living,s.deaths,s.births,s.mortality?.byCause);
   setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
+  if(s.mapVersion!==MAP_VERSION)setConnection("connecting",`${living.length} ALIVE · WORKER UPDATE NEEDED ▾`);
   connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
   if(!s.authoritative)residentDirectory.offline();
   const policy=document.getElementById("welfare-policy");
