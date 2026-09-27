@@ -27,6 +27,7 @@ type FlyState = {
   money: number;
   savings: number;
   debt: number;
+  utilityDebt?: number; powerOn?: boolean; criminalRecordCount?: number; sentence?: string|null; capitalCharge?: boolean;
   jobTitle?: string | null;
   partnerId?: string | null;
   affection: number;
@@ -143,6 +144,8 @@ type CivilizationSnapshot = {
   centralBank?: { inflationRate?: number; priceLevel?: number; lastPrintAmount?: number; boardIds?: string[] };
   politics?: { presidentId?: string | null; presidentPartyId?: string | null; campaignActive?: boolean; nextElectionDay?: number; parties?: Array<{id:string;name:string}> };
   education?: { teacherId?: string | null; teacherGeneration?: number; lessons?: number; students?: number };
+  utilities?: { powerPlant?: { gridOnline?: boolean; generation?: number; demand?: number; capacity?: number; fuelReserve?: number; maintenance?: number }; disconnectedHouseholds?: number; householdAccounts?: number };
+  justice?: { deathPenaltyEnabled?: boolean; executions?: number; convictions?: number; acquittals?: number };
   totalTransactions?: number;
   weather?: WeatherState;
   daysPerYear?: number;
@@ -183,6 +186,8 @@ const inflationEl = $("inflation");
 const employedEl = $("employed");
 const presidentEl = $("president");
 const academyTeacherEl = $("academy-teacher");
+const powerGridEl = $("power-grid");
+const powerCutsEl = $("power-cuts");
 const events = $("events");
 const brainGrid = $("brain-grid");
 const brainNote = $("brain-note");
@@ -322,7 +327,7 @@ function renderInspector(fly: FlyState | null) {
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
-  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0), 1)} H$ · ${fly.vehicle || fly.transitMode || "walk"}`;
+  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0),1)} H$ + power ${num(fly.utilityDebt||0,1)} · ${fly.powerOn===false?"POWER CUT":"powered"} · ${fly.vehicle||fly.transitMode||"walk"}`;
   flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
   flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
   flyRelationshipEl.textContent = fly.partnerId
@@ -336,7 +341,7 @@ function renderInspector(fly: FlyState | null) {
     ? `${fly.businessId} · equity ${num(fly.businessEquity || 0)} H$`
     : `no business · credit ${num(fly.creditScore || 0)}`;
   const skillNames = Object.entries(fly.professionSkills || {}).filter(([,v]) => Number(v) > 0.45).map(([k]) => k).slice(0,2);
-  flyLawEl.textContent = `${Math.round((fly.lawAwareness || 0) * 100)}% aware · ${fly.lawViolations || 0} violations${fly.arrested ? " · DETAINED" : fly.wanted ? " · WANTED" : ""}${skillNames.length ? " · " + skillNames.join("/") : ""}`;
+  flyLawEl.textContent = `${Math.round((fly.lawAwareness||0)*100)}% aware · ${fly.lawViolations||0} violations · ${fly.criminalRecordCount||0} charges${fly.sentence?" · "+fly.sentence:fly.arrested?" · DETAINED":fly.wanted?" · WANTED":""}${skillNames.length?" · "+skillNames.join("/"):""}`;
   flyLearningEl.textContent = `IQ-like ${Math.round((fly.intelligence || 0) * 100)} · edu ${num(fly.educationLevel || 0,1)} · ${fly.schoolDays || 0} school days${fly.teacherId ? " · teacher " + fly.teacherId : ""}`;
   flyScheduleEl.textContent = `${fly.chronotype || "day"} · start ${String(Math.round(fly.preferredWorkStart || 0)).padStart(2,"0")}:00 · ${num(fly.preferredWorkHours || 0,1)}h · ${fly.partyId || "no party"}`;
   flyStressEl.textContent = `${num(fly.stress, 1)}%`;
@@ -378,7 +383,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = num(s.population);
   generation.textContent = num(s.generation);
-  speed.textContent = "1h = 1m";
+  speed.textContent = "1s = 2m";
   births.textContent = num(s.births);
   deaths.textContent = num(s.deaths);
   food.textContent = num(s.foodReserve);
@@ -387,6 +392,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
   employedEl.textContent = num(Number(s.economy?.employed || 0));
   presidentEl.textContent = s.politics?.presidentId || (s.politics?.campaignActive ? "campaigning…" : "—");
   academyTeacherEl.textContent = s.education?.teacherId || "—";
+  const grid=s.utilities?.powerPlant;
+  powerGridEl.textContent=grid ? `${grid.gridOnline===false?"BLACKOUT":"ONLINE"} · ${num(grid.generation||0)} / ${num(grid.demand||0)}` : "—";
+  powerCutsEl.textContent=num(Number(s.utilities?.disconnectedHouseholds||0));
   gameClockEl.textContent = s.gameClock || "--:--";
   gameDayEl.textContent = `DAY ${s.day || 1}`;
   const weather = s.weather || {};
@@ -419,6 +427,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "school" || e.type === "education" ? "🎓 " :
       e.type === "salary" ? "$ " :
       e.type === "monetary_policy" ? "🏦 " :
+      e.type === "grid_outage" || e.type === "power_cut" ? "⚡ " :
+      e.type === "grid_restored" || e.type === "power_reconnected" ? "💡 " :
+      e.type === "crime" || e.type === "assault" || e.type === "homicide" || e.type === "power_theft" ? "🚨 " :
+      e.type === "capital_sentence" || e.type === "execution" ? "⚖ " :
       e.type === "election_campaign" || e.type === "election_result" || e.type === "party_founded" ? "🗳 " :
       e.type === "political_argument" ? "💬 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
@@ -827,11 +839,26 @@ function addShowroomCar(x:number,z:number,color:number){
 if(graphics.metroDetail>=1){addShowroomCar(-137,-63.5,0xc94d4d);addShowroomCar(-130,-63.5,0xd5d8d2);addShowroomCar(-123,-63.5,0x3d668c);}
 
 // Industrial outer ring.
-const industrial=[[-220,75,25,18,20,"SUGAR WORKS"],[220,125,28,20,22,"MATERIALS"],[220,-75,28,19,18,"PACKAGING"],[-220,-125,31,22,19,"WAREHOUSE"],[220,25,26,20,16,"BUILD YARD"],[220,-125,30,20,18,"TRANSIT DEPOT"],[-220,-75,27,21,17,"UTILITIES"],[245,125,27,20,17,"RECYCLING"]] as const;
+const industrial=[[-220,75,25,18,20,"SUGAR WORKS"],[220,125,28,20,22,"MATERIALS"],[220,-75,28,19,18,"PACKAGING"],[-220,-125,31,22,19,"WAREHOUSE"],[220,25,26,20,16,"BUILD YARD"],[220,-125,30,20,18,"TRANSIT DEPOT"],[245,125,27,20,17,"RECYCLING"]] as const;
 for (let i = 0; i < industrial.length; i += 1) {
   const [x, z, w, d, h, label] = industrial[i];
   addBuilding(x, z, w, d, h, 9000 + i, { sign: label });
 }
+
+function addPowerPlant(x:number,z:number){
+  const g=new THREE.Group();
+  const concrete=new THREE.MeshStandardMaterial({color:0x6f7476,roughness:.78,metalness:.18});
+  const dark=new THREE.MeshStandardMaterial({color:0x323a3d,roughness:.52,metalness:.52});
+  const copper=new THREE.MeshStandardMaterial({color:0xb9854d,roughness:.4,metalness:.55});
+  const glow=new THREE.MeshStandardMaterial({color:0xffd36e,emissive:0xffaa33,emissiveIntensity:1.05,roughness:.35});
+  const hall=new THREE.Mesh(new THREE.BoxGeometry(34,16,24),concrete);hall.position.y=8;g.add(hall);
+  const turbine=new THREE.Mesh(new THREE.BoxGeometry(19,7,11),dark);turbine.position.set(0,18,0);g.add(turbine);
+  for(const sx of [-10,10]){const stack=new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.8,34,12),concrete);stack.position.set(sx,25,-6);g.add(stack);const ring=new THREE.Mesh(new THREE.TorusGeometry(2.2,.18,6,14),glow);ring.rotation.x=Math.PI/2;ring.position.set(sx,40,-6);g.add(ring);}
+  for(let i=-2;i<=2;i++){const transformer=new THREE.Mesh(new THREE.BoxGeometry(4.2,3.2,4.8),copper);transformer.position.set(i*5.2,2.1,17);g.add(transformer);const pole=new THREE.Mesh(new THREE.CylinderGeometry(.12,.16,8,6),dark);pole.position.set(i*5.2,6,17);g.add(pole);}
+  const sign=makeCanvasSprite("HANSDREX POWER PLANT · 24/7",20,1.25);sign.position.set(0,22,13);g.add(sign);
+  g.position.set(x,0,z);cityRoot.add(g);
+}
+addPowerPlant(-220,-75);
 
 // Hansdrex Farm in a reserved agricultural district.
 const farmSoil=new THREE.MeshStandardMaterial({color:0x6e5738,roughness:1}),cropMat=new THREE.MeshStandardMaterial({color:0x6f8f45,roughness:1});
