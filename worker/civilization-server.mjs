@@ -12,7 +12,9 @@ const EXPERIMENT_ID = process.env.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(process.env.CIV_WORLD_SEED || 948291);
 const GAME_SECONDS_PER_REAL_SECOND = Number(process.env.CIV_TIME_SCALE || 120);
 const TARGET_POPULATION = 130;
-const INITIAL_POPULATION = Math.min(TARGET_POPULATION, Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || TARGET_POPULATION)));
+const RECOVERY_POPULATION = 100;
+const WELFARE_VERSION = 1;
+const INITIAL_POPULATION = Math.min(TARGET_POPULATION, Math.max(12, Number(process.env.CIV_INITIAL_POPULATION || RECOVERY_POPULATION)));
 const MAX_POPULATION = Math.min(132, Math.max(TARGET_POPULATION, Number(process.env.CIV_MAX_POPULATION || 132)));
 const DATABASE_URL = process.env.DATABASE_URL;
 const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
@@ -253,9 +255,9 @@ function migrateGroundHousesToSafeLots(previousMapVersion) {
   }
 }
 
-function migrateResidentNavigation(previousMapVersion) {
+function migrateResidentNavigation(previousMapVersion, residents=state.flies) {
   if(previousMapVersion>=MAP_VERSION) return;
-  for(const fly of state.flies){
+  for(const fly of residents){
     if(!fly.alive) continue;
     const base=fly.currentLocationId===fly.homeId
       ? {x:Number(fly.homeX??location(fly.homeId).x),z:Number(fly.homeZ??location(fly.homeId).z)}
@@ -1014,7 +1016,79 @@ function freshState() {
   ensureCentralBankBoard();
   migrateResidentNavigation(0);
   s.generation=1;
+  ensureWelfare();
+  state.welfare.recoveryVersion=WELFARE_VERSION;
   return s;
+}
+
+function ensureWelfare() {
+  state.welfare ||= { birthGrants: {}, birthGrantTotal: 0, foodSubsidies: 0, leisureSubsidies: 0, emergencyFunding: 0 };
+  state.welfare.birthGrants ||= {};
+  return state.welfare;
+}
+function fundPublicPayment(amount) {
+  const welfare=ensureWelfare();
+  const shortage=Math.max(0,amount-Number(state.treasury.cash||0));
+  if(shortage){
+    // Explicit, auditable public issuance; never silently reset the money supply.
+    state.treasury.cash+=shortage;
+    state.centralBank.moneyPrintedLifetime=Number(state.centralBank.moneyPrintedLifetime||0)+shortage;
+    welfare.emergencyFunding=Number(welfare.emergencyFunding||0)+shortage;
+  }
+  state.treasury.cash-=amount;
+  state.treasury.spending=Number(state.treasury.spending||0)+amount;
+}
+function payBirthGrant(child, parent) {
+  const welfare=ensureWelfare();
+  if(welfare.birthGrants[child.id])return false;
+  fundPublicPayment(1000);
+  parent.money+=1000;
+  welfare.birthGrants[child.id]={amount:1000,parentId:parent.id,paidAt:state.simulationAgeSeconds};
+  welfare.birthGrantTotal=Number(welfare.birthGrantTotal||0)+1000;
+  state.totalTransactions++;
+  emit("birth_grant",`${parent.id}'s family received 1,000 H$ for newborn ${child.id}.`,{childId:child.id,parentId:parent.id,amount:1000});
+  return true;
+}
+function replenishResidents(target,reason) {
+  maintainHouseholds();
+  const before=state.flies.filter(f=>f.alive).length;
+  const arrivals=[];
+  for(let count=before;count<Math.min(target,MAX_POPULATION);count++){
+    const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);state.flies.push(fly);arrivals.push(fly);
+  }
+  const added=state.flies.filter(f=>f.alive).length-before;
+  if(added){
+    migrateResidentNavigation(0,arrivals);
+    emit("migration",`${added} new residents arrived; ${before+added} now alive.`,{before,added,after:before+added,reason});
+  }
+  return added;
+}
+function applyWelfareRecovery() {
+  const welfare=ensureWelfare();
+  if(Number(welfare.recoveryVersion||0)>=WELFARE_VERSION)return 0;
+  const added=replenishResidents(RECOVERY_POPULATION,"population recovery requested by city administrator");
+  welfare.recoveryVersion=WELFARE_VERSION;
+  welfare.recoveredAt=state.simulationAgeSeconds;
+  welfare.recoveryAdded=added;
+  restockEssentials();
+  return added;
+}
+function restockEssentials() {
+  state.foodReserve=Math.max(Number(state.foodReserve||0),state.flies.filter(f=>f.alive).length*30,4000);
+  for(const id of ["market","grocery","bakery","restaurant","night-market"]){
+    const business=state.businesses[id];if(business)business.inventory=Math.max(Number(business.inventory||0),200);
+  }
+}
+function mortalityReport() {
+  const dead=state.flies.filter(f=>!f.alive&&!f.migratedOut),byCause={},riskAtDeath={dehydrated:0,hungry:0,severeStress:0,lowHealth:0};
+  for(const f of dead){
+    const cause=f.causeOfDeath||"unrecorded";byCause[cause]=(byCause[cause]||0)+1;
+    if(f.thirst>85)riskAtDeath.dehydrated++;
+    if(f.hunger>85)riskAtDeath.hungry++;
+    if(f.stress>92)riskAtDeath.severeStress++;
+    if(f.health<25)riskAtDeath.lowHealth++;
+  }
+  return {recordedDeaths:dead.length,byCause,riskAtDeath,note:"Risk indicators may overlap; they are not proven causes of historical deaths."};
 }
 
 function appendMemoryEvent(type, text, payload = {}) {
@@ -1236,19 +1310,7 @@ async function initDb() {
     ensurePoliticalSystem();
     ensureCentralBankBoard();
     rebalancePopulationToTarget();
-    if (state.populationBootstrapVersion < POPULATION_BOOTSTRAP_VERSION || state.flies.filter((x) => x.alive).length < INITIAL_POPULATION) {
-      const before = state.flies.filter((x) => x.alive).length;
-      while (state.flies.filter((x) => x.alive).length < INITIAL_POPULATION) {
-        const fly = createFly(state.flies.length);
-        seedSocioeconomicProfile(fly);
-        state.flies.push(fly);
-      }
-      state.populationBootstrapVersion = POPULATION_BOOTSTRAP_VERSION;
-      emit("population_bootstrap", `Hansdrex expanded from ${before} to ${state.flies.filter((x) => x.alive).length} residents with mixed socioeconomic starting conditions.`, {
-        before,
-        after: state.flies.filter((x) => x.alive).length,
-      });
-    }
+    applyWelfareRecovery();
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
   } else {
     freshState();
@@ -2071,14 +2133,14 @@ function brainChooseAction(fly, clock) {
   const circadianSleep = clock.hour >= 22 || clock.hour < 6;
   add(fly.homeId, "sleeping", (100 - fly.energy) * 0.88 + fly.sleepDebt * 0.72 + (circadianSleep ? 82 : -12) - fly.caffeine * 0.42);
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.42 + fly.stress * 0.20 + (circadianSleep ? 20 : 0));
-  add("market", "buying food", fly.hunger * 0.8 + (fly.money > 5 ? 8 : -35));
+  add("market", "buying food", fly.hunger * 0.9 + 18);
   add("cafe", "drinking Hansdrex coffee", (100 - fly.energy) * 0.58 + fly.sleepDebt * 0.46 + fly.thirst * 0.18 + (fly.money > 5 ? 8 : -30));
   add("tea-house", "drinking tea", fly.thirst * 0.48 + fly.stress * 0.28 + fly.loneliness * 0.12);
   add("restaurant", "eating dinner", fly.hunger * 0.66 + fly.happiness * 0.08 + (fly.money > 12 ? 8 : -28));
   add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
   add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
-  add("park", "taking a walk", fly.stress * 0.55 + fly.traits.resilience * 15);
+  add("park", "taking a walk", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
   add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
   add("clinic", "seeking care", (100 - fly.health) * 1.05 + (fly.illness ? 55 : 0));
   add("hospital-central", "going to Hansdrex hospital", (100 - fly.health) * 1.28 + (fly.illness ? 72 : 0));
@@ -2089,12 +2151,12 @@ function brainChooseAction(fly, clock) {
   }
 
   const heliPrice=heliTourTicketPrice();
-  const luxuryEligible=["affluent","wealthy","elite"].includes(fly.socialClass)||(fly.money+fly.savings)>heliPrice*8;
-  if(age>=18&&luxuryEligible&&heliTourAvailable(clock)&&fly.energy>28&&fly.money+fly.savings>heliPrice*1.2){
+  const luxuryEligible=fly.stress>=55||["affluent","wealthy","elite"].includes(fly.socialClass)||(fly.money+fly.savings)>heliPrice*8;
+  if(age>=18&&luxuryEligible&&heliTourAvailable(clock)&&fly.energy>28&&(fly.stress>=55||fly.money+fly.savings>heliPrice*1.2)){
     const classBonus=fly.socialClass==="elite"?34:fly.socialClass==="wealthy"?27:fly.socialClass==="affluent"?19:8;
     const visualCuriosity=brain.dynamic.curiosity*32+neuralDrive(fly,"exploreDrive")*24+fly.excitement*0.22+fly.traits.ambition*12;
     const affordability=Math.min(24,(fly.money+fly.savings)/Math.max(1,heliPrice*3));
-    add("heliport","taking a Hansdrex helicopter sightseeing tour",visualCuriosity+classBonus+affordability-fly.sleepDebt*0.22-weatherDanger()*90);
+    add("heliport","taking a Hansdrex helicopter sightseeing tour",visualCuriosity+classBonus+affordability+(fly.stress>=55?fly.stress*0.6:0)-fly.sleepDebt*0.22-weatherDanger()*90);
   }
 
   ensureCognitiveProfile(fly);
@@ -2176,7 +2238,7 @@ function brainChooseAction(fly, clock) {
       loc.id !== fly.homeId &&
       loc.type !== "home" &&
       !(loc.type === "health" && !fly.illness && fly.health > 72) &&
-      !(loc.type === "luxury" && !["affluent","wealthy","elite"].includes(fly.socialClass) && fly.money+fly.savings<heliTourTicketPrice()*6)
+      !(loc.type === "luxury" && fly.stress<55 && !["affluent","wealthy","elite"].includes(fly.socialClass) && fly.money+fly.savings<heliTourTicketPrice()*6)
     );
     const sampleCount = Math.min(7, eligible.length);
     const picked = new Set();
@@ -2222,9 +2284,12 @@ function chooseDestination(fly, clock) {
 
   // Once a fly commits to a destination, keep that decision until arrival.
   if (fly.traveling) return;
-  if (!fly.traveling && fly.actionUntil > state.simulationAgeSeconds) return;
+  if (!fly.traveling && fly.actionUntil > state.simulationAgeSeconds && fly.hunger<85 && fly.thirst<85) return;
 
-  const chosen = brainChooseAction(fly, clock);
+  const food=LOCATIONS.filter(l=>["market","grocery","bakery"].includes(l.id)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+  const chosen = fly.hunger>72 ? {id:food.id,action:"getting a subsidized meal"}
+    : fly.thirst>72 ? {id:fly.homeId,action:"drinking free water"}
+    : brainChooseAction(fly, clock);
   startJourney(fly,chosen);
 }
 
@@ -2610,12 +2675,15 @@ function simulateHeliTour(fly,clock){
   }
   if(fly.currentLocationId!=="heliport"||fly.traveling||fly.action!=="taking a Hansdrex helicopter sightseeing tour")return false;
   const active=state.flies.filter((f)=>f.alive&&f.heliPassenger&&Number(f.heliTourUntil||0)>now).length;
-  const price=heliTourTicketPrice();
+  const fare=heliTourTicketPrice();
+  const subsidized=fly.stress>=55;
+  const price=subsidized?0:fare;
   if(active>=4||(state.helicopterFlight&&now>=state.helicopterFlight.startsAt&&now<state.helicopterFlight.endsAt)){fly.action="waiting for the next Hansdrex helicopter";fly.actionUntil=now+600;return true;}
   if(!heliTourAvailable(clock)){fly.action="heli tour cancelled by weather or operating hours";fly.actionUntil=now+1200;fly.stress=clamp(fly.stress-1);return true;}
   if(fly.money+fly.savings<price){fly.action="could not afford the helicopter tour";fly.actionUntil=now+1800;return true;}
   const cash=Math.min(fly.money,price);fly.money-=cash;fly.savings-=Math.max(0,price-cash);
-  state.businesses["heli-tour"].cash+=price;fly.expensesLifetime+=price;state.totalTransactions+=1;
+  if(subsidized){fundPublicPayment(fare);ensureWelfare().leisureSubsidies+=fare;}
+  state.businesses["heli-tour"].cash+=fare;fly.expensesLifetime+=price;state.totalTransactions+=1;
   if(!state.helicopterFlight||now>=state.helicopterFlight.endsAt)state.helicopterFlight={startsAt:now+600,endsAt:now+2400};
   fly.lastHeliTicket=price;fly.heliTourStartedAt=state.helicopterFlight.startsAt;fly.heliTourUntil=state.helicopterFlight.endsAt;fly.heliPassenger=true;
   fly.transitMode="helicopter";fly.transitStage="boarding";fly.action="boarding Hansdrex helicopter";
@@ -2769,7 +2837,7 @@ function reproduction(fly) {
   const mutualWait = Math.max(waitA, waitB);
 
   const financialSecurity = clamp(
-    ((fly.money + fly.savings - fly.debt) + (partner.money + partner.savings - partner.debt)) / 6500,
+    ((fly.money + fly.savings - fly.debt) + (partner.money + partner.savings - partner.debt) + 1000) / 6500,
     0,
     1,
   );
@@ -2877,6 +2945,7 @@ function completePregnancy(fly) {
     fly.children.push(child.id);
     father.children.push(child.id);
     state.births += 1;
+    payBirthGrant(child, fly);
     state.generation = Math.max(state.generation, child.generation);
     emit("birth", `${child.id} / ${child.brain.id} was born to ${fly.id} and ${fatherId} with a new independent brain instance.`, {
       childId: child.id,
@@ -3076,21 +3145,24 @@ function needsAndActivities(fly, clock) {
   }
 
   if(fly.traveling)return;
+  // Tap water is free in homes, indoor public places and park fountains.
+  if(fly.thirst>35&&(fly.indoors||atHome||fly.currentLocationId==="park")){
+    fly.thirst=clamp(fly.thirst-55);fly.stress=clamp(fly.stress-2);
+    if(fly.currentLocationId==="tea-house")fly.action="drinking tea and water";
+  }
   const foodPlaces = ["market","grocery","bakery","restaurant","night-market"];
-  if (foodPlaces.includes(fly.currentLocationId) && fly.hunger > 28 && fly.money >= 3.5) {
-    const business = state.businesses?.[fly.currentLocationId];
-    if (brainRand(fly) < 0.12 && (!business || business.inventory > 0)) {
-      const cost = business?.price ? business.price * brainRange(fly, 0.9, 1.08) : brainRange(fly, 3.5, 9.5);
-      if(!spend(fly,cost,business||state.treasury))return;
-      fly.hunger = clamp(fly.hunger - brainRange(fly, 28, 52));
-      fly.thirst = clamp(fly.thirst - brainRange(fly, 8, 20));
-      fly.happiness = clamp(fly.happiness + 2);
-      if (business) {
-        business.inventory = Math.max(0, business.inventory - 1);
-      }
-      state.foodReserve = Math.max(0, state.foodReserve - 1);
-      state.totalTransactions += 1;
-    }
+  // Deliver essentials to homes/shelters as well: children, poor and rain-bound residents can eat.
+  if ((foodPlaces.includes(fly.currentLocationId)||atHome||fly.action==="sheltering from bad weather") && fly.hunger > 45) {
+    restockEssentials();
+    const business=state.businesses[foodPlaces.includes(fly.currentLocationId)?fly.currentLocationId:"market"];
+    const price=0.1,paid=Math.min(price,Math.max(0,fly.money)),subsidy=4-paid;
+    if(paid>0)spend(fly,paid,business);
+    fundPublicPayment(subsidy);business.cash+=subsidy;ensureWelfare().foodSubsidies+=subsidy;
+    fly.hunger=clamp(fly.hunger-60);fly.thirst=clamp(fly.thirst-30);fly.happiness=clamp(fly.happiness+2);
+    business.inventory=Math.max(0,business.inventory-1);state.foodReserve--;
+  }
+  if(fly.indoors&&fly.hunger<55&&fly.thirst<55&&fly.stress<80){
+    fly.health=clamp(fly.health+(sleeping?0.025:0.008));
   }
 
   if (fly.currentLocationId === "cafe" && fly.action === "drinking Hansdrex coffee" &&
@@ -3161,15 +3233,16 @@ function needsAndActivities(fly, clock) {
 
   if (fly.currentLocationId === "park") {
     const sunset = sunsetQuality();
-    fly.stress = clamp(fly.stress - (sunset > 0.48 ? 0.18 : 0.06));
+    fly.stress = clamp(fly.stress - (sunset > 0.48 ? 0.24 : 0.18));
     fly.excitement = clamp(fly.excitement + (sunset > 0.48 ? 0.09 : 0.015));
-    if (sunset > 0.65) fly.happiness = clamp(fly.happiness + 0.055);
+    fly.happiness = clamp(fly.happiness + 0.055);
+    fly.loneliness=clamp(fly.loneliness-0.035);
   }
   if (fly.currentLocationId === "cafe") {
     fly.loneliness = clamp(fly.loneliness - 0.04);
     fly.happiness = clamp(fly.happiness + 0.025);
   }
-  if (fly.smoking) {
+  if (fly.smoking && fly.action === "smoke break") {
     fly.stress = clamp(fly.stress - 0.16);
     fly.health = clamp(fly.health - 0.018);
   }
@@ -3462,6 +3535,8 @@ function getState() {
     generation: state.generation,
     births: state.births,
     deaths: state.deaths,
+    mortality: mortalityReport(),
+    welfare: {...ensureWelfare(),birthGrants:undefined,birthGrantPerChild:1000,essentialMealPrice:0.1,freeWater:true,freeStressRelief:true},
     foodReserve: state.foodReserve,
     moneySupply,
     currency: state.currency,
@@ -3565,15 +3640,9 @@ async function tick() {
         emit("weather", "A new simulated day begins across Hansdrex City of Fruit Fly.", { day: clock.day });
       }
 
-      if (state.foodReserve < 2000 && rand() < 0.002) {
-        state.foodReserve += 4000;
-        emit("supply", "Hansdrex Central Market restocked food supplies.", { foodReserve: state.foodReserve });
-      }
-
-      if (state.flies.filter((f) => f.alive).length < 8 && state.flies.length < MAX_POPULATION) {
-        for (let i = 0; i < 6; i += 1) state.flies.push(createFly(state.flies.length));
-        emit("migration", "New migrants arrived to prevent total population collapse.", {});
-      }
+      if(state.foodReserve<2000)restockEssentials();
+      // Archived deaths must never disable the emergency population floor.
+      if(state.flies.filter(f=>f.alive).length<8)replenishResidents(24,"emergency immigration");
     }
     await checkpoint(false);
   } catch (error) {
@@ -3661,4 +3730,4 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 }
 // Side-effect-free test entry points; importing never starts a server or touches persistence.
-export {spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
+export {applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
