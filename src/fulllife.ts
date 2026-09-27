@@ -1115,7 +1115,7 @@ function addMetroStation(line:typeof metroLines[number],index:number,lineIndex:n
   const platform=new THREE.Mesh(new THREE.BoxGeometry(horizontal?16:4.8,.55,horizontal?4.8:16),metroPlatformMat);
   platform.position.set(geo.platform.x,geo.platform.y-.30,geo.platform.z);cityRoot.add(platform);
   const edgeMat=new THREE.MeshBasicMaterial({color:lineColors[lineIndex],toneMapped:false});
-  const edge=new THREE.Mesh(new THREE.BoxGeometry(horizontal?15.4:.16,.08,horizontal?.16:15.4),edgeMat);
+  const edge=new THREE.Mesh(new THREE.BoxGeometry(horizontal?15.4:.16,.08,horizontal ? .16 : 15.4),edgeMat);
   const towardTrack=new THREE.Vector3(geo.track.x-geo.platform.x,0,geo.track.z-geo.platform.z).normalize();
   edge.position.set(geo.platform.x+towardTrack.x*2.15,geo.platform.y+.03,geo.platform.z+towardTrack.z*2.15);cityRoot.add(edge);
   addMetroStaircase(geo.access,geo.platform);
