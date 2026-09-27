@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, WORLD_HALF, PARK, PARK_PATHS, FERRIS_WHEEL, wheelCabin, WATER, ROADS, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, WORLD_HALF, PARK, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
   id: string;
@@ -590,10 +590,10 @@ const cityRoot = new THREE.Group();
 scene.add(cityRoot);
 
 
-const riverX = 128;
-const riverWidth = 28;
-const harborZ = 205;
-const harborDepth = 68;
+const riverX = RIVER.x;
+const riverWidth = RIVER.w;
+const harborZ = HARBOR.z;
+const harborDepth = HARBOR.d;
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2),
@@ -610,13 +610,13 @@ const waterMat = new THREE.MeshStandardMaterial({
   transparent: true,
   opacity: 0.92,
 });
-const river = new THREE.Mesh(new THREE.PlaneGeometry(riverWidth, 470), waterMat);
+const river = new THREE.Mesh(new THREE.PlaneGeometry(RIVER.w, RIVER.d), waterMat);
 river.rotation.x = -Math.PI / 2;
-river.position.set(riverX, 0.015, -12);
+river.position.set(RIVER.x, 0.015, RIVER.z);
 cityRoot.add(river);
-const harbor = new THREE.Mesh(new THREE.PlaneGeometry(350, harborDepth), waterMat);
+const harbor = new THREE.Mesh(new THREE.PlaneGeometry(HARBOR.w, HARBOR.d), waterMat);
 harbor.rotation.x = -Math.PI / 2;
-harbor.position.set(65, 0.018, harborZ);
+harbor.position.set(HARBOR.x, 0.018, HARBOR.z);
 cityRoot.add(harbor);
 
 const roadMat = new THREE.MeshStandardMaterial({ color: 0x242a2e, roughness: 0.97 });
@@ -711,57 +711,74 @@ function addBridge(z: number, width = 13) {
     cityRoot.add(tower);
   }
 }
-[-87, 0, 87].forEach((z) => addBridge(z));
+BRIDGES.forEach((b) => addBridge(b.z, Math.max(12,b.d-3)));
 
-// Central Park is a continuous reserved district, with clear paths and planting beds.
+// Central Park is a long protected Manhattan-style district with reservoirs, meadows and a highly visible wheel.
 const centralPark=new THREE.Mesh(new THREE.BoxGeometry(PARK.w,.10,PARK.d),parkMat);
 centralPark.position.set(PARK.x,.09,PARK.z);cityRoot.add(centralPark);
 const pathMat=new THREE.MeshStandardMaterial({color:0xd9c6a3,roughness:1});
 const parkPaths=PARK_PATHS;
 for(const r of parkPaths){const m=new THREE.Mesh(new THREE.BoxGeometry(r.w,.12,r.d),pathMat);m.position.set(r.x,.17,r.z);cityRoot.add(m);}
-const pond=new THREE.Mesh(new THREE.CylinderGeometry(7,7,.12,24),waterMat);pond.scale.z=1.42;pond.position.set(0,.19,-111);cityRoot.add(pond);
+for(const p of PARK_PONDS){
+ const pond=new THREE.Mesh(new THREE.CylinderGeometry(1,1,.12,32),waterMat);
+ pond.scale.set(p.w/2,1,p.d/2);pond.position.set(p.x,.19,p.z);cityRoot.add(pond);
+}
+const meadowMat=new THREE.MeshStandardMaterial({color:0x69a665,roughness:1});
+for(const [x,z,w,d] of [[-16,-215,30,26],[50,-145,34,34],[-10,-55,42,24]] as const){
+ const meadow=new THREE.Mesh(new THREE.BoxGeometry(w,.06,d),meadowMat);meadow.position.set(x,.15,z);cityRoot.add(meadow);
+}
 const benchMat=new THREE.MeshStandardMaterial({color:0x9b7045,roughness:.8});
 const lampMat=new THREE.MeshStandardMaterial({color:0xffe4a0,emissive:0xffd173,emissiveIntensity:1.4});
-for(const z of [-125,-105,-65,-48])for(const x of [-7,37]){
- const bench=new THREE.Mesh(new THREE.BoxGeometry(2.6,.35,.7),benchMat);bench.position.set(x,.65,z);cityRoot.add(bench);
- const back=new THREE.Mesh(new THREE.BoxGeometry(2.6,.75,.18),benchMat);back.position.set(x,1.1,z+.3);cityRoot.add(back);
+for(const z of [-282,-242,-202,-162,-122,-82,-52])for(const x of [-43,73]){
+ const bench=new THREE.Mesh(new THREE.BoxGeometry(2.8,.35,.75),benchMat);bench.position.set(x,.65,z);cityRoot.add(bench);
+ const back=new THREE.Mesh(new THREE.BoxGeometry(2.8,.75,.18),benchMat);back.position.set(x,1.1,z+.32);cityRoot.add(back);
  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.09,3,6),trafficPoleMat);pole.position.set(x,1.5,z-2);cityRoot.add(pole);
  const bulb=new THREE.Mesh(new THREE.SphereGeometry(.24,8,6),lampMat);bulb.position.set(x,3,z-2);cityRoot.add(bulb);
 }
-const parkSign=makeCanvasSprite("HANSDREX CENTRAL PARK",26,1.7);parkSign.position.set(15,4,-35);cityRoot.add(parkSign);
-// Two rings, braced supports and upright cabins; no dynamic point lights.
+const parkSign=makeCanvasSprite("HANSDREX CENTRAL PARK",34,2.0);parkSign.position.set(PARK.x,5,PARK.z+PARK.d/2-5);cityRoot.add(parkSign);
+
+// Giant Great Wheel: large enough to remain obvious from the city overview.
 const wheelRoot=new THREE.Group();wheelRoot.position.set(FERRIS_WHEEL.x,FERRIS_WHEEL.y,FERRIS_WHEEL.z);cityRoot.add(wheelRoot);
 const wheelRotor=new THREE.Group();wheelRoot.add(wheelRotor);
-const wheelMetal=new THREE.MeshStandardMaterial({color:0xe1ebe4,metalness:.5,roughness:.35});
-const wheelGlow=new THREE.MeshStandardMaterial({color:0x9be9d0,emissive:0x4da58c,emissiveIntensity:.65});
-for(const z of [-1.25,1.25]){const ring=new THREE.Mesh(new THREE.TorusGeometry(20,.22,6,graphics.metroDetail>=2?80:48),wheelGlow);ring.position.z=z;wheelRotor.add(ring);}
-for(const side of [-1,1])for(const z of [-2,2]){
- const end=new THREE.Vector3(side*11,-21,z),mid=end.clone().multiplyScalar(.5);
- const beam=new THREE.Mesh(new THREE.CylinderGeometry(.45,.65,end.length(),6),wheelMetal);beam.position.copy(mid);beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),end.normalize());wheelRoot.add(beam);
+const wheelMetal=new THREE.MeshStandardMaterial({color:0xe1ebe4,metalness:.58,roughness:.30});
+const wheelGlow=new THREE.MeshStandardMaterial({color:0xb8fff0,emissive:0x4fcfb2,emissiveIntensity:1.35,roughness:.22});
+for(const z of [-1.7,1.7]){
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(FERRIS_WHEEL.radius,.34,8,graphics.metroDetail>=2?96:56),wheelGlow);ring.position.z=z;wheelRotor.add(ring);
+}
+const hub=new THREE.Mesh(new THREE.CylinderGeometry(1.25,1.25,4.2,14),wheelMetal);hub.rotation.x=Math.PI/2;wheelRotor.add(hub);
+for(const side of [-1,1])for(const z of [-2.6,2.6]){
+ const end=new THREE.Vector3(side*FERRIS_WHEEL.radius*.58,-(FERRIS_WHEEL.y-1),z),mid=end.clone().multiplyScalar(.5);
+ const beam=new THREE.Mesh(new THREE.CylinderGeometry(.55,.82,end.length(),7),wheelMetal);beam.position.copy(mid);beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),end.normalize());wheelRoot.add(beam);
 }
 const wheelCabins:THREE.Group[]=[];
-const cabinGeometry=new THREE.BoxGeometry(2,2,2.6);
+const cabinGeometry=new THREE.BoxGeometry(2.8,2.5,3.4);
 for(let i=0;i<FERRIS_WHEEL.seats;i++){
  const a=i/FERRIS_WHEEL.seats*Math.PI*2;
- const spoke=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,20,5),wheelMetal);spoke.position.set(Math.cos(a)*10,Math.sin(a)*10,0);spoke.rotation.z=a-Math.PI/2;wheelRotor.add(spoke);
- const cabin=new THREE.Group(),body=new THREE.Mesh(cabinGeometry,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(i/16,.55,.52),metalness:.25,roughness:.4}));body.position.y=-.7;cabin.add(body);
- const window=new THREE.Mesh(new THREE.BoxGeometry(1.7,.8,2.65),wheelGlow);window.position.y=-.4;cabin.add(window);wheelRoot.add(cabin);wheelCabins.push(cabin);
+ const spoke=new THREE.Mesh(new THREE.CylinderGeometry(.11,.11,FERRIS_WHEEL.radius,6),wheelMetal);spoke.position.set(Math.cos(a)*FERRIS_WHEEL.radius/2,Math.sin(a)*FERRIS_WHEEL.radius/2,0);spoke.rotation.z=a-Math.PI/2;wheelRotor.add(spoke);
+ const cabin=new THREE.Group(),body=new THREE.Mesh(cabinGeometry,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(i/FERRIS_WHEEL.seats,.62,.55),metalness:.28,roughness:.34}));body.position.y=-.9;cabin.add(body);
+ const window=new THREE.Mesh(new THREE.BoxGeometry(2.35,1.0,3.45),wheelGlow);window.position.y=-.5;cabin.add(window);wheelRoot.add(cabin);wheelCabins.push(cabin);
 }
-const wheelSign=makeCanvasSprite("GREAT WHEEL · FREE FOR EVERYONE",28,1.8);wheelSign.position.set(15,5,-78);cityRoot.add(wheelSign);
+const wheelSign=makeCanvasSprite("HANSDREX GREAT WHEEL · FREE",34,2.1);wheelSign.position.set(FERRIS_WHEEL.x,8,FERRIS_WHEEL.z+FERRIS_WHEEL.radius+9);cityRoot.add(wheelSign);
 function updateParkWheel(now:number){
  const seconds=Number(snapshot?.simulationAgeSeconds||0)+(Math.min(2,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120));
  wheelRotor.rotation.z=seconds/FERRIS_WHEEL.period*Math.PI*2;
- wheelCabins.forEach((c,i)=>{const p=wheelCabin(seconds,i);c.position.set(p.x-FERRIS_WHEEL.x,p.y-FERRIS_WHEEL.y,0);});
+ wheelCabins.forEach((cab,i)=>{const p=wheelCabin(seconds,i);cab.position.set(p.x-FERRIS_WHEEL.x,p.y-FERRIS_WHEEL.y,0);});
  for(const f of latestFlyStates.values()){if(!f.wheelRideUntil||f.wheelSeat==null)continue;const v=flyVisuals.get(f.id);if(v){const p=wheelCabin(seconds,f.wheelSeat);v.group.position.set(p.x,p.y-.5,p.z);}}
 }
+
 const treeTransforms:Array<{x:number;z:number;scale:number}>=[];
 function addTree(x:number,z:number,scale=1){
  const p={x,z};
- if(ROADS.some(r=>contains(r,p,2.8))||WATER.some(r=>contains(r,p,1))||BUILDINGS.some(r=>contains(r,p,1))||parkPaths.some(r=>contains(r,p,1.3))||contains({x:15,z:-87,w:46,d:15},p,2))return;
+ const wheelZone={x:FERRIS_WHEEL.x,z:FERRIS_WHEEL.z,w:FERRIS_WHEEL.radius*2+18,d:22};
+ if(ROADS.some(r=>contains(r,p,2.8))||WATER.some(r=>contains(r,p,1))||BUILDINGS.some(r=>contains(r,p,1))||parkPaths.some(r=>contains(r,p,1.3))||contains(wheelZone,p,2))return;
  treeTransforms.push({x,z,scale});
 }
-for(let i=0;i<Math.round(310*graphics.treeScale);i++)addTree(-13+seeded(i+20)*56,-134+seeded(i+80)*94,1.5+seeded(i+140)*1.1);
-for(let i=0;i<Math.round(45*graphics.treeScale);i++)addTree(-95+seeded(i+500)*190,155+seeded(i+600)*12,1.1);
+for(let i=0;i<Math.round(820*graphics.treeScale);i++){
+ const x=PARK.x-PARK.w/2+6+seeded(i+20)*(PARK.w-12);
+ const z=PARK.z-PARK.d/2+6+seeded(i+820)*(PARK.d-12);
+ addTree(x,z,1.35+seeded(i+140)*1.25);
+}
+for(let i=0;i<Math.round(95*graphics.treeScale);i++)addTree(-150+seeded(i+1500)*300,190+seeded(i+1600)*24,1.0+seeded(i+1700)*.45);
 function buildTrees(){
  const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.13,.22,1.8,6),new THREE.MeshStandardMaterial({color:0x674a34}),treeTransforms.length);
  const crowns=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.05,graphics.metroDetail>=2?1:0),new THREE.MeshStandardMaterial({color:0x3b7250,roughness:1}),treeTransforms.length);
@@ -839,6 +856,7 @@ function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=
   for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(4.2-i*.7,3.4,4.2-i*.7),landmarkWarm);c.position.y=104+i*4;g.add(c);}
   const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.72,25,8),landmarkMetal);spire.position.y=123;g.add(spire);const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.72,8,6),landmarkWarm);beacon.position.y=136;g.add(beacon);g.position.set(x,0,z);cityRoot.add(g);}
 addEmpireStyleTower(15,43.5);
+const empireLandmarkLabel=makeCanvasSprite("HANSDREX EMPIRE",24,1.25);empireLandmarkLabel.position.set(15,142,43.5);cityRoot.add(empireLandmarkLabel);
 
 const heliPadCenter=new THREE.Vector3(23,101,43.5);
 const heliPadMat=new THREE.MeshStandardMaterial({color:0x343a3d,roughness:.56,metalness:.38});
@@ -870,8 +888,36 @@ let heliGuestCount=0;
 function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.9,2.4,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
   const pod=new THREE.Mesh(new THREE.CylinderGeometry(4.7,3.8,7,18),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.24,6,18),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
 addTorontoStyleTower(-11,43.5);
+const hansdrexTowerLabel=makeCanvasSprite("HANSDREX TOWER",23,1.2);hansdrexTowerLabel.position.set(-11,140,43.5);cityRoot.add(hansdrexTowerLabel);
 function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-3.1,3.1]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=2.35-i*.18,h=12.2-i*.35,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r,h,10),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(.7,1.8,10,9),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(6.2,1.5,2),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
 addPetronasTwinTowers(41,43.5);
+const petronasLabel=makeCanvasSprite("HANSDREX PETRONAS",22,1.15);petronasLabel.position.set(41,119,43.5);cityRoot.add(petronasLabel);
+
+function addBurjKhalifaStyle(x:number,z:number){
+ const g=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x89aebf,roughness:.2,metalness:.52}),silver=new THREE.MeshStandardMaterial({color:0xcbd2d4,roughness:.28,metalness:.74});
+ let y=0;
+ const tiers=[[13,40],[11.2,34],[9.4,30],[7.7,25],[6.1,21],[4.6,17]] as const;
+ tiers.forEach(([r,h],i)=>{const seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.72/2,r/2,h,10),i%2?silver:glass);seg.position.y=y+h/2;seg.rotation.y=i*.17;g.add(seg);y+=h-2;});
+ const crown=new THREE.Mesh(new THREE.CylinderGeometry(.65,2.0,18,9),silver);crown.position.y=y+9;g.add(crown);
+ const spire=new THREE.Mesh(new THREE.CylinderGeometry(.12,.42,42,7),silver);spire.position.y=y+37;g.add(spire);
+ const sign=makeCanvasSprite("BURJ KHALIFA · HANSDREX",26,1.35);sign.position.set(0,194,0);g.add(sign);
+ g.position.set(x,0,z);cityRoot.add(g);
+}
+addBurjKhalifaStyle(236,72.5);
+
+function addMarinaBaySandsStyle(x:number,z:number){
+ const g=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x7597a7,roughness:.22,metalness:.38}),stone=new THREE.MeshStandardMaterial({color:0xc7c3b8,roughness:.55,metalness:.12});
+ for(const sx of [-14,0,14]){
+  const tower=new THREE.Mesh(new THREE.BoxGeometry(10,68,13),glass);tower.position.set(sx,34,0);tower.rotation.z=-sx*.0022;g.add(tower);
+  const base=new THREE.Mesh(new THREE.BoxGeometry(12,5,15),stone);base.position.set(sx,2.5,0);g.add(base);
+ }
+ const deck=new THREE.Mesh(new THREE.BoxGeometry(44,4.2,8),stone);deck.position.y=71;g.add(deck);
+ const bow=new THREE.Mesh(new THREE.CylinderGeometry(4,4,4.2,20),stone);bow.rotation.z=Math.PI/2;bow.position.set(22,71,0);g.add(bow);
+ const pool=new THREE.Mesh(new THREE.BoxGeometry(29,.45,4.2),waterMat);pool.position.set(2,73.4,0);g.add(pool);
+ const sign=makeCanvasSprite("MARINA BAY SANDS · HANSDREX",31,1.5);sign.position.set(0,82,0);g.add(sign);
+ g.position.set(x,0,z);cityRoot.add(g);
+}
+addMarinaBaySandsStyle(285,320);
 // Distinct shopfronts: glazed windows, colored awnings and readable destination signs.
 for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  if(b.id==="power")continue;
@@ -916,10 +962,10 @@ addPowerPlant(powerBuilding.x,powerBuilding.z);
 
 // Hansdrex Farm in a reserved agricultural district.
 const farmSoil=new THREE.MeshStandardMaterial({color:0x6e5738,roughness:1}),cropMat=new THREE.MeshStandardMaterial({color:0x6f8f45,roughness:1});
-for(let row=0;row<7;row+=1){const z=108+row*5.3,soil=new THREE.Mesh(new THREE.BoxGeometry(42,0.08,2.2),farmSoil);soil.position.set(-220,0.08,z);cityRoot.add(soil);const crops=new THREE.Mesh(new THREE.BoxGeometry(40,0.42,0.9),cropMat);crops.position.set(-220,0.31,z);cityRoot.add(crops);}
+for(let row=0;row<7;row+=1){const z=108+row*5.3,soil=new THREE.Mesh(new THREE.BoxGeometry(42,0.08,2.2),farmSoil);soil.position.set(-300,0.08,z);cityRoot.add(soil);const crops=new THREE.Mesh(new THREE.BoxGeometry(40,0.42,0.9),cropMat);crops.position.set(-300,0.31,z);cityRoot.add(crops);}
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
-  for (let z = -150; z <= 150; z += graphics.streetTreeStep) {
+  for (let z = -330; z <= 330; z += graphics.streetTreeStep) {
     if (x > 95 && Math.abs(x - riverX) < 25) continue;
     addTree(x + 7.2, z + 4, 0.72);
   }
@@ -1233,10 +1279,10 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 
 function setCameraOverview() {
   followSelected = false;
-  freePosition.set(210, 145, 285);
-  cameraYaw = -2.48;
-  cameraPitch = -0.38;
-  camera.fov = 48;
+  freePosition.set(420, 290, 510);
+  cameraYaw = -2.47;
+  cameraPitch = -0.40;
+  camera.fov = 52;
   camera.updateProjectionMatrix();
 }
 
@@ -1250,9 +1296,9 @@ function cameraForward(out = new THREE.Vector3()) {
 }
 
 document.getElementById("park-view")?.addEventListener("click",()=>{
- followSelected=false;freePosition.set(100,92,-6);
- const direction=new THREE.Vector3(15,10,-87).sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
- camera.fov=48;camera.updateProjectionMatrix();
+ followSelected=false;freePosition.set(205,235,105);
+ const direction=new THREE.Vector3(PARK.x,12,PARK.z).sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
+ camera.fov=50;camera.updateProjectionMatrix();
 });
 setCameraOverview();
 camera.position.copy(freePosition);
