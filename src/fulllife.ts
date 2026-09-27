@@ -315,6 +315,15 @@ function setConnection(state: "authoritative" | "offline" | "connecting", label:
   connectionLabel.textContent = label;
 }
 
+window.addEventListener("error",(event)=>{
+  console.error("[fulllife] runtime error",event.error||event.message);
+  if(connection.dataset.state==="connecting")setConnection("connecting","GRAPHICS ERROR · CENSUS RETRYING ▾");
+});
+window.addEventListener("unhandledrejection",(event)=>{
+  console.error("[fulllife] unhandled rejection",event.reason);
+  if(connection.dataset.state==="connecting")setConnection("connecting","APP ERROR · CENSUS RETRYING ▾");
+});
+
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-production.up.railway.app").replace(/\/$/, "");
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
@@ -983,7 +992,7 @@ function addPowerPlant(x:number,z:number){
   const sign=makeCanvasSprite("HANSDREX POWER PLANT · 24/7",20,1.25);sign.position.set(0,22,13);g.add(sign);
   g.position.set(x,0,z);cityRoot.add(g);
 }
-const powerBuilding=BUILDINGS.find(b=>b.id==="power")!;
+const powerBuilding=BUILDINGS.find(b=>b.id==="power") || {x:-285,z:-75};
 addPowerPlant(powerBuilding.x,powerBuilding.z);
 
 // Hansdrex Farm in a reserved agricultural district.
@@ -1525,11 +1534,16 @@ function animate(now = performance.now()) {
   updateFreeCamera(dt);
   renderer.render(scene, camera);
 }
-animate();
-// Start API polling only after all Three.js globals, metro trains and landmark objects are initialized.
-// This removes a Safari race where a very fast API response could touch visual globals too early.
+// Start census polling before the first animation frame. All Three.js globals are initialized by
+// this point, but a render-frame failure must never prevent the city census from connecting.
 void fetchSnapshot();
 window.setInterval(fetchSnapshot,2500);
+try {
+  animate();
+} catch(error) {
+  console.error("[fulllife] initial graphics frame failed",error);
+  setConnection("connecting","CITY API CONNECTING · GRAPHICS DEGRADED ▾");
+}
 
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
