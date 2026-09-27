@@ -808,6 +808,13 @@ function createFly(index, parents = null) {
     familyWaitYears: null,
     familyReadiness: 0,
     flirtingWith: null,
+    relationshipTrust: randRange(58, 88),
+    jealousy: 0,
+    infidelityCount: 0,
+    lastAffairAt: -1e12,
+    lastAffairWith: null,
+    affairDiscovered: true,
+    lastJealousyAt: -1e12,
     pregnancyBy: null,
     pregnancyDueAt: null,
     children: [],
@@ -1265,6 +1272,13 @@ async function initDb() {
       fly.sleeping = Boolean(fly.sleeping);
       fly.familyWaitYears = Number.isFinite(fly.familyWaitYears) ? fly.familyWaitYears : null;
       fly.familyReadiness = Number(fly.familyReadiness || 0);
+      fly.relationshipTrust = Number.isFinite(fly.relationshipTrust) ? clamp(fly.relationshipTrust,0,100) : (fly.partnerId ? 68 : 75);
+      fly.jealousy = Number.isFinite(fly.jealousy) ? clamp(fly.jealousy,0,100) : 0;
+      fly.infidelityCount = Number(fly.infidelityCount || 0);
+      fly.lastAffairAt = Number.isFinite(fly.lastAffairAt) ? fly.lastAffairAt : -1e12;
+      fly.lastAffairWith = fly.lastAffairWith || null;
+      fly.affairDiscovered = fly.affairDiscovered !== false;
+      fly.lastJealousyAt = Number.isFinite(fly.lastJealousyAt) ? fly.lastJealousyAt : -1e12;
       fly.thirst = Number.isFinite(fly.thirst) ? fly.thirst : 25;
       fly.caffeine = Number.isFinite(fly.caffeine) ? fly.caffeine : 0;
       fly.sleepDebt = Number.isFinite(fly.sleepDebt) ? fly.sleepDebt : 0;
@@ -2744,6 +2758,98 @@ function romanceUtility(a, b) {
   return clamp(compatibility - stressPenalty, 0, 1);
 }
 
+function endRelationship(a,b,reason="relationship ended") {
+  if(!a||!b)return false;
+  const linked=a.partnerId===b.id||b.partnerId===a.id;
+  if(!linked)return false;
+  for(const person of [a,b]){
+    person.partnerId=null;
+    person.relationshipSince=null;
+    person.familyWaitYears=null;
+    person.familyReadiness=0;
+    person.flirtingWith=null;
+    person.affection=0;
+    person.relationshipTrust=clamp(Number(person.relationshipTrust||50)-8,0,100);
+    person.jealousy=clamp(Number(person.jealousy||0)-12,0,100);
+    person.happiness=clamp(person.happiness-12);
+    person.loneliness=clamp(person.loneliness+16);
+  }
+  emit("breakup",`${a.id} and ${b.id} ended their relationship: ${reason}.`,{flyId:a.id,partnerId:b.id,reason});
+  return true;
+}
+
+function revealInfidelity(actor,betrayed) {
+  if(!actor||!betrayed||!actor.alive||!betrayed.alive)return false;
+  actor.affairDiscovered=true;
+  betrayed.jealousy=clamp(Number(betrayed.jealousy||0)+38+(betrayed.traits?.risk||0.5)*14,0,100);
+  betrayed.relationshipTrust=clamp(Number(betrayed.relationshipTrust||65)-34,0,100);
+  actor.relationshipTrust=clamp(Number(actor.relationshipTrust||65)-18,0,100);
+  betrayed.affection=clamp(betrayed.affection-16);
+  actor.affection=clamp(actor.affection-10);
+  betrayed.stress=clamp(betrayed.stress+22);
+  actor.stress=clamp(actor.stress+10);
+  betrayed.happiness=clamp(betrayed.happiness-14);
+  brainRemember(betrayed,"infidelity_discovered",{partnerId:actor.id,with:actor.lastAffairWith});
+  brainRemember(actor,"infidelity_discovered",{partnerId:betrayed.id,with:actor.lastAffairWith});
+  emit("infidelity_discovered",`${betrayed.id} discovered that partner ${actor.id} had been unfaithful.`,{flyId:actor.id,partnerId:betrayed.id,otherId:actor.lastAffairWith});
+  return true;
+}
+
+function recordInfidelity(actor,other,betrayed,discovered=false) {
+  if(!actor?.alive||!other?.alive||!betrayed?.alive||actor.partnerId!==betrayed.id||related(actor,other))return false;
+  actor.infidelityCount=Number(actor.infidelityCount||0)+1;
+  actor.lastAffairAt=state.simulationAgeSeconds;
+  actor.lastAffairWith=other.id;
+  actor.affairDiscovered=false;
+  actor.excitement=clamp(actor.excitement+12);
+  other.excitement=clamp(other.excitement+9);
+  actor.stress=clamp(actor.stress+(actor.traits?.empathy||0.5)*6);
+  actor.affection=clamp(actor.affection-5);
+  brainRemember(actor,"infidelity",{with:other.id,partnerId:betrayed.id});
+  brainRemember(other,"affair",{with:actor.id,partnerId:betrayed.id});
+  if(discovered) return revealInfidelity(actor,betrayed);
+  emit("infidelity",`${actor.id} secretly crossed a relationship boundary with ${other.id} while partnered with ${betrayed.id}.`,{flyId:actor.id,partnerId:betrayed.id,otherId:other.id});
+  return true;
+}
+
+function nearestAffairCandidate(fly,partner) {
+  let best=null,bestScore=-Infinity;
+  for(const other of state.flies){
+    if(!other.alive||other.id===fly.id||other.id===partner?.id||other.partnerId||other.traveling||other.sleeping||other.currentLocationId!==fly.currentLocationId||related(fly,other))continue;
+    if(other.ageYears<18||other.ageYears>85||fly.ageYears<18||fly.ageYears>85)continue;
+    const d=Math.hypot(other.x-fly.x,other.z-fly.z);if(d>9.5)continue;
+    const score=romanceUtility(fly,other)*0.52+romanceUtility(other,fly)*0.28+(other.traits?.risk||0.5)*0.12+brainRand(fly)*0.08;
+    if(score>bestScore){best=other;bestScore=score;}
+  }
+  return bestScore>0.53?best:null;
+}
+
+function maybeJealousyConflict(fly,partner) {
+  if(!fly?.alive||!partner?.alive||fly.partnerId!==partner.id)return false;
+  const jealousy=Number(fly.jealousy||0);
+  if(jealousy<12||state.simulationAgeSeconds-Number(fly.lastJealousyAt||-1e12)<1800)return false;
+  fly.lastJealousyAt=state.simulationAgeSeconds;
+  const intensity=clamp(jealousy/100*0.48+fly.stress/100*0.24+(1-Number(fly.relationshipTrust||60)/100)*0.28,0,1);
+  fly.stress=clamp(fly.stress+4+intensity*8);
+  partner.stress=clamp(partner.stress+3+intensity*6);
+  fly.affection=clamp(fly.affection-(2+intensity*7));
+  partner.affection=clamp(partner.affection-(1+intensity*5));
+  fly.jealousy=clamp(jealousy-(5+fly.traits.empathy*5));
+  emit("relationship_conflict",`${fly.id} confronted partner ${partner.id} over jealousy and trust.`,{flyId:fly.id,partnerId:partner.id,intensity});
+  const aggression=intensity*0.46+fly.traits.risk*0.22+(1-fly.traits.empathy)*0.22+fly.stress/100*0.18;
+  if(aggression>0.76&&brainRand(fly)<0.045+intensity*0.045){
+    const damage=brainRange(fly,2,10)*(0.7+fly.traits.risk*0.5);
+    partner.health=clamp(partner.health-damage);
+    partner.stress=clamp(partner.stress+12);
+    recordLawViolation(fly,"assault",2.4);
+    emit("assault",`${fly.id} assaulted partner ${partner.id} during a jealousy conflict.`,{flyId:fly.id,victimId:partner.id,damage,relationshipConflict:true});
+  }
+  if((Number(fly.relationshipTrust||50)<18||fly.affection<12)&&brainRand(fly)<0.12+intensity*0.20){
+    return endRelationship(fly,partner,"trust collapsed after repeated conflict");
+  }
+  return false;
+}
+
 function socialLife(fly, clock) {
   if (!fly.alive||fly.traveling||fly.sleeping) return;
   if (!["social", "food", "nightlife"].includes(location(fly.currentLocationId).type)) return;
@@ -2753,30 +2859,39 @@ function socialLife(fly, clock) {
   const partner = fly.partnerId ? state.flies.find((f) => f.id === fly.partnerId && f.alive) : null;
 
   if (partner) {
-    if(partner.traveling||partner.sleeping||partner.currentLocationId!==fly.currentLocationId||Math.hypot(partner.x-fly.x,partner.z-fly.z)>10)return;
-    const closeness = 4 + fly.traits.empathy * 5;
-    fly.affection = clamp(fly.affection + randRange(-2, closeness), 0, 100);
-    fly.loneliness = clamp(fly.loneliness - 8);
-    fly.happiness = clamp(fly.happiness + 2.5);
-    fly.excitement = clamp(fly.excitement + randRange(-3, 5));
-    if (fly.affection < 12 && fly.stress > 70 && rand() < 0.08) {
-      const old = fly.partnerId;
-      fly.partnerId = null;
-      fly.relationshipSince = null;
-      fly.familyWaitYears = null;
-      fly.familyReadiness = 0;
-      fly.affection = 0;
-      const other = state.flies.find((f) => f.id === old);
-      if (other?.partnerId === fly.id) {
-        other.partnerId = null;
-        other.relationshipSince = null;
-        other.familyWaitYears = null;
-        other.familyReadiness = 0;
-        other.affection = 0;
+    const partnerPresent=!partner.traveling&&!partner.sleeping&&partner.currentLocationId===fly.currentLocationId&&Math.hypot(partner.x-fly.x,partner.z-fly.z)<=10;
+    if(partnerPresent){
+      if(fly.lastAffairWith&&!fly.affairDiscovered&&state.simulationAgeSeconds-fly.lastAffairAt>600){
+        const discoveryChance=0.035+partner.traits.sociability*0.045+Math.min(0.06,Number(fly.infidelityCount||0)*0.012);
+        if(brainRand(partner)<discoveryChance)revealInfidelity(fly,partner);
       }
-      fly.happiness = clamp(fly.happiness - 15);
-      fly.loneliness = clamp(fly.loneliness + 20);
-      emit("breakup", `${fly.id} and ${old} broke up.`, { flyId: fly.id, partnerId: old });
+      const closeness = 4 + fly.traits.empathy * 5 - Number(fly.jealousy||0)*0.025;
+      fly.affection = clamp(fly.affection + randRange(-2, closeness), 0, 100);
+      fly.relationshipTrust=clamp(Number(fly.relationshipTrust||65)+0.15*fly.traits.empathy-(fly.jealousy||0)*0.001,0,100);
+      fly.loneliness = clamp(fly.loneliness - 8);
+      fly.happiness = clamp(fly.happiness + 2.5);
+      fly.excitement = clamp(fly.excitement + randRange(-3, 5));
+      if(maybeJealousyConflict(fly,partner))return;
+      if ((fly.affection < 12 || Number(fly.relationshipTrust||50)<10) && fly.stress > 70 && rand() < 0.08) {
+        endRelationship(fly,partner,"affection and trust fell too low");
+      }
+      return;
+    }
+
+    if(fly.ageYears>=18&&fly.ageYears<=85&&state.simulationAgeSeconds-Number(fly.lastAffairAt||-1e12)>7200){
+      const candidate=nearestAffairCandidate(fly,partner);
+      if(candidate){
+        const desireA=romanceUtility(fly,candidate),desireB=romanceUtility(candidate,fly);
+        const commitment=fly.affection/100*0.24+Number(fly.relationshipTrust||65)/100*0.24+fly.traits.empathy*0.18+(1-fly.traits.risk)*0.12;
+        const nightlife=location(fly.currentLocationId).type==="nightlife"?0.10:0;
+        const temptation=clamp(fly.traits.risk*0.24+fly.loneliness/100*0.18+fly.excitement/100*0.12+neuralDrive(fly,"approachDrive")*0.18+nightlife-commitment,0,1);
+        const mutual=clamp(desireB*0.56+candidate.traits.risk*0.14+candidate.loneliness/100*0.12+neuralDrive(candidate,"approachDrive")*0.18,0,1);
+        const chance=Math.max(0,0.001+temptation*0.012+(desireA-0.55)*0.008);
+        if(desireA>0.58&&mutual>0.50&&brainRand(fly)<chance){
+          const witnessed=brainRand(fly)<0.10+candidate.traits.sociability*0.08;
+          recordInfidelity(fly,candidate,partner,witnessed);
+        }
+      }
     }
     return;
   }
@@ -2804,6 +2919,8 @@ function socialLife(fly, clock) {
     fly.partnerId = candidate.id;
     candidate.partnerId = fly.id;
     fly.affection = candidate.affection = randRange(45, 72);
+    fly.relationshipTrust=candidate.relationshipTrust=randRange(58,82);
+    fly.jealousy=candidate.jealousy=0;
     fly.relationshipSince = candidate.relationshipSince = gameYears();
 
     const waitPreference = (person, other) => {
@@ -3451,6 +3568,11 @@ function compactFly(f) {
     jobTitle: f.jobTitle,
     partnerId: f.partnerId,
     affection: Number(f.affection.toFixed(1)),
+    relationshipTrust: Number((f.relationshipTrust || 0).toFixed(1)),
+    jealousy: Number((f.jealousy || 0).toFixed(1)),
+    infidelityCount: Number(f.infidelityCount || 0),
+    lastAffairWith: f.lastAffairWith || null,
+    affairDiscovered: f.affairDiscovered !== false,
     relationshipYears: f.relationshipSince == null ? null : Number(Math.max(0, gameYears() - f.relationshipSince).toFixed(3)),
     familyWaitYears: f.familyWaitYears == null ? null : Number(f.familyWaitYears.toFixed(3)),
     familyReadiness: Number((f.familyReadiness || 0).toFixed(3)),
@@ -3779,4 +3901,4 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 }
 // Side-effect-free test entry points; importing never starts a server or touches persistence.
-export {simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
+export {simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,recordInfidelity,revealInfidelity,endRelationship,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
