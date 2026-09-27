@@ -1010,6 +1010,7 @@ function freshState() {
     housing: null,
     currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
     weather: null,
+    heliTrial: { version:1, passengerIds:Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,"0")}`), startedIds:[], completedIds:[], batchesStarted:0, lastBatchAt:0 },
   };
   state = s;
   state.weather = makeWeather();
@@ -2670,6 +2671,54 @@ function simulateParkWheel(fly){
  return true;
 }
 
+const HELI_TRIAL_IDS=Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,"0")}`);
+
+function ensureHeliTrialState(){
+  state.heliTrial ||= {version:1,passengerIds:[...HELI_TRIAL_IDS],startedIds:[],completedIds:[],batchesStarted:0,lastBatchAt:0};
+  state.heliTrial.passengerIds=Array.isArray(state.heliTrial.passengerIds)&&state.heliTrial.passengerIds.length?state.heliTrial.passengerIds:[...HELI_TRIAL_IDS];
+  state.heliTrial.startedIds=Array.isArray(state.heliTrial.startedIds)?state.heliTrial.startedIds:[];
+  state.heliTrial.completedIds=Array.isArray(state.heliTrial.completedIds)?state.heliTrial.completedIds:[];
+  state.heliTrial.batchesStarted=Number(state.heliTrial.batchesStarted||0);
+  state.heliTrial.lastBatchAt=Number(state.heliTrial.lastBatchAt||0);
+  return state.heliTrial;
+}
+
+function commissionHeliTrial(clock=gameClock()){
+  const trial=ensureHeliTrialState(),now=state.simulationAgeSeconds;
+  const livingById=new Map(state.flies.filter(f=>f.alive).map(f=>[f.id,f]));
+  const active=trial.passengerIds
+    .map(id=>livingById.get(id))
+    .filter(f=>f&&f.heliPassenger&&Number(f.heliTourUntil||0)>now);
+  if(active.length)return active;
+  const completed=new Set(trial.completedIds);
+  const pending=trial.passengerIds.map(id=>livingById.get(id)).filter(f=>f&&!completed.has(f.id));
+  if(!pending.length)return [];
+  // The commissioning ride is free and may run outside normal commercial hours, but not in severe simulated weather.
+  if(weatherDanger()>0.55)return [];
+  ensureHeliTourStaff();
+  const batch=pending.slice(0,4);
+  const startsAt=now+120,endsAt=startsAt+1800;
+  state.helicopterFlight={startsAt,endsAt,trial:true};
+  trial.batchesStarted+=1;trial.lastBatchAt=now;
+  for(const fly of batch){
+    if(!trial.startedIds.includes(fly.id))trial.startedIds.push(fly.id);
+    fly.heliTrialRide=true;
+    fly.lastHeliTicket=0;
+    fly.heliTourStartedAt=startsAt;
+    fly.heliTourUntil=endsAt;
+    fly.heliPassenger=true;
+    fly.traveling=false;fly.sleeping=false;fly.indoors=false;
+    fly.currentLocationId="heliport";fly.targetLocationId="heliport";
+    fly.x=23;fly.y=103;fly.z=43.5;fly.targetX=23;fly.targetZ=43.5;
+    fly.transitMode="helicopter";fly.transitStage="boarding";fly.action="boarding free Hansdrex helicopter trial";
+    fly.excitement=clamp(fly.excitement+14);fly.stress=clamp(fly.stress-3);
+    brainRemember(fly,"heli_trial_ticket",{price:0,batch:trial.batchesStarted});
+    emit("heli_trial_ticket",`${fly.id} received a FREE commissioning ticket for Hansdrex Heli Tours.`,{flyId:fly.id,price:0,batch:trial.batchesStarted});
+  }
+  emit("heli_trial_batch",`Hansdrex Heli Tours started free test batch ${trial.batchesStarted}: ${batch.map(f=>f.id).join(", ")}.`,{flyIds:batch.map(f=>f.id),price:0});
+  return batch;
+}
+
 function heliTourTicketPrice(){
   return 185*Number(state.centralBank?.priceLevel||1);
 }
@@ -2709,6 +2758,12 @@ function simulateHeliTour(fly,clock){
     fly.x=15;fly.z=43.5;fly.y=1.4;fly.indoors=true;fly.targetX=fly.x;fly.targetZ=fly.z;fly.action="finished Hansdrex helicopter tour";fly.actionUntil=now+900;
     fly.happiness=clamp(fly.happiness+10);fly.excitement=clamp(fly.excitement+16);fly.stress=clamp(fly.stress-12);
     brainRemember(fly,"heli_tour_completed",{weather:weatherLabel(),ticket:fly.lastHeliTicket||0});
+    if(fly.heliTrialRide){
+      const trial=ensureHeliTrialState();
+      if(!trial.completedIds.includes(fly.id))trial.completedIds.push(fly.id);
+      fly.heliTrialRide=false;
+      emit("heli_trial_complete",`${fly.id} completed the FREE Hansdrex helicopter commissioning ride.`,{flyId:fly.id,price:0});
+    }
     emit("heli_landing",`${fly.id} landed after a Hansdrex skyline helicopter tour.`,{flyId:fly.id,ticket:fly.lastHeliTicket||0});
     return true;
   }
@@ -3721,6 +3776,7 @@ function getState() {
     mapVersion:MAP_VERSION,
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>f.action?.startsWith("waiting at M")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
+    helicopterTrial:(()=>{const t=ensureHeliTrialState();return {passengerIds:t.passengerIds,started:t.startedIds.length,completed:t.completedIds.length,active:living.filter(f=>f.heliPassenger&&t.passengerIds.includes(f.id)).map(f=>f.id),pending:t.passengerIds.filter(id=>!t.completedIds.includes(id)),ticket:0,batchesStarted:t.batchesStarted};})(),
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
@@ -3773,6 +3829,7 @@ async function tick() {
       const clock = gameClock();
       updateWeather(clock);
       ensureAcademyTeacher();
+      commissionHeliTrial(clock);
       ensureHeliTourStaff();
       if(!state.flies.some(f=>f.alive&&f.jobId==="rooftop")){
        const host=state.flies.find(f=>f.alive&&f.ageYears>=21&&f.ageYears<65&&!f.jobId&&!f.businessEmployeeOf);
@@ -3901,4 +3958,4 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 }
 // Side-effect-free test entry points; importing never starts a server or touches persistence.
-export {simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,recordInfidelity,revealInfidelity,endRelationship,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
+export {simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,ensureHeliTrialState,commissionHeliTrial,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,recordInfidelity,revealInfidelity,endRelationship,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
