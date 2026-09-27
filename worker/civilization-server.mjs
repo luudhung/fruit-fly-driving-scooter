@@ -106,7 +106,6 @@ const METRO_ROUTE_LINES = [
   { id:"M6", points:[[159,-150],[159,-100],[159,-50],[159,0],[159,50],[159,100],[159,150]] },
 ];
 
-function nearestPointIndex];
 
 function nearestPointIndex(points, x, z) {
   let best = 0;
@@ -272,7 +271,6 @@ function emergentRoleForBusiness(business, owner) {
   return {title,wage:Number(wage.toFixed(2)),need:sectorNeed};
 }
 
-const APARTMENT_CAPACITY];
 
 const APARTMENT_CAPACITY = 10;
 const POPULATION_BOOTSTRAP_VERSION = 3;
@@ -1875,7 +1873,7 @@ function hireEnterpriseEmployee(business, owner) {
   return worker;
 }
 
-function closeEnterprisefunction closeEnterprise(business, owner, reason) {
+function closeEnterprise(business, owner, reason) {
   business.status = "bankrupt";
   const defaultLoss = Math.max(0, Number(business.loanBalance || 0));
   if (defaultLoss > 0) {
