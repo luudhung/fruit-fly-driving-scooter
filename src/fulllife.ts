@@ -38,6 +38,11 @@ type FlyState = {
   jobTitle?: string | null;
   partnerId?: string | null;
   affection: number;
+  relationshipTrust?: number;
+  jealousy?: number;
+  infidelityCount?: number;
+  lastAffairWith?: string | null;
+  affairDiscovered?: boolean;
   relationshipYears?: number | null;
   familyWaitYears?: number | null;
   familyReadiness?: number;
@@ -356,7 +361,7 @@ function renderInspector(fly: FlyState | null) {
   flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
   flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
   flyRelationshipEl.textContent = fly.partnerId
-    ? `${fly.partnerId} · ${num(fly.relationshipYears || 0, 2)}y`
+    ? `${fly.partnerId} · ${num(fly.relationshipYears || 0, 2)}y · trust ${num(fly.relationshipTrust || 0)}% · jealousy ${num(fly.jealousy || 0)}% · affairs ${fly.infidelityCount || 0}${fly.lastAffairWith && fly.affairDiscovered===false ? " · secret" : ""}`
     : (fly.flirtingWith ? `flirting ${fly.flirtingWith}` : "single");
   flyFamilyEl.textContent = fly.partnerId
     ? `${Math.round((fly.familyReadiness || 0) * 100)}% ready · wait ${num(fly.familyWaitYears || 0, 2)}y`
@@ -462,6 +467,8 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "capital_sentence" || e.type === "execution" ? "⚖ " :
       e.type === "election_campaign" || e.type === "election_result" || e.type === "party_founded" ? "🗳 " :
       e.type === "political_argument" ? "💬 " :
+      e.type === "infidelity" || e.type === "infidelity_discovered" ? "💔 " :
+      e.type === "relationship_conflict" || e.type === "breakup" ? "⚠ " :
       e.type === "heli_boarding" ? "🚁 " :
       e.type === "heli_landing" ? "🚁 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
