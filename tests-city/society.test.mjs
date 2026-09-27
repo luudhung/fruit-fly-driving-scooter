@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation} from '../worker/civilization-server.mjs';
+import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation,recordInfidelity,revealInfidelity,endRelationship} from '../worker/civilization-server.mjs';
 import {entrance,blocked,BUILDINGS} from '../worker/city-map.mjs';
 function base(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0};return s;}
 test('sleep begins only after arrival inside the assigned home and remains motionless',()=>{
@@ -36,4 +36,19 @@ test('doctor cannot treat a patient while either is still traveling',()=>{
 test('map migration preserves wealth/brains and gives every household one valid physical unit',()=>{
  const s=base(),wealth=s.flies.map(f=>[f.money,f.savings,f.brain.id]);migrateGroundHousesToSafeLots(7);migrateResidentNavigation(7);
  for(let i=0;i<s.flies.length;i++){const f=s.flies[i];assert.deepEqual([f.money,f.savings,f.brain.id],wealth[i]);assert.ok(BUILDINGS.some(b=>b.id===f.housingUnitId));if(!f.indoors)assert.equal(blocked(f),false);else assert.ok(BUILDINGS.some(b=>Math.abs(b.x-f.x)<b.w/2&&Math.abs(b.z-f.z)<b.d/2));}
+});
+
+test('infidelity is persisted as relationship state and discovery creates jealousy/trust loss',()=>{
+ const s=base(),actor=s.flies[0],partner=s.flies[1],other=s.flies[2];
+ actor.partnerId=partner.id;partner.partnerId=actor.id;actor.relationshipTrust=partner.relationshipTrust=70;actor.affection=partner.affection=65;
+ actor.ageYears=partner.ageYears=other.ageYears=30;other.partnerId=null;
+ const beforeEvents=s.events.length;
+ assert.equal(recordInfidelity(actor,other,partner,false),true);
+ assert.equal(actor.infidelityCount,1);assert.equal(actor.lastAffairWith,other.id);assert.equal(actor.affairDiscovered,false);
+ assert.equal(partner.jealousy,0);
+ assert.equal(revealInfidelity(actor,partner),true);
+ assert.equal(actor.affairDiscovered,true);assert.ok(partner.jealousy>30);assert.ok(partner.relationshipTrust<50);
+ assert.ok(s.events.length>=beforeEvents+2);
+ assert.equal(endRelationship(actor,partner,'test trust collapse'),true);
+ assert.equal(actor.partnerId,null);assert.equal(partner.partnerId,null);
 });
