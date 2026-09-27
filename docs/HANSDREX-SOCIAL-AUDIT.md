@@ -38,7 +38,8 @@ The observer (`src/fulllife.ts`) consumes snapshots from a persistent Node/Postg
 - Enterprise export revenue is exogenous demand and explicitly recorded; this is not a closed macroeconomic economy. Monetary policy and long-term solvency still need longer evaluation.
 - Birth/death probabilities, education, health and life stages are human-like synthetic rules on a compressed calendar, not biological fruit-fly predictions.
 - Cohabitation is implemented for a simple eligible couple; divorce/property division, multi-property inheritance and complex blended-family moves are incomplete.
-- Organized conflict/military/ceasefire, explicit infidelity/jealousy and staged house construction remain listed in the backlog until implemented and tested.
+- Organized conflict/military/ceasefire and staged house construction remain listed in the backlog until implemented and tested.
+- Explicit infidelity/jealousy now has persistent trust/jealousy state, affair discovery, breakup and conflict hooks. It is still a synthetic social model, not a behavioral claim about biological fruit flies.
 - Real mobile/iPad GPU performance and production worker migration require deployment/browser evidence; successful unit tests alone do not establish them.
 
 ## Evidence
@@ -58,3 +59,8 @@ The primary Railway service was restarted with CIV_INITIAL_POPULATION=100 by the
 
 
 Isolation verified at 2026-09-27 14:19 UTC: primary WORLD-A had 100 alive / D84; secondary WORLD-A-V2-ISOLATED had its separate initial population 40 / D1. A read-only `/api/civilization/mortality?since=<ISO timestamp>` endpoint is included in the branch to inspect the append-only database event archive after deployment. It explicitly distinguishes archive counts from current checkpoint counts because historical WORLD-A events may combine both formerly competing workers. The primary Dockerfile now packages city-map.mjs, matching its new server import.
+
+
+## Relationship milestone — 2026-09-27
+
+Partnered adults can now make rare neural/trait-influenced infidelity choices only when physically co-located with another eligible adult and their partner is absent. Affairs can remain secret or be discovered later; discovery changes trust, jealousy, stress and affection, and repeated conflict can lead to breakup. High-conflict confrontations can feed into the existing assault/law system instead of bypassing it. New relationship telemetry is exposed to the inspector. Deterministic tests cover affair persistence, discovery consequences and symmetric breakup cleanup.
