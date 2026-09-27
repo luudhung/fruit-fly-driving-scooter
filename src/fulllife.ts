@@ -1000,6 +1000,13 @@ buildTrees();
 
 cityRoot.traverse(obj=>{obj.updateMatrix();obj.matrixAutoUpdate=false;});
 for(const train of metroTrains) train.group.matrixAutoUpdate=true;
+// These parts move every frame and must not inherit the static-city matrix freeze.
+wheelRotor.matrixAutoUpdate=true;
+for(const cabin of wheelCabins)cabin.matrixAutoUpdate=true;
+heliTourGroup.matrixAutoUpdate=true;
+heliRotor.matrixAutoUpdate=true;
+heliRotorCross.matrixAutoUpdate=true;
+heliTailRotor.matrixAutoUpdate=true;
 
 let snapshotReceivedAt=0;
 function updateMetroTrains(now:number){
