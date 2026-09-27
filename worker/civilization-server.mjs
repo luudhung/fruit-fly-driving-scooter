@@ -262,9 +262,10 @@ function migrateResidentNavigation(previousMapVersion, residents=state.flies) {
     const base=fly.currentLocationId===fly.homeId
       ? {x:Number(fly.homeX??location(fly.homeId).x),z:Number(fly.homeZ??location(fly.homeId).z)}
       : location(fly.currentLocationId);
-    const p=legalDestinationPoint(base);
+    const inside=fly.currentLocationId===fly.homeId||BUILDINGS.some(b=>b.id===fly.currentLocationId)||["rooftop","heliport"].includes(fly.currentLocationId);
+    const p=inside?base:legalDestinationPoint(base);
     fly.x=p.x;fly.z=p.z;fly.targetX=p.x;fly.targetZ=p.z;fly.finalTargetX=p.x;fly.finalTargetZ=p.z;
-    fly.indoors=true;fly.sleeping=false;fly.pendingAction=null;fly.parkedCar=parkingPoint(p);fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.metroLineId=null;fly.transitStage=null;fly.transitMode="walk";fly.travelStuckTicks=0;
+    fly.indoors=inside;fly.actionUntil=0;fly.sleeping=false;fly.pendingAction=null;fly.parkedCar=parkingPoint(p);fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.metroLineId=null;fly.transitStage=null;fly.transitMode="walk";fly.travelStuckTicks=0;
   }
 }
 

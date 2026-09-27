@@ -35,5 +35,5 @@ test('doctor cannot treat a patient while either is still traveling',()=>{
 });
 test('map migration preserves wealth/brains and gives every household one valid physical unit',()=>{
  const s=base(),wealth=s.flies.map(f=>[f.money,f.savings,f.brain.id]);migrateGroundHousesToSafeLots(7);migrateResidentNavigation(7);
- for(let i=0;i<s.flies.length;i++){const f=s.flies[i];assert.deepEqual([f.money,f.savings,f.brain.id],wealth[i]);assert.ok(BUILDINGS.some(b=>b.id===f.housingUnitId));assert.equal(blocked(f),false);}
+ for(let i=0;i<s.flies.length;i++){const f=s.flies[i];assert.deepEqual([f.money,f.savings,f.brain.id],wealth[i]);assert.ok(BUILDINGS.some(b=>b.id===f.housingUnitId));if(!f.indoors)assert.equal(blocked(f),false);else assert.ok(BUILDINGS.some(b=>Math.abs(b.x-f.x)<b.w/2&&Math.abs(b.z-f.z)<b.d/2));}
 });
