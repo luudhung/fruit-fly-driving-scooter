@@ -1267,6 +1267,14 @@ addEventListener("keydown", (e) => {
 addEventListener("keyup", (e) => {pressed.delete(e.code);if (movementKeys.has(e.code)) e.preventDefault();});
 document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;pressed.add(key);button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();pressed.delete(key);button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{pressed.delete(key);button.classList.remove("active");});});
 
+const mobileInspectorToggle=document.getElementById("mobile-inspector-toggle") as HTMLButtonElement | null;
+mobileInspectorToggle?.addEventListener("click",(e)=>{
+  e.preventDefault();e.stopPropagation();
+  const open=document.body.classList.toggle("mobile-inspector-open");
+  mobileInspectorToggle.setAttribute("aria-expanded",String(open));
+  mobileInspectorToggle.textContent=open?"CLOSE INFO":"FLY INFO";
+});
+
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 renderer.domElement.addEventListener("click", (e) => {
@@ -1281,6 +1289,11 @@ renderer.domElement.addEventListener("click", (e) => {
   selectedFlyId = id;
   const fly = latestFlyStates.get(id) || null;
   renderInspector(fly);
+  if (matchMedia("(max-width:980px), (pointer:coarse)").matches) {
+    document.body.classList.add("mobile-inspector-open");
+    mobileInspectorToggle?.setAttribute("aria-expanded","true");
+    if (mobileInspectorToggle) mobileInspectorToggle.textContent="CLOSE INFO";
+  }
   for (const [fid, visual] of flyVisuals) {
     (visual.halo.material as THREE.MeshBasicMaterial).opacity = fid === id ? 0.85 : 0;
   }

@@ -63,8 +63,14 @@
     .mobile-control{width:52px;height:52px;border-radius:16px;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 20px/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
     .mobile-control:active,.mobile-control.active{background:rgba(255,255,255,.20);color:#fff;transform:scale(.96)}
     .mobile-control[data-key="KeyW"]{grid-area:up}.mobile-control[data-key="KeyA"]{grid-area:left}.mobile-control[data-key="KeyS"]{grid-area:down}.mobile-control[data-key="KeyD"]{grid-area:right}
-    @media(max-width:980px),(pointer:coarse){.right{display:none}.hint{display:none}.mobile-controls{display:block}}
-    @media(max-width:650px){.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}}
+    .mobile-inspector-toggle{display:none;position:fixed;right:18px;top:74px;z-index:14;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.55);backdrop-filter:blur(5px);color:rgba(255,255,255,.82);border-radius:14px;padding:10px 12px;font:800 11px/1 system-ui;letter-spacing:.08em}
+    @media(max-width:980px),(pointer:coarse){
+      .hint{display:none}.mobile-controls{display:block}.mobile-inspector-toggle{display:block}
+      .right{display:block;position:fixed;top:118px;right:12px;bottom:110px;width:min(86vw,340px);z-index:13;overflow:auto;transform:translateX(calc(100% + 28px));transition:transform .22s ease;pointer-events:none}
+      body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
+      .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
+    }
+    @media(max-width:650px){.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
   </style>
 </head>
 <body>
@@ -115,6 +121,7 @@
     </section>
   </aside>
 
+  <button class="mobile-inspector-toggle" id="mobile-inspector-toggle" type="button" aria-expanded="false">FLY INFO</button>
   <aside class="right">
     <section class="card" id="fly-card">
       <div class="head"><span>Selected fly</span><button class="panel-toggle" data-panel="fly-card" type="button">−</button></div>
