@@ -667,7 +667,13 @@ cityRoot.add(harbor);
 
 const roadMat = new THREE.MeshStandardMaterial({ color: 0x242a2e, roughness: 0.97 });
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb6b5ad, roughness: 1 });
-const laneMat = new THREE.MeshBasicMaterial({ color: 0xe9dfb1 });
+const laneMat = new THREE.MeshBasicMaterial({
+  color: 0xe9dfb1,
+  toneMapped: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -4,
+  polygonOffsetUnits: -4,
+});
 const parkMat = new THREE.MeshStandardMaterial({ color: 0x4f8459, roughness: 1 });
 const plazaMat = new THREE.MeshStandardMaterial({ color: 0xc7c3b8, roughness: 1 });
 
@@ -675,12 +681,13 @@ const avenueXs = AVENUES;
 const streetZs = STREETS;
 
 function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false) {
-  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 6, 0.10, d + 6), sidewalkMat);
-  base.position.set(x, 0.04, z);
+  // Keep each road layer physically separated in Y. This prevents distant-camera z-fighting.
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 6, 0.06, d + 6), sidewalkMat);
+  base.position.set(x, 0.03, z);
   cityRoot.add(base);
 
-  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), roadMat);
-  road.position.set(x, 0.11, z);
+  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, d), roadMat);
+  road.position.set(x, 0.10, z);
   cityRoot.add(road);
 
   const sidewalkOffset = (avenue ? w : d) / 2 + 1.55;
@@ -689,15 +696,15 @@ function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false
       avenue ? new THREE.BoxGeometry(2.6, 0.18, d + 5) : new THREE.BoxGeometry(w + 5, 0.18, 2.6),
       sidewalkMat,
     );
-    walk.position.set(avenue ? x + side * sidewalkOffset : x, 0.18, avenue ? z : z + side * sidewalkOffset);
+    walk.position.set(avenue ? x + side * sidewalkOffset : x, 0.15, avenue ? z : z + side * sidewalkOffset);
     cityRoot.add(walk);
   }
 
   const marker = new THREE.Mesh(
-    new THREE.BoxGeometry(avenue ? 0.12 : w * 0.92, 0.014, avenue ? d * 0.92 : 0.12),
+    new THREE.BoxGeometry(avenue ? 0.16 : w * 0.92, 0.008, avenue ? d * 0.92 : 0.16),
     laneMat,
   );
-  marker.position.set(x, 0.18, z);
+  marker.position.set(x, 0.151, z);
   cityRoot.add(marker);
 }
 
@@ -709,7 +716,13 @@ const trafficSignals: TrafficSignalVisual[] = [];
 const trafficPoleMat = new THREE.MeshStandardMaterial({ color:0x303638, roughness:0.72, metalness:0.42 });
 const trafficBoxMat = new THREE.MeshStandardMaterial({ color:0x111615, roughness:0.82 });
 const trafficBulbGeo = new THREE.SphereGeometry(0.16, 7, 5);
-const crossingMat = new THREE.MeshBasicMaterial({ color:0xf1f2ed, transparent:true, opacity:0.72 });
+const crossingMat = new THREE.MeshBasicMaterial({
+  color:0xf1f2ed,
+  toneMapped:false,
+  polygonOffset:true,
+  polygonOffsetFactor:-7,
+  polygonOffsetUnits:-7,
+});
 
 function addTrafficHead(x:number,z:number,axis:"ns"|"ew",offset:number) {
   const g=new THREE.Group();
@@ -720,8 +733,8 @@ function addTrafficHead(x:number,z:number,axis:"ns"|"ew",offset:number) {
   g.position.set(x,0,z); cityRoot.add(g); trafficSignals.push({axis,offset,red,yellow,green});
 }
 function addCrossing(x:number,z:number) {
-  for(const dx of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.018,3.2),crossingMat);m.position.set(x+dx,0.195,z-6.1);cityRoot.add(m);}
-  for(const dz of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.018,0.8),crossingMat);m.position.set(x-6.2,0.196,z+dz);cityRoot.add(m);}
+  for(const dx of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.008,3.2),crossingMat);m.position.set(x+dx,0.165,z-6.1);cityRoot.add(m);}
+  for(const dz of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.008,0.8),crossingMat);m.position.set(x-6.2,0.166,z+dz);cityRoot.add(m);}
 }
 const signalAvenues=avenueXs.filter((_,i)=>i%graphics.trafficStride===0);
 const signalStreets=streetZs.filter((_,i)=>i%graphics.trafficStride===0);
@@ -948,26 +961,68 @@ addPetronasTwinTowers(41,43.5);
 const petronasLabel=makeCanvasSprite("HANSDREX PETRONAS",22,1.15);petronasLabel.position.set(41,119,43.5);cityRoot.add(petronasLabel);
 
 function addBurjKhalifaStyle(x:number,z:number){
- const g=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x89aebf,roughness:.2,metalness:.52}),silver=new THREE.MeshStandardMaterial({color:0xcbd2d4,roughness:.28,metalness:.74});
+ const g=new THREE.Group(),
+   glass=new THREE.MeshStandardMaterial({color:0x89aebf,roughness:.2,metalness:.52}),
+   silver=new THREE.MeshStandardMaterial({color:0xcbd2d4,roughness:.28,metalness:.74}),
+   coolGlow=new THREE.MeshBasicMaterial({color:0xd7f5ff,toneMapped:false}),
+   warmGlow=new THREE.MeshBasicMaterial({color:0xffd89a,toneMapped:false});
  let y=0;
  const tiers=[[13,40],[11.2,34],[9.4,30],[7.7,25],[6.1,21],[4.6,17]] as const;
- tiers.forEach(([r,h],i)=>{const seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.72/2,r/2,h,10),i%2?silver:glass);seg.position.y=y+h/2;seg.rotation.y=i*.17;g.add(seg);y+=h-2;});
+ tiers.forEach(([r,h],i)=>{
+   const tierBase=y;
+   const seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.72/2,r/2,h,10),i%2?silver:glass);
+   seg.position.y=tierBase+h/2;seg.rotation.y=i*.17;g.add(seg);
+   // Thin fake-light bands and vertical accents give the tower a night identity without PointLights.
+   const ring=new THREE.Mesh(new THREE.TorusGeometry(r*.44,.075,5,22),i%2?warmGlow:coolGlow);
+   ring.rotation.x=Math.PI/2;ring.position.y=tierBase+h*.80;g.add(ring);
+   for(const a of [0,Math.PI/2,Math.PI,Math.PI*1.5]){
+     const rr=r*.37;
+     const strip=new THREE.Mesh(new THREE.BoxGeometry(.11,h*.72,.11),coolGlow);
+     strip.position.set(Math.cos(a)*rr,tierBase+h*.46,Math.sin(a)*rr);g.add(strip);
+   }
+   y+=h-2;
+ });
  const crown=new THREE.Mesh(new THREE.CylinderGeometry(.65,2.0,18,9),silver);crown.position.y=y+9;g.add(crown);
+ const crownGlow=new THREE.Mesh(new THREE.CylinderGeometry(.20,.62,14,8),warmGlow);crownGlow.position.y=y+12;g.add(crownGlow);
  const spire=new THREE.Mesh(new THREE.CylinderGeometry(.12,.42,42,7),silver);spire.position.y=y+37;g.add(spire);
+ const spireGlow=new THREE.Mesh(new THREE.CylinderGeometry(.055,.13,39,6),coolGlow);spireGlow.position.y=y+37.5;g.add(spireGlow);
+ const baseHalo=new THREE.Mesh(new THREE.TorusGeometry(6.2,.11,6,28),warmGlow);baseHalo.rotation.x=Math.PI/2;baseHalo.position.y=.18;g.add(baseHalo);
  const sign=makeCanvasSprite("BURJ KHALIFA · HANSDREX",26,1.35);sign.position.set(0,194,0);g.add(sign);
  g.position.set(x,0,z);cityRoot.add(g);
 }
 addBurjKhalifaStyle(236,72.5);
 
 function addMarinaBaySandsStyle(x:number,z:number){
- const g=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x7597a7,roughness:.22,metalness:.38}),stone=new THREE.MeshStandardMaterial({color:0xc7c3b8,roughness:.55,metalness:.12});
+ const g=new THREE.Group(),
+   glass=new THREE.MeshStandardMaterial({color:0x7597a7,roughness:.22,metalness:.38}),
+   stone=new THREE.MeshStandardMaterial({color:0xc7c3b8,roughness:.55,metalness:.12}),
+   warmGlow=new THREE.MeshBasicMaterial({color:0xffdf9c,toneMapped:false}),
+   coolGlow=new THREE.MeshBasicMaterial({color:0xbcecff,toneMapped:false}),
+   poolGlow=new THREE.MeshBasicMaterial({color:0x64e8ff,toneMapped:false});
  for(const sx of [-14,0,14]){
-  const tower=new THREE.Mesh(new THREE.BoxGeometry(10,68,13),glass);tower.position.set(sx,34,0);tower.rotation.z=-sx*.0022;g.add(tower);
-  const base=new THREE.Mesh(new THREE.BoxGeometry(12,5,15),stone);base.position.set(sx,2.5,0);g.add(base);
+  const tg=new THREE.Group();
+  const tower=new THREE.Mesh(new THREE.BoxGeometry(10,68,13),glass);tower.position.y=34;tg.add(tower);
+  const base=new THREE.Mesh(new THREE.BoxGeometry(12,5,15),stone);base.position.y=2.5;tg.add(base);
+  // Stable facade windows: unlit rectangles sit clearly in front of glass, so they do not shimmer.
+  const windowMatrices:THREE.Matrix4[]=[];const dummy=new THREE.Object3D();
+  for(let floor=0;floor<15;floor++){
+    const wy=7+floor*3.8;
+    for(const wx of [-2.7,0,2.7])for(const face of [-1,1]){
+      dummy.position.set(wx,wy,face*6.57);dummy.scale.set(1.45,.72,.025);dummy.updateMatrix();windowMatrices.push(dummy.matrix.clone());
+    }
+  }
+  const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),warmGlow,windowMatrices.length);
+  windowMatrices.forEach((m,i)=>windows.setMatrixAt(i,m));windows.instanceMatrix.needsUpdate=true;tg.add(windows);
+  const edgeL=new THREE.Mesh(new THREE.BoxGeometry(.11,63,.11),coolGlow);edgeL.position.set(-4.96,35,6.58);tg.add(edgeL);
+  const edgeR=edgeL.clone();edgeR.position.x=4.96;tg.add(edgeR);
+  tg.position.x=sx;tg.rotation.z=-sx*.0022;g.add(tg);
  }
  const deck=new THREE.Mesh(new THREE.BoxGeometry(44,4.2,8),stone);deck.position.y=71;g.add(deck);
+ const deckTop=new THREE.Mesh(new THREE.BoxGeometry(44.4,.16,8.4),warmGlow);deckTop.position.y=73.18;g.add(deckTop);
+ const underDeck=new THREE.Mesh(new THREE.BoxGeometry(42,.12,1.2),warmGlow);underDeck.position.set(0,68.86,3.95);g.add(underDeck);
  const bow=new THREE.Mesh(new THREE.CylinderGeometry(4,4,4.2,20),stone);bow.rotation.z=Math.PI/2;bow.position.set(22,71,0);g.add(bow);
- const pool=new THREE.Mesh(new THREE.BoxGeometry(29,.45,4.2),waterMat);pool.position.set(2,73.4,0);g.add(pool);
+ const pool=new THREE.Mesh(new THREE.BoxGeometry(29,.38,4.2),poolGlow);pool.position.set(2,73.45,0);g.add(pool);
+ const poolEdge=new THREE.Mesh(new THREE.BoxGeometry(30,.10,4.65),coolGlow);poolEdge.position.set(2,73.66,0);g.add(poolEdge);
  const sign=makeCanvasSprite("MARINA BAY SANDS · HANSDREX",31,1.5);sign.position.set(0,82,0);g.add(sign);
  g.position.set(x,0,z);cityRoot.add(g);
 }
