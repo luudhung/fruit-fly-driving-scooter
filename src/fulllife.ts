@@ -91,6 +91,8 @@ type FlyState = {
   wanted?: boolean;
   arrested?: boolean;
   professionSkills?: Record<string, number>;
+  intelligence?: number; learningRate?: number; educationLevel?: number; knowledge?: Record<string,number>; teacherId?: string|null; schoolDays?: number;
+  chronotype?: string; preferredWorkStart?: number; preferredWorkHours?: number; workMinutesToday?: number;
 };
 
 type LocationState = {
@@ -135,6 +137,7 @@ type CivilizationSnapshot = {
   deaths: number;
   foodReserve: number;
   moneySupply: number;
+  currency?: { code?: string; name?: string };
   totalTransactions?: number;
   weather?: WeatherState;
   daysPerYear?: number;
@@ -202,6 +205,8 @@ const flyFamilyEl = $("fly-family");
 const flyClassEl = $("fly-class");
 const flyBusinessEl = $("fly-business");
 const flyLawEl = $("fly-law");
+const flyLearningEl = $("fly-learning");
+const flyScheduleEl = $("fly-schedule");
 const flyStressEl = $("fly-stress");
 const flyHappyEl = $("fly-happy");
 const flyExciteEl = $("fly-excite");
@@ -213,9 +218,9 @@ const healthMeter = $("health-meter");
 
 type GraphicsPreset = "low" | "medium" | "high" | "ultra";
 const GRAPHICS_PROFILES = {
-  low:    { pixelRatio: 0.85, fps: 24, maxFlies: 50,  maxHomes: 24,  rain: 320,  treeScale: 0.34, streetTreeStep: 72, windowStride: 3, metroDetail: 0, trafficStride: 3 },
-  medium: { pixelRatio: 1.0,  fps: 30, maxFlies: 90,  maxHomes: 48,  rain: 700,  treeScale: 0.58, streetTreeStep: 48, windowStride: 2, metroDetail: 1, trafficStride: 2 },
-  high:   { pixelRatio: 1.25, fps: 45, maxFlies: 130, maxHomes: 72,  rain: 1200, treeScale: 0.82, streetTreeStep: 36, windowStride: 1, metroDetail: 2, trafficStride: 1 },
+  low:    { pixelRatio: 0.85, fps: 24, maxFlies: 80,  maxHomes: 24,  rain: 320,  treeScale: 0.34, streetTreeStep: 72, windowStride: 3, metroDetail: 0, trafficStride: 3 },
+  medium: { pixelRatio: 1.0,  fps: 30, maxFlies: 110, maxHomes: 48,  rain: 700,  treeScale: 0.58, streetTreeStep: 48, windowStride: 2, metroDetail: 1, trafficStride: 2 },
+  high:   { pixelRatio: 1.25, fps: 45, maxFlies: 132, maxHomes: 72,  rain: 1200, treeScale: 0.82, streetTreeStep: 36, windowStride: 1, metroDetail: 2, trafficStride: 1 },
   ultra:  { pixelRatio: 2.0,  fps: 60, maxFlies: 132, maxHomes: 110, rain: 2200, treeScale: 1.0,  streetTreeStep: 24, windowStride: 1, metroDetail: 3, trafficStride: 1 },
 } as const;
 const savedGraphics = localStorage.getItem("fulllife_graphics");
@@ -286,7 +291,7 @@ function renderInspector(fly: FlyState | null) {
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flySleepEl.textContent = flyNeedsEl.textContent = flyRelationshipEl.textContent = flyFamilyEl.textContent =
-      flyClassEl.textContent = flyBusinessEl.textContent = flyLawEl.textContent = flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
+      flyClassEl.textContent = flyBusinessEl.textContent = flyLawEl.textContent = flyLearningEl.textContent = flyScheduleEl.textContent = flyStressEl.textContent = flyHappyEl.textContent = flyExciteEl.textContent = flyHealthEl.textContent = "—";
     for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
     return;
   }
@@ -307,8 +312,8 @@ function renderInspector(fly: FlyState | null) {
   flyHomeEl.textContent = fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
-  flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} WC`;
-  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0), 1)} WC · ${fly.vehicle || fly.transitMode || "walk"}`;
+  flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
+  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0), 1)} H$ · ${fly.vehicle || fly.transitMode || "walk"}`;
   flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
   flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
   flyRelationshipEl.textContent = fly.partnerId
@@ -319,10 +324,12 @@ function renderInspector(fly: FlyState | null) {
     : "—";
   flyClassEl.textContent = fly.socialClass || "working";
   flyBusinessEl.textContent = fly.businessId
-    ? `${fly.businessId} · equity ${num(fly.businessEquity || 0)} WC`
+    ? `${fly.businessId} · equity ${num(fly.businessEquity || 0)} H$`
     : `no business · credit ${num(fly.creditScore || 0)}`;
   const skillNames = Object.entries(fly.professionSkills || {}).filter(([,v]) => Number(v) > 0.45).map(([k]) => k).slice(0,2);
   flyLawEl.textContent = `${Math.round((fly.lawAwareness || 0) * 100)}% aware · ${fly.lawViolations || 0} violations${fly.arrested ? " · DETAINED" : fly.wanted ? " · WANTED" : ""}${skillNames.length ? " · " + skillNames.join("/") : ""}`;
+  flyLearningEl.textContent = `IQ-like ${Math.round((fly.intelligence || 0) * 100)} · edu ${num(fly.educationLevel || 0,1)} · ${fly.schoolDays || 0} school days${fly.teacherId ? " · teacher " + fly.teacherId : ""}`;
+  flyScheduleEl.textContent = `${fly.chronotype || "day"} · start ${String(Math.round(fly.preferredWorkStart || 0)).padStart(2,"0")}:00 · ${num(fly.preferredWorkHours || 0,1)}h preferred`;
   flyStressEl.textContent = `${num(fly.stress, 1)}%`;
   flyHappyEl.textContent = `${num(fly.happiness, 1)}%`;
   flyExciteEl.textContent = `${num(fly.excitement, 1)}%`;
@@ -366,7 +373,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   births.textContent = num(s.births);
   deaths.textContent = num(s.deaths);
   food.textContent = num(s.foodReserve);
-  money.textContent = `${num(s.moneySupply, 0)} WC`;
+  money.textContent = `${num(s.moneySupply, 0)} ${s.currency?.code || "H$"}`;
   gameClockEl.textContent = s.gameClock || "--:--";
   gameDayEl.textContent = `DAY ${s.day || 1}`;
   const weather = s.weather || {};
@@ -395,7 +402,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "weather_injury" ? "🌧 " :
       e.type === "weather_death" ? "⛈ " :
       e.type === "death" ? "† " :
-      e.type === "job" ? "▣ " :
+      e.type === "job" || e.type === "work" || e.type === "hire" || e.type === "labor" ? "▣ " :
+      e.type === "school" || e.type === "education" ? "🎓 " :
+      e.type === "salary" ? "$ " :
       e.type === "vehicle_purchase" ? "◆ " : "";
     row.textContent = `D${e.day ?? s.day} ${e.time || ""} · ${icon}${e.text}`;
     return row;
@@ -717,43 +726,21 @@ function addBuilding(
   return group;
 }
 
-// Manhattan-like blocks: buildings are placed inside blocks only, never on roads.
-let blockSeed = 1;
-for (let xi = 0; xi < avenueXs.length - 1; xi += 1) {
-  for (let zi = 0; zi < streetZs.length - 1; zi += 1) {
-    const x0 = avenueXs[xi] + 6.5;
-    const x1 = avenueXs[xi + 1] - 6.5;
-    const z0 = streetZs[zi] + 6.5;
-    const z1 = streetZs[zi + 1] - 6.5;
-    const cx = (x0 + x1) / 2;
-    const cz = (z0 + z1) / 2;
-
-    // Park reservation.
-    if (cx > -8 && cx < 38 && cz < -50 && cz > -125) continue;
-    // Waterfront setback.
-    if (x1 > 101) continue;
-
-    const distCore = Math.hypot(cx - 5, cz - 20);
-    const isCore = distCore < 82;
-    const isMid = distCore < 135;
-    const parcels = isCore ? 2 : 1;
-
-    for (let p = 0; p < parcels; p += 1) {
-      const pw = Math.max(7, (x1 - x0) / parcels - 2);
-      const px = x0 + pw / 2 + p * ((x1 - x0) / parcels);
-      const pd = Math.max(9, z1 - z0 - 2);
-      const height =
-        isCore ? 26 + seeded(blockSeed++) * 78 :
-        isMid ? 14 + seeded(blockSeed++) * 34 :
-        8 + seeded(blockSeed++) * 16;
-      addBuilding(
-        px, cz, pw, pd, height, blockSeed++,
-        { glass: isCore && seeded(blockSeed + 20) > 0.42, residential: !isCore },
-      );
-    }
+// Manhattan-like blocks: strict zoning keeps roads, metro corridors, landmarks and waterfront clear.
+const skylineCenter = new THREE.Vector2(15,43.5);
+const reservedBuildingPlots=[{x:-11,z:43.5,r:14},{x:15,z:43.5,r:14},{x:41,z:43.5,r:14},{x:-63,z:14.5,r:11},{x:-89,z:72.5,r:12},{x:93,z:-14.5,r:11},{x:67,z:43.5,r:11},{x:93,z:72.5,r:11},{x:-11,z:101.5,r:12},{x:-37,z:14.5,r:11}];
+const isReservedPlot=(x:number,z:number)=>reservedBuildingPlots.some((p)=>Math.hypot(x-p.x,z-p.z)<p.r);
+let blockSeed=1;
+for(let xi=0;xi<avenueXs.length-1;xi+=1)for(let zi=0;zi<streetZs.length-1;zi+=1){
+  const x0=avenueXs[xi]+6.5,x1=avenueXs[xi+1]-6.5,z0=streetZs[zi]+6.5,z1=streetZs[zi+1]-6.5,cx=(x0+x1)/2,cz=(z0+z1)/2;
+  if(cx>-8&&cx<38&&cz<-50&&cz>-125)continue;
+  if(x1>riverX-riverWidth/2-4)continue;
+  const distCore=Math.hypot(cx-skylineCenter.x,cz-skylineCenter.y),core=THREE.MathUtils.clamp(1-distCore/175,0,1),parcels=core>0.55?2:1;
+  for(let p=0;p<parcels;p+=1){const span=(x1-x0)/parcels,pw=Math.max(7,span-2),px=x0+span*(p+0.5),pd=Math.max(9,z1-z0-2);if(isReservedPlot(px,cz))continue;
+    const height=8+Math.pow(core,1.75)*78+seeded(blockSeed++)*(7+core*15);
+    addBuilding(px,cz,pw,pd,height,blockSeed++,{glass:core>0.52&&seeded(blockSeed+20)>0.38,residential:core<0.52});
   }
 }
-
 // Outer low-rise suburbs. Houses stay in reserved lots between arterials.
 function addSuburbanHouse(x: number, z: number, seed: number, premium = false) {
   const group = new THREE.Group();
@@ -788,91 +775,28 @@ let suburbSeed = 3000;
 const safeSuburbZ = graphicsPreset === "low" ? [-125,-25,75] : [-125,-75,-25,25,75,125];
 const safeSuburbOffsets = graphicsPreset === "low" ? [-18,18] : [-32,-16,0,16,32];
 for(const side of [-1,1]) for(const z of safeSuburbZ) for(const offset of safeSuburbOffsets){
-  const x=(side<0?-220:220)+offset;
-  addSuburbanHouse(x,z,suburbSeed++,seeded(suburbSeed)>0.72);
+  if(side<0&&z>100)continue;
+  const x=(side<0?-220:220)+offset;addSuburbanHouse(x,z,suburbSeed++,seeded(suburbSeed)>0.72);
 }
 
-// Hansdrex iconic skyline — stylized references, not exact architectural replicas.
-function addEmpireStyleTower(x: number, z: number) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x9c9b93, roughness: 0.7, metalness: 0.08 });
-  const tiers = [
-    [18, 18, 52, 26],
-    [13, 13, 26, 65],
-    [8, 8, 18, 87],
-  ];
-  for (const [w, d, h, y] of tiers) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.y = y;
-    g.add(m);
-  }
-  const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 1.8, 29, 10), mat);
-  spire.position.y = 111;
-  g.add(spire);
-  g.position.set(x, 0, z);
-  cityRoot.add(g);
-  const label = makeCanvasSprite("HANSDREX EMPIRE", 24, 1.5);
-  label.position.set(x, 130, z);
-  cityRoot.add(label);
-}
-addEmpireStyleTower(28, 28);
-
-function addCnStyleTower(x: number, z: number) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xb8b9b8, roughness: 0.55, metalness: 0.16 });
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 3.8, 96, 12), mat);
-  shaft.position.y = 48;
-  g.add(shaft);
-  const pod = new THREE.Mesh(new THREE.CylinderGeometry(8, 6, 7, 18), mat);
-  pod.position.y = 84;
-  g.add(pod);
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.7, 34, 8), mat);
-  antenna.position.y = 104;
-  g.add(antenna);
-  g.position.set(x, 0, z);
-  cityRoot.add(g);
-  const label = makeCanvasSprite("HANSDREX SKY TOWER", 22, 1.45);
-  label.position.set(x, 124, z);
-  cityRoot.add(label);
-}
-addCnStyleTower(88, 54);
-
-function addNeedleTower(x: number, z: number, height: number, labelText: string) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x75838c, roughness: 0.35, metalness: 0.32 });
-  for (let i = 0; i < 5; i += 1) {
-    const h = height * (0.24 - i * 0.025);
-    const w = 13 - i * 2;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
-    m.position.y = i * height * 0.15 + h / 2;
-    g.add(m);
-  }
-  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.7, height * 0.28, 8), mat);
-  needle.position.y = height * 0.88;
-  g.add(needle);
-  g.position.set(x, 0, z);
-  cityRoot.add(g);
-  const label = makeCanvasSprite(labelText, 20, 1.35);
-  label.position.set(x, height + 8, z);
-  cityRoot.add(label);
-}
-addNeedleTower(-45, 22, 105, "HANSDREX 101");
-addNeedleTower(65, -52, 125, "HANSDREX SPIRE");
-
+// Hansdrex iconic skyline — stylized landmark references on reserved central plots.
+const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
+const landmarkCool=new THREE.MeshStandardMaterial({color:0x8db9d0,emissive:0x3c9fd4,emissiveIntensity:0.95,roughness:0.28});
+const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.38,metalness:0.58});
+function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=new THREE.MeshStandardMaterial({color:0xa4a19a,roughness:0.68,metalness:0.08});const tiers=[[20,20,38,19],[16,16,28,52],[12,12,22,77],[8,8,14,95]] as const;
+  for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(7-i*1.5,4,7-i*1.5),landmarkWarm);c.position.y=104+i*4;g.add(c);}
+  const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.72,25,8),landmarkMetal);spire.position.y=123;g.add(spire);const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.72,8,6),landmarkWarm);beacon.position.y=136;g.add(beacon);g.position.set(x,0,z);cityRoot.add(g);}
+addEmpireStyleTower(15,43.5);
+function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(1.25,3.6,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
+  const pod=new THREE.Mesh(new THREE.CylinderGeometry(8.2,6.4,8,20),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(7.2,0.35,6,20),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
+addTorontoStyleTower(-11,43.5);
+function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-6.2,6.2]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=5.4-i*0.48,h=13-i*0.45,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*0.88,r,h,12),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(1.3,3,12,10),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(12.5,2.4,3.1),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
+addPetronasTwinTowers(41,43.5);
 // Major destination buildings aligned to backend coordinates.
-const destinationBuildings = [
-  ["HANSDREX COFFEE", 22, 16, 12, 10, 12],
-  ["HANSDREX BANK", -52, 26, 15, 12, 31],
-  ["HANSDREX HOSPITAL", -82, 58, 20, 16, 27],
-  ["EAST HOSPITAL", 126, 48, 18, 15, 24],
-  ["HANSDREX NIGHT", 82, -20, 15, 13, 22],
-  ["SKY LOUNGE", 40, 44, 14, 12, 38],
-  ["HANSDREX HOTEL", 52, 48, 17, 14, 46],
-  ["RESEARCH LAB", 88, 62, 18, 14, 32],
-  ["HANSDREX SCHOOL", -16, 102, 22, 17, 18],
-  ["HANSDREX MARKET", -18, 10, 17, 14, 14],
-  ["HANSDREX MOTORS", -130, -74, 22, 15, 14],
-  ["HANSDREX POLICE", -104, -42, 18, 14, 17],
+const destinationBuildings=[
+["HANSDREX COFFEE",15,-14.5,12,10,12],["HANSDREX BANK",-63,14.5,15,12,31],["HANSDREX HOSPITAL",-89,72.5,20,16,27],["EAST HOSPITAL",176,68,18,15,24],
+["HANSDREX NIGHT",93,-14.5,15,13,22],["SKY LOUNGE",41,101.5,14,12,38],["HANSDREX HOTEL",67,43.5,17,14,46],["RESEARCH LAB",93,72.5,18,14,32],
+["HANSDREX SCHOOL",-11,101.5,22,17,18],["HANSDREX MARKET",-37,14.5,17,14,14],["HANSDREX MOTORS",-130,-74,22,15,14],["HANSDREX POLICE",-130,-25,18,14,17],
 ] as const;
 for (let i = 0; i < destinationBuildings.length; i += 1) {
   const [label, x, z, w, d, h] = destinationBuildings[i];
@@ -887,34 +811,15 @@ function addShowroomCar(x:number,z:number,color:number){
 if(graphics.metroDetail>=1){addShowroomCar(-137,-63.5,0xc94d4d);addShowroomCar(-130,-63.5,0xd5d8d2);addShowroomCar(-123,-63.5,0x3d668c);}
 
 // Industrial outer ring.
-const industrial = [
-  [-132, 88, 25, 18, 20, "SUGAR WORKS"],
-  [148, 118, 28, 20, 22, "MATERIALS"],
-  [78, 152, 28, 19, 18, "PACKAGING"],
-  [-42, -138, 31, 22, 19, "WAREHOUSE"],
-  [142, 102, 26, 20, 16, "BUILD YARD"],
-  [152, -112, 30, 20, 18, "TRANSIT DEPOT"],
-  [-148, -104, 27, 21, 17, "UTILITIES"],
-  [102, 148, 27, 20, 17, "RECYCLING"],
-] as const;
+const industrial=[[-220,75,25,18,20,"SUGAR WORKS"],[220,125,28,20,22,"MATERIALS"],[220,-75,28,19,18,"PACKAGING"],[-220,-125,31,22,19,"WAREHOUSE"],[220,25,26,20,16,"BUILD YARD"],[220,-125,30,20,18,"TRANSIT DEPOT"],[-220,-75,27,21,17,"UTILITIES"],[245,125,27,20,17,"RECYCLING"]] as const;
 for (let i = 0; i < industrial.length; i += 1) {
   const [x, z, w, d, h, label] = industrial[i];
   addBuilding(x, z, w, d, h, 9000 + i, { sign: label });
 }
 
-// Hansdrex Farm outside the dense grid.
-const farmSoil = new THREE.MeshStandardMaterial({ color: 0x6e5738, roughness: 1 });
-const cropMat = new THREE.MeshStandardMaterial({ color: 0x6f8f45, roughness: 1 });
-for (let row = 0; row < 7; row += 1) {
-  const soil = new THREE.Mesh(new THREE.BoxGeometry(36, 0.08, 2.1), farmSoil);
-  soil.position.set(-208, 0.08, -55 + row * 5);
-  cityRoot.add(soil);
-  // One crop strip replaces 14 individual cone meshes per row.
-  const crops = new THREE.Mesh(new THREE.BoxGeometry(34, 0.42, 0.85), cropMat);
-  crops.position.set(-208, 0.31, -55 + row * 5);
-  cityRoot.add(crops);
-}
-
+// Hansdrex Farm in a reserved agricultural district.
+const farmSoil=new THREE.MeshStandardMaterial({color:0x6e5738,roughness:1}),cropMat=new THREE.MeshStandardMaterial({color:0x6f8f45,roughness:1});
+for(let row=0;row<7;row+=1){const z=108+row*5.3,soil=new THREE.Mesh(new THREE.BoxGeometry(42,0.08,2.2),farmSoil);soil.position.set(-220,0.08,z);cityRoot.add(soil);const crops=new THREE.Mesh(new THREE.BoxGeometry(40,0.42,0.9),cropMat);crops.position.set(-220,0.31,z);cityRoot.add(crops);}
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
   for (let z = -150; z <= 150; z += graphics.streetTreeStep) {
@@ -924,19 +829,12 @@ for (const x of avenueXs) {
 }
 
 // ---------- elevated metro network ----------
-type MetroTrain = { group:THREE.Group; curve:THREE.CatmullRomCurve3; stationTs:number[]; offset:number; lineIndex:number };
+type MetroTrain = { group:THREE.Group; curve:THREE.Curve<THREE.Vector3>; stationTs:number[]; offset:number; lineIndex:number };
 const metroTrains:MetroTrain[]=[];
 const metroTrackMat=new THREE.MeshStandardMaterial({color:0x555b60,roughness:0.48,metalness:0.62});
 const metroBeamMat=new THREE.MeshStandardMaterial({color:0x6e7478,roughness:0.66,metalness:0.38});
 const lineColors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae];
-const metroLines=[
-  {name:"M1",points:[[-150,0],[0,0],[142,0],[190,0]],height:9.0},
-  {name:"M2",points:[[0,-175],[0,-140],[0,0],[0,142],[0,175]],height:10.0},
-  {name:"M3",points:[[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]],height:11.0},
-  {name:"M4",points:[[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]],height:12.0},
-  {name:"M5",points:[[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]],height:10.5},
-  {name:"M6",points:[[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]],height:11.5},
-] as const;
+const metroLines=[{name:"M1",points:[[-154,0],[-102,0],[-50,0],[2,0],[54,0],[106,0],[159,0],[195,0]],height:9},{name:"M2",points:[[2,-150],[2,-116],[2,-58],[2,0],[2,58],[2,116],[2,150]],height:10},{name:"M3",points:[[-154,87],[-102,87],[-50,87],[2,87],[54,87],[106,87]],height:11},{name:"M4",points:[[-102,-150],[-102,-100],[-102,-50],[-102,0],[-102,50],[-102,100],[-102,150]],height:12},{name:"M5",points:[[-154,-87],[-102,-87],[-50,-87],[2,-87],[54,-87],[106,-87]],height:10.5},{name:"M6",points:[[159,-150],[159,-100],[159,-50],[159,0],[159,50],[159,100],[159,150]],height:11.5}] as const;
 
 function addMetroStation(p:THREE.Vector3,lineName:string,lineIndex:number){
   const platform=new THREE.Mesh(new THREE.BoxGeometry(graphics.metroDetail>=2?16:12,0.65,5.8),new THREE.MeshStandardMaterial({color:0xb9bec0,roughness:0.65,metalness:0.18}));
@@ -947,28 +845,10 @@ function addMetroStation(p:THREE.Vector3,lineName:string,lineIndex:number){
     const sign=makeCanvasSprite(`${lineName} · HANSDREX SUBWAY`,20,1.0);sign.position.copy(p).add(new THREE.Vector3(0,3.2,0));cityRoot.add(sign);
   }
 }
-function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){
-  const pts=line.points.map(([x,z])=>new THREE.Vector3(x,line.height,z));
-  const curve=new THREE.CatmullRomCurve3(pts,false,"catmullrom",0.15);
-  const track=new THREE.Mesh(new THREE.TubeGeometry(curve,graphics.metroDetail>=2?52:28,0.82,graphics.metroDetail>=2?6:4,false),metroTrackMat);cityRoot.add(track);
-  for(let t=0.08;t<1;t+=graphics.metroDetail>=2?0.12:0.2){const p=curve.getPoint(t);const support=new THREE.Mesh(new THREE.BoxGeometry(0.6,line.height,0.6),metroBeamMat);support.position.set(p.x,line.height/2,p.z);cityRoot.add(support);}
-  const stationTs=line.points.map((_,i)=>i/Math.max(1,line.points.length-1));
-  stationTs.forEach(t=>addMetroStation(curve.getPoint(t),line.name,lineIndex));
-
-  const train=new THREE.Group();
-  const carCount=graphics.metroDetail>=2?4:3;
-  for(let car=0;car<carCount;car+=1){
-    const carGroup=new THREE.Group();
-    const body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.5,7.6),new THREE.MeshStandardMaterial({color:0xc6cbce,roughness:0.28,metalness:0.78}));carGroup.add(body);
-    const stripe=new THREE.Mesh(new THREE.BoxGeometry(3.24,0.22,7.66),new THREE.MeshBasicMaterial({color:lineColors[lineIndex]}));stripe.position.y=-0.52;carGroup.add(stripe);
-    if(graphics.metroDetail>=2){
-      for(const side of [-1,1]) for(const wz of [-2.35,-0.8,0.8,2.35]){const win=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.72,1.05),new THREE.MeshStandardMaterial({color:0x1a2b34,emissive:0x12212a,emissiveIntensity:0.35,roughness:0.2}));win.position.set(side*1.62,0.35,wz);carGroup.add(win);}
-      for(const side of [-1,1]){const door=new THREE.Mesh(new THREE.BoxGeometry(0.04,1.75,1.3),new THREE.MeshStandardMaterial({color:0x9ea5a8,metalness:0.7,roughness:0.3}));door.position.set(side*1.63,-0.15,0);carGroup.add(door);}
-    }
-    carGroup.position.z=car*8.05;train.add(carGroup);
-  }
-  cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});
-}
+function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){const pts=line.points.map(([x,z])=>new THREE.Vector3(x,line.height,z)),curve=new THREE.CurvePath<THREE.Vector3>();let total=0;const lens:number[]=[];
+for(let i=0;i<pts.length-1;i++){const seg=new THREE.LineCurve3(pts[i],pts[i+1]);curve.add(seg);const len=pts[i].distanceTo(pts[i+1]);lens.push(len);total+=len;}const track=new THREE.Mesh(new THREE.TubeGeometry(curve,graphics.metroDetail>=2?64:36,0.82,graphics.metroDetail>=2?6:4,false),metroTrackMat);cityRoot.add(track);
+for(let t=.06;t<1;t+=graphics.metroDetail>=2?.10:.17){const p=curve.getPointAt(t),support=new THREE.Mesh(new THREE.BoxGeometry(.6,line.height,.6),metroBeamMat);support.position.set(p.x,line.height/2,p.z);cityRoot.add(support);}const stationTs=[0];let acc=0;for(const len of lens){acc+=len;stationTs.push(acc/Math.max(1,total));}stationTs.forEach(t=>addMetroStation(curve.getPointAt(t),line.name,lineIndex));
+const train=new THREE.Group(),cars=graphics.metroDetail>=2?4:3;for(let car=0;car<cars;car++){const cg=new THREE.Group(),body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.5,7.6),new THREE.MeshStandardMaterial({color:0xc6cbce,roughness:.28,metalness:.78}));cg.add(body);const stripe=new THREE.Mesh(new THREE.BoxGeometry(3.24,.22,7.66),new THREE.MeshBasicMaterial({color:lineColors[lineIndex]}));stripe.position.y=-.52;cg.add(stripe);cg.position.z=car*8.05;train.add(cg);}cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});}
 metroLines.forEach(addElevatedMetroLine);
 
 cityRoot.traverse(obj=>{obj.updateMatrix();obj.matrixAutoUpdate=false;});
@@ -1082,6 +962,7 @@ const wingMat = new THREE.MeshStandardMaterial({
 
 function createFlyVisual(id: string): FlyVisual {
   const group = new THREE.Group();
+  group.scale.setScalar(graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18);
 
   // Ultra-light fly: two body meshes + two wings. The server still simulates every fly
   // independently; this only cuts browser draw calls.
@@ -1366,10 +1247,8 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 });
-addEventListener("keyup", (e) => {
-  pressed.delete(e.code);
-  if (movementKeys.has(e.code)) e.preventDefault();
-});
+addEventListener("keyup", (e) => {pressed.delete(e.code);if (movementKeys.has(e.code)) e.preventDefault();});
+document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;pressed.add(key);button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();pressed.delete(key);button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{pressed.delete(key);button.classList.remove("active");});});
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
