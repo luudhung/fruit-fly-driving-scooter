@@ -23,8 +23,8 @@
     .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 12px rgba(240,197,106,.7)}
     .status[data-state="authoritative"] .dot{background:var(--ok);box-shadow:0 0 12px rgba(102,227,157,.7)}
     .status[data-state="offline"] .dot{background:#ef6b6b;box-shadow:0 0 12px rgba(239,107,107,.7)}
-    .left{position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
-    .right{position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
+    .left{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
+    .right{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
     .card{border-radius:16px;overflow:hidden}
     .head{padding:10px 12px;border-bottom:1px solid var(--line);font:850 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;gap:8px}
     .panel-toggle{pointer-events:auto;border:1px solid var(--line);background:rgba(255,255,255,.06);color:#fff;border-radius:7px;width:25px;height:22px;cursor:pointer;font:900 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -70,13 +70,13 @@
       body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
       .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
     }
-    @media(max-width:650px){.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
+    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
   </style>
 </head>
 <body>
   <div id="world"></div>
   <div class="topbar">
-    <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 game hour = 1 real minute</small></div>
+    <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 real second = 2 game minutes</small></div>
     <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
     <div class="status" id="connection" data-state="connecting"><span class="dot"></span><span id="connection-label">CONNECTING</span></div>
     <div class="settings-wrap" id="settings-wrap">
@@ -98,6 +98,7 @@
   <aside class="left">
     <section class="card" id="city-card">
       <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
+      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span></div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <div class="stat"><span>Population</span><b id="population">—</b></div>

@@ -1,4 +1,7 @@
 import http from "node:http";
+import { pathToFileURL } from "node:url";
+import { MAP_VERSION, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState } from "./city-map.mjs";
+const IS_MAIN = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 import process from "node:process";
 import pg from "pg";
 const { Pool } = pg;
@@ -16,13 +19,13 @@ const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-wo
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(process.env.NEURAL_SYNC_INTERVAL_MS || 1000));
 const CHECKPOINT_EVERY_MS = 5000;
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
-const MAP_VERSION = 7;
+
 const CURRENCY_CODE = "H$";
 const CURRENCY_NAME = "Hansdrex Dollar";
 const CITY_NAME = "Hansdrex City of Fruit Fly";
 const WEATHER_UPDATE_GAME_SECONDS = 45 * 60;
 
-if (!DATABASE_URL) {
+if (IS_MAIN && !DATABASE_URL) {
   console.error("[civilization] DATABASE_URL is required.");
   process.exit(1);
 }
@@ -41,71 +44,7 @@ const VERSION = {
   economicVersion: "adaptive-hansdrex-dollar-education-economy-0.7.0",
 };
 
-const LOCATIONS = [
-  { id: "apt-north", type: "home", name: "Hansdrex North Garden Homes", x: 0, z: -165 },
-  { id: "apt-east", type: "home", name: "Hansdrex East River Homes", x: 170, z: 12 },
-  { id: "apt-south", type: "home", name: "Hansdrex South Meadow Homes", x: 12, z: 170 },
-  { id: "apt-west", type: "home", name: "Hansdrex West Orchard Homes", x: -170, z: 8 },
-
-  { id: "market", type: "food", name: "Hansdrex Central Market", x: -37, z: 14.5 },
-  { id: "cafe", type: "social", name: "Hansdrex Coffee", x: 15, z: -14.5 },
-  { id: "tea-house", type: "social", name: "Hansdrex Tea House", x: -32, z: -20 },
-  { id: "restaurant", type: "food", name: "Hansdrex Kitchen", x: 41, z: -14.5 },
-  { id: "park", type: "social", name: "Hansdrex Central Park", x: 0, z: -52 },
-  { id: "office", type: "job", name: "Hansdrex Commerce Tower", x: 67, z: 14.5 },
-  { id: "bank", type: "service", name: "Hansdrex Bank", x: -63, z: 14.5 },
-  { id: "hotel", type: "service", name: "Hansdrex Grand Hotel", x: 67, z: 43.5 },
-  { id: "cinema", type: "social", name: "Hansdrex Cinema", x: -52, z: 50 },
-  { id: "library", type: "service", name: "Hansdrex Library", x: 15, z: 72.5 },
-
-  { id: "hospital-central", type: "health", name: "Hansdrex Central Hospital", x: -89, z: 72.5 },
-  { id: "hospital-east", type: "health", name: "Hansdrex East Hospital", x: 176, z: 68 },
-  { id: "clinic", type: "health", name: "Hansdrex Community Clinic", x: -63, z: 101.5 },
-  { id: "pharmacy", type: "health", name: "Hansdrex Pharmacy", x: -92, z: 24 },
-  { id: "school", type: "service", name: "Hansdrex Academy", x: -11, z: 101.5 },
-  { id: "post-office", type: "service", name: "Hansdrex Post", x: -98, z: -16 },
-  { id: "lab", type: "job", name: "Hansdrex Research Lab", x: 93, z: 72.5 },
-  { id: "garage", type: "service", name: "Hansdrex Garage", x: 93, z: -72.5 },
-  { id: "vehicle-showroom", type: "shop", name: "Hansdrex Motors Showroom", x: -130, z: -74 },
-  { id: "police", type: "law", name: "Hansdrex Police Department", x: -130, z: -25 },
-  { id: "gym", type: "wellness", name: "Hansdrex Fitness", x: 93, z: 14.5 },
-
-  { id: "bakery", type: "food", name: "Hansdrex Bakery", x: 41, z: 72.5 },
-  { id: "grocery", type: "food", name: "Hansdrex Grocery", x: -63, z: -43.5 },
-  { id: "corner-shop", type: "shop", name: "Hansdrex Store", x: 67, z: -72.5 },
-  { id: "night-market", type: "nightlife", name: "Hansdrex Night Market", x: 15, z: -101.5 },
-  { id: "arcade", type: "nightlife", name: "Hansdrex Arcade", x: -63, z: -72.5 },
-  { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 67, z: 72.5 },
-  { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 93, z: -14.5 },
-  { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", x: 41, z: 101.5 },
-  { id: "heliport", type: "luxury", name: "Hansdrex Heli Tours", x: 15, z: 43.5 },
-
-  { id: "factory", type: "job", name: "Hansdrex Sugar Works", x: -220, z: 75 },
-  { id: "factory-east", type: "job", name: "Hansdrex Materials Plant", x: 220, z: 125 },
-  { id: "factory-south", type: "job", name: "Hansdrex Packaging", x: 220, z: -75 },
-  { id: "warehouse", type: "job", name: "Hansdrex Warehouse", x: -220, z: -125 },
-  { id: "farm", type: "production", name: "Hansdrex Farm", x: -220, z: 125 },
-  { id: "construction", type: "job", name: "Hansdrex Build Yard", x: 220, z: 25 },
-  { id: "transit", type: "job", name: "Hansdrex Transit Depot", x: 220, z: -125 },
-  { id: "power", type: "infrastructure", name: "Hansdrex Power Plant", x: -220, z: -75 },
-  { id: "recycling", type: "job", name: "Hansdrex Recycling", x: 245, z: 125 },
-
-  { id: "metro-central", type: "transit", name: "Hansdrex Central Station", x: 2, z: 0 },
-  { id: "metro-north", type: "transit", name: "Hansdrex North Station", x: 2, z: -145 },
-  { id: "metro-east", type: "transit", name: "Hansdrex East Station", x: 159, z: 0 },
-  { id: "metro-south", type: "transit", name: "Hansdrex South Station", x: 2, z: 145 },
-  { id: "metro-west", type: "transit", name: "Hansdrex West Station", x: -154, z: 0 },
-  { id: "metro-industrial", type: "transit", name: "Hansdrex Industrial Station", x: -154, z: 87 },
-];
-
-const METRO_ROUTE_LINES = [
-  { id:"M1", points:[[-154,0],[-102,0],[-50,0],[2,0],[54,0],[106,0],[159,0],[195,0]] },
-  { id:"M2", points:[[2,-150],[2,-116],[2,-58],[2,0],[2,58],[2,116],[2,150]] },
-  { id:"M3", points:[[-154,87],[-102,87],[-50,87],[2,87],[54,87],[106,87]] },
-  { id:"M4", points:[[-102,-150],[-102,-100],[-102,-50],[-102,0],[-102,50],[-102,100],[-102,150]] },
-  { id:"M5", points:[[-154,-87],[-102,-87],[-50,-87],[2,-87],[54,-87],[106,-87]] },
-  { id:"M6", points:[[159,-150],[159,-100],[159,-50],[159,0],[159,50],[159,100],[159,150]] },
-];
+const METRO_ROUTE_LINES = METRO_LINES;
 
 
 function nearestPointIndex(points, x, z) {
@@ -140,8 +79,8 @@ function planMetroRoute(fly, dest) {
   const waypoints=[];
   const [ex,ez]=best.line.points[best.entry.index], [xx,xz]=best.line.points[best.exit.index];
   waypoints.push(...buildPedestrianRoute({x:fly.x,z:fly.z},{x:ex,z:ez}));
-  waypoints.push({x:ex,z:ez,mode:"walk",lineId:best.line.id,stage:"station-entry"});
   const dir=best.exit.index>best.entry.index?1:-1;
+  waypoints.push({x:ex,z:ez,mode:"walk",lineId:best.line.id,stage:"station-entry",stationIndex:best.entry.index,exitIndex:best.exit.index,direction:dir});
   for(let i=best.entry.index;i!==best.exit.index+dir;i+=dir){const [x,z]=best.line.points[i];waypoints.push({x,z,mode:"metro",lineId:best.line.id,stage:"on-train"});}
   waypoints.push({x:xx,z:xz,mode:"walk",lineId:best.line.id,stage:"station-exit"});
   waypoints.push(...buildPedestrianRoute({x:xx,z:xz},dest));
@@ -284,43 +223,8 @@ function emergentRoleForBusiness(business, owner) {
 const APARTMENT_CAPACITY = 10;
 const POPULATION_BOOTSTRAP_VERSION = 3;
 
-function buildApartmentBlocks() {
-  const districts = [
-    ["N", 0, -165, 22],
-    ["E", 170, 12, 22],
-    ["S", 12, 170, 22],
-    ["W", -170, 8, 22],
-    ["C", -18, 125, 28],
-  ];
-  const blocks = [];
-  for (const [prefix, cx, cz, rentBase] of districts) {
-    for (let i = 0; i < 6; i += 1) {
-      const row = Math.floor(i / 3);
-      const col = i % 3;
-      blocks.push({
-        id: `APT-${prefix}-${String(i + 1).padStart(2, "0")}`,
-        x: Number(cx) + (col - 1) * 14,
-        z: Number(cz) + (row - 0.5) * 16,
-        capacity: APARTMENT_CAPACITY,
-        rent: Number(rentBase) + row * 2 + col,
-        purchaseValue: (Number(rentBase) + row * 2 + col) * 210,
-        occupants: [],
-      });
-    }
-  }
-  return blocks;
-}
-
-function buildGroundHouseLots() {
-  const lots=[]; const safeZ=[-132,-118,-82,-68,-32,-18,18,32,68,82,118,132], offsets=[-48,-32,-16,0,16,32,48]; let n=1;
-  for(const [zone,cx,basePrice] of [["W",-220,8200],["E",220,9800]]){
-    for(let zi=0;zi<safeZ.length;zi+=1) for(let oi=0;oi<offsets.length;oi+=1){
-      const premium=1+zi*0.022+oi*0.014;
-      lots.push({id:`HOUSE-${zone}-${String(n++).padStart(3,"0")}`,x:Number(cx)+offsets[oi],z:safeZ[zi],baseValue:Math.round(Number(basePrice)*premium),ownerHouseholdId:null});
-    }
-  }
-  return lots;
-}
+function buildApartmentBlocks() { return APARTMENTS.map(b=>({...b,occupants:[]})); }
+function buildGroundHouseLots() { return HOUSE_LOTS.map(b=>({...b,ownerHouseholdId:null})); }
 
 function ensureHousingState() {
   state.housing = state.housing || {
@@ -336,14 +240,17 @@ function ensureHousingState() {
 }
 
 function migrateGroundHousesToSafeLots(previousMapVersion) {
-  if(previousMapVersion>=MAP_VERSION) return;
-  const safeLots=buildGroundHouseLots();
-  const owners=Object.values(state.housing?.households||{}).filter((hh)=>hh.housingType==="house");
-  for(let i=0;i<owners.length&&i<safeLots.length;i+=1){
-    const hh=owners[i],lot=safeLots[i]; lot.ownerHouseholdId=hh.id; hh.unitId=lot.id; hh.homeX=lot.x; hh.homeZ=lot.z; hh.propertyValue=Math.max(Number(hh.propertyValue||0),lot.baseValue);
-    for(const memberId of hh.members||[]){const member=state.flies.find((f)=>f.id===memberId);if(!member)continue;member.housingType="house";member.housingUnitId=lot.id;member.homeX=lot.x;member.homeZ=lot.z;member.ownsHome=true;}
+  if(previousMapVersion>=MAP_VERSION)return;
+  state.housing.houseLots=buildGroundHouseLots();
+  state.housing.apartmentBlocks=buildApartmentBlocks();
+  for(const hh of Object.values(state.housing.households)) {
+    const members=(hh.members||[]).map(id=>state.flies.find(f=>f.id===id&&f.alive)).filter(Boolean);
+    if(!members.length)continue;
+    const owner=members[0],wasHouse=hh.housingType==="house",wasOwned=members.some(f=>f.ownsHome);
+    if(!wasHouse||!assignGroundHouse(owner,Math.max(1,owner.homeTier||1),hh))assignApartment(owner,hh);
+    if(!wasHouse&&wasOwned)owner.ownsHome=true;
+    for(const f of members){f.housingType=hh.housingType;f.housingUnitId=hh.unitId;f.homeX=hh.homeX;f.homeZ=hh.homeZ;}
   }
-  state.housing.houseLots=safeLots;
 }
 
 function migrateResidentNavigation(previousMapVersion) {
@@ -355,7 +262,7 @@ function migrateResidentNavigation(previousMapVersion) {
       : location(fly.currentLocationId);
     const p=legalDestinationPoint(base);
     fly.x=p.x;fly.z=p.z;fly.targetX=p.x;fly.targetZ=p.z;fly.finalTargetX=p.x;fly.finalTargetZ=p.z;
-    fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.metroLineId=null;fly.transitStage=null;fly.transitMode="walk";fly.travelStuckTicks=0;
+    fly.indoors=true;fly.sleeping=false;fly.pendingAction=null;fly.parkedCar=parkingPoint(p);fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.metroLineId=null;fly.transitStage=null;fly.transitMode="walk";fly.travelStuckTicks=0;
   }
 }
 
@@ -407,7 +314,8 @@ function assignApartment(fly, household = null) {
   const block = availableApartmentBlock();
   if (!block) return false;
   block.occupants = block.occupants || [];
-  if (!block.occupants.includes(fly.id)) block.occupants.push(fly.id);
+  releaseHousingUnit(hh);
+  if (!block.occupants.includes(hh.id)) block.occupants.push(hh.id);
   hh.housingType = "apartment";
   hh.unitId = block.id;
   hh.homeX = block.x;
@@ -416,8 +324,8 @@ function assignApartment(fly, household = null) {
   hh.propertyValue = 0;
   fly.housingType = "apartment";
   fly.housingUnitId = block.id;
-  fly.homeX = block.x + randRange(-2.2, 2.2);
-  fly.homeZ = block.z + randRange(-2.2, 2.2);
+  fly.homeX = block.x;
+  fly.homeZ = block.z;
   fly.ownsHome = false;
   fly.homeTier = 0;
   fly.homeEquity = 0;
@@ -430,6 +338,7 @@ function assignGroundHouse(fly, tier = 1, household = null) {
   const free = state.housing.houseLots.filter((lot) => !lot.ownerHouseholdId);
   if (!free.length) return false;
   const lot = free[Math.floor(rand() * free.length)];
+  releaseHousingUnit(hh);
   lot.ownerHouseholdId = hh.id;
   const value = lot.baseValue * (1 + (tier - 1) * 0.58);
   hh.housingType = "house";
@@ -512,59 +421,15 @@ function seedSocioeconomicProfile(fly) {
   }
 }
 
-function inheritHousehold(child, mother) {
-  ensureHousingState();
-  const hhId = mother?.householdId;
-  const hh = hhId ? state.housing.households[hhId] : null;
-  if (!hh) {
-    createHousehold(child);
-    assignApartment(child);
-    return;
-  }
-
-  if (!hh.members.includes(child.id)) hh.members.push(child.id);
-  child.householdId = hh.id;
-
-  if (hh.housingType === "apartment") {
-    let block = state.housing.apartmentBlocks.find((b) => b.id === hh.unitId);
-    const required = hh.members.filter((id) => state.flies.some((f) => f.id === id && f.alive) || id === child.id).length;
-    const currentOccupants = block?.occupants?.length || 0;
-
-    if (!block || currentOccupants >= block.capacity) {
-      const nextBlock = state.housing.apartmentBlocks
-        .filter((b) => b.id !== block?.id && (b.occupants?.length || 0) + required <= b.capacity)
-        .sort((a,b) => (a.occupants?.length || 0) - (b.occupants?.length || 0))[0];
-
-      if (nextBlock) {
-        if (block) block.occupants = (block.occupants || []).filter((id) => !hh.members.includes(id));
-        block = nextBlock;
-        hh.unitId = block.id;
-        hh.homeX = block.x;
-        hh.homeZ = block.z;
-        hh.monthlyHousingCost = block.rent;
-        for (const memberId of hh.members) {
-          const member = state.flies.find((f) => f.id === memberId);
-          if (member) {
-            member.housingUnitId = block.id;
-            member.homeX = block.x + randRange(-2.2, 2.2);
-            member.homeZ = block.z + randRange(-2.2, 2.2);
-          }
-        }
-      }
-    }
-
-    if (block && !block.occupants.includes(child.id) && block.occupants.length < block.capacity) {
-      block.occupants.push(child.id);
-    }
-  }
-
-  child.housingType = hh.housingType;
-  child.housingUnitId = hh.unitId;
-  child.homeX = hh.homeX + randRange(-1.5, 1.5);
-  child.homeZ = hh.homeZ + randRange(-1.5, 1.5);
-  child.ownsHome = false;
-  child.homeTier = 0;
-  child.homeEquity = 0;
+function inheritHousehold(child,mother) {
+  const hh=state.housing?.households?.[mother?.householdId];
+  if(!hh){createHousehold(child);assignApartment(child);return;}
+  if(!hh.members.includes(child.id))hh.members.push(child.id);
+  Object.assign(child,{householdId:hh.id,housingType:hh.housingType,housingUnitId:hh.unitId,homeX:hh.homeX,homeZ:hh.homeZ,ownsHome:false,homeTier:mother.homeTier||0,homeEquity:0});
+}
+function releaseHousingUnit(hh) {
+  for(const b of state.housing.apartmentBlocks)b.occupants=(b.occupants||[]).filter(id=>id!==hh.id);
+  for(const lot of state.housing.houseLots)if(lot.ownerHouseholdId===hh.id)lot.ownerHouseholdId=null;
 }
 
 
@@ -742,59 +607,13 @@ function jittered(loc, radius = 3) {
   return { x: loc.x + Math.cos(a) * r, z: loc.z + Math.sin(a) * r };
 }
 
-// Hansdrex traffic law / navigation map. Pedestrians and flying flies use sidewalk corridors;
-// cars and scooters use road centerlines; river crossings are restricted to bridges.
-const CITY_ROAD_X=[-154,-102,-76,-50,-24,2,28,54,80,106,159];
-const CITY_ROAD_Z=[-150,-145,-116,-100,-87,-58,-50,-29,0,29,50,58,87,100,116,145,150];
-const SIDEWALK_X=CITY_ROAD_X.flatMap((x)=>[x-6.3,x+6.3]);
-const SIDEWALK_Z=CITY_ROAD_Z.flatMap((z)=>[z-6.2,z+6.2]);
-const BRIDGE_Z=[-87,0,87];
+// Navigation follows the geometry used by the renderer.
+const CITY_ROAD_X=[-154,-102,-76,-50,-24,2,28,54,80,106,159,260];
+const CITY_ROAD_Z=[-234,-184,-150,-145,-116,-100,-87,-58,-50,-29,0,29,50,58,87,100,116,145,150];
 const nearestValue=(arr,value)=>arr.reduce((best,v)=>Math.abs(v-value)<Math.abs(best-value)?v:best,arr[0]);
-
-function riverSafeManhattan(points,a,b,mode,stage){
-  const crosses=(a.x<105&&b.x>139)||(a.x>139&&b.x<105);
-  if(!crosses){points.push({x:b.x,z:b.z,mode,stage});return;}
-  const bz=nearestValue(BRIDGE_Z,a.z);
-  const left=a.x<b.x?104:140, right=a.x<b.x?140:104;
-  points.push({x:a.x,z:bz,mode,stage},{x:left,z:bz,mode,stage:"bridge"},{x:right,z:bz,mode,stage:"bridge"},{x:b.x,z:bz,mode,stage},{x:b.x,z:b.z,mode,stage});
-}
-function sidewalkAccess(p){
-  const sx=nearestValue(SIDEWALK_X,p.x), sz=nearestValue(SIDEWALK_Z,p.z);
-  return Math.abs(sx-p.x)<Math.abs(sz-p.z)?{x:sx,z:p.z}:{x:p.x,z:sz};
-}
-function roadNode(p){return{x:nearestValue(CITY_ROAD_X,p.x),z:nearestValue(CITY_ROAD_Z,p.z)};}
-function buildPedestrianRoute(start,dest){
-  const points=[]; const a=sidewalkAccess(start),b=sidewalkAccess(dest);
-  points.push({x:a.x,z:a.z,mode:"walk",stage:"sidewalk"});
-  const aVertical=SIDEWALK_X.includes(a.x);
-  const bVertical=SIDEWALK_X.includes(b.x);
-  if(aVertical&&bVertical){
-    const crossZ=nearestValue(SIDEWALK_Z,(a.z+b.z)/2);
-    points.push({x:a.x,z:crossZ,mode:"walk",stage:"sidewalk"});
-    riverSafeManhattan(points,{x:a.x,z:crossZ},{x:b.x,z:crossZ},"walk","crosswalk");
-  } else if(!aVertical&&!bVertical){
-    const crossX=nearestValue(SIDEWALK_X,(a.x+b.x)/2);
-    riverSafeManhattan(points,a,{x:crossX,z:a.z},"walk","sidewalk");
-    points.push({x:crossX,z:b.z,mode:"walk",stage:"crosswalk"});
-  } else {
-    const intersection={x:aVertical?a.x:b.x,z:aVertical?b.z:a.z};
-    riverSafeManhattan(points,a,intersection,"walk","crosswalk");
-  }
-  points.push({x:b.x,z:b.z,mode:"walk",stage:"sidewalk"});
-  return points.filter((p,i,arr)=>i===0||Math.hypot(p.x-arr[i-1].x,p.z-arr[i-1].z)>0.2);
-}
-function buildRoadRoute(start,dest,mode){
-  const points=[]; const a=roadNode(start),b=roadNode(dest);
-  const sidewalkStart=sidewalkAccess(start);
-  points.push(...buildPedestrianRoute(start,sidewalkStart));
-  points.push({x:a.x,z:a.z,mode,stage:"road-entry"});
-  const cross={x:b.x,z:a.z};
-  riverSafeManhattan(points,a,cross,mode,"road");
-  points.push({x:b.x,z:b.z,mode,stage:"road"});
-  points.push(...buildPedestrianRoute(b,dest));
-  return points;
-}
-function legalDestinationPoint(dest){return sidewalkAccess(dest);}
+const buildPedestrianRoute=pedestrianRoute;
+const buildRoadRoute=vehicleRoute;
+const legalDestinationPoint=entrance;
 function trafficPhase(){return Math.floor(state.simulationAgeSeconds/Math.max(1,GAME_SECONDS_PER_REAL_SECOND))%60;}
 function shouldStopAtRed(fly){
   if(!["car","scooter"].includes(fly.transitMode)) return false;
@@ -1195,6 +1014,7 @@ function freshState() {
   ensureAcademyTeacher(true);
   ensurePoliticalSystem();
   ensureCentralBankBoard();
+  migrateResidentNavigation(0);
   s.generation=1;
   return s;
 }
@@ -1232,7 +1052,7 @@ async function persistEvent(e) {
 function emit(type, text, payload = {}) {
   appendMemoryEvent(type, text, payload);
   const e = state.events[state.events.length - 1];
-  void persistEvent(e);
+  if(IS_MAIN)void persistEvent(e);
 }
 
 async function initDb() {
@@ -1309,9 +1129,7 @@ async function initDb() {
     state.populationBootstrapVersion = Number(state.populationBootstrapVersion || 0);
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
     ensureHousingState();
-    migrateGroundHousesToSafeLots(previousMapVersion);
-    migrateResidentNavigation(previousMapVersion);
-    state.mapVersion=MAP_VERSION;
+
     state.weather = state.weather || makeWeather();
     state.rngState = Number(state.rngState || WORLD_SEED) >>> 0;
     state.nextFlyId = Number(state.nextFlyId || (state.flies.length + 1));
@@ -1413,6 +1231,9 @@ async function initDb() {
       }
     }
 
+    migrateGroundHousesToSafeLots(previousMapVersion);
+    migrateResidentNavigation(previousMapVersion);
+    state.mapVersion=MAP_VERSION;
     ensureAcademyTeacher();
     ensurePoliticalSystem();
     ensureCentralBankBoard();
@@ -1743,7 +1564,7 @@ function liquidMoneySupply() {
   const residents=state.flies.filter((f)=>f.alive).reduce((sum,f)=>sum+Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0)),0);
   const fixedBusinesses=Object.values(state.businesses||{}).reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
   const enterprises=Object.values(state.enterprises||{}).filter((b)=>b.status==="operating").reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
-  return residents+fixedBusinesses+enterprises+Math.max(0,Number(state.treasury?.cash||0));
+  return residents+fixedBusinesses+enterprises+Math.max(0,Number(state.treasury?.cash||0))+Math.max(0,Number(state.utilities?.powerPlant?.cash||0))+Math.max(0,Number(state.bank?.reserves||0));
 }
 
 function ensurePoliticalProfile(fly) {
@@ -2210,7 +2031,7 @@ function simulateEnterprises(clock) {
   state.economy.businessCount = Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length;
   const enterpriseWorkers=state.flies.filter((f)=>f.alive&&f.businessEmployeeOf).length;
   const staticWorkers=state.flies.filter((f)=>f.alive&&f.jobId).length;
-  state.economy.employed=enterpriseWorkers+staticWorkers;
+  state.economy.employed=state.flies.filter(f=>f.alive&&(f.jobId||f.businessEmployeeOf)).length;
   if(hourKey%4===0&&state.economy.lastLaborPulseHour!==hourKey){
     state.economy.lastLaborPulseHour=hourKey;
     emit("labor",`Hansdrex labor pulse: ${state.economy.employed} employed, ${enterpriseWorkers} in brain-created roles, ${state.economy.businessCount} resident-run businesses.`,{employed:state.economy.employed,enterpriseWorkers,businesses:state.economy.businessCount});
@@ -2398,15 +2219,16 @@ function chooseDestination(fly, clock) {
   const distToTarget = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
 
   // Once a fly commits to a destination, keep that decision until arrival.
-  if (fly.traveling && distToTarget > 1.0) return;
+  if (fly.traveling) return;
   if (!fly.traveling && fly.actionUntil > state.simulationAgeSeconds) return;
 
   const chosen = brainChooseAction(fly, clock);
   fly.targetLocationId = chosen.id;
   fly.action = chosen.action;
+  fly.pendingAction=chosen.action;fly.indoors=false;
   fly.smoking = chosen.action === "smoke break";
   fly.exercising = chosen.action === "exercising";
-  fly.sleeping = chosen.action === "sleeping";
+  fly.sleeping = false;
 
   const dest = chosen.id === fly.homeId
     ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
@@ -2437,6 +2259,18 @@ function chooseDestination(fly, clock) {
 }
 
 function moveFly(fly) {
+  if(!fly.traveling){fly.vx=fly.vz=0;return;}
+  // A passenger occupies an actual scheduled train, including its station dwell.
+  if(fly.onTrain){
+    const line=METRO_LINES.find(l=>l.id===fly.metroLineId),t=trainState(line,state.simulationAgeSeconds/GAME_SECONDS_PER_REAL_SECOND);
+    const oldX=fly.x,oldZ=fly.z;fly.x=t.x;fly.z=t.z;fly.y=t.y;fly.vx=fly.x-oldX;fly.vz=fly.z-oldZ;
+    if(t.dwelling&&t.from===fly.metroExitIndex){
+      fly.onTrain=false;fly.routeIndex=fly.metroExitWaypoint;fly.transitMode="walk";fly.y=1.1;
+      const next=fly.routeWaypoints[fly.routeIndex];fly.targetX=next.x;fly.targetZ=next.z;
+      state.transit=state.transit||{boardings:0,completedTrips:0};state.transit.completedTrips++;
+    }
+    return;
+  }
   const dx = fly.targetX - fly.x;
   const dz = fly.targetZ - fly.z;
   const dist = Math.hypot(dx, dz);
@@ -2450,10 +2284,15 @@ function moveFly(fly) {
     if (fly.routeWaypoints?.length && fly.routeIndex < fly.routeWaypoints.length - 1) {
       const currentWp=fly.routeWaypoints[fly.routeIndex];
       if(currentWp?.stage==="station-entry"){
-        if(!fly.transitWaitUntil){fly.transitWaitUntil=state.simulationAgeSeconds+180;fly.action=`waiting at ${fly.metroLineId||"metro"} station`;fly.stress=clamp(fly.stress-0.15);return;}
-        if(state.simulationAgeSeconds<fly.transitWaitUntil)return;
-        fly.transitWaitUntil=0;fly.action=`boarding metro ${fly.metroLineId||""}`;
+        const line=METRO_LINES.find(l=>l.id===fly.metroLineId),t=trainState(line,state.simulationAgeSeconds/GAME_SECONDS_PER_REAL_SECOND);
+        if(!t.dwelling||t.from!==currentWp.stationIndex||t.direction!==currentWp.direction){fly.action=`waiting at ${fly.metroLineId} station`;return;}
+        fly.onTrain=true;fly.action=`riding metro ${fly.metroLineId}`;
+        state.transit=state.transit||{boardings:0,completedTrips:0};state.transit.boardings++;
+        fly.metroExitIndex=currentWp.exitIndex;
+        fly.metroExitWaypoint=fly.routeWaypoints.findIndex((p,i)=>i>fly.routeIndex&&p.stage==="station-exit");
+        return;
       }
+      if(currentWp?.stage==="parking")fly.parkedCar={x:fly.x,z:fly.z};
       fly.routeIndex += 1;
       const next = fly.routeWaypoints[fly.routeIndex];
       fly.targetX = next.x;
@@ -2470,6 +2309,13 @@ function moveFly(fly) {
     if (fly.traveling) {
       const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
       fly.traveling = false;
+      fly.action=fly.pendingAction||fly.action;
+      fly.pendingAction=null;
+      fly.indoors=fly.currentLocationId===fly.homeId||BUILDINGS.some(b=>b.id===fly.currentLocationId)||["rooftop","heliport"].includes(fly.currentLocationId);
+      fly.sleeping=fly.action==="sleeping"&&fly.currentLocationId===fly.homeId&&fly.indoors;
+      fly.y=fly.currentLocationId==="rooftop"?99:1.1;
+      if(fly.vehicle&&!fly.parkedCar)fly.parkedCar=parkingPoint(fly);
+      if(brainRand(fly)<.18)emit("arrival",`${fly.id} arrived: ${fly.action}.`,{flyId:fly.id,locationId:fly.currentLocationId});
       fly.travelGoalId = null;
       fly.travelLastDistance = null;
       fly.travelStuckTicks = 0;
@@ -2494,7 +2340,7 @@ function moveFly(fly) {
 
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
-  const baseSpeed = (0.42 + fly.energy / 320 + neuralMotor * 0.42) * vehicleBoost;
+  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost;
   const danger = weatherDanger();
   const weatherFactor =
     fly.transitMode === "metro" ? 1 :
@@ -2516,9 +2362,11 @@ function moveFly(fly) {
   const step = Math.min(Math.max(0.08, baseSpeed * weatherFactor), dist);
   fly.vx = ux * step;
   fly.vz = uz * step;
-  fly.x += fly.vx;
-  fly.z += fly.vz;
-  fly.y = 1.4 + Math.sin(state.simulationAgeSeconds * 0.018 + Number(fly.id.slice(-3))) * 0.3;
+  const nextPosition={x:fly.x+fly.vx,z:fly.z+fly.vz};
+  if(!clearSegment(fly,nextPosition)){fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
+  fly.x=nextPosition.x;fly.z=nextPosition.z;
+  if(["car","scooter"].includes(fly.transitMode))fly.parkedCar={x:fly.x,z:fly.z};
+  fly.y = 1.1;
 
   const remaining = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
   if (Number.isFinite(fly.travelLastDistance)) {
@@ -2547,7 +2395,7 @@ function moveFly(fly) {
 }
 
 function productionAndRetail(fly, clock) {
-  if (!fly.alive) return;
+  if (!fly.alive || fly.traveling) return;
   const business = state.businesses?.[fly.currentLocationId];
 
   if(String(fly.action||"").startsWith("working as") || String(fly.action||"").includes("teaching at Hansdrex Academy")){
@@ -2559,7 +2407,7 @@ function productionAndRetail(fly, clock) {
   }
   educationTick(fly,clock);
 
-  if (fly.jobId === "farm" && fly.currentLocationId === "farm" && fly.action === "working") {
+  if (fly.jobId === "farm" && fly.currentLocationId === "farm" && String(fly.action).startsWith("working")) {
     state.businesses.farm.inventory += 0.08 * (0.5 + fly.traits.ambition);
     if (state.businesses.farm.inventory > 80 && rand() < 0.025) {
       const moved = Math.min(35, state.businesses.farm.inventory);
@@ -2665,7 +2513,8 @@ function payAndFinance(fly, clock) {
             fly.money -= fromCash;
             fly.savings -= Math.max(0, deposit - fromCash);
             const hh = state.housing.households[fly.householdId] || createHousehold(fly);
-            lot.ownerHouseholdId = hh.id;
+            releaseHousingUnit(hh);
+  lot.ownerHouseholdId = hh.id;
             hh.housingType = "house";
             hh.unitId = lot.id;
             hh.homeX = lot.x;
@@ -3214,8 +3063,8 @@ function needsAndActivities(fly, clock) {
   fly.hunger = clamp(fly.hunger + 0.055);
   fly.thirst = clamp(fly.thirst + 0.082);
   fly.caffeine = clamp(fly.caffeine - 0.075);
-  const atHome = fly.currentLocationId === fly.homeId;
-  const sleeping = Boolean(fly.sleeping && atHome && !fly.traveling);
+  const atHome = fly.currentLocationId === fly.homeId && !fly.traveling;
+  const sleeping = Boolean(fly.action==="sleeping" && atHome && !fly.traveling && fly.indoors);
   fly.sleeping = sleeping;
 
   if (sleeping) {
@@ -3236,6 +3085,7 @@ function needsAndActivities(fly, clock) {
     fly.health = clamp(fly.health - 0.012);
   }
 
+  if(fly.traveling)return;
   const foodPlaces = ["market","grocery","bakery","restaurant","night-market"];
   if (foodPlaces.includes(fly.currentLocationId) && fly.hunger > 28 && fly.money >= 3.5) {
     const business = state.businesses?.[fly.currentLocationId];
@@ -3369,6 +3219,12 @@ function tickFly(fly, clock) {
     emit("retirement", `${fly.id} retired at age ${fly.ageYears.toFixed(1)}.`, { flyId: fly.id });
   }
 
+  if(!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
+    const shelter=LOCATIONS.filter(l=>BUILDINGS.some(b=>b.id===l.id)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+    const route=buildPedestrianRoute(fly,shelter);
+    if(route.length){fly.targetLocationId=shelter.id;fly.pendingAction="sheltering from bad weather";fly.action="walking to shelter";fly.routeWaypoints=route;fly.routeIndex=0;fly.targetX=route[0].x;fly.targetZ=route[0].z;fly.traveling=true;fly.transitMode="walk";fly.metroLineId=null;}
+  }
+  if(fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.action==="sheltering from bad weather")fly.actionUntil=state.simulationAgeSeconds+600;
   chooseDestination(fly, clock);
   moveFly(fly);
   if(simulateHeliTour(fly,clock)) return;
@@ -3389,6 +3245,7 @@ function tickFly(fly, clock) {
   mentalHealthAndMortality(fly);
   if (fly.alive) regulateEmotions(fly, clock);
   brainLearnFromOutcome(fly, before);
+  fly.movementTrace=[...(fly.movementTrace||[]),{x:fly.x,y:fly.y,z:fly.z,t:state.simulationAgeSeconds}].slice(-8);
 }
 
 async function checkpoint(force = false) {
@@ -3443,6 +3300,9 @@ function compactFly(f) {
     vx: Number(f.vx.toFixed(3)),
     vz: Number(f.vz.toFixed(3)),
     action: f.action,
+    traveling:Boolean(f.traveling),indoors:Boolean(f.indoors),onTrain:Boolean(f.onTrain),
+    parkedCar:f.parkedCar||null,
+    movementTrace:f.movementTrace||[],
     currentLocationId: f.currentLocationId,
     targetLocationId: f.targetLocationId,
     hunger: Number(f.hunger.toFixed(1)),
@@ -3611,6 +3471,9 @@ function getState() {
     politics:state.politics,
     utilities:{powerPlant:state.utilities?.powerPlant||null,disconnectedHouseholds:Number(state.utilities?.disconnectedHouseholds||0),householdAccounts:Object.keys(state.utilities?.householdAccounts||{}).length},
     justice:state.justice,
+    mapVersion:MAP_VERSION,
+    transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>f.action?.startsWith("waiting at M")).length},
+    activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
         id: b.id,
@@ -3750,6 +3613,7 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+if(IS_MAIN){
 await initDb();
 setInterval(() => void tick(), 1000);
 
@@ -3767,3 +3631,7 @@ async function shutdown(signal) {
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
+
+}
+// Side-effect-free test entry points; importing never starts a server or touches persistence.
+export {freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
