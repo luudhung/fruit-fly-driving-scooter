@@ -253,16 +253,16 @@ const healthMeter = $("health-meter");
 
 type GraphicsPreset = "low" | "medium" | "high" | "ultra";
 const GRAPHICS_PROFILES = {
-  low:    { pixelRatio: 0.82, fps: 24, maxFlies: 132, maxHomes: 24,  rain: 260,  treeScale: 0.30, streetTreeStep: 78, windowStride: 4, metroDetail: 0, trafficStride: 4, cityStride: 4 },
-  medium: { pixelRatio: 1.00, fps: 30, maxFlies: 132, maxHomes: 48,  rain: 520,  treeScale: 0.52, streetTreeStep: 52, windowStride: 3, metroDetail: 1, trafficStride: 3, cityStride: 2 },
-  high:   { pixelRatio: 1.18, fps: 40, maxFlies: 132, maxHomes: 72,  rain: 900,  treeScale: 0.76, streetTreeStep: 38, windowStride: 2, metroDetail: 2, trafficStride: 2, cityStride: 1 },
-  ultra:  { pixelRatio: 1.50, fps: 50, maxFlies: 132, maxHomes: 100, rain: 1500, treeScale: 1.00, streetTreeStep: 28, windowStride: 1, metroDetail: 3, trafficStride: 1, cityStride: 1 },
+  low:    { pixelRatio: 0.82, fps: 24, maxFlies: 132, maxHomes: 24,  rain: 260,  treeScale: 0.30, streetTreeStep: 78, windowStride: 4, metroDetail: 0, trafficStride: 4 },
+  medium: { pixelRatio: 1.00, fps: 30, maxFlies: 132, maxHomes: 48,  rain: 520,  treeScale: 0.52, streetTreeStep: 52, windowStride: 3, metroDetail: 1, trafficStride: 3 },
+  high:   { pixelRatio: 1.18, fps: 40, maxFlies: 132, maxHomes: 72,  rain: 900,  treeScale: 0.76, streetTreeStep: 38, windowStride: 2, metroDetail: 2, trafficStride: 2 },
+  ultra:  { pixelRatio: 1.50, fps: 50, maxFlies: 132, maxHomes: 100, rain: 1500, treeScale: 1.00, streetTreeStep: 28, windowStride: 1, metroDetail: 3, trafficStride: 1 },
 } as const;
 const MOBILE_GRAPHICS_PROFILES = {
-  low:    { ...GRAPHICS_PROFILES.low,    pixelRatio:0.66, fps:22, rain:180, treeScale:0.24, cityStride:5 },
-  medium: { ...GRAPHICS_PROFILES.medium, pixelRatio:0.78, fps:26, rain:300, treeScale:0.40, cityStride:3 },
-  high:   { ...GRAPHICS_PROFILES.high,   pixelRatio:0.90, fps:30, rain:480, treeScale:0.56, cityStride:2 },
-  ultra:  { ...GRAPHICS_PROFILES.ultra,  pixelRatio:1.00, fps:34, rain:650, treeScale:0.68, cityStride:1 },
+  low:    { ...GRAPHICS_PROFILES.low,    pixelRatio:0.66, fps:22, rain:180, treeScale:0.24 },
+  medium: { ...GRAPHICS_PROFILES.medium, pixelRatio:0.78, fps:26, rain:300, treeScale:0.40 },
+  high:   { ...GRAPHICS_PROFILES.high,   pixelRatio:0.90, fps:30, rain:480, treeScale:0.56 },
+  ultra:  { ...GRAPHICS_PROFILES.ultra,  pixelRatio:1.00, fps:34, rain:650, treeScale:0.68 },
 } as const;
 const savedGraphics = localStorage.getItem("fulllife_graphics");
 const coarseDevice = matchMedia("(pointer:coarse)").matches || /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
@@ -561,13 +561,16 @@ scene.fog = new THREE.Fog(0x93b8cf, 360, 1500);
 
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 1800);
 const renderer = new THREE.WebGLRenderer({
-  antialias: !coarseDevice && graphics.metroDetail >= 2,
+  antialias: graphics.metroDetail >= 2,
   powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
   precision: graphicsPreset === "ultra" && !coarseDevice ? "highp" : "mediump",
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = graphicsPreset === "ultra" ? 1.18 : graphicsPreset === "high" ? 1.14 : graphicsPreset === "medium" ? 1.10 : 1.06;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
 renderer.domElement.addEventListener("webglcontextlost",(event)=>{
@@ -583,9 +586,15 @@ renderer.domElement.addEventListener("webglcontextlost",(event)=>{
 
 const hemi = new THREE.HemisphereLight(0xeaf7ff, 0x465a43, 1.85);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffe6bd, 2.6);
-sun.position.set(-150, 190, 120);
+// Cheap "fake sun": one fixed warm key light + hemisphere fill, no shadows and no astronomical tracking.
+const sun = new THREE.DirectionalLight(0xffe0aa, 2.6);
+sun.position.set(-170, 230, 140);
+sun.castShadow = false;
 scene.add(sun);
+const sunFill = new THREE.DirectionalLight(0xffc98f, 0.42);
+sunFill.position.set(190, 120, -160);
+sunFill.castShadow = false;
+scene.add(sunFill);
 const moon = new THREE.DirectionalLight(0xa9c3ff, 0.35);
 moon.position.set(130, 120, -150);
 scene.add(moon);
@@ -621,7 +630,7 @@ function seeded(n: number) {
   return x - Math.floor(x);
 }
 
-const windowMaterials: THREE.MeshStandardMaterial[] = [];
+const windowMaterials: THREE.MeshBasicMaterial[] = [];
 const streetLights: THREE.PointLight[] = [];
 const cityRoot = new THREE.Group();
 scene.add(cityRoot);
@@ -851,15 +860,22 @@ function addBuilding(
   roof.position.y = h + 0.18;
   group.add(roof);
 
-  // Warm windows are fixed emissive surfaces, not dynamic point lights.
-  const windowMat = new THREE.MeshStandardMaterial({ color:0x6c5735, emissive:0xffcf67, emissiveIntensity:1.05, roughness:0.34, metalness:options.glass?0.22:0.04 });
+  // Windows are fixed façade pixels: unlit/basic material means camera/light direction cannot make
+  // them "slide" over the wall. A small physical offset also removes z-fighting shimmer.
+  const windowMat = new THREE.MeshBasicMaterial({
+    color: 0xe7b85f,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
   windowMaterials.push(windowMat);
   const floors=Math.max(2,Math.floor(h/3.1)), colsX=Math.max(2,Math.floor(w/2.7)), colsZ=Math.max(2,Math.floor(d/2.7));
   const matrices:THREE.Matrix4[]=[]; const dummy=new THREE.Object3D();
   for(let floor=0;floor<floors;floor+=graphics.windowStride){
     const wy=1.8+floor*2.9; if(wy>h-0.65) continue;
-    for(let col=0;col<colsX;col+=graphics.windowStride){const wx=-w/2+1.25+col*((w-2.5)/Math.max(1,colsX-1));for(const face of [-1,1]){dummy.position.set(wx,wy,face*(d/2+0.045));dummy.scale.set(0.92,1.12,0.08);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
-    for(let col=0;col<colsZ;col+=graphics.windowStride){const wz=-d/2+1.25+col*((d-2.5)/Math.max(1,colsZ-1));for(const face of [-1,1]){dummy.position.set(face*(w/2+0.045),wy,wz);dummy.scale.set(0.08,1.12,0.92);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
+    for(let col=0;col<colsX;col+=graphics.windowStride){const wx=-w/2+1.25+col*((w-2.5)/Math.max(1,colsX-1));for(const face of [-1,1]){dummy.position.set(wx,wy,face*(d/2+0.09));dummy.scale.set(0.92,1.12,0.025);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
+    for(let col=0;col<colsZ;col+=graphics.windowStride){const wz=-d/2+1.25+col*((d-2.5)/Math.max(1,colsZ-1));for(const face of [-1,1]){dummy.position.set(face*(w/2+0.09),wy,wz);dummy.scale.set(0.025,1.12,0.92);dummy.updateMatrix();matrices.push(dummy.matrix.clone());}}
   }
   const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),windowMat,matrices.length);
   matrices.forEach((m,i)=>windows.setMatrixAt(i,m)); windows.instanceMatrix.needsUpdate=true; group.add(windows);
@@ -882,9 +898,8 @@ function addBuilding(
   return group;
 }
 
-// Every authoritative footprint remains on the server. On coarse/mobile GPUs we render only
-// every third generic block while keeping ALL park-edge apartments and every unique landmark.
-const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment").filter((b,i)=>b.kind==="apartment"||i%graphics.cityStride===0);
+// Building topology is authoritative city data and MUST NOT change with graphics quality.
+const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment");
 for(const b of renderableCityBuildings)addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
@@ -1296,9 +1311,10 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
 
   // Keep the expanded overview readable at night: the city is simulated, not a black-screen test.
   hemi.intensity = 0.68 + daylight * 1.30;
-  sun.intensity = (0.16 + daylight * 2.55) * (1 - cloud * 0.52);
+  sun.intensity = (0.18 + daylight * 2.42) * (1 - cloud * 0.48);
+  sunFill.intensity = (0.10 + daylight * 0.46) * (1 - cloud * 0.36);
   moon.intensity = 0.28 + night * 0.78 * (1 - cloud * 0.28);
-  sun.position.set(Math.cos((t / 24) * Math.PI * 2) * 80, Math.max(-12, sunHeight * 95), Math.sin((t / 24) * Math.PI * 2) * 80);
+  // Fake sun direction stays fixed for a stable, inexpensive city-lighting look.
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
   const rainLevel = THREE.MathUtils.clamp(weather.precipitation || 0, 0, 1);
