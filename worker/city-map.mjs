@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 10;
+export const MAP_VERSION = 11;
 export const WORLD_HALF = 620;
 export const PARK = { x:15, z:-170, w:150, d:260 };
 export const PARK_PONDS = [
@@ -142,25 +142,64 @@ function addApartment(x,z,h=38,w=11,d=16){
  const b={id:`APT-${APARTMENTS.length+1}`,x,z,w,d,h,kind:'apartment',capacity:10,rent:24,purchaseValue:5040};
  if(place(b))APARTMENTS.push(b);
 }
-// Park-edge residential wall: towers follow both long sides and the north edge.
-for(const z of [-280,-240,-200,-160,-120,-80]){addApartment(-76,z,34+((Math.abs(z)/40)%4)*7);addApartment(106,z,38+((Math.abs(z)/40)%4)*7);}
-for(const x of [-63,-37,-11,15,41,67])addApartment(x,-320,42+((x+70)%4)*5,11,16);
-// Secondary residential clusters extend into the larger map without overwhelming mobile rendering.
-for(const x of [-260,-210,210,260])for(const z of [-320,-280,220,260])addApartment(x,z,26+((Math.abs(x+z)/20)%4)*6,12,16);
+// High-rise residential wall hugs Central Park, like Manhattan's park-edge skyline.
+for(const z of [-286,-258,-230,-202,-174,-146,-118,-90,-62]){
+ addApartment(-76,z,72+((Math.abs(z)/28)%5)*8,13,18);
+ addApartment(106,z,78+((Math.abs(z)/28)%5)*9,13,18);
+}
+for(const x of [-63,-37,-11,15,41,67])addApartment(x,-320,82+((x+70)%5)*8,13,18);
+for(const x of [-63,-37,-11,15,41,67])addApartment(x,-20,68+((x+70)%5)*7,12,16);
 
+// Dense downtown fabric: fill buildable street blocks, tallest directly around the park,
+// then taper through mid-rise / low-rise districts toward detached-house neighborhoods.
+const URBAN_X=[-310,-260,-210,-154,-102,-92,-50,-24,2,28,54,80,122,159,210,260,310];
+const URBAN_Z=[-340,-300,-260,-220,-180,-145,-116,-87,-58,-29,0,29,58,87,116,145,180,220,260,300,340];
+function distanceFromPark(x,z){
+ const dx=Math.max(Math.abs(x-PARK.x)-PARK.w/2,0);
+ const dz=Math.max(Math.abs(z-PARK.z)-PARK.d/2,0);
+ return Math.hypot(dx,dz);
+}
+function skylineHeight(x,z,seed=0){
+ const d=distanceFromPark(x,z);
+ const jitter=((Math.abs(Math.round(x*13+z*7+seed*17))%17)-8);
+ if(d<34)return 92+jitter*2.2;
+ if(d<80)return 68+jitter*1.7;
+ if(d<145)return 43+jitter*1.2;
+ if(d<220)return 24+jitter*.8;
+ return 10+Math.max(0,jitter*.45);
+}
+for(let xi=0;xi<URBAN_X.length-1;xi++)for(let zi=0;zi<URBAN_Z.length-1;zi++){
+ const x0=URBAN_X[xi],x1=URBAN_X[xi+1],z0=URBAN_Z[zi],z1=URBAN_Z[zi+1];
+ const cellW=x1-x0,cellD=z1-z0,cx=(x0+x1)/2,cz=(z0+z1)/2;
+ if(distanceFromPark(cx,cz)>285)continue;
+ const inset=8.0,buildW=cellW-inset*2,buildD=cellD-inset*2;
+ if(buildW<7||buildD<7)continue;
+ // Large blocks get four towers/buildings, medium blocks two, narrow blocks one.
+ const cols=buildW>30?2:1,rows=buildD>30?2:1;
+ const lotW=(buildW-(cols-1)*4)/cols,lotD=(buildD-(rows-1)*4)/rows;
+ for(let a=0;a<cols;a++)for(let b=0;b<rows;b++){
+  const x=x0+inset+lotW/2+a*(lotW+4),z=z0+inset+lotD/2+b*(lotD+4);
+  const h=skylineHeight(x,z,a*3+b+xi*11+zi*5);
+  place({id:`DOWNTOWN-${xi}-${zi}-${a}-${b}`,x,z,w:Math.max(6,lotW),d:Math.max(6,lotD),h,kind:'block'});
+ }
+}
+
+// Additional apartment clusters bridge the high-rise core into the mid-rise neighborhoods.
+for(const x of [-260,-210,210,260])for(const z of [-300,-240,180,240,300])addApartment(x,z,28+Math.max(0,62-distanceFromPark(x,z)*.16),12,16);
+
+// Detached ground-house lots form the outer residential ring after the skyline has tapered down.
 export const HOUSE_LOTS=[];
-for(const x of [-340,-320,-290,-270,-250,-230,-210,210,230,250,270,290,320,340])for(const z of [-170,-132,-118,-82,-68,-32,18,32,68,82,118,132,170]) {
+const outerHouseXs=[-350,-330,-310,-290,290,310,330,350];
+const outerHouseZs=[-320,-280,-240,-200,-160,-120,-80,-40,0,40,80,120,160,200,240,280,320];
+for(const x of outerHouseXs)for(const z of outerHouseZs){
  const b={id:`HOUSE-${HOUSE_LOTS.length+1}`,x,z,w:9,d:9,h:6,kind:'house',baseValue:8200+HOUSE_LOTS.length*32};
  if(place(b))HOUSE_LOTS.push(b);
 }
-// Dense but bounded skyline: full map is larger, while only selected corridors receive detailed towers.
-const BLOCK_AVENUES=[-310,-210,-154,-102,-92,122,159,210,310];
-const BLOCK_STREETS=[-340,-300,-260,-220,-180,-145,-116,-87,-58,-29,0,29,58,87,116,145,180,220,260,300,340];
-for(let xi=0;xi<BLOCK_AVENUES.length-1;xi++)for(let zi=0;zi<BLOCK_STREETS.length-1;zi++) {
- const x=(BLOCK_AVENUES[xi]+BLOCK_AVENUES[xi+1])/2,z=(BLOCK_STREETS[zi]+BLOCK_STREETS[zi+1])/2;
- const core=Math.max(0,1-Math.hypot(x-15,z-55)/260);
- place({id:`BLOCK-${xi}-${zi}`,x,z,w:Math.min(18,Math.abs(BLOCK_AVENUES[xi+1]-BLOCK_AVENUES[xi])-14),d:Math.min(18,Math.abs(BLOCK_STREETS[zi+1]-BLOCK_STREETS[zi])-14),h:9+core**1.7*76+((xi*13+zi*7)%13),kind:'block'});
+for(const z of [-350,-330,330,350])for(const x of [-260,-220,-180,-140,-100,-60,-20,20,60,100,140,180,220,260]){
+ const b={id:`HOUSE-${HOUSE_LOTS.length+1}`,x,z,w:9,d:9,h:6,kind:'house',baseValue:8200+HOUSE_LOTS.length*32};
+ if(place(b))HOUSE_LOTS.push(b);
 }
+
 export function entrance(p) {
  const b=BUILDINGS.find(b=>contains(b,p,0.2));
  if(b)return {x:b.x,z:b.z+b.d/2+1.2};
