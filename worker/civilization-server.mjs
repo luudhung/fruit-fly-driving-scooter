@@ -2716,6 +2716,7 @@ function commissionHeliTrial(clock=gameClock()){
     emit("heli_trial_ticket",`${fly.id} received a FREE commissioning ticket for Hansdrex Heli Tours.`,{flyId:fly.id,price:0,batch:trial.batchesStarted});
   }
   emit("heli_trial_batch",`Hansdrex Heli Tours started free test batch ${trial.batchesStarted}: ${batch.map(f=>f.id).join(", ")}.`,{flyIds:batch.map(f=>f.id),price:0});
+  console.log(`[heli-trial] batch ${trial.batchesStarted} FREE riders=${batch.map(f=>f.id).join(",")}`);
   return batch;
 }
 
@@ -2763,6 +2764,7 @@ function simulateHeliTour(fly,clock){
       if(!trial.completedIds.includes(fly.id))trial.completedIds.push(fly.id);
       fly.heliTrialRide=false;
       emit("heli_trial_complete",`${fly.id} completed the FREE Hansdrex helicopter commissioning ride.`,{flyId:fly.id,price:0});
+      console.log(`[heli-trial] completed ${fly.id} FREE ticket`);
     }
     emit("heli_landing",`${fly.id} landed after a Hansdrex skyline helicopter tour.`,{flyId:fly.id,ticket:fly.lastHeliTicket||0});
     return true;
@@ -3829,13 +3831,14 @@ async function tick() {
       const clock = gameClock();
       updateWeather(clock);
       ensureAcademyTeacher();
-      commissionHeliTrial(clock);
       ensureHeliTourStaff();
       if(!state.flies.some(f=>f.alive&&f.jobId==="rooftop")){
        const host=state.flies.find(f=>f.alive&&f.ageYears>=21&&f.ageYears<65&&!f.jobId&&!f.businessEmployeeOf);
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       for(const fly of state.flies)tickFly(fly,clock);
+      // Start the next free commissioning batch only after expired riders have been landed/marked complete.
+      commissionHeliTrial(clock);
       simulateEnterprises(clock);
       simulatePowerGrid(clock);
       updateMonetaryPolicy(clock);
