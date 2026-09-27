@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, WORLD_HALF, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, WORLD_HALF, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
   id: string;
@@ -1083,26 +1083,93 @@ for (const x of avenueXs) {
 // ---------- elevated metro network ----------
 type MetroTrain = { group:THREE.Group; curve:THREE.Curve<THREE.Vector3>; stationTs:number[]; offset:number; lineIndex:number; label?:THREE.Sprite };
 const metroTrains:MetroTrain[]=[];
-const metroTrackMat=new THREE.MeshStandardMaterial({color:0x555b60,roughness:0.48,metalness:0.62});
+const metroTrackMat=new THREE.MeshStandardMaterial({color:0x555b60,roughness:0.42,metalness:0.72});
+const metroSleeperMat=new THREE.MeshStandardMaterial({color:0x4a4038,roughness:0.88,metalness:0.10});
 const metroBeamMat=new THREE.MeshStandardMaterial({color:0x6e7478,roughness:0.66,metalness:0.38});
+const metroPlatformMat=new THREE.MeshStandardMaterial({color:0xb9bec0,roughness:0.72,metalness:0.12});
+const metroStepMat=new THREE.MeshStandardMaterial({color:0x8e9497,roughness:0.82,metalness:0.16});
 const lineColors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae];
 const metroLines=METRO_LINES.map(l=>({...l,name:l.id}));
 
-function addMetroStation(p:THREE.Vector3,lineName:string,lineIndex:number){
-  const platform=new THREE.Mesh(new THREE.BoxGeometry(lineIndex===1||lineIndex===3||lineIndex===5?5.8:16,0.65,lineIndex===1||lineIndex===3||lineIndex===5?16:5.8),new THREE.MeshStandardMaterial({color:0xb9bec0,roughness:0.65,metalness:0.18}));
-  platform.position.copy(p).add(new THREE.Vector3(0,-0.8,0));cityRoot.add(platform);
-  const access=new THREE.Mesh(new THREE.BoxGeometry(1.8,p.y,1.8),metroBeamMat);access.position.set(p.x+3,p.y/2,p.z);cityRoot.add(access);
-  if(graphics.metroDetail>=2){
-    const canopy=new THREE.Mesh(new THREE.BoxGeometry(11,0.3,5.2),new THREE.MeshStandardMaterial({color:0x535b60,roughness:0.55,metalness:0.45}));canopy.position.copy(p).add(new THREE.Vector3(0,2.2,0));cityRoot.add(canopy);
-    for(const sx of [-4,4]){const post=new THREE.Mesh(new THREE.BoxGeometry(0.18,3,0.18),metroBeamMat);post.position.copy(p).add(new THREE.Vector3(sx,0.6,0));cityRoot.add(post);}
-    const sign=makeCanvasSprite(`${lineName} · HANSDREX SUBWAY`,20,1.0);sign.position.copy(p).add(new THREE.Vector3(0,3.2,0));cityRoot.add(sign);
-  }
+function addMetroStaircase(from:{x:number;z:number;y:number},to:{x:number;z:number;y:number}){
+ const steps=9;
+ for(let i=0;i<steps;i++){
+   const u0=i/steps,u1=(i+1)/steps;
+   const x=from.x+(to.x-from.x)*(u0+u1)/2;
+   const z=from.z+(to.z-from.z)*(u0+u1)/2;
+   const y=from.y+(to.y-from.y)*u1*.5+(from.y+(to.y-from.y)*u0)*.5;
+   const dx=(to.x-from.x)/steps,dz=(to.z-from.z)/steps,len=Math.hypot(dx,dz);
+   const step=new THREE.Mesh(new THREE.BoxGeometry(Math.max(.95,len+.35),.22,2.0),metroStepMat);
+   step.position.set(x,y,z);
+   step.rotation.y=Math.atan2(dx,dz)-Math.PI/2;
+   cityRoot.add(step);
+ }
 }
-function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){const pts=line.points.map(([x,z])=>new THREE.Vector3(x,line.height,z)),curve=new THREE.CurvePath<THREE.Vector3>();let total=0;const lens:number[]=[];
-for(let i=0;i<pts.length-1;i++){const seg=new THREE.LineCurve3(pts[i],pts[i+1]);curve.add(seg);const len=pts[i].distanceTo(pts[i+1]);lens.push(len);total+=len;}const track=new THREE.Mesh(new THREE.TubeGeometry(curve,graphics.metroDetail>=2?64:36,0.82,graphics.metroDetail>=2?6:4,false),metroTrackMat);cityRoot.add(track);
-for(let t=.06;t<1;t+=graphics.metroDetail>=2?.10:.17){const p=curve.getPointAt(t),support=new THREE.Mesh(new THREE.BoxGeometry(.6,line.height,.6),metroBeamMat);support.position.set(p.x,line.height/2,p.z);cityRoot.add(support);}const stationTs=[0];let acc=0;for(const len of lens){acc+=len;stationTs.push(acc/Math.max(1,total));}stationTs.forEach(t=>addMetroStation(curve.getPointAt(t),line.name,lineIndex));
-const train=new THREE.Group(),cars=graphics.metroDetail>=2?3:2;for(let car=0;car<cars;car++){const cg=new THREE.Group(),body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.5,7.6),new THREE.MeshStandardMaterial({color:0xc6cbce,roughness:.28,metalness:.78}));cg.add(body);const stripe=new THREE.Mesh(new THREE.BoxGeometry(3.24,.22,7.66),new THREE.MeshBasicMaterial({color:lineColors[lineIndex]}));stripe.position.y=-.52;cg.add(stripe);cg.position.z=(car-(cars-1)/2)*8.05;
-if(graphics.metroDetail>=1){for(const side of [-1,1])for(let w=-2;w<=2;w++){const window=new THREE.Mesh(new THREE.BoxGeometry(.06,.8,.75),landmarkCool);window.position.set(side*1.63,.4,w*1.25);cg.add(window);}}train.add(cg);}cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});}
+
+function addMetroStation(line:typeof metroLines[number],index:number,lineIndex:number){
+  const geo=metroStationGeometry(line,index);
+  const horizontal=geo.axis==="x";
+  const platform=new THREE.Mesh(new THREE.BoxGeometry(horizontal?16:4.8,.55,horizontal?4.8:16),metroPlatformMat);
+  platform.position.set(geo.platform.x,geo.platform.y-.30,geo.platform.z);cityRoot.add(platform);
+  const edgeMat=new THREE.MeshBasicMaterial({color:lineColors[lineIndex],toneMapped:false});
+  const edge=new THREE.Mesh(new THREE.BoxGeometry(horizontal?15.4:.16,.08,horizontal?.16:15.4),edgeMat);
+  const towardTrack=new THREE.Vector3(geo.track.x-geo.platform.x,0,geo.track.z-geo.platform.z).normalize();
+  edge.position.set(geo.platform.x+towardTrack.x*2.15,geo.platform.y+.03,geo.platform.z+towardTrack.z*2.15);cityRoot.add(edge);
+  addMetroStaircase(geo.access,geo.platform);
+  const accessSign=makeCanvasSprite(`${line.id} METRO ↑`,18,.85);accessSign.position.set(geo.access.x,3.1,geo.access.z);cityRoot.add(accessSign);
+  if(graphics.metroDetail>=1){
+    const canopy=new THREE.Mesh(new THREE.BoxGeometry(horizontal?12:4.4,.28,horizontal?4.4:12),new THREE.MeshStandardMaterial({color:0x535b60,roughness:0.55,metalness:0.45}));
+    canopy.position.set(geo.platform.x,geo.platform.y+2.55,geo.platform.z);cityRoot.add(canopy);
+    for(const s of [-1,1]){
+      const post=new THREE.Mesh(new THREE.BoxGeometry(.16,2.7,.16),metroBeamMat);
+      post.position.set(geo.platform.x+(horizontal?s*5:0),geo.platform.y+1.25,geo.platform.z+(horizontal?0:s*5));cityRoot.add(post);
+    }
+  }
+  const sign=makeCanvasSprite(`${line.id} · HANSDREX METRO`,20,1.0);sign.position.set(geo.platform.x,geo.platform.y+3.45,geo.platform.z);cityRoot.add(sign);
+}
+
+function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
+ const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz),horizontal=Math.abs(dx)>=Math.abs(dz);
+ const cx=(a.x+b.x)/2,cz=(a.z+b.z)/2,y=a.y;
+ const bed=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:3.4,.24,horizontal?3.4:len),metroBeamMat);
+ bed.position.set(cx,y-.48,cz);cityRoot.add(bed);
+ for(const side of [-1,1]){
+   const rail=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:.20,.22,horizontal?.20:len),metroTrackMat);
+   rail.position.set(cx+(horizontal?0:side*1.05),y-.20,cz+(horizontal?side*1.05:0));cityRoot.add(rail);
+ }
+ const sleeperCount=Math.max(2,Math.floor(len/4.5));
+ for(let i=0;i<=sleeperCount;i++){
+   const u=i/sleeperCount,x=a.x+dx*u,z=a.z+dz*u;
+   const sleeper=new THREE.Mesh(new THREE.BoxGeometry(horizontal?.30:3.05,.12,horizontal?3.05:.30),metroSleeperMat);
+   sleeper.position.set(x,y-.34,z);cityRoot.add(sleeper);
+ }
+ const supportEvery=26;
+ for(let d=supportEvery/2;d<len;d+=supportEvery){
+   const u=d/len,x=a.x+dx*u,z=a.z+dz*u;
+   const support=new THREE.Mesh(new THREE.BoxGeometry(.72,y-.55,.72),metroBeamMat);
+   support.position.set(x,(y-.55)/2,z);cityRoot.add(support);
+ }
+}
+
+function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){
+ const pts=line.points.map(([x,z])=>new THREE.Vector3(x,line.height,z)),curve=new THREE.CurvePath<THREE.Vector3>();let total=0;const lens:number[]=[];
+ for(let i=0;i<pts.length-1;i++){
+   const seg=new THREE.LineCurve3(pts[i],pts[i+1]);curve.add(seg);
+   const len=pts[i].distanceTo(pts[i+1]);lens.push(len);total+=len;
+   addRailSegment(pts[i],pts[i+1],lineIndex);
+ }
+ const stationTs=[0];let acc=0;for(const len of lens){acc+=len;stationTs.push(acc/Math.max(1,total));}
+ line.points.forEach((_,i)=>addMetroStation(line,i,lineIndex));
+
+ const train=new THREE.Group(),cars=graphics.metroDetail>=2?3:2;
+ for(let car=0;car<cars;car++){
+   const cg=new THREE.Group(),body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.5,7.6),new THREE.MeshStandardMaterial({color:0xc6cbce,roughness:.28,metalness:.78}));cg.add(body);
+   const stripe=new THREE.Mesh(new THREE.BoxGeometry(3.24,.22,7.66),new THREE.MeshBasicMaterial({color:lineColors[lineIndex]}));stripe.position.y=-.52;cg.add(stripe);cg.position.z=(car-(cars-1)/2)*8.05;
+   if(graphics.metroDetail>=1){for(const side of [-1,1])for(let w=-2;w<=2;w++){const window=new THREE.Mesh(new THREE.BoxGeometry(.06,.8,.75),landmarkCool);window.position.set(side*1.63,.4,w*1.25);cg.add(window);}}
+   train.add(cg);
+ }
+ cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});
+}
 metroLines.forEach(addElevatedMetroLine);
 for(const t of metroTrains){t.label=makeCanvasSprite(METRO_LINES[t.lineIndex].id,20,1.1);t.label.position.y=4;t.group.add(t.label);}
 buildTrees();
