@@ -487,6 +487,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "political_argument" ? "💬 " :
       e.type === "infidelity" || e.type === "infidelity_discovered" ? "💔 " :
       e.type === "relationship_conflict" || e.type === "breakup" ? "⚠ " :
+      e.type === "metro_boarding" ? "🚇 " :
       e.type === "heli_boarding" || e.type === "heli_trial_ticket" || e.type === "heli_trial_batch" ? "🚁 " :
       e.type === "heli_landing" || e.type === "heli_trial_complete" ? "🚁 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
@@ -498,6 +499,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
   syncFlyMeshes(s.flies || []);
   updateHeliTourState(s.flies || []);
+  updateMetroStationOccupancy(s.flies || []);
   syncHomes(s.flies || []);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
   updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
@@ -1083,6 +1085,7 @@ for (const x of avenueXs) {
 // ---------- elevated metro network ----------
 type MetroTrain = { group:THREE.Group; curve:THREE.Curve<THREE.Vector3>; stationTs:number[]; offset:number; lineIndex:number; label?:THREE.Sprite };
 const metroTrains:MetroTrain[]=[];
+const metroStationDisplays:Array<{lineId:string;index:number;x:number;z:number;label:THREE.Sprite}>=[];
 const metroTrackMat=new THREE.MeshStandardMaterial({color:0x555b60,roughness:0.42,metalness:0.72});
 const metroSleeperMat=new THREE.MeshStandardMaterial({color:0x4a4038,roughness:0.88,metalness:0.10});
 const metroBeamMat=new THREE.MeshStandardMaterial({color:0x6e7478,roughness:0.66,metalness:0.38});
@@ -1126,6 +1129,8 @@ function addMetroStation(line:typeof metroLines[number],index:number,lineIndex:n
     }
   }
   const sign=makeCanvasSprite(`${line.id} · HANSDREX METRO`,20,1.0);sign.position.set(geo.platform.x,geo.platform.y+3.45,geo.platform.z);cityRoot.add(sign);
+  const waitingLabel=makeCanvasSprite(`${line.id} · 0 WAITING`,17,.82);waitingLabel.position.set(geo.platform.x,geo.platform.y+2.25,geo.platform.z);cityRoot.add(waitingLabel);
+  metroStationDisplays.push({lineId:line.id,index,x:geo.platform.x,z:geo.platform.z,label:waitingLabel});
 }
 
 function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
@@ -1185,6 +1190,14 @@ heliRotorCross.matrixAutoUpdate=true;
 heliTailRotor.matrixAutoUpdate=true;
 
 let snapshotReceivedAt=0;
+function updateMetroStationOccupancy(flies:FlyState[]){
+  for(const station of metroStationDisplays){
+    const waiting=flies.filter((f)=>f.alive&&f.metroLineId===station.lineId&&f.transitStage==="platform-wait"&&Math.hypot(f.x-station.x,f.z-station.z)<9).length;
+    updateSpriteText(station.label,`${station.lineId} · ${waiting} WAITING`);
+    station.label.visible=waiting>0||graphics.metroDetail>=1;
+  }
+}
+
 function updateMetroTrains(now:number){
  const seconds=(snapshot?.simulationAgeSeconds||0)/Math.max(1,snapshot?.timeScale||120)+Math.min(3,(now-snapshotReceivedAt)/1000);
  for(const train of metroTrains){
