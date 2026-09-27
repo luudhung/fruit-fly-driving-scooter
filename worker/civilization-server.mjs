@@ -1122,7 +1122,10 @@ function freshState() {
     enterprises: {},
     nextEnterpriseId: 1,
     bank: { reserves: 250000, loansOutstanding: 0, defaults: 0 },
-    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1, employed:0, lastLaborPulseHour:-1 },
+    treasury: { cash: 90000, taxRevenue: 0, spending: 0 },
+    centralBank: { inflationTarget: 2, inflationRate: 0, priceLevel: 1, lastPolicyDay: 0, lastPrintAmount: 0, moneyPrintedLifetime: 0, boardIds: [], lastDecision: null },
+    politics: { parties: [], presidentId: null, presidentPartyId: null, termStartDay: 0, nextElectionDay: 48, electionNumber: 0, campaignActive: false, candidates: [], lastElection: null, nextPartyId: 5 },
+    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1, employed:0, lastLaborPulseHour:-1, inflationRate:0, priceLevel:1 },
     education: { teacherId:null, teacherGeneration:0, lessons:0 },
     mapVersion: MAP_VERSION,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
@@ -1139,7 +1142,9 @@ function freshState() {
     state.flies.push(fly);
   }
   ensureAcademyTeacher(true);
-  s.generation = 1;
+  ensurePoliticalSystem();
+  ensureCentralBankBoard();
+  s.generation=1;
   return s;
 }
 
@@ -1234,10 +1239,15 @@ async function initDb() {
     state.enterprises = state.enterprises || {};
     state.nextEnterpriseId = Number(state.nextEnterpriseId || 1);
     state.bank = state.bank || { reserves: 250000, loansOutstanding: 0, defaults: 0 };
+    state.treasury = state.treasury || { cash: 90000, taxRevenue: 0, spending: 0 };
+    state.centralBank = state.centralBank || { inflationTarget:2, inflationRate:0, priceLevel:1, lastPolicyDay:0, lastPrintAmount:0, moneyPrintedLifetime:0, boardIds:[], lastDecision:null };
+    state.politics = state.politics || { parties:[], presidentId:null, presidentPartyId:null, termStartDay:0, nextElectionDay:48, electionNumber:0, campaignActive:false, candidates:[], lastElection:null, nextPartyId:5 };
     state.economy = state.economy || { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1 };
     state.economy.gdpToday = Number(state.economy.gdpToday || 0);
     state.economy.bankruptcies = Number(state.economy.bankruptcies || 0);
     state.economy.lastEnterpriseHour = Number.isFinite(state.economy.lastEnterpriseHour) ? state.economy.lastEnterpriseHour : -1;
+    state.economy.inflationRate=Number(state.economy.inflationRate||state.centralBank.inflationRate||0);
+    state.economy.priceLevel=Number(state.economy.priceLevel||state.centralBank.priceLevel||1);
     state.economy.employed=Number(state.economy.employed||0);
     state.economy.lastLaborPulseHour=Number.isFinite(state.economy.lastLaborPulseHour)?state.economy.lastLaborPulseHour:-1;
     state.education=state.education||{teacherId:null,teacherGeneration:0,lessons:0};
@@ -1331,6 +1341,7 @@ async function initDb() {
       fly.lastViolationAt = Number(fly.lastViolationAt||0);
       fly.professionSkills = fly.professionSkills || trainedSkillsForJob(fly.jobId,fly.jobTitle);
       ensureCognitiveProfile(fly);
+      ensurePoliticalProfile(fly);
       fly.enterpriseLocationId=fly.enterpriseLocationId||null;
       fly.wageArrears=Number(fly.wageArrears||0);
       fly.lastWorkEventDay=Number.isFinite(fly.lastWorkEventDay)?fly.lastWorkEventDay:-1;
@@ -1348,6 +1359,8 @@ async function initDb() {
     }
 
     ensureAcademyTeacher();
+    ensurePoliticalSystem();
+    ensureCentralBankBoard();
     rebalancePopulationToTarget();
     if (state.populationBootstrapVersion < POPULATION_BOOTSTRAP_VERSION || state.flies.filter((x) => x.alive).length < INITIAL_POPULATION) {
       const before = state.flies.filter((x) => x.alive).length;
@@ -1675,9 +1688,113 @@ function liquidMoneySupply() {
   const residents=state.flies.filter((f)=>f.alive).reduce((sum,f)=>sum+Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0)),0);
   const fixedBusinesses=Object.values(state.businesses||{}).reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
   const enterprises=Object.values(state.enterprises||{}).filter((b)=>b.status==="operating").reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
-  return residents+fixedBusinesses+enterprises;
+  return residents+fixedBusinesses+enterprises+Math.max(0,Number(state.treasury?.cash||0));
 }
 
+function ensurePoliticalProfile(fly) {
+  if (!fly.ideology) {
+    fly.ideology = {
+      growth: clamp((fly.traits?.ambition||0.5)*0.58+(fly.traits?.risk||0.5)*0.16+brainRange(fly,0,0.22),0,1),
+      welfare: clamp((fly.traits?.empathy||0.5)*0.66+(1-(fly.traits?.risk||0.5))*0.14+brainRange(fly,0,0.18),0,1),
+      liberty: clamp((fly.traits?.risk||0.5)*0.24+(fly.traits?.sociability||0.5)*0.20+Number(fly.brain?.plasticity?.noveltyBias||0.48)*0.38+brainRange(fly,0,0.16),0,1),
+      environment: clamp((fly.traits?.empathy||0.5)*0.34+Number(fly.brain?.plasticity?.noveltyBias||0.48)*0.28+brainRange(fly,0.12,0.34),0,1),
+    };
+  }
+  fly.politicalInterest=Number.isFinite(fly.politicalInterest)?fly.politicalInterest:clamp((fly.traits?.sociability||0.5)*0.25+(fly.traits?.ambition||0.5)*0.28+(fly.intelligence||0.5)*0.18+brainRange(fly,0,0.18),0,1);
+  fly.politicalRivalries=fly.politicalRivalries||{};
+  fly.partyId=fly.partyId||null;
+  return fly;
+}
+function ideologyDistance(a,b) {
+  return Math.sqrt(["growth","welfare","liberty","environment"].reduce((sum,k)=>sum+Math.pow(Number(a?.[k]||0.5)-Number(b?.[k]||0.5),2),0)/4);
+}
+function ensurePoliticalSystem() {
+  const p=state.politics||(state.politics={parties:[],presidentId:null,presidentPartyId:null,termStartDay:0,nextElectionDay:48,electionNumber:0,campaignActive:false,candidates:[],lastElection:null,nextPartyId:5});
+  if (!p.parties.length) {
+    p.parties=[
+      {id:"PARTY-1",name:"Hansdrex Growth Party",growth:0.84,welfare:0.34,liberty:0.62,environment:0.36,founderId:null,members:0},
+      {id:"PARTY-2",name:"Civic Social Party",growth:0.48,welfare:0.86,liberty:0.56,environment:0.62,founderId:null,members:0},
+      {id:"PARTY-3",name:"Free Wings Party",growth:0.68,welfare:0.30,liberty:0.90,environment:0.46,founderId:null,members:0},
+      {id:"PARTY-4",name:"Green City Party",growth:0.42,welfare:0.64,liberty:0.60,environment:0.92,founderId:null,members:0},
+    ];
+  }
+  const adults=state.flies.filter((f)=>f.alive&&f.ageYears>=16);
+  for(const fly of adults){
+    ensurePoliticalProfile(fly);
+    const nearest=p.parties.map((party)=>({party,d:ideologyDistance(fly.ideology,party)})).sort((a,b)=>a.d-b.d)[0];
+    if(!fly.partyId||!p.parties.some((party)=>party.id===fly.partyId))fly.partyId=nearest?.party.id||null;
+    if(fly.ageYears>=22&&fly.politicalInterest>0.72&&fly.traits.ambition>0.72&&nearest?.d>0.30&&p.parties.length<7&&brainRand(fly)<0.0009){
+      const id=`PARTY-${p.nextPartyId++}`;
+      const theme=fly.ideology.liberty>0.72?"Liberty":fly.ideology.environment>0.72?"Future":fly.ideology.welfare>0.72?"Community":"Prosperity";
+      const party={id,name:`Hansdrex ${theme} Movement ${id.slice(-1)}`,...fly.ideology,founderId:fly.id,members:0};
+      p.parties.push(party);fly.partyId=id;brainRemember(fly,"party_founded",{partyId:id});emit("party_founded",`${fly.id} founded ${party.name} after deciding the existing parties did not fit their views.`,{flyId:fly.id,party});
+    }
+  }
+  for(const party of p.parties)party.members=adults.filter((f)=>f.partyId===party.id).length;
+}
+function candidateScore(fly,party) {
+  ensurePoliticalProfile(fly);
+  return fly.traits.ambition*0.24+fly.traits.sociability*0.19+fly.traits.empathy*0.10+(fly.intelligence||0.5)*0.17+(fly.politicalInterest||0)*0.14+neuralDrive(fly,"socialDrive")*0.10-ideologyDistance(fly.ideology,party)*0.16+brainRange(fly,-0.05,0.05);
+}
+function startElection(clock) {
+  ensurePoliticalSystem();
+  const candidates=[];
+  for(const party of state.politics.parties){
+    const pool=state.flies.filter((f)=>f.alive&&f.ageYears>=24&&f.ageYears<=75&&f.partyId===party.id).sort((a,b)=>candidateScore(b,party)-candidateScore(a,party));
+    const c=pool[0];if(c){c.brainDecision="campaigning for president";c.stress=clamp(c.stress+3);brainRemember(c,"presidential_campaign",{partyId:party.id});candidates.push({flyId:c.id,partyId:party.id,votes:0});}
+  }
+  state.politics.candidates=candidates;state.politics.campaignActive=true;
+  emit("election_campaign",`Hansdrex presidential campaign began: ${candidates.length} parties nominated candidates.`,{candidates});
+}
+function resolveElection(clock) {
+  const candidates=state.politics.candidates||[];if(!candidates.length)return;
+  for(const voter of state.flies.filter((f)=>f.alive&&f.ageYears>=18)){
+    ensurePoliticalProfile(voter);let best=null;
+    for(const c of candidates){
+      const candidate=state.flies.find((f)=>f.id===c.flyId),party=state.politics.parties.find((p)=>p.id===c.partyId);if(!candidate||!party)continue;
+      const affinity=1-ideologyDistance(voter.ideology,party), social=Number(voter.brain?.memory?.socialAffinity?.[candidate.id]||0);
+      const score=affinity*0.67+candidate.traits.sociability*0.10+(candidate.intelligence||0.5)*0.08+social*0.07+(100-voter.stress)/100*0.03+brainRange(voter,-0.07,0.07);
+      if(!best||score>best.score)best={c,score};
+    }
+    if(best)best.c.votes+=1;
+  }
+  candidates.sort((a,b)=>b.votes-a.votes);const winner=candidates[0];if(!winner)return;
+  state.politics.presidentId=winner.flyId;state.politics.presidentPartyId=winner.partyId;state.politics.termStartDay=clock.day;state.politics.electionNumber=Number(state.politics.electionNumber||0)+1;state.politics.nextElectionDay=clock.day+48;state.politics.campaignActive=false;state.politics.lastElection={day:clock.day,candidates:candidates.map((c)=>({...c}))};
+  const president=state.flies.find((f)=>f.id===winner.flyId);if(president){president.happiness=clamp(president.happiness+12);brainRemember(president,"elected_president",{votes:winner.votes,partyId:winner.partyId});}
+  emit("election_result",`${winner.flyId} won the Hansdrex presidential election with ${winner.votes} votes.`,{winner,candidates});
+}
+function simulatePoliticalLife(clock) {
+  ensurePoliticalSystem();
+  if(!state.politics.campaignActive&&clock.day>=state.politics.nextElectionDay-3)startElection(clock);
+  if(state.politics.campaignActive&&clock.day>=state.politics.nextElectionDay)resolveElection(clock);
+  if(clock.minute<2&&clock.hour%6===0){
+    const pool=state.flies.filter((f)=>f.alive&&f.ageYears>=18&&(f.politicalInterest||0)>0.45);
+    if(pool.length>1){
+      const a=pool[Math.floor(rand()*pool.length)],b=pool[Math.floor(rand()*pool.length)];
+      if(a&&b&&a.id!==b.id){ensurePoliticalProfile(a);ensurePoliticalProfile(b);const disagreement=ideologyDistance(a.ideology,b.ideology),emotion=(a.stress+b.stress)/200+(2-a.traits.empathy-b.traits.empathy)*0.22;
+        if(disagreement>0.35&&brainRand(a)<0.012+emotion*0.02){a.stress=clamp(a.stress+3*disagreement);b.stress=clamp(b.stress+2*disagreement);a.politicalRivalries[b.id]=Number(a.politicalRivalries[b.id]||0)+disagreement;b.politicalRivalries[a.id]=Number(b.politicalRivalries[a.id]||0)+disagreement;brainRemember(a,"political_argument",{with:b.id,disagreement});brainRemember(b,"political_argument",{with:a.id,disagreement});emit("political_argument",`${a.id} and ${b.id} had a political argument driven by personal emotion and ideological disagreement.`,{a:a.id,b:b.id,disagreement});}
+      }
+    }
+  }
+}
+function ensureCentralBankBoard() {
+  const cb=state.centralBank||(state.centralBank={inflationTarget:2,inflationRate:0,priceLevel:1,lastPolicyDay:0,lastPrintAmount:0,moneyPrintedLifetime:0,boardIds:[],lastDecision:null});
+  const valid=(cb.boardIds||[]).map((id)=>state.flies.find((f)=>f.id===id&&f.alive&&f.ageYears>=24&&f.ageYears<=78)).filter(Boolean);
+  if(valid.length>=3)return valid;
+  const pool=state.flies.filter((f)=>f.alive&&f.ageYears>=24&&f.ageYears<=72).sort((a,b)=>((b.intelligence||0.5)+b.traits.thrift*0.25+b.creditScore/850*0.15)-((a.intelligence||0.5)+a.traits.thrift*0.25+a.creditScore/850*0.15));
+  cb.boardIds=pool.slice(0,5).map((f)=>f.id);return cb.boardIds.map((id)=>state.flies.find((f)=>f.id===id)).filter(Boolean);
+}
+function updateMonetaryPolicy(clock) {
+  const cb=state.centralBank;if(cb.lastPolicyDay===clock.day)return;
+  cb.lastPolicyDay=clock.day;const board=ensureCentralBankBoard(),supply=Math.max(1,liquidMoneySupply()),unemployment=Number(state.economy?.unemployment||0),inflation=Number(cb.inflationRate||0),target=Number(cb.inflationTarget||2);
+  const votes=board.map((f)=>{const support=unemployment*0.42+Math.max(0,target-inflation)/10*0.25+(1-f.traits.thrift)*0.18+f.traits.empathy*0.10+neuralDrive(f,"approachDrive")*0.08;const restraint=Math.max(0,inflation-target)/10*(0.30+f.traits.thrift*0.25);return {id:f.id,desiredRate:clamp(0.00015+support*0.004-restraint*0.004,0.0001,0.009)};});
+  const rate=votes.length?votes.reduce((a,v)=>a+v.desiredRate,0)/votes.length:0.0005,amount=supply*rate;
+  state.bank.reserves+=amount*0.60;state.treasury.cash+=amount*0.40;cb.lastPrintAmount=amount;cb.moneyPrintedLifetime=Number(cb.moneyPrintedLifetime||0)+amount;
+  const outputGap=Number(state.economy?.index||1)-1,annualMoneyGrowth=rate*DAYS_PER_YEAR*100,rawInflation=annualMoneyGrowth-outputGap*7+unemployment*2.2;
+  cb.inflationRate=clamp(cb.inflationRate*0.72+rawInflation*0.28,-4,28);cb.priceLevel=clamp(cb.priceLevel*(1+cb.inflationRate/100/DAYS_PER_YEAR),0.65,4.5);state.economy.inflationRate=cb.inflationRate;state.economy.priceLevel=cb.priceLevel;cb.lastDecision={day:clock.day,rate,amount,votes};
+  for(const member of board)brainRemember(member,"central_bank_vote",{rate,amount,inflation:cb.inflationRate});
+  emit("monetary_policy",`Hansdrex Central Bank issued ${amount.toFixed(0)} ${CURRENCY_CODE}; board decision implies ${cb.inflationRate.toFixed(1)}% inflation.`,{amount,rate,inflation:cb.inflationRate,boardIds:cb.boardIds});
+}
 function netWorth(fly) {
   const business = fly.businessId ? state.enterprises?.[fly.businessId] : null;
   const equity = business?.status === "operating"
@@ -1981,7 +2098,7 @@ function simulateEnterprises(clock) {
       ensureCognitiveProfile(employee);
       const pay=Math.min(Math.max(3.8,Number(employee.wage||4.5)),Math.max(0,business.cash));
       if(pay<=0){employee.wageArrears=Number(employee.wageArrears||0)+Math.max(3.8,Number(employee.wage||4.5));continue;}
-      business.cash-=pay;employee.money+=pay;employee.salaryLifetime+=pay;employee.salaryEarnedToday+=pay;employee.workMinutesToday=Number(employee.workMinutesToday||0)+60;payrollPaid+=pay;state.totalTransactions+=1;
+      const tax=pay*0.05,net=pay-tax;business.cash-=pay;employee.money+=net;employee.salaryLifetime+=net;employee.salaryEarnedToday+=net;employee.workMinutesToday=Number(employee.workMinutesToday||0)+60;payrollPaid+=pay;state.treasury.cash+=tax;state.treasury.taxRevenue=Number(state.treasury.taxRevenue||0)+tax;state.totalTransactions+=1;
       if(brainRand(employee)<0.035)emit("salary",`${business.name} paid ${employee.id} ${pay.toFixed(1)} ${CURRENCY_CODE} for this hour.`,{businessId:business.id,flyId:employee.id,amount:pay});
     }
     const operatingCost=nonPayrollCost+payrollPaid;
@@ -2389,7 +2506,7 @@ function productionAndRetail(fly, clock) {
   }
 
   if (["market","grocery","bakery"].includes(fly.currentLocationId) && fly.hunger > 28 && fly.money > 3 && business?.inventory > 0 && rand() < 0.09) {
-    const price = business.price * randRange(0.9, 1.08);
+    const price=business.price*Number(state.centralBank?.priceLevel||1)*randRange(0.9,1.08);
     fly.money -= price;
     fly.expensesLifetime += price;
     fly.hunger = clamp(fly.hunger - randRange(24, 48));
@@ -2422,9 +2539,10 @@ function payAndFinance(fly, clock) {
       if(workedHours>=1){
         const base=fly.wage*workedHours;
         const bonus=base*fly.traits.ambition*randRange(0,0.14);
-        const gross=base+bonus;
-        fly.money+=gross;fly.salaryEarnedToday+=gross;fly.salaryLifetime+=gross;fly.happiness=clamp(fly.happiness+2.5);state.totalTransactions+=1;
-        emit("salary",`${fly.id} earned ${gross.toFixed(1)} ${CURRENCY_CODE} for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,amount:gross,hours:workedHours});
+        const gross=base+bonus,tax=gross*0.07,available=Math.max(0,Number(state.treasury?.cash||0)),paid=Math.min(gross,available),net=Math.max(0,paid-tax);
+        state.treasury.cash-=paid;state.treasury.spending=Number(state.treasury.spending||0)+paid;state.treasury.taxRevenue=Number(state.treasury.taxRevenue||0)+Math.min(tax,paid);state.treasury.cash+=Math.min(tax,paid);
+        fly.money+=net;fly.salaryEarnedToday+=net;fly.salaryLifetime+=net;fly.happiness=clamp(fly.happiness+(paid>=gross?2.5:-2));state.totalTransactions+=1;
+        emit("salary",`${fly.id} earned ${net.toFixed(1)} ${CURRENCY_CODE} after tax for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,amount:net,hours:workedHours,tax:Math.min(tax,paid)});
       }
       fly.lastPaidDay=day;fly.workMinutesToday=0;
     }
@@ -2516,19 +2634,20 @@ function payAndFinance(fly, clock) {
       emit("home_upgrade", `${fly.id} expanded their home to tier ${fly.homeTier}.`, { flyId: fly.id, tier: fly.homeTier });
     }
 
-    if(!fly.vehicle&&fly.currentLocationId==="vehicle-showroom"&&fly.savings>420&&fly.action.includes("vehicle")){
-      const affordable=VEHICLE_CATALOG.filter((v)=>v.price<=fly.savings*0.78);
-      if(affordable.length&&brainRand(fly)<0.48){
-        const ambition=fly.traits.ambition+neuralDrive(fly,"approachDrive");
-        const choice=ambition>1.15?affordable[affordable.length-1]:affordable[Math.floor(brainRand(fly)*affordable.length)];
-        fly.savings-=choice.price;fly.vehicle=choice.id;state.businesses["vehicle-showroom"].cash+=choice.price;state.businesses["vehicle-showroom"].inventory=Math.max(0,state.businesses["vehicle-showroom"].inventory-1);state.totalTransactions+=1;
-        fly.happiness=clamp(fly.happiness+8);fly.excitement=clamp(fly.excitement+12);brainRemember(fly,"vehicle_purchase",{vehicle:choice.id,price:choice.price});
-        emit("vehicle_purchase",`${fly.id} chose and bought a ${choice.id} at Hansdrex Motors for ${choice.price} H$.`,{flyId:fly.id,vehicle:choice.id,price:choice.price});
-      }
-    }
   }
 }
 
+function vehicleShopping(fly) {
+  if(fly.vehicle||fly.currentLocationId!=="vehicle-showroom"||!String(fly.action||"").includes("vehicle"))return;
+  const level=Number(state.centralBank?.priceLevel||1),affordable=VEHICLE_CATALOG.map((v)=>({...v,price:v.price*level})).filter((v)=>v.price<=fly.savings*0.88);
+  if(!affordable.length)return;
+  const desire=fly.traits.ambition*0.28+neuralDrive(fly,"approachDrive")*0.24+neuralDrive(fly,"exploreDrive")*0.18+fly.excitement/100*0.14+(fly.savings>1000?0.12:0);
+  if(brainRand(fly)<0.035+desire*0.08){
+    const choice=desire>0.72?affordable[affordable.length-1]:affordable[Math.floor(brainRand(fly)*affordable.length)];
+    fly.savings-=choice.price;fly.vehicle=choice.id;state.businesses["vehicle-showroom"].cash+=choice.price;state.businesses["vehicle-showroom"].inventory=Math.max(0,state.businesses["vehicle-showroom"].inventory-1);state.totalTransactions+=1;fly.happiness=clamp(fly.happiness+8);fly.excitement=clamp(fly.excitement+12);brainRemember(fly,"vehicle_purchase",{vehicle:choice.id,price:choice.price});
+    emit("vehicle_purchase",`${fly.id} independently decided to buy a ${choice.id} at Hansdrex Motors for ${choice.price.toFixed(0)} ${CURRENCY_CODE}.`,{flyId:fly.id,vehicle:choice.id,price:choice.price});
+  }
+}
 function romanceUtility(a, b) {
   const neuralA = neuralDrive(a, "socialDrive") * 0.20 + neuralDrive(a, "approachDrive") * 0.12 - neuralDrive(a, "avoidDrive") * 0.10;
   const compatibility =
@@ -3050,8 +3169,9 @@ function tickFly(fly, clock) {
   chooseDestination(fly, clock);
   moveFly(fly);
   needsAndActivities(fly, clock);
-  productionAndRetail(fly, clock);
-  payAndFinance(fly, clock);
+  productionAndRetail(fly,clock);
+  payAndFinance(fly,clock);
+  vehicleShopping(fly);
   if (!fly.traveling && fly.currentLocationId === "bank" && fly.action.includes("business")) {
     attemptStartup(fly);
   }
@@ -3213,7 +3333,10 @@ function compactFly(f) {
     chronotype: f.chronotype||"day",
     preferredWorkStart: Number(f.preferredWorkStart||0),
     preferredWorkHours: Number(f.preferredWorkHours||0),
-    workMinutesToday: Number(f.workMinutesToday||0),
+    workMinutesToday:Number(f.workMinutesToday||0),
+    partyId:f.partyId||null,
+    ideology:f.ideology||null,
+    politicalInterest:Number(f.politicalInterest||0),
   };
 }
 
@@ -3253,12 +3376,23 @@ function getState() {
       operatingBusinesses: Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length,
       employed: Number(state.economy?.employed||0),
     },
-    education: {
-      teacherId: state.education?.teacherId||null,
-      teacherGeneration: Number(state.education?.teacherGeneration||0),
-      lessons: Number(state.education?.lessons||0),
-      students: living.filter((f)=>f.ageYears>=5&&f.ageYears<18).length,
+    education:{
+      teacherId:state.education?.teacherId||null,
+      teacherGeneration:Number(state.education?.teacherGeneration||0),
+      lessons:Number(state.education?.lessons||0),
+      students:living.filter((f)=>f.ageYears>=5&&f.ageYears<18).length,
     },
+    centralBank:{
+      inflationTarget:Number(state.centralBank?.inflationTarget||2),
+      inflationRate:Number(state.centralBank?.inflationRate||0),
+      priceLevel:Number(state.centralBank?.priceLevel||1),
+      lastPrintAmount:Number(state.centralBank?.lastPrintAmount||0),
+      moneyPrintedLifetime:Number(state.centralBank?.moneyPrintedLifetime||0),
+      boardIds:state.centralBank?.boardIds||[],
+      lastDecision:state.centralBank?.lastDecision||null,
+    },
+    treasury:state.treasury,
+    politics:state.politics,
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
         id: b.id,
@@ -3310,8 +3444,10 @@ async function tick() {
       const clock = gameClock();
       updateWeather(clock);
       ensureAcademyTeacher();
-      for (const fly of state.flies) tickFly(fly, clock);
+      for(const fly of state.flies)tickFly(fly,clock);
       simulateEnterprises(clock);
+      updateMonetaryPolicy(clock);
+      simulatePoliticalLife(clock);
       void syncFullConnectomeBrains();
 
       // periodic city-wide events
