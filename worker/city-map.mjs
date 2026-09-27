@@ -20,7 +20,7 @@ export function wheelCabin(seconds,seat){const a=seconds/FERRIS_WHEEL.period*Mat
 export const RIVER={id:"hansdrex-river",x:390,z:0,w:32,d:760};
 export const HARBOR={id:"hansdrex-harbor",x:120,z:420,w:560,d:90};
 export const WATER = [...PARK_PONDS,RIVER,HARBOR];
-export const AVENUES = [-310,-260,-210,-154,-102,-92,-76,-50,-24,2,28,54,80,106,122,159,210,260,310];
+export const AVENUES = [-310,-260,-210,-154,-102,-92,-50,-24,2,28,54,80,122,159,210,260,310];
 export const STREETS = [-340,-300,-260,-220,-180,-145,-116,-87,-58,-29,0,29,58,87,116,145,180,220,260,300,340];
 export const contains = (r,p,m=0) => Math.abs(r.x-p.x)<r.w/2+m && Math.abs(r.z-p.z)<r.d/2+m;
 export const overlaps = (a,b,m=0) => Math.abs(a.x-b.x)<(a.w+b.w)/2+m && Math.abs(a.z-b.z)<(a.d+b.d)/2+m;
@@ -134,7 +134,7 @@ for(const [id,x,z,w,d,h] of [
  ['empire',15,43.5,11,12,136],
  ['petronas',41,43.5,11,12,115],
  ['burj-khalifa',236,72.5,14,14,190],
- ['marina-bay',285,320,44,18,88],
+ ['marina-bay',340,320,44,18,88],
 ]) place({id,x,z,w,d,h,kind:'landmark'});
 
 export const APARTMENTS=[];
