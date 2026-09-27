@@ -39,7 +39,7 @@ test('large park is free of streets, buildings and elevated metro; wheel queue i
  for(const path of PARK_PATHS)for(const water of WATER)assert.equal(overlaps(path,water),false);
 });
 
-test('park-edge housing and iconic skyline survive the v10 expansion',()=>{
+test('park-edge housing and iconic skyline survive the v11 downtown expansion',()=>{
  const ids=new Set(BUILDINGS.filter(b=>b.kind==='landmark').map(b=>b.id));
  for(const id of ['empire','toronto','petronas','burj-khalifa','marina-bay'])assert.ok(ids.has(id),`missing landmark ${id}`);
  const west=PARK.x-PARK.w/2,east=PARK.x+PARK.w/2,north=PARK.z-PARK.d/2,south=PARK.z+PARK.d/2;
@@ -48,4 +48,19 @@ test('park-edge housing and iconic skyline survive the v10 expansion',()=>{
    return Math.hypot(dx,dz)<28;
  });
  assert.ok(nearPark.length>=12,`expected park-edge apartment wall, got ${nearPark.length}`);
+});
+
+test('downtown is dense around Central Park and tapers toward detached-house districts',()=>{
+ const blocks=BUILDINGS.filter(b=>b.kind==='block');
+ assert.ok(blocks.length>=45,`expected dense downtown, got ${blocks.length} blocks`);
+ const distanceFromPark=(b)=>{
+   const dx=Math.max(Math.abs(b.x-PARK.x)-PARK.w/2,0),dz=Math.max(Math.abs(b.z-PARK.z)-PARK.d/2,0);
+   return Math.hypot(dx,dz);
+ };
+ const near=blocks.filter(b=>distanceFromPark(b)<65),outer=blocks.filter(b=>distanceFromPark(b)>155);
+ assert.ok(near.length>=8&&outer.length>=8);
+ const avg=a=>a.reduce((s,b)=>s+b.h,0)/a.length;
+ assert.ok(avg(near)>avg(outer)+25,`expected park-edge skyline taller than outskirts: ${avg(near)} vs ${avg(outer)}`);
+ const houses=BUILDINGS.filter(b=>b.kind==='house');
+ assert.ok(houses.length>=20,`expected detached outer-ring houses, got ${houses.length}`);
 });
