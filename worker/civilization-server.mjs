@@ -78,6 +78,7 @@ const LOCATIONS = [
   { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 67, z: 72.5 },
   { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 93, z: -14.5 },
   { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", x: 41, z: 101.5 },
+  { id: "heliport", type: "luxury", name: "Hansdrex Heli Tours", x: 15, z: 43.5 },
 
   { id: "factory", type: "job", name: "Hansdrex Sugar Works", x: -220, z: 75 },
   { id: "factory-east", type: "job", name: "Hansdrex Materials Plant", x: 220, z: 125 },
@@ -189,6 +190,10 @@ const JOBS = [
   { id: "music-hall", locationId: "music-hall", title: "music hall crew", wage: 5.1, shiftStart: 17, shiftEnd: 2 },
   { id: "nightclub", locationId: "nightclub", title: "nightclub staff", wage: 5.2, shiftStart: 19, shiftEnd: 3 },
   { id: "rooftop", locationId: "rooftop", title: "rooftop host", wage: 5.3, shiftStart: 17, shiftEnd: 1 },
+  { id: "heli-pilot-day", locationId: "heliport", title: "helicopter sightseeing pilot", wage: 9.6, shiftStart: 8, shiftEnd: 16 },
+  { id: "heli-pilot-evening", locationId: "heliport", title: "helicopter sightseeing pilot", wage: 10.2, shiftStart: 16, shiftEnd: 22 },
+  { id: "heli-ground", locationId: "heliport", title: "heliport ground crew", wage: 6.8, shiftStart: 8, shiftEnd: 18 },
+  { id: "heli-ground-evening", locationId: "heliport", title: "heliport ground crew", wage: 7.1, shiftStart: 14, shiftEnd: 22 },
 ];
 
 const BUSINESSES = {
@@ -205,6 +210,7 @@ const BUSINESSES = {
   "music-hall": { inventory: 999, cash: 2300, price: 8.0, sector: "nightlife" },
   nightclub: { inventory: 999, cash: 2600, price: 10.0, sector: "nightlife" },
   rooftop: { inventory: 999, cash: 2500, price: 9.0, sector: "nightlife" },
+  "heli-tour": { inventory: 999, cash: 12000, price: 185, sector: "luxury-tourism" },
   "vehicle-showroom": { inventory: 80, cash: 60000, price: 650, sector: "automotive" },
 };
 const VEHICLE_CATALOG = [
@@ -803,6 +809,8 @@ function trainedSkillsForJob(jobId,title=""){
   if(String(title).includes("nurse")||String(jobId).includes("hospital")) return {medicine:0.76,emergencyCare:0.74};
   if(jobId==="vehicle-showroom") return {sales:0.85,vehicleKnowledge:0.84};
   if(String(jobId||"").startsWith("power")||jobId==="grid-dispatch") return {electrical:0.94,gridOperations:0.92,safety:0.91,maintenance:0.86};
+  if(String(jobId||"").startsWith("heli-pilot")) return {aviation:0.98,flightSafety:0.96,navigation:0.94,sightseeing:0.88};
+  if(String(jobId||"").startsWith("heli-ground")) return {groundOps:0.94,flightSafety:0.90,customerService:0.84};
   return {};
 }
 function ensureProfessionalTraining(fly){
@@ -2257,6 +2265,15 @@ function brainChooseAction(fly, clock) {
     add("vehicle-showroom","shopping for a vehicle",mobilityNeed);
   }
 
+  const heliPrice=heliTourTicketPrice();
+  const luxuryEligible=["affluent","wealthy","elite"].includes(fly.socialClass)||(fly.money+fly.savings)>heliPrice*8;
+  if(age>=18&&luxuryEligible&&heliTourAvailable(clock)&&fly.energy>28&&fly.money+fly.savings>heliPrice*1.2){
+    const classBonus=fly.socialClass==="elite"?34:fly.socialClass==="wealthy"?27:fly.socialClass==="affluent"?19:8;
+    const visualCuriosity=brain.dynamic.curiosity*32+neuralDrive(fly,"exploreDrive")*24+fly.excitement*0.22+fly.traits.ambition*12;
+    const affordability=Math.min(24,(fly.money+fly.savings)/Math.max(1,heliPrice*3));
+    add("heliport","taking a Hansdrex helicopter sightseeing tour",visualCuriosity+classBonus+affordability-fly.sleepDebt*0.22-weatherDanger()*90);
+  }
+
   ensureCognitiveProfile(fly);
   const teacher=academyTeacher();
   if (teacher?.id===fly.id && personalWorkWindow(fly,JOBS.find((j)=>j.id==="school"),clock.hour)) {
@@ -2335,7 +2352,8 @@ function brainChooseAction(fly, clock) {
       loc.id !== fly.currentLocationId &&
       loc.id !== fly.homeId &&
       loc.type !== "home" &&
-      !(loc.type === "health" && !fly.illness && fly.health > 72)
+      !(loc.type === "health" && !fly.illness && fly.health > 72) &&
+      !(loc.type === "luxury" && !["affluent","wealthy","elite"].includes(fly.socialClass) && fly.money+fly.savings<heliTourTicketPrice()*6)
     );
     const sampleCount = Math.min(7, eligible.length);
     const picked = new Set();
@@ -2681,6 +2699,83 @@ function payAndFinance(fly, clock) {
     }
 
   }
+}
+
+function ensureHeliTourStaff(){
+  const ids=new Set(["heli-pilot-day","heli-pilot-evening","heli-ground","heli-ground-evening"]);
+  const staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId));
+  if(staff.length>=4)return staff;
+  const slots=["heli-pilot-day","heli-pilot-evening","heli-ground","heli-ground-evening"];
+  const candidates=state.flies
+    .filter((f)=>f.alive&&f.ageYears>=23&&f.ageYears<=66&&!f.businessId&&!f.businessEmployeeOf&&!ids.has(f.jobId)&&!["doctor","police","power","power-evening","power-night","grid-dispatch","school"].includes(f.jobId))
+    .sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition));
+  while(staff.length<4&&candidates.length){
+    const fly=candidates.shift(),job=JOBS.find((j)=>j.id===slots[staff.length]);
+    if(!fly||!job)break;
+    fly.jobId=job.id;fly.jobTitle=job.title;fly.wage=job.wage;
+    fly.preferredWorkStart=job.shiftStart;fly.preferredWorkHours=(job.shiftEnd-job.shiftStart+24)%24||8;
+    fly.professionSkills=trainedSkillsForJob(job.id,job.title);
+    fly.brainDecision="accepted Hansdrex Heli Tours aviation job";
+    brainRemember(fly,"aviation_job",{jobId:job.id});
+    staff.push(fly);
+  }
+  return staff;
+}
+
+function heliTourTicketPrice(){
+  return 185*Number(state.centralBank?.priceLevel||1);
+}
+
+function heliTourAvailable(clock){
+  if(weatherDanger()>0.22)return false;
+  if(clock.hour<8||clock.hour>=22)return false;
+  const staff=ensureHeliTourStaff();
+  const pilots=staff.filter((f)=>String(f.jobId||"").startsWith("heli-pilot"));
+  return pilots.some((p)=>personalWorkWindow(p,JOBS.find((j)=>j.id===p.jobId),clock.hour));
+}
+
+function simulateHeliTour(fly,clock){
+  const now=state.simulationAgeSeconds;
+  if(fly.heliTourUntil&&now<fly.heliTourUntil){
+    const start=Number(fly.heliTourStartedAt||now),duration=Math.max(1,fly.heliTourUntil-start),progress=clamp((now-start)/duration,0,1);
+    const angle=progress*Math.PI*2-Math.PI/2;
+    const radius=105+Math.sin(progress*Math.PI*4)*16;
+    fly.heliPassenger=true;
+    fly.traveling=false;
+    fly.transitMode="helicopter";
+    fly.transitStage="sightseeing-flight";
+    fly.action="helicopter sightseeing over Hansdrex";
+    fly.x=15+Math.cos(angle)*radius;
+    fly.z=34+Math.sin(angle)*radius*0.72;
+    fly.y=72+Math.sin(progress*Math.PI*2)*13+Math.sin(progress*Math.PI*6)*4;
+    fly.vx=fly.vz=0;
+    fly.excitement=clamp(fly.excitement+0.12);
+    fly.stress=clamp(fly.stress-0.10);
+    return true;
+  }
+  if(fly.heliTourUntil&&now>=fly.heliTourUntil){
+    fly.heliTourUntil=0;fly.heliTourStartedAt=0;fly.heliPassenger=false;
+    fly.transitMode="walk";fly.transitStage=null;fly.currentLocationId="heliport";fly.targetLocationId="heliport";
+    fly.x=15;fly.z=43.5;fly.y=1.4;fly.action="finished Hansdrex helicopter tour";fly.actionUntil=now+900;
+    fly.happiness=clamp(fly.happiness+10);fly.excitement=clamp(fly.excitement+16);fly.stress=clamp(fly.stress-12);
+    brainRemember(fly,"heli_tour_completed",{weather:weatherLabel(),ticket:fly.lastHeliTicket||0});
+    emit("heli_landing",`${fly.id} landed after a Hansdrex skyline helicopter tour.`,{flyId:fly.id,ticket:fly.lastHeliTicket||0});
+    return true;
+  }
+  if(fly.currentLocationId!=="heliport"||fly.traveling||fly.action!=="taking a Hansdrex helicopter sightseeing tour")return false;
+  const active=state.flies.filter((f)=>f.alive&&f.heliPassenger&&Number(f.heliTourUntil||0)>now).length;
+  const price=heliTourTicketPrice();
+  if(active>=4){fly.action="waiting for the next Hansdrex helicopter";fly.actionUntil=now+600;return true;}
+  if(!heliTourAvailable(clock)){fly.action="heli tour cancelled by weather or operating hours";fly.actionUntil=now+1200;fly.stress=clamp(fly.stress-1);return true;}
+  if(fly.money+fly.savings<price){fly.action="could not afford the helicopter tour";fly.actionUntil=now+1800;return true;}
+  const cash=Math.min(fly.money,price);fly.money-=cash;fly.savings-=Math.max(0,price-cash);
+  state.businesses["heli-tour"].cash+=price;fly.expensesLifetime+=price;state.totalTransactions+=1;
+  fly.lastHeliTicket=price;fly.heliTourStartedAt=now;fly.heliTourUntil=now+1800;fly.heliPassenger=true;
+  fly.transitMode="helicopter";fly.transitStage="boarding";fly.action="boarding Hansdrex helicopter";
+  fly.excitement=clamp(fly.excitement+12);
+  brainRemember(fly,"heli_tour_purchase",{price,socialClass:fly.socialClass,weather:weatherLabel()});
+  emit("heli_boarding",`${fly.id} paid ${price.toFixed(0)} ${CURRENCY_CODE} and boarded Hansdrex Heli Tours.`,{flyId:fly.id,price,socialClass:fly.socialClass});
+  return true;
 }
 
 function vehicleShopping(fly) {
@@ -3244,6 +3339,7 @@ function needsAndActivities(fly, clock) {
 function tickFly(fly, clock) {
   if (!fly.alive) return;
   if(lawEnforcement(fly)) return;
+  if(simulateHeliTour(fly,clock)) return;
   ensureCognitiveProfile(fly);
   ensureProfessionalTraining(fly);
   const before = {
@@ -3275,6 +3371,7 @@ function tickFly(fly, clock) {
 
   chooseDestination(fly, clock);
   moveFly(fly);
+  if(simulateHeliTour(fly,clock)) return;
   needsAndActivities(fly, clock);
   applyPowerEffects(fly,clock);
   productionAndRetail(fly,clock);
@@ -3383,6 +3480,8 @@ function compactFly(f) {
     transitMode: f.transitMode || "walk",
     transitStage: f.transitStage || null,
     metroLineId: f.metroLineId || null,
+    heliPassenger:Boolean(f.heliPassenger),
+    heliTourUntil:Number(f.heliTourUntil||0),
     illness: f.illness || null,
     socialClass: f.socialClass || "working",
     householdId: f.householdId || null,
@@ -3563,6 +3662,7 @@ async function tick() {
       const clock = gameClock();
       updateWeather(clock);
       ensureAcademyTeacher();
+      ensureHeliTourStaff();
       for(const fly of state.flies)tickFly(fly,clock);
       simulateEnterprises(clock);
       simulatePowerGrid(clock);

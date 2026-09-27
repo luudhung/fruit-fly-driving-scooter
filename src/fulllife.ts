@@ -40,6 +40,8 @@ type FlyState = {
   parents: string[];
   vehicle?: string | null;
   transitMode?: string;
+  heliPassenger?: boolean;
+  heliTourUntil?: number;
   illness?: string | null;
   socialClass?: string;
   businessId?: string | null;
@@ -433,6 +435,8 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "capital_sentence" || e.type === "execution" ? "⚖ " :
       e.type === "election_campaign" || e.type === "election_result" || e.type === "party_founded" ? "🗳 " :
       e.type === "political_argument" ? "💬 " :
+      e.type === "heli_boarding" ? "🚁 " :
+      e.type === "heli_landing" ? "🚁 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
     row.textContent = `D${e.day ?? s.day} ${e.time || ""} · ${icon}${e.text}`;
     return row;
@@ -441,6 +445,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
 
   latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
   syncFlyMeshes(s.flies || []);
+  updateHeliTourState(s.flies || []);
   syncHomes(s.flies || []);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
   updateTrafficSignals((s.simulationTime || 0) / Math.max(1, s.timeScale || 60));
@@ -451,6 +456,20 @@ function renderSnapshot(s: CivilizationSnapshot) {
     const firstLiving = (s.flies || []).find((f) => f.alive) || null;
     if (firstLiving && !selectedFlyId) selectedFlyId = firstLiving.id;
     renderInspector(firstLiving);
+  }
+}
+
+function updateHeliTourState(flies:FlyState[]){
+  const riders=flies.filter((f)=>f.alive&&f.heliPassenger);
+  heliGuestCount=riders.length;
+  updateSpriteText(heliOccupancy,`HELI TOUR · ${heliGuestCount} GUEST${heliGuestCount===1?"":"S"}`);
+  if(riders.length){
+    const lead=riders[0];
+    heliTarget.set(lead.x,Math.max(lead.y,28),lead.z);
+    heliOccupancy.visible=true;
+  }else{
+    heliTarget.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));
+    heliOccupancy.visible=graphics.metroDetail>=1;
   }
 }
 
@@ -815,6 +834,34 @@ function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=
   for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(4.2-i*.7,3.4,4.2-i*.7),landmarkWarm);c.position.y=104+i*4;g.add(c);}
   const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.72,25,8),landmarkMetal);spire.position.y=123;g.add(spire);const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.72,8,6),landmarkWarm);beacon.position.y=136;g.add(beacon);g.position.set(x,0,z);cityRoot.add(g);}
 addEmpireStyleTower(15,43.5);
+
+const heliPadCenter=new THREE.Vector3(23,101,43.5);
+const heliPadMat=new THREE.MeshStandardMaterial({color:0x343a3d,roughness:.56,metalness:.38});
+const heliMarkMat=new THREE.MeshBasicMaterial({color:0xf7e48f});
+const heliPad=new THREE.Mesh(new THREE.CylinderGeometry(5.2,5.2,.55,24),heliPadMat);heliPad.position.copy(heliPadCenter);cityRoot.add(heliPad);
+const heliH1=new THREE.Mesh(new THREE.BoxGeometry(5.3,.08,.62),heliMarkMat);heliH1.position.copy(heliPadCenter).add(new THREE.Vector3(0,.32,0));cityRoot.add(heliH1);
+const heliH2=new THREE.Mesh(new THREE.BoxGeometry(.62,.08,5.3),heliMarkMat);heliH2.position.copy(heliPadCenter).add(new THREE.Vector3(0,.33,0));cityRoot.add(heliH2);
+const heliBridge=new THREE.Mesh(new THREE.BoxGeometry(6.5,.45,2.1),landmarkMetal);heliBridge.position.set(19.2,100.6,43.5);cityRoot.add(heliBridge);
+const heliPadLabel=makeCanvasSprite("HANSDREX HELI TOURS",18,1.0);heliPadLabel.position.set(23,108,43.5);cityRoot.add(heliPadLabel);
+
+const heliTourGroup=new THREE.Group();
+const heliBodyMat=new THREE.MeshStandardMaterial({color:0x1f292f,roughness:.28,metalness:.54});
+const heliAccentMat=new THREE.MeshStandardMaterial({color:0xd8aa48,roughness:.32,metalness:.45});
+const heliGlassMat=new THREE.MeshStandardMaterial({color:0x6d9db0,roughness:.12,metalness:.22,transparent:true,opacity:.78});
+const heliBody=new THREE.Mesh(new THREE.SphereGeometry(2.2,12,8),heliBodyMat);heliBody.scale.set(1.35,.82,1.85);heliTourGroup.add(heliBody);
+const heliCabin=new THREE.Mesh(new THREE.SphereGeometry(1.45,10,7),heliGlassMat);heliCabin.scale.set(1.15,.72,1.2);heliCabin.position.set(0,.35,-1.45);heliTourGroup.add(heliCabin);
+const heliTail=new THREE.Mesh(new THREE.BoxGeometry(.55,.55,6.4),heliBodyMat);heliTail.position.set(0,.25,4.5);heliTourGroup.add(heliTail);
+const heliTailFin=new THREE.Mesh(new THREE.BoxGeometry(.16,2.2,1.2),heliAccentMat);heliTailFin.position.set(0,1.25,7.2);heliTourGroup.add(heliTailFin);
+const heliSkidMat=new THREE.MeshStandardMaterial({color:0x15191b,metalness:.72,roughness:.35});
+for(const sx of [-1,1]){const skid=new THREE.Mesh(new THREE.BoxGeometry(.18,.18,5.2),heliSkidMat);skid.position.set(sx*1.55,-1.45,.2);heliTourGroup.add(skid);}
+const heliRotor=new THREE.Mesh(new THREE.BoxGeometry(10.5,.08,.22),heliAccentMat);heliRotor.position.y=2.05;heliTourGroup.add(heliRotor);
+const heliRotorCross=new THREE.Mesh(new THREE.BoxGeometry(.22,.08,10.5),heliAccentMat);heliRotorCross.position.y=2.05;heliTourGroup.add(heliRotorCross);
+const heliTailRotor=new THREE.Mesh(new THREE.BoxGeometry(.10,3.1,.18),heliAccentMat);heliTailRotor.position.set(0,1.1,7.25);heliTourGroup.add(heliTailRotor);
+const heliOccupancy=makeCanvasSprite("HELI TOUR · 0 GUESTS",17,.9);heliOccupancy.position.set(0,4.4,0);heliTourGroup.add(heliOccupancy);
+heliTourGroup.position.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));cityRoot.add(heliTourGroup);
+const heliTarget=heliTourGroup.position.clone();
+let heliGuestCount=0;
+
 function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.9,2.4,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
   const pod=new THREE.Mesh(new THREE.CylinderGeometry(4.7,3.8,7,18),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.24,6,18),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
 addTorontoStyleTower(-11,43.5);
@@ -1070,6 +1117,7 @@ function syncFlyMeshes(flies: FlyState[]) {
       flyVisuals.set(fly.id, visual);
     }
     visual.target.set(fly.x, fly.y, fly.z);
+    visual.group.visible=!fly.heliPassenger;
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
     visual.group.scale.setScalar(ageScale * visibilityScale);
@@ -1386,6 +1434,14 @@ function animate(now = performance.now()) {
   }
 
   updateMetroTrains(now);
+  heliTourGroup.position.lerp(heliTarget,heliGuestCount>0?.18:.08);
+  heliRotor.rotation.y+=dt*18;
+  heliRotorCross.rotation.y+=dt*18;
+  heliTailRotor.rotation.x+=dt*24;
+  if(heliGuestCount>0){
+    const dx=heliTarget.x-heliTourGroup.position.x,dz=heliTarget.z-heliTourGroup.position.z;
+    if(Math.abs(dx)+Math.abs(dz)>.05)heliTourGroup.rotation.y=Math.atan2(dx,dz);
+  }else heliTourGroup.rotation.y*=.94;
 
   if (rain.visible) {
     rain.position.x = camera.position.x;
