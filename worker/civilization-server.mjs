@@ -3008,6 +3008,67 @@ function mentalHealthAndMortality(fly) {
   }
 }
 
+function regulateEmotions(fly, clock) {
+  // Happiness is slow-moving life satisfaction; stress is acute pressure.
+  // They may coexist, but sustained 100/100 states are intentionally unstable.
+  const atHome = fly.currentLocationId === fly.homeId && !fly.traveling;
+  const partnered = fly.partnerId ? 1 : 0;
+  const debtPressure = Math.min(24, Math.max(0, Number(fly.debt || 0)) / Math.max(120, Number(fly.money || 0) + Number(fly.savings || 0) + 120) * 28);
+  const healthPressure = Math.max(0, 72 - Number(fly.health || 0)) * 0.24;
+  const deprivation =
+    Number(fly.hunger || 0) * 0.11 +
+    Number(fly.thirst || 0) * 0.07 +
+    Number(fly.sleepDebt || 0) * 0.20 +
+    Number(fly.loneliness || 0) * 0.09;
+
+  let stressTarget =
+    9 +
+    deprivation +
+    healthPressure +
+    debtPressure +
+    weatherDanger() * 13 -
+    Number(fly.traits?.resilience || 0.5) * 12 -
+    (atHome ? 4 : 0) -
+    (fly.sleeping ? 9 : 0) -
+    Math.max(0, Number(fly.happiness || 0) - 65) * 0.075;
+  stressTarget = clamp(stressTarget, 0, 94);
+
+  let happinessTarget =
+    38 +
+    Number(fly.traits?.resilience || 0.5) * 17 +
+    Number(fly.traits?.empathy || 0.5) * 4 +
+    partnered * 5 +
+    Number(fly.health || 0) * 0.10 -
+    Number(fly.loneliness || 0) * 0.15 -
+    Number(fly.hunger || 0) * 0.10 -
+    Number(fly.sleepDebt || 0) * 0.11 -
+    Number(fly.stress || 0) * 0.25;
+  happinessTarget = clamp(happinessTarget, 4, 92);
+
+  // Mean-revert gently so events still matter, but saturated values do not stay forever.
+  fly.stress = clamp(Number(fly.stress || 0) + (stressTarget - Number(fly.stress || 0)) * 0.006);
+  fly.happiness = clamp(Number(fly.happiness || 0) + (happinessTarget - Number(fly.happiness || 0)) * 0.0045);
+
+  // Severe stress and maximum happiness can happen briefly, but not remain locked together.
+  // Excess positive arousal is represented as excitement instead of 100/100 stress+happiness.
+  if (fly.stress > 80) {
+    const happinessCeiling = 100 - (fly.stress - 80) * 0.75;
+    if (fly.happiness > happinessCeiling) {
+      const excess = fly.happiness - happinessCeiling;
+      const transfer = Math.min(excess, 0.32 + excess * 0.08);
+      fly.happiness = clamp(fly.happiness - transfer);
+      fly.excitement = clamp(Number(fly.excitement || 0) + transfer * 0.42);
+    }
+  }
+
+  if (fly.happiness > 82 && fly.stress > 55 && !fly.mentalHealthCrisis) {
+    fly.stress = clamp(fly.stress - (fly.happiness - 82) * 0.0025 * (0.6 + Number(fly.traits?.resilience || 0.5)));
+  }
+
+  fly.emotionalValence = clamp((fly.happiness - fly.stress) / 100, -1, 1);
+  fly.emotionalArousal = clamp((Number(fly.excitement || 0) * 0.55 + fly.stress * 0.45) / 100, 0, 1);
+}
+
 function needsAndActivities(fly, clock) {
   fly.hunger = clamp(fly.hunger + 0.055);
   fly.thirst = clamp(fly.thirst + 0.082);
@@ -3181,6 +3242,7 @@ function tickFly(fly, clock) {
   completePregnancy(fly);
   professionalService(fly);
   mentalHealthAndMortality(fly);
+  if (fly.alive) regulateEmotions(fly, clock);
   brainLearnFromOutcome(fly, before);
 }
 
@@ -3247,6 +3309,8 @@ function compactFly(f) {
     stress: Number(f.stress.toFixed(1)),
     happiness: Number(f.happiness.toFixed(1)),
     excitement: Number(f.excitement.toFixed(1)),
+    emotionalValence: Number((f.emotionalValence ?? ((f.happiness-f.stress)/100)).toFixed(3)),
+    emotionalArousal: Number((f.emotionalArousal ?? ((f.excitement*0.55+f.stress*0.45)/100)).toFixed(3)),
     loneliness: Number(f.loneliness.toFixed(1)),
     health: Number(f.health.toFixed(1)),
     money: Number(f.money.toFixed(1)),
