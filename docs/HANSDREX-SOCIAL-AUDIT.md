@@ -46,3 +46,12 @@ The observer (`src/fulllife.ts`) consumes snapshots from a persistent Node/Postg
 Checkpoint 1: production build/typecheck; 130-resident simulation for 500 ticks, no blocked outdoor positions, actual sleeping/work and metro completions.
 
 Checkpoint 2: eight deterministic regression tests cover footprint separation, route safety, train station service, stationary indoor sleeping, household rent/capacity, money transfer conservation, medical presence and migration preserving finances/brain IDs. All passed locally. No production database was modified by tests.
+
+
+## Population collapse and recovery — 2026-09-27
+
+Confirmed live observations: primary API reported 0 living, 140 deaths, 22 births, D108 and foodReserve 7457. Historical records are not included in that public API. Database connector redacts credentials, so no verified death-cause distribution is available yet.
+
+Code defects fixed: immigration capacity incorrectly counted archived dead; ordinary hydration was absent despite continuous dehydration health damage; poor residents could not afford food even with ample reserves; relief could lose priority to other utility actions. Basic meals/water and deterministic restocking now reach poor, homebound and sheltering residents. Survival regression includes 20,000 needs ticks without dehydration collapse.
+
+The primary Railway service was restarted with CIV_INITIAL_POPULATION=100 by the user's explicit recovery request. It bootstrapped from 65 to 100, but loaded D83/deaths9/births34 instead of D108/deaths140/births22. The secondary civilization-core-v2 endpoint simultaneously reported the same WORLD-A, EXP-0001, seed948291, D83/deaths9/births34 with 65 residents. This strongly indicates competing writers to the same world checkpoint, not a trustworthy reduction in historical deaths. The secondary is being isolated under WORLD-A-V2-ISOLATED / EXP-V2-ISOLATED; verify deployment and ensure only one primary writer before declaring recovery stable. Do not overwrite or invent the historical cause totals.

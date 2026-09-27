@@ -32,3 +32,11 @@ test('zero-cash residents eat and drink indoors even with empty inventories, no 
  for(let i=0;i<20000;i++)needsAndActivities(f,{hour:12});
  assert.ok(f.health>=75);assert.ok(f.thirst<85);assert.ok(f.hunger<50);
 });
+test('park wheel admits a penniless resident and reduces stress after a real round trip',async()=>{
+ const {simulateParkWheel}=await import('../worker/civilization-server.mjs');
+ const s=freshState(),f=s.flies[0];s.weather={condition:'clear',precipitation:0,wind:0};
+ Object.assign(f,{money:0,savings:0,currentLocationId:'ferris-wheel',traveling:false,action:'riding the free Central Park wheel',stress:90});
+ assert.equal(simulateParkWheel(f),true);assert.ok(f.wheelRideUntil);const end=f.wheelRideUntil;
+ s.simulationAgeSeconds+=1800;simulateParkWheel(f);assert.ok(f.y>2);
+ s.simulationAgeSeconds=end;simulateParkWheel(f);assert.equal(f.wheelRideUntil,0);assert.equal(f.money,0);assert.ok(f.stress<70);assert.equal(s.parkLeisure.completedRides,1);
+});

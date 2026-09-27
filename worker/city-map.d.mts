@@ -4,6 +4,9 @@ export type Building=Rect&{id:string;h:number;kind:string;name?:string;type?:str
 export type MetroLine={id:string;height:number;points:number[][]};
 export const MAP_VERSION:number, WORLD_HALF:number;
 export const PARK:Rect;
+export const PARK_PATHS:Rect[];
+export const FERRIS_WHEEL:{x:number;z:number;y:number;radius:number;seats:number;period:number};
+export function wheelCabin(seconds:number,seat:number):Point&{y:number};
 export const WATER:Rect[],ROADS:Rect[],BRIDGES:Rect[],BUILDINGS:Building[],APARTMENTS:Building[],HOUSE_LOTS:Building[];
 export const AVENUES:number[],STREETS:number[];
 export const LOCATIONS:Array<Point&{id:string;type:string;name:string}>;

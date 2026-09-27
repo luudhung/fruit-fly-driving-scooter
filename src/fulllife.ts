@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, WORLD_HALF, PARK, WATER, ROADS, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, WORLD_HALF, PARK, PARK_PATHS, FERRIS_WHEEL, wheelCabin, WATER, ROADS, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
   id: string;
@@ -10,6 +10,8 @@ type FlyState = {
   generation: number;
   alive: boolean;
   traveling?:boolean; indoors?:boolean; onTrain?:boolean; metroLineId?:string; householdId?:string; housingUnitId?:string; housingType?:string;
+  wheelRideUntil?:number;
+  wheelSeat?:number|null;
   parkedCar?:{x:number;z:number}|null;
   movementTrace?:Array<{x:number;y:number;z:number;t:number}>;
   causeOfDeath?: string | null;
@@ -147,6 +149,9 @@ type CivilizationSnapshot = {
   generation: number;
   births: number;
   deaths: number;
+  mortality?:{byCause:Record<string,number>};
+  welfare?:{birthGrantPerChild:number;essentialMealPrice:number};
+  parkLeisure?:{passengers:number;completedRides:number};
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -395,10 +400,12 @@ function renderSnapshot(s: CivilizationSnapshot) {
   if(s.mapVersion!==MAP_VERSION){setConnection("connecting","CITY UPDATE AWAITING WORKER");}
   const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
   const living=(s.flies||[]).filter(f=>f.alive);
-  residentDirectory.update(living,s.deaths,s.births);
+  residentDirectory.update(living,s.deaths,s.births,s.mortality?.byCause);
   setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
   connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
   if(!s.authoritative)residentDirectory.offline();
+  const policy=document.getElementById("welfare-policy");
+  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · ${s.parkLeisure?.passengers||0} on wheel / ${s.parkLeisure?.completedRides||0} completed`:'Awaiting public-support policy update';
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = `${num(living.length)} flies`;
   generation.textContent = num(s.generation);
@@ -703,25 +710,50 @@ function addBridge(z: number, width = 13) {
 const centralPark=new THREE.Mesh(new THREE.BoxGeometry(PARK.w,.10,PARK.d),parkMat);
 centralPark.position.set(PARK.x,.09,PARK.z);cityRoot.add(centralPark);
 const pathMat=new THREE.MeshStandardMaterial({color:0xd9c6a3,roughness:1});
-const parkPaths=[{x:-11,z:-106,w:36,d:2.4},{x:-11,z:-68,w:36,d:2.4},{x:-28,z:-87,w:2.4,d:38},{x:6,z:-87,w:2.4,d:38},{x:-11,z:-87,w:2.4,d:44},{x:-11,z:-87,w:38,d:2.4}];
+const parkPaths=PARK_PATHS;
 for(const r of parkPaths){const m=new THREE.Mesh(new THREE.BoxGeometry(r.w,.12,r.d),pathMat);m.position.set(r.x,.17,r.z);cityRoot.add(m);}
-const pond=new THREE.Mesh(new THREE.CylinderGeometry(5,5,.12,24),waterMat);pond.scale.z=1.2;pond.position.set(-20,.19,-97);cityRoot.add(pond);
+const pond=new THREE.Mesh(new THREE.CylinderGeometry(7,7,.12,24),waterMat);pond.scale.z=1.42;pond.position.set(0,.19,-111);cityRoot.add(pond);
 const benchMat=new THREE.MeshStandardMaterial({color:0x9b7045,roughness:.8});
 const lampMat=new THREE.MeshStandardMaterial({color:0xffe4a0,emissive:0xffd173,emissiveIntensity:1.4});
-for(const z of [-103,-91,-79,-70])for(const x of [-25,3]){
+for(const z of [-125,-105,-65,-48])for(const x of [-7,37]){
  const bench=new THREE.Mesh(new THREE.BoxGeometry(2.6,.35,.7),benchMat);bench.position.set(x,.65,z);cityRoot.add(bench);
  const back=new THREE.Mesh(new THREE.BoxGeometry(2.6,.75,.18),benchMat);back.position.set(x,1.1,z+.3);cityRoot.add(back);
  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.09,3,6),trafficPoleMat);pole.position.set(x,1.5,z-2);cityRoot.add(pole);
  const bulb=new THREE.Mesh(new THREE.SphereGeometry(.24,8,6),lampMat);bulb.position.set(x,3,z-2);cityRoot.add(bulb);
 }
-const parkSign=makeCanvasSprite("HANSDREX CENTRAL PARK",26,1.7);parkSign.position.set(-11,4,-63);cityRoot.add(parkSign);
+const parkSign=makeCanvasSprite("HANSDREX CENTRAL PARK",26,1.7);parkSign.position.set(15,4,-35);cityRoot.add(parkSign);
+// Two rings, braced supports and upright cabins; no dynamic point lights.
+const wheelRoot=new THREE.Group();wheelRoot.position.set(FERRIS_WHEEL.x,FERRIS_WHEEL.y,FERRIS_WHEEL.z);cityRoot.add(wheelRoot);
+const wheelRotor=new THREE.Group();wheelRoot.add(wheelRotor);
+const wheelMetal=new THREE.MeshStandardMaterial({color:0xe1ebe4,metalness:.5,roughness:.35});
+const wheelGlow=new THREE.MeshStandardMaterial({color:0x9be9d0,emissive:0x4da58c,emissiveIntensity:.65});
+for(const z of [-1.25,1.25]){const ring=new THREE.Mesh(new THREE.TorusGeometry(20,.22,6,graphics.metroDetail>=2?80:48),wheelGlow);ring.position.z=z;wheelRotor.add(ring);}
+for(const side of [-1,1])for(const z of [-2,2]){
+ const end=new THREE.Vector3(side*11,-21,z),mid=end.clone().multiplyScalar(.5);
+ const beam=new THREE.Mesh(new THREE.CylinderGeometry(.45,.65,end.length(),6),wheelMetal);beam.position.copy(mid);beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),end.normalize());wheelRoot.add(beam);
+}
+const wheelCabins:THREE.Group[]=[];
+const cabinGeometry=new THREE.BoxGeometry(2,2,2.6);
+for(let i=0;i<FERRIS_WHEEL.seats;i++){
+ const a=i/FERRIS_WHEEL.seats*Math.PI*2;
+ const spoke=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,20,5),wheelMetal);spoke.position.set(Math.cos(a)*10,Math.sin(a)*10,0);spoke.rotation.z=a-Math.PI/2;wheelRotor.add(spoke);
+ const cabin=new THREE.Group(),body=new THREE.Mesh(cabinGeometry,new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(i/16,.55,.52),metalness:.25,roughness:.4}));body.position.y=-.7;cabin.add(body);
+ const window=new THREE.Mesh(new THREE.BoxGeometry(1.7,.8,2.65),wheelGlow);window.position.y=-.4;cabin.add(window);wheelRoot.add(cabin);wheelCabins.push(cabin);
+}
+const wheelSign=makeCanvasSprite("GREAT WHEEL · FREE FOR EVERYONE",28,1.8);wheelSign.position.set(15,5,-78);cityRoot.add(wheelSign);
+function updateParkWheel(now:number){
+ const seconds=Number(snapshot?.simulationAgeSeconds||0)+(Math.min(2,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120));
+ wheelRotor.rotation.z=seconds/FERRIS_WHEEL.period*Math.PI*2;
+ wheelCabins.forEach((c,i)=>{const p=wheelCabin(seconds,i);c.position.set(p.x-FERRIS_WHEEL.x,p.y-FERRIS_WHEEL.y,0);});
+ for(const f of latestFlyStates.values()){if(!f.wheelRideUntil||f.wheelSeat==null)continue;const v=flyVisuals.get(f.id);if(v){const p=wheelCabin(seconds,f.wheelSeat);v.group.position.set(p.x,p.y-.5,p.z);}}
+}
 const treeTransforms:Array<{x:number;z:number;scale:number}>=[];
 function addTree(x:number,z:number,scale=1){
  const p={x,z};
- if(ROADS.some(r=>contains(r,p,2.8))||WATER.some(r=>contains(r,p,1))||BUILDINGS.some(r=>contains(r,p,1))||parkPaths.some(r=>contains(r,p,1.3))||Math.hypot((x+20)/5,(z+97)/6)<1.25)return;
+ if(ROADS.some(r=>contains(r,p,2.8))||WATER.some(r=>contains(r,p,1))||BUILDINGS.some(r=>contains(r,p,1))||parkPaths.some(r=>contains(r,p,1.3))||contains({x:15,z:-87,w:46,d:15},p,2))return;
  treeTransforms.push({x,z,scale});
 }
-for(let i=0;i<Math.round(95*graphics.treeScale);i++)addTree(-28+seeded(i+20)*34,-107+seeded(i+80)*40,1.5+seeded(i+140)*1.1);
+for(let i=0;i<Math.round(310*graphics.treeScale);i++)addTree(-13+seeded(i+20)*56,-134+seeded(i+80)*94,1.5+seeded(i+140)*1.1);
 for(let i=0;i<Math.round(45*graphics.treeScale);i++)addTree(-95+seeded(i+500)*190,155+seeded(i+600)*12,1.1);
 function buildTrees(){
  const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.13,.22,1.8,6),new THREE.MeshStandardMaterial({color:0x674a34}),treeTransforms.length);
@@ -1210,6 +1242,11 @@ function cameraForward(out = new THREE.Vector3()) {
   ).normalize();
 }
 
+document.getElementById("park-view")?.addEventListener("click",()=>{
+ followSelected=false;freePosition.set(100,92,-6);
+ const direction=new THREE.Vector3(15,10,-87).sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
+ camera.fov=48;camera.updateProjectionMatrix();
+});
 setCameraOverview();
 camera.position.copy(freePosition);
 
@@ -1365,6 +1402,7 @@ function animate(now = performance.now()) {
   }
 
   updateMetroTrains(now);
+  updateParkWheel(now);
   heliTourGroup.position.lerp(heliTarget,heliGuestCount>0?.18:.08);
   heliRotor.rotation.y+=dt*18;
   heliRotorCross.rotation.y+=dt*18;

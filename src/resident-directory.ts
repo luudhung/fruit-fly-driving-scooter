@@ -18,11 +18,14 @@ export function createResidentDirectory(onSelect:(id:string)=>void){
  const connection=document.getElementById('resident-connection')!;
  const query=document.getElementById('resident-search') as HTMLInputElement;
  const close=document.getElementById('resident-close')!;
+ let causes:Record<string,number>|undefined;
  let residents:Resident[]=[],deaths=0,births=0,online=false,loaded=false,lastUpdated='';
  const number=(v:number)=>finite(v).toLocaleString('en-US',{maximumFractionDigits:1});
  function render(){
   summary.textContent=loaded?`${residents.length} alive now · ${deaths} deaths since the city began · ${births} births`:'Waiting for the first city snapshot…';
   connection.textContent=loaded?`${online?'Live census':'Offline — last known census'} · Updated ${lastUpdated}. Money = cash + savings (H$).`:'Connecting…';
+  const mortality=document.getElementById('resident-mortality')!;
+  mortality.textContent=causes?`Recorded causes: ${Object.entries(causes).sort((a,b)=>b[1]-a[1]).map(([cause,n])=>`${cause}: ${n}`).join(' · ')||'No deaths recorded'}.`:'Historical causes unavailable from this server version.';
   if(!dialog.open)return;
   const activeId=(document.activeElement as HTMLElement)?.dataset.residentId;
   const scroll=rows.parentElement!.scrollTop;
@@ -53,5 +56,5 @@ export function createResidentDirectory(onSelect:(id:string)=>void){
  close.addEventListener('click',()=>dialog.close());
  dialog.addEventListener('click',event=>{if(event.target===dialog){const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)dialog.close();}});
  sort.addEventListener('change',render);query.addEventListener('input',render);
- return {update(flies:Resident[],dead:number,born:number){residents=flies.filter(f=>f.alive);deaths=dead;births=born;online=true;loaded=true;lastUpdated=new Date().toLocaleTimeString();render();},offline(){online=false;render();},get count(){return residents.length;}};
+ return {update(flies:Resident[],dead:number,born:number,deathCauses?:Record<string,number>){causes=deathCauses;residents=flies.filter(f=>f.alive);deaths=dead;births=born;online=true;loaded=true;lastUpdated=new Date().toLocaleTimeString();render();},offline(){online=false;render();},get count(){return residents.length;}};
 }

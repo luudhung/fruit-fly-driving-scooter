@@ -73,6 +73,7 @@
     @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
     .status{pointer-events:auto;color:inherit;cursor:pointer;white-space:normal;text-align:left}.status:hover{border-color:var(--ok)}
     .population-button{border:0;color:inherit;text-align:left;cursor:pointer}.population-button:hover{background:#183228}.population-button:focus-visible,.status:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+    #park-view{pointer-events:auto}
     #resident-directory{color:#eef6f2;background:#0c1916;border:1px solid #345148;border-radius:20px;width:min(920px,calc(100vw - 24px));max-height:85dvh;padding:20px;box-shadow:0 24px 80px #0008}
     #resident-directory::backdrop{background:#0009;backdrop-filter:blur(4px)}
     .resident-heading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.resident-heading h2{font-size:22px;margin:0 0 8px}.resident-heading p{font-size:12px;color:#b0c8be;margin:0;line-height:1.6}
@@ -88,6 +89,7 @@
   <dialog id="resident-directory" aria-labelledby="resident-title" aria-describedby="resident-summary">
     <div class="resident-heading"><div><h2 id="resident-title">City residents</h2><p id="resident-summary" aria-live="polite">Waiting for census…</p></div><button type="button" id="resident-close" aria-label="Close resident directory">✕</button></div>
     <div class="resident-filters"><label>Rank by<select id="resident-sort"><option value="money">Money · highest first</option><option value="age-desc">Age · oldest first</option><option value="age-asc">Age · youngest first</option><option value="id">ID · ascending</option></select></label><label>Find a resident<input id="resident-search" type="search" placeholder="ID or name" autocomplete="off" /></label></div>
+    <p id="resident-mortality" style="font-size:11px;line-height:1.5;color:#c0b9a0"></p>
     <p id="resident-connection">Connecting…</p>
     <div class="resident-table-wrap"><table><thead><tr><th scope="col">#</th><th scope="col">Resident</th><th scope="col">Age</th><th scope="col">Money (H$)</th><th scope="col">Activity</th></tr></thead><tbody id="resident-rows"></tbody></table></div>
   </dialog>
@@ -95,6 +97,7 @@
     <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 real second = 2 game minutes</small></div>
     <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
     <button type="button" class="status" id="connection" data-state="connecting" aria-haspopup="dialog" aria-controls="resident-directory" title="Open living residents and rankings"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></button>
+    <button class="settings-button" id="park-view" type="button" title="View Central Park and the free Great Wheel">♧ CENTRAL PARK</button>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button">⚙ GRAPHICS</button>
       <div class="settings-menu">
@@ -122,6 +125,7 @@
         <div class="stat"><span>Clock speed</span><b id="speed">—</b></div>
         <div class="stat"><span>Births · since city began</span><b id="births">—</b></div>
         <div class="stat"><span>Deaths · since city began</span><b id="deaths">—</b></div>
+        <div class="stat" style="grid-column:1/-1"><span>Public support · live policy</span><b id="welfare-policy" style="font-size:11px;line-height:1.5">—</b></div>
         <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
         <div class="stat"><span>Hansdrex Dollar supply</span><b id="money">—</b></div>
         <div class="stat"><span>Inflation</span><b id="inflation">—</b></div>

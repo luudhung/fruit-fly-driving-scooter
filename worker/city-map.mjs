@@ -1,21 +1,29 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 8;
+export const MAP_VERSION = 9;
 export const WORLD_HALF = 405; // approximately twice the previous ground area
-export const PARK = { x:-11, z:-87, w:38, d:44 };
-export const WATER = [{x:-20,z:-97,w:10,d:12},{x:128,z:-12,w:28,d:470},{x:65,z:205,w:350,d:68}];
+export const PARK = { x:15, z:-87, w:62, d:100 };
+export const PARK_PATHS = [{x:15,z:-132,w:56,d:3},{x:15,z:-42,w:56,d:3},{x:-11,z:-87,w:3,d:90},{x:41,z:-87,w:3,d:90},{x:15,z:-87,w:3,d:100},{x:15,z:-80,w:62,d:4}];
+export const FERRIS_WHEEL={x:15,z:-87,y:22,radius:20,seats:16,period:7200};
+export function wheelCabin(seconds,seat){const a=seconds/FERRIS_WHEEL.period*Math.PI*2+seat/FERRIS_WHEEL.seats*Math.PI*2;return {x:FERRIS_WHEEL.x+Math.cos(a)*20,y:22+Math.sin(a)*20,z:FERRIS_WHEEL.z};}
+export const WATER = [{x:0,z:-111,w:14,d:20},{x:128,z:-12,w:28,d:470},{x:65,z:205,w:350,d:68}];
 export const AVENUES = [-102,-76,-50,-24,2,28,54,80,106];
 export const STREETS = [-145,-116,-87,-58,-29,0,29,58,87,116,145];
 export const contains = (r,p,m=0) => Math.abs(r.x-p.x)<r.w/2+m && Math.abs(r.z-p.z)<r.d/2+m;
 export const overlaps = (a,b,m=0) => Math.abs(a.x-b.x)<(a.w+b.w)/2+m && Math.abs(a.z-b.z)<(a.d+b.d)/2+m;
 export const ROADS = [];
 function road(x,z,w,d) { ROADS.push({x,z,w,d}); }
+// Manhattan-style avenues and cross streets wrap a protected Central Park superblock.
 for(const x of AVENUES) {
-  if(x===-24||x===2) { road(x,-140,9.5,54);road(x,51,9.5,222); }
-  else road(x,-5,9.5,332);
+ if(Math.abs(x-PARK.x)<PARK.w/2+5){
+  const north=PARK.z-PARK.d/2-3,south=PARK.z+PARK.d/2+3;
+  road(x,(-171+north)/2,9.5,north+171);road(x,(south+161)/2,9.5,161-south);
+ }else road(x,-5,9.5,332);
 }
-for(const z of STREETS) {
-  if(z===-87) {road(-72,z,80,9);road(61,z,102,9);}
-  else road(2,z,220,9);
+for(const z of STREETS){
+ if(Math.abs(z-PARK.z)<PARK.d/2+5){
+  const west=PARK.x-PARK.w/2-3,east=PARK.x+PARK.w/2+3;
+  road((-108+west)/2,z,west+108,9);road((east+112)/2,z,112-east,9);
+ }else road(2,z,220,9);
 }
 for(const x of [-154,159]) road(x,-5,10,366);
 for(const z of [-150,-100,-50,0,50,100,150]) {
@@ -37,7 +45,8 @@ export const LOCATIONS = [
   { id: "cafe", type: "social", name: "Hansdrex Coffee", x: 15, z: -14.5 },
   { id: "tea-house", type: "social", name: "Hansdrex Tea House", x: -37, z: -14.5 },
   { id: "restaurant", type: "food", name: "Hansdrex Kitchen", x: 41, z: -14.5 },
-  { id: "park", type: "social", name: "Hansdrex Central Park", x: -11, z: -87 },
+  { id: "park", type: "social", name: "Hansdrex Central Park", x: 15, z: -46 },
+  { id: "ferris-wheel", type: "social", name: "Central Park Great Wheel · FREE", x: 15, z: -80 },
   { id: "office", type: "job", name: "Hansdrex Commerce Tower", x: 67, z: 14.5 },
   { id: "bank", type: "service", name: "Hansdrex Bank", x: -63, z: 14.5 },
   { id: "hotel", type: "service", name: "Hansdrex Grand Hotel", x: 67, z: 43.5 },
@@ -59,7 +68,7 @@ export const LOCATIONS = [
   { id: "bakery", type: "food", name: "Hansdrex Bakery", x: 41, z: 72.5 },
   { id: "grocery", type: "food", name: "Hansdrex Grocery", x: -63, z: -43.5 },
   { id: "corner-shop", type: "shop", name: "Hansdrex Store", x: 67, z: -72.5 },
-  { id: "night-market", type: "nightlife", name: "Hansdrex Night Market", x: 41, z: -101.5 },
+  { id: "night-market", type: "nightlife", name: "Hansdrex Night Market", x: 67, z: -101.5 },
   { id: "arcade", type: "nightlife", name: "Hansdrex Arcade", x: -63, z: -72.5 },
   { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 67, z: 72.5 },
   { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 93, z: -14.5 },
@@ -89,7 +98,7 @@ export const METRO_LINES = [
  {id:"M2",height:11,points:[[-50,-184],[-50,-116],[-50,-29],[-50,58],[-50,145]]},
  {id:"M3",height:13,points:[[-154,87],[-76,87],[2,87],[80,87],[159,87]]},
  {id:"M4",height:15,points:[[-102,-184],[-102,-116],[-102,-29],[-102,58],[-102,145]]},
- {id:"M5",height:17,points:[[-102,-116],[-24,-116],[54,-116],[106,-116]]},
+ {id:"M5",height:17,points:[[-102,-145],[-24,-145],[54,-145],[106,-145]]},
  {id:"M6",height:19,points:[[159,-184],[159,-100],[159,0],[159,100],[159,150]]}
 ];
 export const BUILDINGS=[];
@@ -144,8 +153,7 @@ for(const r of ROADS) {
  else for(const s of [-1,1])walks.push({a:{x:r.x+s*(r.w/2+1.4),z:r.z-r.d/2},b:{x:r.x+s*(r.w/2+1.4),z:r.z+r.d/2}});
 }
 // Park loop, internal stroll and entrance connections.
-for(const z of [-106,-87,-68])walks.push({a:{x:-30,z},b:{x:10,z}});
-for(const x of [-28,-11,6])walks.push({a:{x,z:-122},b:{x,z:-52}});
+for(const r of PARK_PATHS)walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w/2,z:r.z}}:{a:{x:r.x,z:r.z-r.d/2},b:{x:r.x,z:r.z+r.d/2}});
 export const WALKWAYS=walks;
 // Small A* lattice: cached blocked cells, weighted sidewalks and exact segment validation.
 const STEP=2,MIN=-290,MAX=290,SIZE=(MAX-MIN)/STEP+1;

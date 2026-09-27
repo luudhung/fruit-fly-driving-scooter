@@ -1,6 +1,6 @@
 import http from "node:http";
 import { pathToFileURL } from "node:url";
-import { MAP_VERSION, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState } from "./city-map.mjs";
+import { MAP_VERSION, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState } from "./city-map.mjs";
 const IS_MAIN = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 import process from "node:process";
 import pg from "pg";
@@ -2141,6 +2141,7 @@ function brainChooseAction(fly, clock) {
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
   add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
   add("park", "taking a walk", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
+  if(weatherDanger()<.3)add("ferris-wheel","riding the free Central Park wheel",fly.stress*.95+fly.loneliness*.2+fly.traits.sociability*18+12);
   add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
   add("clinic", "seeking care", (100 - fly.health) * 1.05 + (fly.illness ? 55 : 0));
   add("hospital-central", "going to Hansdrex hospital", (100 - fly.health) * 1.28 + (fly.illness ? 72 : 0));
@@ -2629,6 +2630,30 @@ function ensureHeliTourStaff(){
     staff.push(fly);
   }
   return staff;
+}
+
+function simulateParkWheel(fly){
+ const now=state.simulationAgeSeconds;
+ if(fly.wheelRideUntil){
+  if(now>=fly.wheelRideUntil){
+   fly.wheelRideUntil=0;fly.wheelSeat=null;fly.x=15;fly.y=1.1;fly.z=-80;fly.targetX=fly.x;fly.targetZ=fly.z;
+   fly.action="relaxing after the free park wheel";fly.actionUntil=now+1800;
+   fly.stress=clamp(fly.stress-24);fly.happiness=clamp(fly.happiness+12);fly.loneliness=clamp(fly.loneliness-8);
+   state.parkLeisure.completedRides++;
+   emit("park_ride",`${fly.id} finished a free Central Park wheel ride.`,{flyId:fly.id,ticket:0});
+   return true;
+  }
+  Object.assign(fly,wheelCabin(now,fly.wheelSeat));fly.vx=fly.vz=0;fly.sleeping=false;fly.indoors=false;
+  fly.action="riding the free Central Park wheel";fly.stress=clamp(fly.stress-.18);return true;
+ }
+ if(fly.traveling||fly.currentLocationId!=="ferris-wheel"||fly.action!=="riding the free Central Park wheel")return false;
+ if(weatherDanger()>=.3){fly.action="park wheel closed for weather";fly.actionUntil=now+1200;return false;}
+ const occupied=new Set(state.flies.filter(f=>f.alive&&f.wheelRideUntil>now).map(f=>f.wheelSeat));
+ const seat=Array.from({length:FERRIS_WHEEL.seats},(_,i)=>i).sort((a,b)=>wheelCabin(now,a).y-wheelCabin(now,b).y)[0];
+ if(occupied.has(seat))return false;
+ fly.wheelSeat=seat;fly.wheelRideUntil=now+FERRIS_WHEEL.period;fly.traveling=false;fly.indoors=false;fly.sleeping=false;
+ state.parkLeisure||={boardings:0,completedRides:0};state.parkLeisure.boardings++;
+ return true;
 }
 
 function heliTourTicketPrice(){
@@ -3284,6 +3309,7 @@ function tickFly(fly, clock) {
   if (!fly.alive) return;
   if(fly.health<=0){fly.alive=false;fly.causeOfDeath="fatal injuries or illness";state.deaths++;emit("death",`${fly.id} died after health reached zero.`,{flyId:fly.id});return;}
   if(lawEnforcement(fly)) return;
+  if(simulateParkWheel(fly))return;
   if(simulateHeliTour(fly,clock)) return;
   ensureCognitiveProfile(fly);
   ensureProfessionalTraining(fly);
@@ -3322,6 +3348,7 @@ function tickFly(fly, clock) {
   if(fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.action==="sheltering from bad weather")fly.actionUntil=state.simulationAgeSeconds+600;
   chooseDestination(fly, clock);
   moveFly(fly);
+  if(simulateParkWheel(fly))return;
   if(simulateHeliTour(fly,clock)) return;
   needsAndActivities(fly, clock);
   applyPowerEffects(fly,clock);
@@ -3437,6 +3464,7 @@ function compactFly(f) {
     metroLineId: f.metroLineId || null,
     heliPassenger:Boolean(f.heliPassenger),
     heliTourUntil:Number(f.heliTourUntil||0),
+    wheelRideUntil:Number(f.wheelRideUntil||0),wheelSeat:f.wheelSeat??null,
     illness: f.illness || null,
     socialClass: f.socialClass || "working",
     householdId: f.householdId || null,
@@ -3570,6 +3598,7 @@ function getState() {
     justice:state.justice,
     mapVersion:MAP_VERSION,
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>f.action?.startsWith("waiting at M")).length},
+    parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
@@ -3730,4 +3759,4 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 }
 // Side-effect-free test entry points; importing never starts a server or touches persistence.
-export {applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
+export {simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,simulateHeliTour,spend,related,maintainHouseholds,startJourney,needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,freshState,getState,tickFly,gameClock,chooseDestination,moveFly,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,migrateGroundHousesToSafeLots,migrateResidentNavigation};
