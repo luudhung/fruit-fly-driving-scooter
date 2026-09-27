@@ -917,7 +917,7 @@ function addMarinaBaySandsStyle(x:number,z:number){
  const sign=makeCanvasSprite("MARINA BAY SANDS · HANSDREX",31,1.5);sign.position.set(0,82,0);g.add(sign);
  g.position.set(x,0,z);cityRoot.add(g);
 }
-addMarinaBaySandsStyle(285,320);
+addMarinaBaySandsStyle(340,320);
 // Distinct shopfronts: glazed windows, colored awnings and readable destination signs.
 for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  if(b.id==="power")continue;
