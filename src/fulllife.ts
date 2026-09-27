@@ -259,8 +259,12 @@ const GRAPHICS_PROFILES = {
   ultra:  { pixelRatio: 2.0,  fps: 60, maxFlies: 132, maxHomes: 110, rain: 2200, treeScale: 1.0,  streetTreeStep: 24, windowStride: 1, metroDetail: 3, trafficStride: 1 },
 } as const;
 const savedGraphics = localStorage.getItem("fulllife_graphics");
-const graphicsPreset: GraphicsPreset =
+const coarseDevice = matchMedia("(pointer:coarse)").matches || /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
+const requestedGraphicsPreset: GraphicsPreset =
   savedGraphics === "medium" || savedGraphics === "high" || savedGraphics === "ultra" ? savedGraphics : "low";
+// The expanded v10 city has far more geometry. iPad/iPhone Safari is deliberately capped to the
+// low profile so an old saved "high/ultra" setting cannot exhaust the WebGL context.
+const graphicsPreset: GraphicsPreset = coarseDevice ? "low" : requestedGraphicsPreset;
 const graphics = GRAPHICS_PROFILES[graphicsPreset];
 
 const graphicsSelect = document.getElementById("graphics-preset") as HTMLSelectElement | null;
@@ -511,21 +515,30 @@ function updateHeliTourState(flies:FlyState[]){
 async function fetchSnapshot() {
   // The civilization keeps running on Railway; hidden tabs do not need to poll/render it.
   if (document.hidden) return;
+  let response: Response;
   try {
-    const response = await fetch(`${apiBase}/api/civilization/state`, {
+    response = await fetch(`${apiBase}/api/civilization/state`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderSnapshot(await response.json() as CivilizationSnapshot);
-  } catch {
+  } catch (error) {
+    console.error("[fulllife] civilization fetch failed", error);
     residentDirectory.offline();
     setConnection("offline", `OFFLINE · LAST SEEN ${residentDirectory.count} ALIVE ▾`);
     events.textContent = "Persistent civilization worker is unavailable.";
+    return;
+  }
+  const payload = await response.json() as CivilizationSnapshot;
+  try {
+    renderSnapshot(payload);
+  } catch (error) {
+    // A WebGL/UI problem must never be reported as a dead civilization server.
+    console.error("[fulllife] snapshot visual render failed", error);
+    const living = (payload.flies || []).filter((f) => f.alive).length;
+    setConnection(payload.authoritative ? "authoritative" : "connecting", `${living} ALIVE · CITY LIVE · VISUAL DEGRADED ▾`);
   }
 }
-void fetchSnapshot();
-window.setInterval(fetchSnapshot, 2500);
 
 // ---------- Three.js city ----------
 const host = $("world");
@@ -535,15 +548,25 @@ scene.fog = new THREE.Fog(0x93b8cf, 360, 1500);
 
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 1800);
 const renderer = new THREE.WebGLRenderer({
-  antialias: graphics.metroDetail >= 2,
-  powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
-  precision: graphicsPreset === "ultra" ? "highp" : "mediump",
+  antialias: !coarseDevice && graphics.metroDetail >= 2,
+  powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
+  precision: graphicsPreset === "ultra" && !coarseDevice ? "highp" : "mediump",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
+renderer.setPixelRatio(Math.min(devicePixelRatio, coarseDevice ? 0.78 : graphics.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
+renderer.domElement.addEventListener("webglcontextlost",(event)=>{
+  event.preventDefault();
+  console.error("[fulllife] WebGL context lost");
+  setConnection("connecting","GRAPHICS RECOVERING · CITY STILL RUNNING ▾");
+  if(!sessionStorage.getItem("fulllife_gpu_retry")){
+    sessionStorage.setItem("fulllife_gpu_retry","1");
+    localStorage.setItem("fulllife_graphics","low");
+    window.setTimeout(()=>location.reload(),250);
+  }
+});
 
 const hemi = new THREE.HemisphereLight(0xeaf7ff, 0x465a43, 1.85);
 scene.add(hemi);
@@ -846,8 +869,10 @@ function addBuilding(
   return group;
 }
 
-// Every visible footprint is also used by the server for collisions and zoning.
-for(const b of BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment"))addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});
+// Every authoritative footprint remains on the server. On coarse/mobile GPUs we render only
+// every third generic block while keeping ALL park-edge apartments and every unique landmark.
+const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment").filter((b,i)=>b.kind==="apartment"||!coarseDevice||i%3===0);
+for(const b of renderableCityBuildings)addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
@@ -1501,6 +1526,10 @@ function animate(now = performance.now()) {
   renderer.render(scene, camera);
 }
 animate();
+// Start API polling only after all Three.js globals, metro trains and landmark objects are initialized.
+// This removes a Safari race where a very fast API response could touch visual globals too early.
+void fetchSnapshot();
+window.setInterval(fetchSnapshot,2500);
 
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
