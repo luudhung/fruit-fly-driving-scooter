@@ -157,6 +157,7 @@ type CivilizationSnapshot = {
   mortality?:{byCause:Record<string,number>};
   welfare?:{birthGrantPerChild:number;essentialMealPrice:number};
   parkLeisure?:{passengers:number;completedRides:number};
+  helicopterTrial?:{passengerIds:string[];started:number;completed:number;active:string[];pending:string[];ticket:number;batchesStarted:number};
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -410,7 +411,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
   if(!s.authoritative)residentDirectory.offline();
   const policy=document.getElementById("welfare-policy");
-  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · ${s.parkLeisure?.passengers||0} on wheel / ${s.parkLeisure?.completedRides||0} completed`:'Awaiting public-support policy update';
+  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · wheel ${s.parkLeisure?.passengers||0} riding / ${s.parkLeisure?.completedRides||0} completed · HELI TEST ${s.helicopterTrial?.completed||0}/10 complete · ${s.helicopterTrial?.active?.length||0} flying`:'Awaiting public-support policy update';
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = `${num(living.length)} flies`;
   generation.textContent = num(s.generation);
@@ -469,8 +470,8 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "political_argument" ? "💬 " :
       e.type === "infidelity" || e.type === "infidelity_discovered" ? "💔 " :
       e.type === "relationship_conflict" || e.type === "breakup" ? "⚠ " :
-      e.type === "heli_boarding" ? "🚁 " :
-      e.type === "heli_landing" ? "🚁 " :
+      e.type === "heli_boarding" || e.type === "heli_trial_ticket" || e.type === "heli_trial_batch" ? "🚁 " :
+      e.type === "heli_landing" || e.type === "heli_trial_complete" ? "🚁 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
     row.textContent = `D${e.day ?? s.day} ${e.time || ""} · ${icon}${e.text}`;
     return row;
