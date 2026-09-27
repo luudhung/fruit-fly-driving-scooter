@@ -93,6 +93,7 @@ type FlyState = {
   professionSkills?: Record<string, number>;
   intelligence?: number; learningRate?: number; educationLevel?: number; knowledge?: Record<string,number>; teacherId?: string|null; schoolDays?: number;
   chronotype?: string; preferredWorkStart?: number; preferredWorkHours?: number; workMinutesToday?: number;
+  partyId?: string | null; ideology?: Record<string,number> | null; politicalInterest?: number;
 };
 
 type LocationState = {
@@ -138,6 +139,10 @@ type CivilizationSnapshot = {
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
+  economy?: { employed?: number; inflationRate?: number; priceLevel?: number; [key:string]: unknown };
+  centralBank?: { inflationRate?: number; priceLevel?: number; lastPrintAmount?: number; boardIds?: string[] };
+  politics?: { presidentId?: string | null; presidentPartyId?: string | null; campaignActive?: boolean; nextElectionDay?: number; parties?: Array<{id:string;name:string}> };
+  education?: { teacherId?: string | null; teacherGeneration?: number; lessons?: number; students?: number };
   totalTransactions?: number;
   weather?: WeatherState;
   daysPerYear?: number;
@@ -174,6 +179,10 @@ const births = $("births");
 const deaths = $("deaths");
 const food = $("food");
 const money = $("money");
+const inflationEl = $("inflation");
+const employedEl = $("employed");
+const presidentEl = $("president");
+const academyTeacherEl = $("academy-teacher");
 const events = $("events");
 const brainGrid = $("brain-grid");
 const brainNote = $("brain-note");
@@ -329,7 +338,7 @@ function renderInspector(fly: FlyState | null) {
   const skillNames = Object.entries(fly.professionSkills || {}).filter(([,v]) => Number(v) > 0.45).map(([k]) => k).slice(0,2);
   flyLawEl.textContent = `${Math.round((fly.lawAwareness || 0) * 100)}% aware · ${fly.lawViolations || 0} violations${fly.arrested ? " · DETAINED" : fly.wanted ? " · WANTED" : ""}${skillNames.length ? " · " + skillNames.join("/") : ""}`;
   flyLearningEl.textContent = `IQ-like ${Math.round((fly.intelligence || 0) * 100)} · edu ${num(fly.educationLevel || 0,1)} · ${fly.schoolDays || 0} school days${fly.teacherId ? " · teacher " + fly.teacherId : ""}`;
-  flyScheduleEl.textContent = `${fly.chronotype || "day"} · start ${String(Math.round(fly.preferredWorkStart || 0)).padStart(2,"0")}:00 · ${num(fly.preferredWorkHours || 0,1)}h preferred`;
+  flyScheduleEl.textContent = `${fly.chronotype || "day"} · start ${String(Math.round(fly.preferredWorkStart || 0)).padStart(2,"0")}:00 · ${num(fly.preferredWorkHours || 0,1)}h · ${fly.partyId || "no party"}`;
   flyStressEl.textContent = `${num(fly.stress, 1)}%`;
   flyHappyEl.textContent = `${num(fly.happiness, 1)}%`;
   flyExciteEl.textContent = `${num(fly.excitement, 1)}%`;
@@ -374,6 +383,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
   deaths.textContent = num(s.deaths);
   food.textContent = num(s.foodReserve);
   money.textContent = `${num(s.moneySupply, 0)} ${s.currency?.code || "H$"}`;
+  inflationEl.textContent = `${num(s.centralBank?.inflationRate ?? s.economy?.inflationRate ?? 0, 1)}%`;
+  employedEl.textContent = num(Number(s.economy?.employed || 0));
+  presidentEl.textContent = s.politics?.presidentId || (s.politics?.campaignActive ? "campaigning…" : "—");
+  academyTeacherEl.textContent = s.education?.teacherId || "—";
   gameClockEl.textContent = s.gameClock || "--:--";
   gameDayEl.textContent = `DAY ${s.day || 1}`;
   const weather = s.weather || {};
@@ -405,6 +418,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
       e.type === "job" || e.type === "work" || e.type === "hire" || e.type === "labor" ? "▣ " :
       e.type === "school" || e.type === "education" ? "🎓 " :
       e.type === "salary" ? "$ " :
+      e.type === "monetary_policy" ? "🏦 " :
+      e.type === "election_campaign" || e.type === "election_result" || e.type === "party_founded" ? "🗳 " :
+      e.type === "political_argument" ? "💬 " :
       e.type === "vehicle_purchase" ? "◆ " : "";
     row.textContent = `D${e.day ?? s.day} ${e.time || ""} · ${icon}${e.text}`;
     return row;
@@ -783,14 +799,14 @@ for(const side of [-1,1]) for(const z of safeSuburbZ) for(const offset of safeSu
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
 const landmarkCool=new THREE.MeshStandardMaterial({color:0x8db9d0,emissive:0x3c9fd4,emissiveIntensity:0.95,roughness:0.28});
 const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.38,metalness:0.58});
-function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=new THREE.MeshStandardMaterial({color:0xa4a19a,roughness:0.68,metalness:0.08});const tiers=[[20,20,38,19],[16,16,28,52],[12,12,22,77],[8,8,14,95]] as const;
-  for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(7-i*1.5,4,7-i*1.5),landmarkWarm);c.position.y=104+i*4;g.add(c);}
+function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=new THREE.MeshStandardMaterial({color:0xa4a19a,roughness:0.68,metalness:0.08});const tiers=[[11.5,11.5,38,19],[9.2,9.2,28,52],[6.8,6.8,22,77],[4.5,4.5,14,95]] as const;
+  for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(4.2-i*.7,3.4,4.2-i*.7),landmarkWarm);c.position.y=104+i*4;g.add(c);}
   const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.72,25,8),landmarkMetal);spire.position.y=123;g.add(spire);const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.72,8,6),landmarkWarm);beacon.position.y=136;g.add(beacon);g.position.set(x,0,z);cityRoot.add(g);}
 addEmpireStyleTower(15,43.5);
-function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(1.25,3.6,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
-  const pod=new THREE.Mesh(new THREE.CylinderGeometry(8.2,6.4,8,20),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(7.2,0.35,6,20),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
+function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.9,2.4,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
+  const pod=new THREE.Mesh(new THREE.CylinderGeometry(4.7,3.8,7,18),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.24,6,18),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
 addTorontoStyleTower(-11,43.5);
-function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-6.2,6.2]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=5.4-i*0.48,h=13-i*0.45,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*0.88,r,h,12),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(1.3,3,12,10),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(12.5,2.4,3.1),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
+function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-3.1,3.1]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=2.35-i*.18,h=12.2-i*.35,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r,h,10),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(.7,1.8,10,9),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(6.2,1.5,2),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
 addPetronasTwinTowers(41,43.5);
 // Major destination buildings aligned to backend coordinates.
 const destinationBuildings=[
@@ -1028,7 +1044,8 @@ function syncFlyMeshes(flies: FlyState[]) {
     }
     visual.target.set(fly.x, fly.y, fly.z);
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
-    visual.group.scale.setScalar(ageScale);
+    const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
+    visual.group.scale.setScalar(ageScale * visibilityScale);
     (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
     const emoji = flyStatusEmoji(fly);
     const showStatus = Boolean(emoji) && (

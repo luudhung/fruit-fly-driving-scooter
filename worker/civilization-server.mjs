@@ -16,7 +16,7 @@ const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-wo
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(process.env.NEURAL_SYNC_INTERVAL_MS || 1000));
 const CHECKPOINT_EVERY_MS = 5000;
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
-const MAP_VERSION = 6;
+const MAP_VERSION = 7;
 const CURRENCY_CODE = "H$";
 const CURRENCY_NAME = "Hansdrex Dollar";
 const CITY_NAME = "Hansdrex City of Fruit Fly";
