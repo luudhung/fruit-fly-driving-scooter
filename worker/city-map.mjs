@@ -2,7 +2,7 @@
 export const MAP_VERSION = 8;
 export const WORLD_HALF = 405; // approximately twice the previous ground area
 export const PARK = { x:-11, z:-87, w:38, d:44 };
-export const WATER = [{x:128,z:-12,w:28,d:470},{x:65,z:205,w:350,d:68}];
+export const WATER = [{x:-20,z:-97,w:10,d:12},{x:128,z:-12,w:28,d:470},{x:65,z:205,w:350,d:68}];
 export const AVENUES = [-102,-76,-50,-24,2,28,54,80,106];
 export const STREETS = [-145,-116,-87,-58,-29,0,29,58,87,116,145];
 export const contains = (r,p,m=0) => Math.abs(r.x-p.x)<r.w/2+m && Math.abs(r.z-p.z)<r.d/2+m;

@@ -9,7 +9,7 @@
     "url": "https://github.com/abgnydn/webgpu-fly.git"
   },
   "author": {
-    "name": "Ahmet Barış Günaydın",
+    "name": "Ahmet Bar\u0131\u015f G\u00fcnayd\u0131n",
     "email": "hi@barisgunaydin.com"
   },
   "scripts": {
@@ -32,7 +32,8 @@
     "deploy:hf": "npm run build:slim && cp space/README.md space/.gitattributes NOTICE LICENSE LICENSE-FLYBODY LIMITATIONS.md dist/ && rm -f dist/_headers && hf upload abgunaydin/webgpu-fly dist . --repo-type=space",
     "deploy:vercel": "npm run build && vercel --prod",
     "deploy:r2": "bash tools/upload_to_r2.sh",
-    "prebuild": "node tools/prepare-vercel-assets.mjs"
+    "prebuild": "node tools/prepare-vercel-assets.mjs",
+    "test:city": "node --test tests-city/*.test.mjs"
   },
   "license": "MIT",
   "devDependencies": {

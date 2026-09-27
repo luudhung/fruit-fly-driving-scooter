@@ -381,6 +381,7 @@ function renderInspector(fly: FlyState | null) {
 function renderSnapshot(s: CivilizationSnapshot) {
   snapshot = s;
   snapshotReceivedAt=performance.now();
+  if(s.mapVersion!==MAP_VERSION){setConnection("connecting","CITY UPDATE AWAITING WORKER");}
   const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
   setConnection(
     s.authoritative ? "authoritative" : "offline",
@@ -1072,9 +1073,14 @@ function syncFlyMeshes(flies: FlyState[]) {
       flyVisuals.set(fly.id, visual);
     }
     visual.target.set(fly.x, fly.y, fly.z);
+    if(fly.currentLocationId==="rooftop"&&!fly.traveling){visual.target.set(11+seeded(Number(fly.id.replace(/\D/g,"")))*8,99,47);}
     visual.stationary=Boolean(fly.sleeping||!fly.traveling);
     const trace=(fly.movementTrace||[]).filter(p=>p.t>visual!.lastTraceTime);
-    for(const p of trace)visual.route.push(new THREE.Vector3(p.x,p.y,p.z));
+    for(const p of trace){
+      const last=visual.route.at(-1)||visual.current;
+      if(!clearSegment({x:last.x,z:last.z},p)){visual.route=[];visual.current.set(p.x,p.y,p.z);}
+      else visual.route.push(new THREE.Vector3(p.x,p.y,p.z));
+    }
     visual.lastTraceTime=trace.at(-1)?.t??visual.lastTraceTime;
     if(visual.route.length>12)visual.route=visual.route.slice(-8);
     if(visual.stationary){visual.route=[];visual.current.copy(visual.target);}
@@ -1341,8 +1347,7 @@ function animate(now = performance.now()) {
 
   for (const visual of flyVisuals.values()) {
     const next=visual.route[0]||visual.target;
-    if(clearSegment({x:visual.current.x,z:visual.current.z},{x:next.x,z:next.z}))visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
-    else visual.current.copy(next); // never interpolate diagonally through an obstacle
+    visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
     visual.group.position.copy(visual.current);
     const wingBeat = Math.sin(now * 0.035) * 0.08;
