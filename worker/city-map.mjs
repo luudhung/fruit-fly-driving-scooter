@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 11;
+export const MAP_VERSION = 12;
 export const WORLD_HALF = 620;
 export const PARK = { x:15, z:-170, w:150, d:260 };
 export const PARK_PONDS = [
@@ -297,6 +297,21 @@ export function pedestrianRoute(start,dest,mode="walk") {
  }
  return [a,...path,b].filter((p,i,all)=>!i||Math.hypot(p.x-all[i-1].x,p.z-all[i-1].z)>.05).map(p=>({...p,mode,stage:ROADS.some(r=>contains(r,p))?'crosswalk':'sidewalk'}));
 }
+export function metroStationGeometry(line,index) {
+ const p=line.points[index],prev=line.points[Math.max(0,index-1)],next=line.points[Math.min(line.points.length-1,index+1)];
+ const dx=next[0]-prev[0],dz=next[1]-prev[1],len=Math.hypot(dx,dz)||1;
+ const px=-dz/len,pz=dx/len;
+ const side=index%2===0?1:-1;
+ const platformOffset=3.4,accessOffset=8.2;
+ return {
+  track:{x:p[0],z:p[1],y:line.height},
+  platform:{x:p[0]+px*platformOffset*side,z:p[1]+pz*platformOffset*side,y:line.height+.25},
+  access:{x:p[0]+px*accessOffset*side,z:p[1]+pz*accessOffset*side,y:1.1},
+  axis:Math.abs(dx)>=Math.abs(dz)?"x":"z",
+  side,
+ };
+}
+
 export function trainState(line,seconds) {
  const stops=line.points,legs=[];
  for(let i=0;i<stops.length-1;i++)legs.push([i,i+1]);
