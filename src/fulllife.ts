@@ -253,19 +253,23 @@ const healthMeter = $("health-meter");
 
 type GraphicsPreset = "low" | "medium" | "high" | "ultra";
 const GRAPHICS_PROFILES = {
-  low:    { pixelRatio: 0.85, fps: 24, maxFlies: 132,  maxHomes: 24,  rain: 320,  treeScale: 0.34, streetTreeStep: 72, windowStride: 3, metroDetail: 0, trafficStride: 3 },
-  medium: { pixelRatio: 1.0,  fps: 30, maxFlies: 132, maxHomes: 48,  rain: 700,  treeScale: 0.58, streetTreeStep: 48, windowStride: 2, metroDetail: 1, trafficStride: 2 },
-  high:   { pixelRatio: 1.25, fps: 45, maxFlies: 132, maxHomes: 72,  rain: 1200, treeScale: 0.82, streetTreeStep: 36, windowStride: 1, metroDetail: 2, trafficStride: 1 },
-  ultra:  { pixelRatio: 2.0,  fps: 60, maxFlies: 132, maxHomes: 110, rain: 2200, treeScale: 1.0,  streetTreeStep: 24, windowStride: 1, metroDetail: 3, trafficStride: 1 },
+  low:    { pixelRatio: 0.82, fps: 24, maxFlies: 132, maxHomes: 24,  rain: 260,  treeScale: 0.30, streetTreeStep: 78, windowStride: 4, metroDetail: 0, trafficStride: 4, cityStride: 4 },
+  medium: { pixelRatio: 1.00, fps: 30, maxFlies: 132, maxHomes: 48,  rain: 520,  treeScale: 0.52, streetTreeStep: 52, windowStride: 3, metroDetail: 1, trafficStride: 3, cityStride: 2 },
+  high:   { pixelRatio: 1.18, fps: 40, maxFlies: 132, maxHomes: 72,  rain: 900,  treeScale: 0.76, streetTreeStep: 38, windowStride: 2, metroDetail: 2, trafficStride: 2, cityStride: 1 },
+  ultra:  { pixelRatio: 1.50, fps: 50, maxFlies: 132, maxHomes: 100, rain: 1500, treeScale: 1.00, streetTreeStep: 28, windowStride: 1, metroDetail: 3, trafficStride: 1, cityStride: 1 },
+} as const;
+const MOBILE_GRAPHICS_PROFILES = {
+  low:    { ...GRAPHICS_PROFILES.low,    pixelRatio:0.66, fps:22, rain:180, treeScale:0.24, cityStride:5 },
+  medium: { ...GRAPHICS_PROFILES.medium, pixelRatio:0.78, fps:26, rain:300, treeScale:0.40, cityStride:3 },
+  high:   { ...GRAPHICS_PROFILES.high,   pixelRatio:0.90, fps:30, rain:480, treeScale:0.56, cityStride:2 },
+  ultra:  { ...GRAPHICS_PROFILES.ultra,  pixelRatio:1.00, fps:34, rain:650, treeScale:0.68, cityStride:1 },
 } as const;
 const savedGraphics = localStorage.getItem("fulllife_graphics");
 const coarseDevice = matchMedia("(pointer:coarse)").matches || /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
-const requestedGraphicsPreset: GraphicsPreset =
+const graphicsPreset: GraphicsPreset =
   savedGraphics === "medium" || savedGraphics === "high" || savedGraphics === "ultra" ? savedGraphics : "low";
-// The expanded v10 city has far more geometry. iPad/iPhone Safari is deliberately capped to the
-// low profile so an old saved "high/ultra" setting cannot exhaust the WebGL context.
-const graphicsPreset: GraphicsPreset = coarseDevice ? "low" : requestedGraphicsPreset;
-const graphics = GRAPHICS_PROFILES[graphicsPreset];
+// Mobile keeps the user's chosen quality, but uses Safari-safe budgets instead of silently forcing Low.
+const graphics = coarseDevice ? MOBILE_GRAPHICS_PROFILES[graphicsPreset] : GRAPHICS_PROFILES[graphicsPreset];
 
 const graphicsSelect = document.getElementById("graphics-preset") as HTMLSelectElement | null;
 if (graphicsSelect) {
@@ -561,7 +565,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
   precision: graphicsPreset === "ultra" && !coarseDevice ? "highp" : "mediump",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, coarseDevice ? 0.78 : graphics.pixelRatio));
+renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
@@ -880,7 +884,7 @@ function addBuilding(
 
 // Every authoritative footprint remains on the server. On coarse/mobile GPUs we render only
 // every third generic block while keeping ALL park-edge apartments and every unique landmark.
-const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment").filter((b,i)=>b.kind==="apartment"||!coarseDevice||i%3===0);
+const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment").filter((b,i)=>b.kind==="apartment"||i%graphics.cityStride===0);
 for(const b of renderableCityBuildings)addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
