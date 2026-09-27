@@ -962,7 +962,7 @@ addPowerPlant(powerBuilding.x,powerBuilding.z);
 
 // Hansdrex Farm in a reserved agricultural district.
 const farmSoil=new THREE.MeshStandardMaterial({color:0x6e5738,roughness:1}),cropMat=new THREE.MeshStandardMaterial({color:0x6f8f45,roughness:1});
-for(let row=0;row<7;row+=1){const z=108+row*5.3,soil=new THREE.Mesh(new THREE.BoxGeometry(42,0.08,2.2),farmSoil);soil.position.set(-300,0.08,z);cityRoot.add(soil);const crops=new THREE.Mesh(new THREE.BoxGeometry(40,0.42,0.9),cropMat);crops.position.set(-300,0.31,z);cityRoot.add(crops);}
+for(let row=0;row<7;row+=1){const z=108+row*5.3,soil=new THREE.Mesh(new THREE.BoxGeometry(42,0.08,2.2),farmSoil);soil.position.set(-285,0.08,z);cityRoot.add(soil);const crops=new THREE.Mesh(new THREE.BoxGeometry(40,0.42,0.9),cropMat);crops.position.set(-285,0.31,z);cityRoot.add(crops);}
 // Street trees and lights along main avenues.
 for (const x of avenueXs) {
   for (let z = -330; z <= 330; z += graphics.streetTreeStep) {
