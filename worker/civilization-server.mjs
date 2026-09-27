@@ -16,9 +16,9 @@ const FLYWIRE_BRAIN_URL = (process.env.FLYWIRE_BRAIN_URL || "https://flybrain-wo
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(process.env.NEURAL_SYNC_INTERVAL_MS || 1000));
 const CHECKPOINT_EVERY_MS = 5000;
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
-const MAP_VERSION = 4;
-const CURRENCY_CODE = "WC";
-const CURRENCY_NAME = "Hansdrex WingCoin";
+const MAP_VERSION = 6;
+const CURRENCY_CODE = "H$";
+const CURRENCY_NAME = "Hansdrex Dollar";
 const CITY_NAME = "Hansdrex City of Fruit Fly";
 const WEATHER_UPDATE_GAME_SECONDS = 45 * 60;
 
@@ -38,7 +38,7 @@ const VERSION = {
   brainVersion: "per-fly independent full-connectome bridge + persistent cognition",
   physicsVersion: "district-city-transit-0.5.0",
   geneticsVersion: "heritable-traits-0.2.0",
-  economicVersion: "multi-sector-wingcoin-economy-0.5.0",
+  economicVersion: "adaptive-hansdrex-dollar-education-economy-0.7.0",
 };
 
 const LOCATIONS = [
@@ -59,7 +59,7 @@ const LOCATIONS = [
   { id: "library", type: "service", name: "Hansdrex Library", x: 14, z: 60 },
 
   { id: "hospital-central", type: "health", name: "Hansdrex Central Hospital", x: -82, z: 58 },
-  { id: "hospital-east", type: "health", name: "Hansdrex East Hospital", x: 126, z: 48 },
+  { id: "hospital-east", type: "health", name: "Hansdrex East Hospital", x: 176, z: 68 },
   { id: "clinic", type: "health", name: "Hansdrex Community Clinic", x: -72, z: 90 },
   { id: "pharmacy", type: "health", name: "Hansdrex Pharmacy", x: -92, z: 24 },
   { id: "school", type: "service", name: "Hansdrex Academy", x: -16, z: 102 },
@@ -98,13 +98,15 @@ const LOCATIONS = [
 ];
 
 const METRO_ROUTE_LINES = [
-  { id:"M1", points:[[-150,0],[0,0],[142,0],[190,0]] },
-  { id:"M2", points:[[0,-175],[0,-140],[0,0],[0,142],[0,175]] },
-  { id:"M3", points:[[-170,85],[-128,88],[-60,58],[0,29],[70,48],[126,48],[175,70]] },
-  { id:"M4", points:[[-175,-105],[-98,-82],[-30,-58],[55,-58],[92,-58],[160,-105]] },
-  { id:"M5", points:[[-165,145],[-80,116],[0,116],[78,116],[148,118],[185,150]] },
-  { id:"M6", points:[[-165,-150],[-70,-116],[0,-87],[80,-87],[159,-50],[190,-15]] },
+  { id:"M1", points:[[-154,0],[-102,0],[-50,0],[2,0],[54,0],[106,0],[159,0],[195,0]] },
+  { id:"M2", points:[[2,-150],[2,-116],[2,-58],[2,0],[2,58],[2,116],[2,150]] },
+  { id:"M3", points:[[-154,87],[-102,87],[-50,87],[2,87],[54,87],[106,87]] },
+  { id:"M4", points:[[-102,-150],[-102,-100],[-102,-50],[-102,0],[-102,50],[-102,100],[-102,150]] },
+  { id:"M5", points:[[-154,-87],[-102,-87],[-50,-87],[2,-87],[54,-87],[106,-87]] },
+  { id:"M6", points:[[159,-150],[159,-100],[159,-50],[159,0],[159,50],[159,100],[159,150]] },
 ];
+
+function nearestPointIndex];
 
 function nearestPointIndex(points, x, z) {
   let best = 0;
@@ -216,7 +218,61 @@ const STARTUP_TYPES = [
   { sector: "nightlife", baseCapital: 1700, locationId: "nightclub", margin: 0.24 },
   { sector: "logistics", baseCapital: 1500, locationId: "warehouse", margin: 0.14 },
   { sector: "manufacturing", baseCapital: 2300, locationId: "factory-east", margin: 0.17 },
+  { sector: "health", baseCapital: 1800, locationId: "hospital-central", margin: 0.16 },
+  { sector: "education", baseCapital: 1200, locationId: "school", margin: 0.13 },
+  { sector: "mobility", baseCapital: 1600, locationId: "transit", margin: 0.16 },
+  { sector: "maintenance", baseCapital: 1400, locationId: "power", margin: 0.15 },
+  { sector: "construction", baseCapital: 2200, locationId: "construction", margin: 0.18 },
+  { sector: "media", baseCapital: 950, locationId: "music-hall", margin: 0.21 },
+  { sector: "automotive", baseCapital: 1800, locationId: "vehicle-showroom", margin: 0.17 },
 ];
+
+const EMERGENT_ROLES = {
+  cafe:["barista","coffee roaster","customer host","delivery runner"],
+  retail:["sales associate","inventory planner","customer support","visual merchandiser"],
+  food:["cook","kitchen specialist","food buyer","delivery runner"],
+  nightlife:["event host","sound technician","security officer","venue manager"],
+  logistics:["dispatcher","warehouse coordinator","delivery runner","route planner"],
+  manufacturing:["machine operator","quality inspector","maintenance technician","production planner"],
+  health:["care assistant","medical coordinator","clinic technician","patient services"],
+  education:["teaching assistant","learning coach","school coordinator","library tutor"],
+  mobility:["metro operator","station attendant","dispatcher","fleet technician"],
+  maintenance:["utility technician","repair specialist","facilities engineer","safety inspector"],
+  construction:["builder","site coordinator","electrician","materials planner"],
+  media:["event producer","stage technician","content coordinator","ticketing specialist"],
+  automotive:["vehicle sales specialist","mechanic","detailer","parts coordinator"],
+};
+
+function cityNeedScores() {
+  const living=state.flies.filter((f)=>f.alive);
+  const n=Math.max(1,living.length);
+  return {
+    food: living.reduce((a,f)=>a+f.hunger,0)/n/100,
+    health: living.filter((f)=>f.illness||f.health<72).length/n,
+    mobility: living.filter((f)=>!f.vehicle).length/n,
+    education: living.filter((f)=>f.ageYears>=5&&f.ageYears<18).length/n,
+    maintenance: weatherDanger()*0.6 + Object.values(state.enterprises||{}).filter((b)=>b.status==="operating").length/30,
+    commerce: Number(state.economy?.index||1)/1.65,
+    leisure: living.reduce((a,f)=>a+f.stress,0)/n/100,
+  };
+}
+function emergentRoleForBusiness(business, owner) {
+  const roles=EMERGENT_ROLES[business.sector] || ["operations coordinator","customer support","bookkeeper","facilities worker"];
+  const needs=cityNeedScores();
+  const sectorNeed =
+    business.sector==="food"||business.sector==="cafe" ? needs.food :
+    business.sector==="health" ? needs.health :
+    business.sector==="education" ? needs.education :
+    business.sector==="mobility"||business.sector==="automotive"||business.sector==="logistics" ? needs.mobility :
+    business.sector==="maintenance"||business.sector==="manufacturing"||business.sector==="construction" ? needs.maintenance :
+    business.sector==="nightlife"||business.sector==="media" ? needs.leisure : needs.commerce;
+  const idx=Math.min(roles.length-1,Math.floor(brainRand(owner)*roles.length));
+  const title=roles[idx];
+  const wage=clamp(4.2 + sectorNeed*2.2 + business.reputation*1.5 + owner.traits.empathy*0.5,3.8,10.5);
+  return {title,wage:Number(wage.toFixed(2)),need:sectorNeed};
+}
+
+const APARTMENT_CAPACITY];
 
 const APARTMENT_CAPACITY = 10;
 const POPULATION_BOOTSTRAP_VERSION = 3;
@@ -773,7 +829,7 @@ function lawEnforcement(fly){
       const skill=Number(officer.professionSkills?.arrestProcedure||0.7),fine=Math.min(fly.money,20+fly.lawViolations*8);
       fly.money-=fine;fly.arrestedUntil=state.simulationAgeSeconds+600+skill*600;fly.wantedUntil=0;fly.stress=clamp(fly.stress+18);fly.happiness=clamp(fly.happiness-8);
       officer.brainDecision=`arrested ${fly.id}`; officer.brainConfidence=skill;
-      emit("arrest",`${officer.id} arrested ${fly.id}; fine ${fine.toFixed(0)} WC.`,{officerId:officer.id,flyId:fly.id,fine});
+      emit("arrest",`${officer.id} arrested ${fly.id}; fine ${fine.toFixed(0)} H$.`,{officerId:officer.id,flyId:fly.id,fine});
       return true;
     }
   }
@@ -833,6 +889,12 @@ function createFly(index, parents = null) {
     health: inheritedTrait(mother, father, "health", 0.3, 0.98),
   };
   const job = initialAge >= 18 && initialAge <= 75 && rand() < 0.78 ? pick(JOBS) : null;
+  const inheritedIntelligence = parents
+    ? clamp(((Number(mother?.intelligence||0.55)+Number(father?.intelligence||0.55))/2)+randRange(-0.08,0.08),0.15,0.98)
+    : clamp(0.34 + traits.ambition*0.18 + traits.resilience*0.10 + brain.plasticity.learningRate*0.25 + randRange(-0.10,0.10),0.15,0.95);
+  const chronotypeRoll=brain.seed%4;
+  const chronotype=chronotypeRoll===0?"early":chronotypeRoll===1?"day":chronotypeRoll===2?"late":"night";
+  const preferredWorkStart=(chronotype==="early"?6:chronotype==="day"?9:chronotype==="late"?13:18)+Math.round(randRange(-1,1));
   return {
     id,
     name: `Fly ${index + 1}`,
@@ -911,6 +973,17 @@ function createFly(index, parents = null) {
     arrestedUntil: 0,
     lastViolationAt: 0,
     professionSkills: trainedSkillsForJob(job?.id,job?.title),
+    intelligence: inheritedIntelligence,
+    learningRate: clamp(0.35 + inheritedIntelligence*0.42 + brain.plasticity.learningRate*0.25,0.2,1),
+    educationLevel: parents ? 0 : clamp(Math.max(0,(initialAge-5)*5.2)*inheritedIntelligence,0,100),
+    knowledge: {general:parents?0:clamp(Math.max(0,(initialAge-5)*0.052)*inheritedIntelligence,0,1),science:0,commerce:0,civic:0},
+    schoolDays: 0,
+    teacherId: null,
+    chronotype,
+    preferredWorkStart: (preferredWorkStart+24)%24,
+    preferredWorkHours: clamp(6.5 + traits.ambition*2.2 - traits.risk*0.5,5,10),
+    workMinutesToday: 0,
+    lastEducationDay: -1,
     brainDecision: "resting",
     brainConfidence: 0.5,
     traveling: false,
@@ -1051,7 +1124,8 @@ function freshState() {
     enterprises: {},
     nextEnterpriseId: 1,
     bank: { reserves: 250000, loansOutstanding: 0, defaults: 0 },
-    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1 },
+    economy: { index: 1, unemployment: 0, averageNetWorth: 0, businessCount: 0, gdpToday: 0, bankruptcies: 0, lastEnterpriseHour: -1, employed:0, lastLaborPulseHour:-1 },
+    education: { teacherId:null, teacherGeneration:0, lessons:0 },
     mapVersion: MAP_VERSION,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
     housing: null,
@@ -1066,6 +1140,7 @@ function freshState() {
     seedSocioeconomicProfile(fly);
     state.flies.push(fly);
   }
+  ensureAcademyTeacher(true);
   s.generation = 1;
   return s;
 }
@@ -1165,6 +1240,9 @@ async function initDb() {
     state.economy.gdpToday = Number(state.economy.gdpToday || 0);
     state.economy.bankruptcies = Number(state.economy.bankruptcies || 0);
     state.economy.lastEnterpriseHour = Number.isFinite(state.economy.lastEnterpriseHour) ? state.economy.lastEnterpriseHour : -1;
+    state.economy.employed=Number(state.economy.employed||0);
+    state.economy.lastLaborPulseHour=Number.isFinite(state.economy.lastLaborPulseHour)?state.economy.lastLaborPulseHour:-1;
+    state.education=state.education||{teacherId:null,teacherGeneration:0,lessons:0};
     state.populationBootstrapVersion = Number(state.populationBootstrapVersion || 0);
     state.currency = { code: CURRENCY_CODE, name: CURRENCY_NAME };
     ensureHousingState();
@@ -1254,6 +1332,10 @@ async function initDb() {
       fly.arrestedUntil = Number(fly.arrestedUntil||0);
       fly.lastViolationAt = Number(fly.lastViolationAt||0);
       fly.professionSkills = fly.professionSkills || trainedSkillsForJob(fly.jobId,fly.jobTitle);
+      ensureCognitiveProfile(fly);
+      fly.enterpriseLocationId=fly.enterpriseLocationId||null;
+      fly.wageArrears=Number(fly.wageArrears||0);
+      fly.lastWorkEventDay=Number.isFinite(fly.lastWorkEventDay)?fly.lastWorkEventDay:-1;
       fly.householdId = fly.householdId || null;
       fly.housingType = fly.housingType || null;
       fly.housingUnitId = fly.housingUnitId || null;
@@ -1267,6 +1349,7 @@ async function initDb() {
       }
     }
 
+    ensureAcademyTeacher();
     rebalancePopulationToTarget();
     if (state.populationBootstrapVersion < POPULATION_BOOTSTRAP_VERSION || state.flies.filter((x) => x.alive).length < INITIAL_POPULATION) {
       const before = state.flies.filter((x) => x.alive).length;
@@ -1455,6 +1538,109 @@ function isShiftHour(job, hour) {
   return hour >= job.shiftStart || hour < job.shiftEnd;
 }
 
+function circularHourInWindow(hour,start,duration){
+  const h=((hour-start)%24+24)%24;
+  return h>=0 && h<duration;
+}
+function ensureCognitiveProfile(fly){
+  if(!Number.isFinite(fly.intelligence)){
+    fly.intelligence=clamp(
+      0.30 + (fly.traits?.ambition||0.5)*0.16 + (fly.traits?.resilience||0.5)*0.10 +
+      Number(fly.brain?.plasticity?.learningRate||0.36)*0.24 + brainRange(fly,-0.10,0.10),
+      0.12,0.98
+    );
+  }
+  fly.learningRate=Number.isFinite(fly.learningRate)
+    ? fly.learningRate
+    : clamp(0.35 + fly.intelligence*0.42 + Number(fly.brain?.plasticity?.learningRate||0.36)*0.25,0.2,1);
+  fly.educationLevel=Number.isFinite(fly.educationLevel)
+    ? fly.educationLevel
+    : clamp(Math.max(0,Math.min(100,(fly.ageYears-5)*5.2))*fly.intelligence,0,100);
+  fly.knowledge=fly.knowledge||{general:fly.educationLevel/100,science:0,commerce:0,civic:0};
+  fly.schoolDays=Number(fly.schoolDays||0);
+  fly.teacherId=fly.teacherId||null;
+  fly.chronotype=fly.chronotype||(
+    fly.brain?.seed%4===0?"early":
+    fly.brain?.seed%4===1?"day":
+    fly.brain?.seed%4===2?"late":"night"
+  );
+  if(!Number.isFinite(fly.preferredWorkStart)){
+    const start=fly.chronotype==="early"?6:fly.chronotype==="day"?9:fly.chronotype==="late"?13:18;
+    fly.preferredWorkStart=(start+Math.round(brainRange(fly,-1.5,1.5))+24)%24;
+  }
+  fly.preferredWorkHours=Number.isFinite(fly.preferredWorkHours)
+    ? fly.preferredWorkHours
+    : clamp(6.5 + fly.traits.ambition*2.2 - fly.traits.risk*0.5,5,10);
+  fly.workMinutesToday=Number(fly.workMinutesToday||0);
+  fly.lastEducationDay=Number.isFinite(fly.lastEducationDay)?fly.lastEducationDay:-1;
+}
+function personalWorkWindow(fly,baseJob,hour){
+  ensureCognitiveProfile(fly);
+  const essential=["police","doctor","hospital-central","hospital-east","transit","power"].includes(fly.jobId);
+  const baseStart=Number(baseJob?.shiftStart ?? fly.preferredWorkStart);
+  const brainStart=Number(fly.preferredWorkStart);
+  const start=essential ? Math.round(baseStart*0.72+brainStart*0.28)%24 : brainStart;
+  const hours=essential ? Math.max(7,Number(fly.preferredWorkHours||8)) : Number(fly.preferredWorkHours||8);
+  return circularHourInWindow(hour,start,hours);
+}
+function academyTeacher(){
+  const id=state.education?.teacherId;
+  return id?state.flies.find((f)=>f.id===id&&f.alive):null;
+}
+function ensureAcademyTeacher(force=false){
+  state.education=state.education||{teacherId:null,teacherGeneration:0,lessons:0};
+  let current=academyTeacher();
+  if(current && !force){ensureCognitiveProfile(current);return current;}
+  const adults=state.flies.filter((f)=>f.alive&&f.ageYears>=22&&f.ageYears<=72);
+  if(!adults.length)return null;
+  for(const f of adults)ensureCognitiveProfile(f);
+  const ranked=adults.slice().sort((a,b)=>
+    (b.intelligence*0.55+b.educationLevel/100*0.22+b.traits.empathy*0.13+b.traits.sociability*0.10)-
+    (a.intelligence*0.55+a.educationLevel/100*0.22+a.traits.empathy*0.13+a.traits.sociability*0.10)
+  );
+  const top=ranked.slice(0,Math.max(1,Math.min(8,Math.ceil(ranked.length*0.12))));
+  current=top[Math.floor(rand()*top.length)]||ranked[0];
+  current.intelligence=Math.max(current.intelligence,0.86);
+  current.educationLevel=Math.max(current.educationLevel,82);
+  current.professionSkills={...(current.professionSkills||{}),teaching:0.94,mentoring:0.88};
+  current.jobId="school";
+  current.jobTitle="academy teacher";
+  current.wage=Math.max(Number(current.wage||0),6.4);
+  current.preferredWorkStart=current.chronotype==="early"?7:8;
+  current.preferredWorkHours=7.5;
+  state.education.teacherId=current.id;
+  state.education.teacherGeneration=Number(state.education.teacherGeneration||0)+1;
+  brainRemember(current,"appointed_teacher",{generation:state.education.teacherGeneration});
+  emit("education",`${current.id} was appointed Hansdrex Academy teacher for generation ${state.education.teacherGeneration}.`,{
+    teacherId:current.id,intelligence:current.intelligence,educationLevel:current.educationLevel,
+  });
+  return current;
+}
+function educationTick(fly,clock){
+  ensureCognitiveProfile(fly);
+  if(fly.ageYears<5||fly.ageYears>=18)return;
+  if(fly.currentLocationId!=="school"||!String(fly.action||"").includes("studying"))return;
+  const teacher=ensureAcademyTeacher();
+  const teacherPresent=teacher&&teacher.currentLocationId==="school"&&String(teacher.action||"").includes("teaching");
+  const teacherSkill=teacher?Number(teacher.professionSkills?.teaching||0.65):0.35;
+  const boost=(teacherPresent?1.35:0.72)*(0.65+teacherSkill*0.45)*(0.55+fly.learningRate*0.55);
+  fly.educationLevel=clamp(fly.educationLevel+0.0018*boost,0,100);
+  fly.knowledge.general=clamp(Number(fly.knowledge.general||0)+0.000045*boost,0,1);
+  fly.knowledge.civic=clamp(Number(fly.knowledge.civic||0)+0.000025*boost,0,1);
+  fly.intelligence=clamp(fly.intelligence+0.0000045*boost,0.12,0.995);
+  fly.energy=clamp(fly.energy-0.012);
+  fly.stress=clamp(fly.stress+(fly.traits.resilience<0.4?0.006:-0.002));
+  if(fly.lastEducationDay!==clock.day){
+    fly.lastEducationDay=clock.day;fly.schoolDays+=1;fly.teacherId=teacher?.id||null;
+    brainRemember(fly,"school_day",{teacherId:fly.teacherId,educationLevel:fly.educationLevel});
+    if(brainRand(fly)<0.16)emit("school",`${fly.id} attended Hansdrex Academy with teacher ${fly.teacherId||"independent study"}.`,{flyId:fly.id,teacherId:fly.teacherId});
+  }
+  if(teacherPresent){
+    teacher.professionSkills.teaching=clamp(Number(teacher.professionSkills.teaching||0)+0.000002,0,1);
+    state.education.lessons=Number(state.education.lessons||0)+1;
+  }
+}
+
 function nearestTransitStation(x, z) {
   let best = null;
   let distance = Infinity;
@@ -1485,6 +1671,13 @@ function chooseTravelMode(fly,dest){
 
 function nightlifeOpen(clock) {
   return clock.hour >= 18 || clock.hour < 3;
+}
+
+function liquidMoneySupply() {
+  const residents=state.flies.filter((f)=>f.alive).reduce((sum,f)=>sum+Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0)),0);
+  const fixedBusinesses=Object.values(state.businesses||{}).reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
+  const enterprises=Object.values(state.enterprises||{}).filter((b)=>b.status==="operating").reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
+  return residents+fixedBusinesses+enterprises;
 }
 
 function netWorth(fly) {
@@ -1548,7 +1741,8 @@ function chooseStartupType(fly) {
     return {
       type,
       score:
-        fly.traits.ambition * 0.25 +
+        fly.traits.ambition * 0.22 +
+        enterpriseSectorDemand(type.sector,gameClock()) * 0.18 +
         fly.traits.risk * sectorRisk +
         neuralDrive(fly, "exploreDrive") * 0.18 +
         neuralDrive(fly, "approachDrive") * 0.16 +
@@ -1562,7 +1756,7 @@ function chooseStartupType(fly) {
 function attemptStartup(fly) {
   if (fly.businessId || fly.currentLocationId !== "bank") return;
   const readiness = startupReadiness(fly);
-  if (readiness < 0.56) return;
+  if (readiness < 0.50) return;
 
   const type = chooseStartupType(fly);
   const ownCapital = Math.min(type.baseCapital * 0.55, fly.money + fly.savings * 0.45);
@@ -1652,31 +1846,36 @@ function enterpriseSectorDemand(sector, clock) {
 
 function hireEnterpriseEmployee(business, owner) {
   const candidates = state.flies.filter((f) =>
-    f.alive &&
-    f.ageYears >= 18 &&
-    f.ageYears <= 72 &&
-    f.id !== owner.id &&
-    !f.businessId &&
-    !f.businessEmployeeOf &&
-    (!f.jobId || f.socialClass === "low income")
+    f.alive && f.ageYears >= 18 && f.ageYears <= 72 && f.id !== owner.id &&
+    !f.businessId && !f.businessEmployeeOf && (!f.jobId || f.socialClass === "low income")
   );
   if (!candidates.length) return null;
+  for(const f of candidates)ensureCognitiveProfile(f);
   candidates.sort((a,b) => {
-    const scoreA = a.traits.ambition * 0.35 + a.traits.resilience * 0.25 + a.health / 100 * 0.20 + brainRand(a) * 0.20;
-    const scoreB = b.traits.ambition * 0.35 + b.traits.resilience * 0.25 + b.health / 100 * 0.20 + brainRand(b) * 0.20;
-    return scoreB - scoreA;
+    const scoreA = a.intelligence*0.18+a.educationLevel/100*0.16+a.traits.ambition*0.26+a.traits.resilience*0.18+a.health/100*0.14+brainRand(a)*0.08;
+    const scoreB = b.intelligence*0.18+b.educationLevel/100*0.16+b.traits.ambition*0.26+b.traits.resilience*0.18+b.health/100*0.14+brainRand(b)*0.08;
+    return scoreB-scoreA;
   });
-  const worker = candidates[0];
-  worker.businessEmployeeOf = business.id;
-  worker.jobId = null;
-  worker.jobTitle = `${business.sector} employee`;
-  worker.wage = 4.4 + business.reputation * 2.2;
-  business.employees.push(worker.id);
-  emit("hire", `${business.name} hired ${worker.id}.`, { businessId: business.id, flyId: worker.id });
+  const worker=candidates[0];
+  const role=emergentRoleForBusiness(business,owner);
+  worker.businessEmployeeOf=business.id;
+  worker.jobId=null;
+  worker.jobTitle=role.title;
+  worker.wage=Math.max(role.wage,Number(worker.wage||0)*1.04);
+  worker.preferredWorkStart=(worker.preferredWorkStart+Math.round(brainRange(worker,-1,1))+24)%24;
+  worker.preferredWorkHours=clamp(worker.preferredWorkHours+brainRange(worker,-0.7,0.7),5,10);
+  worker.enterpriseLocationId=business.locationId;
+  worker.professionSkills={...(worker.professionSkills||{}),[business.sector]:Math.max(Number(worker.professionSkills?.[business.sector]||0),0.35+worker.intelligence*0.25)};
+  if(!business.employees.includes(worker.id))business.employees.push(worker.id);
+  brainRemember(owner,"job_created",{businessId:business.id,title:role.title,wage:worker.wage,need:role.need});
+  brainRemember(worker,"hired",{businessId:business.id,title:role.title,wage:worker.wage});
+  emit("hire",`${owner.id}'s brain created a ${role.title} role at ${business.name}; ${worker.id} accepted at ${worker.wage.toFixed(1)} ${CURRENCY_CODE}/h.`,{
+    businessId:business.id,ownerId:owner.id,flyId:worker.id,title:role.title,wage:worker.wage,
+  });
   return worker;
 }
 
-function closeEnterprise(business, owner, reason) {
+function closeEnterprisefunction closeEnterprise(business, owner, reason) {
   business.status = "bankrupt";
   const defaultLoss = Math.max(0, Number(business.loanBalance || 0));
   if (defaultLoss > 0) {
@@ -1759,39 +1958,42 @@ function simulateEnterprises(clock) {
     const employees = (business.employees || [])
       .map((id) => state.flies.find((f) => f.id === id && f.alive))
       .filter(Boolean);
-    const employeeProductivity = employees.length
-      ? employees.reduce((s,e) => s + e.energy / 100 * e.health / 100, 0) / employees.length
-      : 0.55;
+    const workingEmployees=employees.filter((e)=>e.currentLocationId===business.locationId&&String(e.action||"").startsWith("working as")&&personalWorkWindow(e,null,clock.hour));
+    const employeeProductivity = workingEmployees.length
+      ? workingEmployees.reduce((sum,e)=>sum+e.energy/100*e.health/100*(0.72+e.intelligence*0.22),0)/workingEmployees.length
+      : 0.38;
 
     const revenue =
       demand *
-      (8 + employees.length * 11) *
+      (8 + workingEmployees.length * 13) *
       management *
       (0.58 + employeeProductivity * 0.62) *
       brainRange(owner, 0.76, 1.28);
 
-    const wageCost = employees.reduce((s,e) => s + Math.max(3.8, Number(e.wage || 4.5)), 0);
     const rentUtility =
       business.sector === "manufacturing" ? 18 :
       business.sector === "nightlife" ? 13 :
       business.sector === "logistics" ? 14 : 8;
     const interest = Math.max(0, Number(business.loanBalance || 0)) * 0.00032;
-    const operatingCost = wageCost + rentUtility + interest + revenue * (1 - business.margin) * 0.23;
-    const profit = revenue - operatingCost;
+    const nonPayrollCost = rentUtility + interest + revenue * (1 - business.margin) * 0.23;
+    business.cash += revenue - nonPayrollCost;
 
-    business.cash += profit;
+    let payrollPaid=0;
+    for (const employee of workingEmployees) {
+      ensureCognitiveProfile(employee);
+      const pay=Math.min(Math.max(3.8,Number(employee.wage||4.5)),Math.max(0,business.cash));
+      if(pay<=0){employee.wageArrears=Number(employee.wageArrears||0)+Math.max(3.8,Number(employee.wage||4.5));continue;}
+      business.cash-=pay;employee.money+=pay;employee.salaryLifetime+=pay;employee.salaryEarnedToday+=pay;employee.workMinutesToday=Number(employee.workMinutesToday||0)+60;payrollPaid+=pay;state.totalTransactions+=1;
+      if(brainRand(employee)<0.035)emit("salary",`${business.name} paid ${employee.id} ${pay.toFixed(1)} ${CURRENCY_CODE} for this hour.`,{businessId:business.id,flyId:employee.id,amount:pay});
+    }
+    const operatingCost=nonPayrollCost+payrollPaid;
+    const profit=revenue-operatingCost;
+
     business.revenueLifetime += revenue;
     business.expensesLifetime += operatingCost;
     business.profitToday = Number(business.profitToday || 0) + profit;
     business.reputation = clamp(business.reputation + (profit >= 0 ? 0.003 : -0.006) + (management - 0.5) * 0.002, 0.05, 1);
     hourlyGdp += Math.max(0, revenue);
-
-    for (const employee of employees) {
-      const pay = Math.max(3.8, Number(employee.wage || 4.5));
-      employee.money += pay;
-      employee.salaryLifetime += pay;
-      business.cash -= pay;
-    }
 
     if (business.loanBalance > 0 && business.cash > 950) {
       const payment = Math.min(business.loanBalance, Math.max(8, business.cash * 0.018));
@@ -1836,6 +2038,13 @@ function simulateEnterprises(clock) {
 
   state.economy.gdpToday += hourlyGdp;
   state.economy.businessCount = Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length;
+  const enterpriseWorkers=state.flies.filter((f)=>f.alive&&f.businessEmployeeOf).length;
+  const staticWorkers=state.flies.filter((f)=>f.alive&&f.jobId).length;
+  state.economy.employed=enterpriseWorkers+staticWorkers;
+  if(hourKey%4===0&&state.economy.lastLaborPulseHour!==hourKey){
+    state.economy.lastLaborPulseHour=hourKey;
+    emit("labor",`Hansdrex labor pulse: ${state.economy.employed} employed, ${enterpriseWorkers} in brain-created roles, ${state.economy.businessCount} resident-run businesses.`,{employed:state.economy.employed,enterpriseWorkers,businesses:state.economy.businessCount});
+  }
 
   const adults = state.flies.filter((f) => f.alive && f.ageYears >= 18 && f.ageYears <= 75);
   const unemployed = adults.filter((f) => !f.jobId && !f.businessId && !f.businessEmployeeOf).length;
@@ -1886,10 +2095,20 @@ function brainChooseAction(fly, clock) {
     add("vehicle-showroom","shopping for a vehicle",mobilityNeed);
   }
 
-  if (fly.jobId && age >= 18 && age <= 75) {
+  ensureCognitiveProfile(fly);
+  const teacher=academyTeacher();
+  if (teacher?.id===fly.id && personalWorkWindow(fly,JOBS.find((j)=>j.id==="school"),clock.hour)) {
+    add("school","teaching at Hansdrex Academy",106+fly.intelligence*18+fly.traits.empathy*12-fly.stress*0.16);
+  } else if (fly.jobId && age >= 18 && age <= 75) {
     const job = JOBS.find((j) => j.id === fly.jobId);
-    if (job && isShiftHour(job, clock.hour)) {
-      add(job.locationId, "working", 88 + fly.traits.ambition * 25 - fly.stress * 0.25 - fly.sleepDebt * 0.18);
+    if (job && personalWorkWindow(fly,job,clock.hour)) {
+      add(job.locationId,`working as ${fly.jobTitle||job.title}`,92+fly.traits.ambition*25+fly.intelligence*8-fly.stress*0.24-fly.sleepDebt*0.17);
+    }
+  }
+  if(fly.businessEmployeeOf && age>=18 && age<=75){
+    const employer=state.enterprises?.[fly.businessEmployeeOf];
+    if(employer?.status==="operating" && personalWorkWindow(fly,null,clock.hour)){
+      add(employer.locationId,`working as ${fly.jobTitle||"employee"} at ${employer.name}`,100+fly.traits.ambition*24+fly.intelligence*6-fly.stress*0.20-fly.sleepDebt*0.14);
     }
   }
 
@@ -1926,8 +2145,19 @@ function brainChooseAction(fly, clock) {
     add("park", "smoke break", 42 + fly.stress * 0.5 + brain.plasticity.riskBias * 8);
   }
 
-  if (age < 18 && clock.hour >= 8 && clock.hour < 15) {
-    add("school", "at school", 92);
+  if(age>=5&&age<18){
+    const teacherQuality=teacher?Number(teacher.professionSkills?.teaching||0.7):0.4;
+    const schoolWindow=circularHourInWindow(clock.hour,fly.chronotype==="early"?7:fly.chronotype==="late"?10:8,8);
+    const familyEducation=fly.parents?.length
+      ? fly.parents.map((id)=>state.flies.find((p)=>p.id===id)).filter(Boolean).reduce((a,p)=>a+Number(p.educationLevel||40),0)/Math.max(1,fly.parents.length)/100
+      : 0.5;
+    if(schoolWindow){
+      add("school","studying at Hansdrex Academy",
+        82+teacherQuality*18+fly.learningRate*14+familyEducation*10+brain.dynamic.curiosity*12-fly.stress*0.14-fly.sleepDebt*0.12);
+    }
+    if(!schoolWindow && fly.energy>35 && (brain.dynamic.curiosity+fly.intelligence)>1.0){
+      add("library","self-studying after hours",32+fly.intelligence*16+brain.dynamic.curiosity*20);
+    }
   }
 
   const explorationDrive =
@@ -2140,6 +2370,15 @@ function productionAndRetail(fly, clock) {
   if (!fly.alive) return;
   const business = state.businesses?.[fly.currentLocationId];
 
+  if(String(fly.action||"").startsWith("working as") || String(fly.action||"").includes("teaching at Hansdrex Academy")){
+    const workLoc=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:(fly.jobId?JOBS.find((j)=>j.id===fly.jobId)?.locationId:null);
+    if(workLoc && fly.currentLocationId===workLoc){
+      fly.workMinutesToday=Number(fly.workMinutesToday||0)+1;
+      if(fly.lastWorkEventDay!==clock.day){fly.lastWorkEventDay=clock.day;brainRemember(fly,"shift_started",{job:fly.jobTitle,locationId:workLoc});if(brainRand(fly)<0.25)emit("work",`${fly.id} started work as ${fly.jobTitle||"worker"} on a self-chosen schedule.`,{flyId:fly.id,jobTitle:fly.jobTitle,start:fly.preferredWorkStart});}
+    }
+  }
+  educationTick(fly,clock);
+
   if (fly.jobId === "farm" && fly.currentLocationId === "farm" && fly.action === "working") {
     state.businesses.farm.inventory += 0.08 * (0.5 + fly.traits.ambition);
     if (state.businesses.farm.inventory > 80 && rand() < 0.025) {
@@ -2177,18 +2416,20 @@ function productionAndRetail(fly, clock) {
 function payAndFinance(fly, clock) {
   const day = clock.day;
   const salaryJob = fly.jobId ? JOBS.find((j) => j.id === fly.jobId) : null;
-  if (salaryJob && clock.hour === (salaryJob.shiftEnd % 24) && clock.minute < 2 &&
-      fly.lastPaidDay !== day && fly.ageYears >= 18 && fly.ageYears <= 75) {
-    const base = fly.wage * 8;
-    const bonus = base * fly.traits.ambition * randRange(0, 0.18);
-    const gross = base + bonus;
-    fly.money += gross;
-    fly.salaryEarnedToday += gross;
-    fly.salaryLifetime += gross;
-    fly.lastPaidDay = day;
-    fly.happiness = clamp(fly.happiness + 3);
-    state.totalTransactions += 1;
-    if (rand() < 0.05) emit("salary", `${fly.id} received salary ${gross.toFixed(1)} WC.`, { flyId: fly.id, amount: gross });
+  if (salaryJob) {
+    ensureCognitiveProfile(fly);
+    const payHour=Math.floor((fly.preferredWorkStart+fly.preferredWorkHours)%24);
+    if(clock.hour===payHour&&clock.minute<2&&fly.lastPaidDay!==day&&fly.ageYears>=18&&fly.ageYears<=75){
+      const workedHours=Math.min(12,Number(fly.workMinutesToday||0)/60);
+      if(workedHours>=1){
+        const base=fly.wage*workedHours;
+        const bonus=base*fly.traits.ambition*randRange(0,0.14);
+        const gross=base+bonus;
+        fly.money+=gross;fly.salaryEarnedToday+=gross;fly.salaryLifetime+=gross;fly.happiness=clamp(fly.happiness+2.5);state.totalTransactions+=1;
+        emit("salary",`${fly.id} earned ${gross.toFixed(1)} ${CURRENCY_CODE} for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,amount:gross,hours:workedHours});
+      }
+      fly.lastPaidDay=day;fly.workMinutesToday=0;
+    }
   }
 
   if (clock.hour === 0 && clock.minute < 2 && fly.lastRentDay !== day) {
@@ -2261,7 +2502,7 @@ function payAndFinance(fly, clock) {
             fly.bankLoan += loan;
             state.bank.reserves -= loan;
             state.bank.loansOutstanding += loan;
-            emit("home_purchase", `${fly.id} bought a ground house for ${lot.baseValue.toFixed(0)} WC with Hansdrex Bank financing.`, {
+            emit("home_purchase", `${fly.id} bought a ground house for ${lot.baseValue.toFixed(0)} H$ with Hansdrex Bank financing.`, {
               flyId: fly.id, lotId: lot.id, value: lot.baseValue, loan,
             });
           }
@@ -2279,12 +2520,12 @@ function payAndFinance(fly, clock) {
 
     if(!fly.vehicle&&fly.currentLocationId==="vehicle-showroom"&&fly.savings>420&&fly.action.includes("vehicle")){
       const affordable=VEHICLE_CATALOG.filter((v)=>v.price<=fly.savings*0.78);
-      if(affordable.length&&brainRand(fly)<0.18){
+      if(affordable.length&&brainRand(fly)<0.48){
         const ambition=fly.traits.ambition+neuralDrive(fly,"approachDrive");
         const choice=ambition>1.15?affordable[affordable.length-1]:affordable[Math.floor(brainRand(fly)*affordable.length)];
         fly.savings-=choice.price;fly.vehicle=choice.id;state.businesses["vehicle-showroom"].cash+=choice.price;state.businesses["vehicle-showroom"].inventory=Math.max(0,state.businesses["vehicle-showroom"].inventory-1);state.totalTransactions+=1;
         fly.happiness=clamp(fly.happiness+8);fly.excitement=clamp(fly.excitement+12);brainRemember(fly,"vehicle_purchase",{vehicle:choice.id,price:choice.price});
-        emit("vehicle_purchase",`${fly.id} chose and bought a ${choice.id} at Hansdrex Motors for ${choice.price} WC.`,{flyId:fly.id,vehicle:choice.id,price:choice.price});
+        emit("vehicle_purchase",`${fly.id} chose and bought a ${choice.id} at Hansdrex Motors for ${choice.price} H$.`,{flyId:fly.id,vehicle:choice.id,price:choice.price});
       }
     }
   }
@@ -2779,6 +3020,7 @@ function needsAndActivities(fly, clock) {
 function tickFly(fly, clock) {
   if (!fly.alive) return;
   if(lawEnforcement(fly)) return;
+  ensureCognitiveProfile(fly);
   ensureProfessionalTraining(fly);
   const before = {
     happiness: fly.happiness,
@@ -2788,6 +3030,7 @@ function tickFly(fly, clock) {
   };
   fly.ageYears = ageOf(fly);
   if (fly.ageYears < 18) {
+    if(fly.businessEmployeeOf)fly.businessEmployeeOf=null;
     fly.jobId = null;
     fly.jobTitle = null;
     fly.wage = 0;
@@ -2828,7 +3071,7 @@ async function checkpoint(force = false) {
   checkpointAt = Date.now();
   state.updatedAt = new Date().toISOString();
   const living = state.flies.filter((f) => f.alive);
-  const moneySupply = living.reduce((sum, f) => sum + f.money + f.savings - f.debt, 0);
+  const moneySupply = liquidMoneySupply();
   await pool.query(
     `INSERT INTO civilization_state (world_id, state_json, updated_at)
      VALUES ($1,$2::jsonb,NOW())
@@ -2963,12 +3206,22 @@ function compactFly(f) {
     wanted: Number(f.wantedUntil||0)>state.simulationAgeSeconds,
     arrested: Number(f.arrestedUntil||0)>state.simulationAgeSeconds,
     professionSkills: f.professionSkills||{},
+    intelligence: Number((f.intelligence||0).toFixed(3)),
+    learningRate: Number((f.learningRate||0).toFixed(3)),
+    educationLevel: Number((f.educationLevel||0).toFixed(2)),
+    knowledge: f.knowledge||{},
+    teacherId: f.teacherId||null,
+    schoolDays: Number(f.schoolDays||0),
+    chronotype: f.chronotype||"day",
+    preferredWorkStart: Number(f.preferredWorkStart||0),
+    preferredWorkHours: Number(f.preferredWorkHours||0),
+    workMinutesToday: Number(f.workMinutesToday||0),
   };
 }
 
 function getState() {
   const living = state.flies.filter((f) => f.alive);
-  const moneySupply = living.reduce((sum, f) => sum + f.money + f.savings - f.debt, 0);
+  const moneySupply = liquidMoneySupply();
   const clock = gameClock();
   const selected = living[0] || null;
   return {
@@ -2992,6 +3245,7 @@ function getState() {
     deaths: state.deaths,
     foodReserve: state.foodReserve,
     moneySupply,
+    currency: state.currency,
     totalTransactions: state.totalTransactions,
     economy: {
       ...(state.economy || {}),
@@ -2999,6 +3253,13 @@ function getState() {
       loansOutstanding: Number(state.bank?.loansOutstanding || 0),
       defaults: Number(state.bank?.defaults || 0),
       operatingBusinesses: Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length,
+      employed: Number(state.economy?.employed||0),
+    },
+    education: {
+      teacherId: state.education?.teacherId||null,
+      teacherGeneration: Number(state.education?.teacherGeneration||0),
+      lessons: Number(state.education?.lessons||0),
+      students: living.filter((f)=>f.ageYears>=5&&f.ageYears<18).length,
     },
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
@@ -3050,6 +3311,7 @@ async function tick() {
       state.simulationAgeSeconds += GAME_SECONDS_PER_REAL_SECOND;
       const clock = gameClock();
       updateWeather(clock);
+      ensureAcademyTeacher();
       for (const fly of state.flies) tickFly(fly, clock);
       simulateEnterprises(clock);
       void syncFullConnectomeBrains();
