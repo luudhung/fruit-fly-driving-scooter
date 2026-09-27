@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation,recordInfidelity,revealInfidelity,endRelationship,commissionHeliTrial,simulateHeliTour} from '../worker/civilization-server.mjs';
-import {entrance,blocked,BUILDINGS} from '../worker/city-map.mjs';
+import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation,recordInfidelity,revealInfidelity,endRelationship,commissionHeliTrial,simulateHeliTour,planMetroRoute,maybeRoamInsidePark} from '../worker/civilization-server.mjs';
+import {entrance,blocked,BUILDINGS,PARK} from '../worker/city-map.mjs';
 function base(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0};return s;}
 test('sleep begins only after arrival inside the assigned home and remains motionless',()=>{
  const s=base(),f=s.flies[0];f.vehicle=null;f.indoors=false;Object.assign(f,entrance({x:f.homeX,z:f.homeZ}));f.x+=2;
@@ -70,4 +70,30 @@ test('helicopter trial advances through all first ten residents in batches',()=>
    for(const f of batch)simulateHeliTour(f,{hour:12,day:1,minute:0});
  }
  assert.deepEqual([...s.heliTrial.completedIds].sort(),Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,'0')}`).sort());
+});
+
+test('metro route includes stairs, a visible platform wait and a station exit',()=>{
+ const s=base(),f=s.flies[0];
+ f.x=-300;f.z=-300;f.vehicle=null;f.money=100;
+ const plan=planMetroRoute(f,{x:300,z:300});
+ assert.ok(plan);
+ const stages=plan.waypoints.map(p=>p.stage);
+ assert.ok(stages.includes('station-stairs-up'));
+ assert.ok(stages.includes('station-entry'));
+ assert.ok(stages.includes('on-train'));
+ assert.ok(stages.includes('station-exit'));
+ assert.ok(stages.includes('station-stairs-down'));
+ const platform=plan.waypoints.find(p=>p.stage==='station-entry');
+ assert.ok(platform.y>1.1);
+});
+
+test('resident can leave the park path and roam across legal Central Park interior',()=>{
+ const s=base(),f=s.flies[0];
+ f.currentLocationId='park';f.targetLocationId='park';f.x=PARK.x;f.z=PARK.z;f.y=1.1;
+ f.traveling=false;f.indoors=false;f.action='taking a walk';f.lastParkRoamAt=-10000;f.wheelRideUntil=0;
+ assert.equal(maybeRoamInsidePark(f),true);
+ assert.equal(f.traveling,true);assert.equal(f.transitStage,'park-roam');
+ assert.ok(Math.abs(f.finalTargetX-PARK.x)<PARK.w/2);
+ assert.ok(Math.abs(f.finalTargetZ-PARK.z)<PARK.d/2);
+ assert.equal(blocked({x:f.finalTargetX,z:f.finalTargetZ}),false);
 });
