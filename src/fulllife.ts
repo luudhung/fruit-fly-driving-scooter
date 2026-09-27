@@ -531,9 +531,9 @@ window.setInterval(fetchSnapshot, 2500);
 const host = $("world");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
-scene.fog = new THREE.Fog(0x93b8cf, 210, 720);
+scene.fog = new THREE.Fog(0x93b8cf, 360, 1500);
 
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 720);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 1800);
 const renderer = new THREE.WebGLRenderer({
   antialias: graphics.metroDetail >= 2,
   powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
@@ -545,12 +545,12 @@ renderer.shadowMap.enabled = false;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
 
-const hemi = new THREE.HemisphereLight(0xdff2ff, 0x33402d, 1.55);
+const hemi = new THREE.HemisphereLight(0xeaf7ff, 0x465a43, 1.85);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe6bd, 2.6);
 sun.position.set(-150, 190, 120);
 scene.add(sun);
-const moon = new THREE.DirectionalLight(0x7e9ddb, 0.1);
+const moon = new THREE.DirectionalLight(0xa9c3ff, 0.35);
 moon.position.set(130, 120, -150);
 scene.add(moon);
 
@@ -1246,19 +1246,20 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   const sunsetQuality = weather.sunset?.active ? (weather.sunset?.quality || 0) : 0;
   const duskColor = new THREE.Color(
     sunsetQuality > 0.45 ? 0xe27f52 :
-    t > 17 && t < 20 ? 0xbc836d : 0x11182d
+    t > 17 && t < 20 ? 0xbc836d : 0x263852
   );
   const cloud = THREE.MathUtils.clamp(weather.cloudCover || 0, 0, 1);
   const storm = weather.condition === "thunderstorm" ? 1 : weather.condition === "heavy_rain" ? 0.7 : 0;
-  const overcast = new THREE.Color(storm > 0 ? 0x35424f : 0x6f8290);
+  const overcast = new THREE.Color(storm > 0 ? 0x52606e : 0x7f93a1);
   const baseSky = dayColor.clone().lerp(duskColor, Math.max(night, sunsetQuality * 0.68));
   const sky = baseSky.lerp(overcast, cloud * (0.42 + storm * 0.35));
   scene.background = sky;
   (scene.fog as THREE.Fog).color.copy(sky);
 
-  hemi.intensity = 0.22 + daylight * 1.45;
-  sun.intensity = daylight * 2.8 * (1 - cloud * 0.62);
-  moon.intensity = night * 0.55 * (1 - cloud * 0.4);
+  // Keep the expanded overview readable at night: the city is simulated, not a black-screen test.
+  hemi.intensity = 0.68 + daylight * 1.30;
+  sun.intensity = (0.16 + daylight * 2.55) * (1 - cloud * 0.52);
+  moon.intensity = 0.28 + night * 0.78 * (1 - cloud * 0.28);
   sun.position.set(Math.cos((t / 24) * Math.PI * 2) * 80, Math.max(-12, sunHeight * 95), Math.sin((t / 24) * Math.PI * 2) * 80);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
