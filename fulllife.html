@@ -23,8 +23,8 @@
     .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 12px rgba(240,197,106,.7)}
     .status[data-state="authoritative"] .dot{background:var(--ok);box-shadow:0 0 12px rgba(102,227,157,.7)}
     .status[data-state="offline"] .dot{background:#ef6b6b;box-shadow:0 0 12px rgba(239,107,107,.7)}
-    .left{position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
-    .right{position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
+    .left{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
+    .right{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
     .card{border-radius:16px;overflow:hidden}
     .head{padding:10px 12px;border-bottom:1px solid var(--line);font:850 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;gap:8px}
     .panel-toggle{pointer-events:auto;border:1px solid var(--line);background:rgba(255,255,255,.06);color:#fff;border-radius:7px;width:25px;height:22px;cursor:pointer;font:900 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -70,15 +70,34 @@
       body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
       .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
     }
-    @media(max-width:650px){.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
+    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
+    .status{pointer-events:auto;color:inherit;cursor:pointer;white-space:normal;text-align:left}.status:hover{border-color:var(--ok)}
+    .population-button{border:0;color:inherit;text-align:left;cursor:pointer}.population-button:hover{background:#183228}.population-button:focus-visible,.status:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+    #park-view{pointer-events:auto}
+    #resident-directory{color:#eef6f2;background:#0c1916;border:1px solid #345148;border-radius:20px;width:min(920px,calc(100vw - 24px));max-height:85dvh;padding:20px;box-shadow:0 24px 80px #0008}
+    #resident-directory::backdrop{background:#0009;backdrop-filter:blur(4px)}
+    .resident-heading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.resident-heading h2{font-size:22px;margin:0 0 8px}.resident-heading p{font-size:12px;color:#b0c8be;margin:0;line-height:1.6}
+    #resident-close{border:1px solid #456056;border-radius:10px;background:transparent;color:inherit;cursor:pointer;min-width:40px;min-height:40px}
+    .resident-filters{display:flex;gap:16px;margin:20px 0 12px}.resident-filters label{font-size:11px;color:#b0c8be;display:grid;gap:7px;flex:1}.resident-filters input,.resident-filters select{background:#142820;color:#eef6f2;border:1px solid #345148;border-radius:8px;padding:10px;min-width:0;width:100%;font:inherit}
+    #resident-connection{font-size:11px;color:#9eb6ac;line-height:1.5}.resident-table-wrap{overflow:auto;max-height:calc(85dvh - 235px)}
+    #resident-directory table{width:100%;border-collapse:collapse;font-size:12px;text-align:left}#resident-directory th{position:sticky;top:0;background:#193127;color:#c2d5cc;white-space:nowrap}#resident-directory th,#resident-directory td{padding:12px 10px;border-bottom:1px solid #243c31}#resident-directory td:nth-child(3),#resident-directory td:nth-child(4){white-space:nowrap;font-variant-numeric:tabular-nums}#resident-directory td small{display:block;color:#9eb6ac;margin-top:4px}.resident-select{border:0;padding:0;background:none;color:#7dedb5;cursor:pointer;font:700 12px ui-monospace,monospace}
+    @media(max-width:650px){#resident-directory{padding:14px}.resident-heading h2{font-size:19px}.resident-filters{gap:8px}.resident-table-wrap{max-height:calc(85dvh - 255px)}#resident-directory th,#resident-directory td{padding:10px 7px}#resident-directory th:last-child,#resident-directory td:last-child{min-width:150px}}
   </style>
 </head>
 <body>
   <div id="world"></div>
+  <dialog id="resident-directory" aria-labelledby="resident-title" aria-describedby="resident-summary">
+    <div class="resident-heading"><div><h2 id="resident-title">City residents</h2><p id="resident-summary" aria-live="polite">Waiting for census…</p></div><button type="button" id="resident-close" aria-label="Close resident directory">✕</button></div>
+    <div class="resident-filters"><label>Rank by<select id="resident-sort"><option value="money">Money · highest first</option><option value="age-desc">Age · oldest first</option><option value="age-asc">Age · youngest first</option><option value="id">ID · ascending</option></select></label><label>Find a resident<input id="resident-search" type="search" placeholder="ID or name" autocomplete="off" /></label></div>
+    <p id="resident-mortality" style="font-size:11px;line-height:1.5;color:#c0b9a0"></p>
+    <p id="resident-connection">Connecting…</p>
+    <div class="resident-table-wrap"><table><thead><tr><th scope="col">#</th><th scope="col">Resident</th><th scope="col">Age</th><th scope="col">Money (H$)</th><th scope="col">Activity</th></tr></thead><tbody id="resident-rows"></tbody></table></div>
+  </dialog>
   <div class="topbar">
-    <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 game hour = 1 real minute</small></div>
+    <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 real second = 2 game minutes</small></div>
     <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
-    <div class="status" id="connection" data-state="connecting"><span class="dot"></span><span id="connection-label">CONNECTING</span></div>
+    <button type="button" class="status" id="connection" data-state="connecting" aria-haspopup="dialog" aria-controls="resident-directory" title="Open living residents and rankings"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></button>
+    <button class="settings-button" id="park-view" type="button" title="View Central Park and the free Great Wheel">♧ CENTRAL PARK</button>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button">⚙ GRAPHICS</button>
       <div class="settings-menu">
@@ -98,13 +117,15 @@
   <aside class="left">
     <section class="card" id="city-card">
       <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
+      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span></div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
-        <div class="stat"><span>Population</span><b id="population">—</b></div>
+        <button type="button" class="stat population-button" id="population-button" aria-haspopup="dialog" aria-controls="resident-directory"><span>Alive now · View residents ↗</span><b id="population">—</b></button>
         <div class="stat"><span>Generation</span><b id="generation">—</b></div>
         <div class="stat"><span>Clock speed</span><b id="speed">—</b></div>
-        <div class="stat"><span>Births</span><b id="births">—</b></div>
-        <div class="stat"><span>Deaths</span><b id="deaths">—</b></div>
+        <div class="stat"><span>Births · since city began</span><b id="births">—</b></div>
+        <div class="stat"><span>Deaths · since city began</span><b id="deaths">—</b></div>
+        <div class="stat" style="grid-column:1/-1"><span>Public support · live policy</span><b id="welfare-policy" style="font-size:11px;line-height:1.5">—</b></div>
         <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
         <div class="stat"><span>Hansdrex Dollar supply</span><b id="money">—</b></div>
         <div class="stat"><span>Inflation</span><b id="inflation">—</b></div>

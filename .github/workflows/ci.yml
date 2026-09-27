@@ -41,6 +41,9 @@ jobs:
         run: npm run test:unit
         # Needs node >= 22.18 for unflagged TypeScript stripping.
 
+      - name: City regression tests
+        run: npm install --prefix worker --ignore-scripts --no-package-lock && npm run test:city
+
       - name: E2E collection (no browser)
         run: npm run test:e2e:list
         # Parses playwright.config.ts + every tests/*.spec.ts without
