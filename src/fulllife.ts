@@ -1608,7 +1608,7 @@ function updateFreeCamera(dt: number) {
     moveRight.set(moveForward.x,0,moveForward.z);
     if(moveRight.lengthSq()<1e-5) moveRight.set(0,0,-1);
     moveRight.normalize();
-    moveRight.crossVectors(worldUp,moveRight).normalize();
+    moveRight.crossVectors(moveRight,worldUp).normalize();
 
     let forwardAxis = 0;
     let strafeAxis = 0;
