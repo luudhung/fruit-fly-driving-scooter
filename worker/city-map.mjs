@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 12;
+export const MAP_VERSION = 13;
 export const WORLD_HALF = 620;
 export const PARK = { x:15, z:-170, w:150, d:260 };
 export const PARK_PONDS = [
@@ -143,9 +143,12 @@ function addApartment(x,z,h=38,w=11,d=16){
  if(place(b))APARTMENTS.push(b);
 }
 // High-rise residential wall hugs Central Park, like Manhattan's park-edge skyline.
-for(const z of [-286,-258,-230,-202,-174,-146,-118,-90,-62]){
- addApartment(-76,z,72+((Math.abs(z)/28)%5)*8,13,18);
- addApartment(106,z,78+((Math.abs(z)/28)%5)*9,13,18);
+// Use mid-block Z positions rather than street-center coordinates. The previous list sat directly
+// on cross streets, so place() rejected almost every tower and left only two apartment blocks.
+const PARK_EDGE_RESIDENTIAL_Z=[-280,-240,-200,-162.5,-130.5,-101.5,-72.5];
+for(const z of PARK_EDGE_RESIDENTIAL_Z){
+ addApartment(-76,z,72+((Math.abs(Math.round(z))/20)%5)*8,13,12);
+ addApartment(106,z,78+((Math.abs(Math.round(z))/20)%5)*9,13,12);
 }
 for(const x of [-63,-37,-11,15,41,67])addApartment(x,-320,82+((x+70)%5)*8,13,18);
 for(const x of [-63,-37,-11,15,41,67])addApartment(x,-20,68+((x+70)%5)*7,12,16);
