@@ -329,9 +329,36 @@ window.addEventListener("unhandledrejection",(event)=>{
 });
 
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-production.up.railway.app").replace(/\/$/, "");
+const SNAPSHOT_CACHE_KEY = "fulllife:last-good-civilization-snapshot:v1";
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
 let latestFlyStates = new Map<string, FlyState>();
+
+function usableSnapshot(candidate: CivilizationSnapshot | null | undefined) {
+  return Boolean(
+    candidate &&
+    Array.isArray(candidate.flies) &&
+    candidate.flies.some((fly) => fly.alive) &&
+    Number.isFinite(Number(candidate.simulationAgeSeconds)) &&
+    Number(candidate.simulationAgeSeconds) >= 0
+  );
+}
+
+function loadCachedSnapshot(): CivilizationSnapshot | null {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as CivilizationSnapshot;
+    return usableSnapshot(cached) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedSnapshot(value: CivilizationSnapshot) {
+  if (!usableSnapshot(value)) return;
+  try { localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(value)); } catch {}
+}
 
 const residentDirectory=createResidentDirectory((id)=>{
  const fly=latestFlyStates.get(id);if(!fly?.alive)return;
@@ -530,21 +557,32 @@ function updateHeliTourState(flies:FlyState[]){
 async function fetchSnapshot() {
   // The civilization keeps running on Railway; hidden tabs do not need to poll/render it.
   if (document.hidden) return;
-  let response: Response;
+  let payload: CivilizationSnapshot;
   try {
-    response = await fetch(`${apiBase}/api/civilization/state`, {
+    const response = await fetch(`${apiBase}/api/civilization/state`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    payload = await response.json() as CivilizationSnapshot;
+    if (!usableSnapshot(payload)) throw new Error("invalid or empty civilization snapshot");
+    saveCachedSnapshot(payload);
   } catch (error) {
     console.error("[fulllife] civilization fetch failed", error);
+    const cached = snapshot && usableSnapshot(snapshot) ? snapshot : loadCachedSnapshot();
+    if (cached && (!snapshot || !usableSnapshot(snapshot))) {
+      try {
+        renderSnapshot({ ...cached, authoritative: false });
+      } catch (renderError) {
+        console.error("[fulllife] cached snapshot render failed", renderError);
+      }
+    }
     residentDirectory.offline();
-    setConnection("offline", `OFFLINE · LAST SEEN ${residentDirectory.count} ALIVE ▾`);
-    events.textContent = "Persistent civilization worker is unavailable.";
+    const lastSeen = snapshot?.flies?.filter((f) => f.alive).length || residentDirectory.count || 0;
+    setConnection("offline", `OFFLINE · LAST GOOD ${lastSeen} ALIVE · RETRYING ▾`);
+    if (!snapshot) events.textContent = "Civilization worker is unavailable; retrying automatically.";
     return;
   }
-  const payload = await response.json() as CivilizationSnapshot;
   try {
     renderSnapshot(payload);
   } catch (error) {
