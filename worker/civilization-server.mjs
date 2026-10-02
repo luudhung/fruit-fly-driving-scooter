@@ -28,8 +28,7 @@ const CITY_NAME = "Hansdrex City of Fruit Fly";
 const WEATHER_UPDATE_GAME_SECONDS = 45 * 60;
 
 if (IS_MAIN && !DATABASE_URL) {
-  console.error("[civilization] DATABASE_URL is required.");
-  process.exit(1);
+  console.warn("[civilization] DATABASE_URL is missing; starting in degraded in-memory mode and waiting for persistence configuration.");
 }
 
 const pool = new Pool({
@@ -466,6 +465,19 @@ let tickBusy = false;
 let checkpointAt = 0;
 let neuralSyncBusy = false;
 let lastNeuralSyncAt = 0;
+let persistenceReady = false;
+let persistenceConnecting = false;
+let persistenceError = null;
+
+function snapshotLooksUsable(candidate) {
+  return Boolean(
+    candidate &&
+    Array.isArray(candidate.flies) &&
+    candidate.flies.length > 0 &&
+    Number.isFinite(Number(candidate.simulationAgeSeconds)) &&
+    Number(candidate.simulationAgeSeconds) >= 0
+  );
+}
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -1142,6 +1154,7 @@ function appendMemoryEvent(type, text, payload = {}) {
 }
 
 async function persistEvent(e) {
+  if (!DATABASE_URL || !persistenceReady) return;
   try {
     await pool.query(
       `INSERT INTO civilization_events (world_id, source, event_type, message, payload)
@@ -1160,6 +1173,12 @@ function emit(type, text, payload = {}) {
 }
 
 async function initDb() {
+  if (!DATABASE_URL) {
+    if (!snapshotLooksUsable(state)) freshState();
+    persistenceReady = false;
+    persistenceError = "DATABASE_URL missing";
+    return false;
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS civilization_worlds (
       world_id TEXT PRIMARY KEY,
@@ -1205,8 +1224,14 @@ async function initDb() {
     [WORLD_ID],
   );
 
-  if (snapshot.rowCount && snapshot.rows[0].state_json?.flies?.length) {
-    state = snapshot.rows[0].state_json;
+  const persistedState = snapshot.rowCount ? snapshot.rows[0].state_json : null;
+  const persistedUsable = snapshotLooksUsable(persistedState);
+  const currentUsable = snapshotLooksUsable(state);
+  const loadPersisted = persistedUsable && (!currentUsable ||
+    Number(persistedState.simulationAgeSeconds || 0) >= Number(state.simulationAgeSeconds || 0));
+
+  if (loadPersisted) {
+    state = persistedState;
     const previousMapVersion=Number(state.mapVersion||0);
     state.timeScale = GAME_SECONDS_PER_REAL_SECOND;
     state.locations = LOCATIONS;
@@ -1350,11 +1375,19 @@ async function initDb() {
     ensureCentralBankBoard();
     applyWelfareRecovery();
     emit("server_resumed", "Synthetic civilization resumed from PostgreSQL checkpoint.", {});
-  } else {
+  } else if (!currentUsable) {
     freshState();
     emit("world_created", `Synthetic civilization started with ${state.flies.length} flies.`, { seed: WORLD_SEED });
-    await checkpoint(true);
+  } else {
+    emit("database_reconnected", "PostgreSQL persistence reconnected; keeping the newer in-memory civilization state.", {
+      simulationAgeSeconds: state.simulationAgeSeconds,
+    });
   }
+
+  persistenceReady = true;
+  persistenceError = null;
+  if (!loadPersisted) await checkpoint(true);
+  return true;
 }
 
 function ageOf(fly) {
@@ -3620,40 +3653,58 @@ function tickFly(fly, clock) {
 }
 
 async function checkpoint(force = false) {
+  if (!DATABASE_URL || !persistenceReady) return;
   if (!force && Date.now() - checkpointAt < CHECKPOINT_EVERY_MS) return;
+  if (!snapshotLooksUsable(state)) {
+    console.error("[civilization] refusing to persist an invalid/empty world snapshot");
+    return;
+  }
+  let living = state.flies.filter((f) => f.alive);
+  if (!living.length) {
+    replenishResidents(RECOVERY_POPULATION, "automatic recovery from zero living residents");
+    living = state.flies.filter((f) => f.alive);
+  }
   checkpointAt = Date.now();
   state.updatedAt = new Date().toISOString();
-  const living = state.flies.filter((f) => f.alive);
   const moneySupply = liquidMoneySupply();
-  await pool.query(
-    `INSERT INTO civilization_state (world_id, state_json, updated_at)
-     VALUES ($1,$2::jsonb,NOW())
-     ON CONFLICT (world_id)
-     DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()`,
-    [WORLD_ID, JSON.stringify(state)],
-  );
-  await pool.query(
-    `INSERT INTO civilization_worlds
-      (world_id, experiment_id, world_seed, started_at, updated_at, simulation_age_seconds, time_scale, population, generation, births, deaths, food_reserve, money_supply, simulation_status, paused)
-     VALUES ($1,$2,$3,NOW(),NOW(),$4,$5,$6,$7,$8,$9,$10,$11,'SYNTHETIC_CIVILIZATION_LIVE',$12)
-     ON CONFLICT (world_id) DO UPDATE SET
-       updated_at=NOW(),
-       simulation_age_seconds=EXCLUDED.simulation_age_seconds,
-       time_scale=EXCLUDED.time_scale,
-       population=EXCLUDED.population,
-       generation=EXCLUDED.generation,
-       births=EXCLUDED.births,
-       deaths=EXCLUDED.deaths,
-       food_reserve=EXCLUDED.food_reserve,
-       money_supply=EXCLUDED.money_supply,
-       simulation_status='SYNTHETIC_CIVILIZATION_LIVE',
-       paused=EXCLUDED.paused`,
-    [
-      WORLD_ID, EXPERIMENT_ID, WORLD_SEED,
-      state.simulationAgeSeconds, state.timeScale, living.length, state.generation,
-      state.births, state.deaths, state.foodReserve, moneySupply, state.paused,
-    ],
-  );
+  try {
+    await pool.query(
+      `INSERT INTO civilization_state (world_id, state_json, updated_at)
+       VALUES ($1,$2::jsonb,NOW())
+       ON CONFLICT (world_id)
+       DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()
+       WHERE COALESCE((civilization_state.state_json->>'simulationAgeSeconds')::double precision,-1)
+          <= COALESCE((EXCLUDED.state_json->>'simulationAgeSeconds')::double precision,-1)`,
+      [WORLD_ID, JSON.stringify(state)],
+    );
+    await pool.query(
+      `INSERT INTO civilization_worlds
+        (world_id, experiment_id, world_seed, started_at, updated_at, simulation_age_seconds, time_scale, population, generation, births, deaths, food_reserve, money_supply, simulation_status, paused)
+       VALUES ($1,$2,$3,NOW(),NOW(),$4,$5,$6,$7,$8,$9,$10,$11,'SYNTHETIC_CIVILIZATION_LIVE',$12)
+       ON CONFLICT (world_id) DO UPDATE SET
+         updated_at=NOW(),
+         simulation_age_seconds=EXCLUDED.simulation_age_seconds,
+         time_scale=EXCLUDED.time_scale,
+         population=EXCLUDED.population,
+         generation=EXCLUDED.generation,
+         births=EXCLUDED.births,
+         deaths=EXCLUDED.deaths,
+         food_reserve=EXCLUDED.food_reserve,
+         money_supply=EXCLUDED.money_supply,
+         simulation_status='SYNTHETIC_CIVILIZATION_LIVE',
+         paused=EXCLUDED.paused
+       WHERE civilization_worlds.simulation_age_seconds <= EXCLUDED.simulation_age_seconds`,
+      [
+        WORLD_ID, EXPERIMENT_ID, WORLD_SEED,
+        state.simulationAgeSeconds, state.timeScale, living.length, state.generation,
+        state.births, state.deaths, state.foodReserve, moneySupply, state.paused,
+      ],
+    );
+  } catch (error) {
+    persistenceReady = false;
+    persistenceError = String(error);
+    throw error;
+  }
 }
 
 function compactFly(f) {
@@ -3952,18 +4003,24 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
   if (url.pathname === "/health") {
-    try {
-      await pool.query("SELECT 1");
-      json(res, 200, {
-        ok: true,
-        service: "fruit-fly-civilization-core",
-        worldId: WORLD_ID,
-        simulationStatus: state ? "SYNTHETIC_CIVILIZATION_LIVE" : "STARTING",
-        population: state?.flies?.filter((f) => f.alive).length || 0,
-      });
-    } catch (error) {
-      json(res, 503, { ok: false, error: String(error) });
+    if (DATABASE_URL && persistenceReady) {
+      try {
+        await pool.query("SELECT 1");
+      } catch (error) {
+        persistenceReady = false;
+        persistenceError = String(error);
+      }
     }
+    json(res, 200, {
+      ok: Boolean(state),
+      service: "fruit-fly-civilization-core",
+      worldId: WORLD_ID,
+      simulationStatus: state ? "SYNTHETIC_CIVILIZATION_LIVE" : "STARTING",
+      population: state?.flies?.filter((f) => f.alive).length || 0,
+      simulationAgeSeconds: Number(state?.simulationAgeSeconds || 0),
+      persistence: persistenceReady ? "CONNECTED" : "DEGRADED",
+      persistenceError: persistenceReady ? null : persistenceError,
+    });
     return;
   }
 
@@ -3978,6 +4035,10 @@ const server = http.createServer(async (req, res) => {
 
   if(url.pathname === "/api/civilization/mortality"){
     // Read the append-only event archive, which survives checkpoint replacement.
+    if (!DATABASE_URL || !persistenceReady) {
+      json(res,503,{error:"mortality_archive_unavailable",detail:persistenceError||"persistence disconnected"});
+      return;
+    }
     const since=url.searchParams.get("since")||new Date(Date.now()-7*86400000).toISOString();
     if(!Number.isFinite(Date.parse(since))){json(res,400,{error:"invalid_since"});return;}
     try{
@@ -4015,12 +4076,37 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+async function ensurePersistence() {
+  if (persistenceConnecting) return persistenceReady;
+  persistenceConnecting = true;
+  try {
+    await initDb();
+    return persistenceReady;
+  } catch (error) {
+    persistenceReady = false;
+    persistenceError = String(error);
+    console.error("[civilization] persistence unavailable; continuing in memory and retrying", error);
+    if (!snapshotLooksUsable(state)) {
+      freshState();
+      emit("world_recovered", `Recovered ${state.flies.length} residents in memory while PostgreSQL is unavailable.`, {
+        reason: persistenceError,
+      });
+    }
+    return false;
+  } finally {
+    persistenceConnecting = false;
+  }
+}
+
 if(IS_MAIN){
-await initDb();
+await ensurePersistence();
 setInterval(() => void tick(), 1000);
+setInterval(() => {
+  if (!persistenceReady && !tickBusy) void ensurePersistence();
+}, 15000);
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[civilization] synthetic persistent world listening on :${PORT} world=${WORLD_ID} pop=${state.flies.filter((f) => f.alive).length}`);
+  console.log(`[civilization] world listening on :${PORT} world=${WORLD_ID} pop=${state.flies.filter((f) => f.alive).length} persistence=${persistenceReady?"connected":"degraded"}`);
 });
 
 async function shutdown(signal) {
