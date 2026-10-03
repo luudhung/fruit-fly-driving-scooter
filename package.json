@@ -9,7 +9,7 @@
     "url": "https://github.com/abgnydn/webgpu-fly.git"
   },
   "author": {
-    "name": "Ahmet Bar\u0131\u015f G\u00fcnayd\u0131n",
+    "name": "Ahmet Barış Günaydın",
     "email": "hi@barisgunaydin.com"
   },
   "scripts": {
@@ -20,7 +20,7 @@
     "check:py": "PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q tools",
     "check:rs": "cargo check --locked --manifest-path tools/cpu-bench/Cargo.toml",
     "check:sh": "for f in tools/*.sh; do bash -n \"$f\"; done",
-    "check:json": "node -e \"const fs=require('fs');for(const f of ['package.json','vercel.json','r2-cors.json','.zenodo.json','tsconfig.json']){JSON.parse(fs.readFileSync(f,'utf8'));}JSON.parse(fs.readFileSync('wrangler.jsonc','utf8').replace(/^\\\\s*\\\\/\\\\/.*/gm,''));console.log('json-ok')\"",
+    "check:json": "node -e \"const fs=require('fs');for(const f of ['package.json','vercel.json','r2-cors.json','.zenodo.json','tsconfig.json','cloudflare/wrangler.jsonc']){JSON.parse(fs.readFileSync(f,'utf8'));}JSON.parse(fs.readFileSync('wrangler.jsonc','utf8').replace(/^\\\\s*\\\\/\\\\/.*$/gm,''));console.log('json-ok')\"",
     "data": "bash tools/download_data.sh",
     "convert": ".venv/bin/python tools/build_csr.py",
     "test:e2e": "playwright test",
@@ -33,7 +33,9 @@
     "deploy:vercel": "npm run build && vercel --prod",
     "deploy:r2": "bash tools/upload_to_r2.sh",
     "prebuild": "node tools/prepare-vercel-assets.mjs",
-    "test:city": "node --test tests-city/*.test.mjs"
+    "test:city": "node --test tests-city/*.test.mjs",
+    "dev:civilization:cloudflare": "npx --yes wrangler dev --config cloudflare/wrangler.jsonc",
+    "deploy:civilization:cloudflare": "npx --yes wrangler deploy --config cloudflare/wrangler.jsonc"
   },
   "license": "MIT",
   "devDependencies": {
