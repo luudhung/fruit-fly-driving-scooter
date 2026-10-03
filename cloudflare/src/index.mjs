@@ -15,8 +15,8 @@ const SNAPSHOT_META_KEY = "snapshot:meta";
 const CHUNK_PREFIX = "snapshot:chunk:";
 const CHUNK_SIZE = 1_500_000;
 const DEFAULT_WORLD_ID = "WORLD-A";
-const DEFAULT_ALARM_INTERVAL_MS = 300_000;
-const DEFAULT_IDLE_MAX_STEPS = 120;
+const DEFAULT_ALARM_INTERVAL_MS = 60_000;
+const DEFAULT_IDLE_MAX_STEPS = 90;
 const ACTIVE_PERSIST_INTERVAL_MS = 60_000;
 
 setNeuralSyncEnabled(false);
