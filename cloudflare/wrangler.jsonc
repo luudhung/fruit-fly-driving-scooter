@@ -21,7 +21,7 @@
   ],
   "vars": {
     "CIV_WORLD_ID": "WORLD-A",
-    "CIV_ALARM_INTERVAL_MS": "300000",
-    "CIV_IDLE_MAX_STEPS": "120"
+    "CIV_ALARM_INTERVAL_MS": "60000",
+    "CIV_IDLE_MAX_STEPS": "90"
   }
 }
