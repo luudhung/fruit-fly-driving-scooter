@@ -1,0 +1,27 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "fruit-fly-civilization-free",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-03",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CIVILIZATION",
+        "class_name": "CivilizationWorld"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CivilizationWorld"
+      ]
+    }
+  ],
+  "vars": {
+    "CIV_WORLD_ID": "WORLD-A",
+    "CIV_ALARM_INTERVAL_MS": "300000",
+    "CIV_IDLE_MAX_STEPS": "120"
+  }
+}
