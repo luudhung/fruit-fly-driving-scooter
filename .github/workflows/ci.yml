@@ -65,6 +65,11 @@ jobs:
         # Strict JSON.parse for *.json; wrangler.jsonc gets a
         # line-comment strip first (it has // comments, no blocks).
 
+      - name: Cloudflare Worker bundle
+        run: npm run check:cloudflare
+        # Wrangler dry-run bundles the Durable Object without credentials
+        # or a live deployment, catching Worker/runtime import errors.
+
       - name: Manifest consistency
         run: |
           tracked=$(grep -E '^    "[a-z]' tools/write_manifest.py | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
