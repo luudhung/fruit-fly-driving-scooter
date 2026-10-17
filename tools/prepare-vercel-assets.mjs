@@ -50,8 +50,42 @@ async function copySmall(name) {
   console.log("[prepare-vercel-assets] wrote " + name + " (" + (bytes.length / 1e6).toFixed(1) + " MB)");
 }
 
+async function copyExistingChunks(name) {
+  const response = await fetchAsset(name + ".parts.json");
+  const manifest = await response.json();
+  if (!Array.isArray(manifest.parts) || manifest.parts.length === 0 || manifest.parts.length > 128 ||
+      !Number.isSafeInteger(manifest.totalBytes) || manifest.totalBytes <= 0) {
+    throw new Error("Invalid chunk manifest for " + name);
+  }
+  let totalBytes = 0;
+  const parts = [];
+  for (const part of manifest.parts) {
+    if (typeof part.file !== "string" || !part.file.startsWith(name + ".part") ||
+        path.basename(part.file) !== part.file || !Number.isSafeInteger(part.size) || part.size <= 0) {
+      throw new Error("Invalid chunk entry for " + name);
+    }
+    const chunkResponse = await fetchAsset(part.file);
+    const bytes = Buffer.from(await chunkResponse.arrayBuffer());
+    if (bytes.length !== part.size) throw new Error("Chunk size mismatch for " + part.file);
+    await writeFile(path.join(PUBLIC, part.file), bytes);
+    parts.push({ file: part.file, size: bytes.length });
+    totalBytes += bytes.length;
+  }
+  if (totalBytes !== manifest.totalBytes) throw new Error("Total size mismatch for " + name);
+  await writeFile(path.join(PUBLIC, name + ".parts.json"),
+    JSON.stringify({ version: 1, totalBytes, parts }, null, 2) + "\n");
+  console.log("[prepare-vercel-assets] restored " + name + " from " + parts.length + " existing chunks");
+}
+
 async function copyChunked(name) {
   await cleanParts(name);
+  try {
+    await copyExistingChunks(name);
+    return;
+  } catch (error) {
+    console.log("[prepare-vercel-assets] chunk source unavailable; trying full binary: " + (error instanceof Error ? error.message : String(error)));
+    await cleanParts(name);
+  }
   const response = await fetchAsset(name);
   const bytes = Buffer.from(await response.arrayBuffer());
   const parts = [];
