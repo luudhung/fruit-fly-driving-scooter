@@ -123,7 +123,10 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
   const s=world(),a=ensure(),plane=scheduledAircraft(s.simulationAgeSeconds);
   if(plane.phase!=='flying'||a.operatingFlights.includes(plane.id)||weatherDanger()>.3)return;
   const airline=s.businesses['island-air'],cost=24*Number(s.centralBank?.priceLevel||1);
-  if(airline.cash>=cost){airline.cash-=cost;s.treasury.cash+=cost*.75;s.businesses.garage.cash+=cost*.25;s.totalTransactions++;}
+  if(airline.cash>=cost){
+   const maintenance=s.businesses.garage||s.businesses['vehicle-showroom']||s.treasury;
+   airline.cash-=cost;s.treasury.cash+=cost*.75;maintenance.cash=Number(maintenance.cash||0)+cost*.25;s.totalTransactions++;
+  }
   a.operatingFlights=[...a.operatingFlights,plane.id].slice(-48);
  }
  function aviationSummary(){

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {freshState,restoreState,bookIslandHoliday,simulateIslandHoliday,simulateHeliTour,liquidMoneySupply,startJourney,moveFly,gameClock} from '../worker/civilization-engine.mjs';
 import {AIRPORT,ISLAND,LOCATIONS,entrance,pedestrianRoute,clearSegment,blocked,BUILDINGS,atSea} from '../worker/city-map.mjs';
+import {createTourismSystem} from '../worker/tourism.mjs';
 import {nextFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
 function setup(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};s.simulationAgeSeconds=7*3600;return s;}
 function guest(s,i=0){const f=s.flies[i];Object.assign(f,{money:500,savings:2000,ageYears:30,health:90,energy:90,traveling:false,indoors:true,currentLocationId:'airport',x:AIRPORT.terminal.x,z:AIRPORT.terminal.z,action:'taking a holiday on Hansdrex Island'});return f;}
@@ -77,4 +78,16 @@ test('airport helicopter has three paid seats, respects savings and returns to t
  assert.equal(totalBefore.filter(f=>f.heliPassenger).length,3);assert.equal(totalBefore[0].lastHeliTicket,185);assert.equal(totalBefore[3].money,500);
  const f=totalBefore[0];s.simulationAgeSeconds=f.heliTourStartedAt+450;simulateHeliTour(f,gameClock());assert.ok(f.y>250);
  s.simulationAgeSeconds=f.heliTourUntil;simulateHeliTour(f,gameClock());assert.equal(f.heliPassenger,false);assert.equal(f.x,AIRPORT.heliAccess.x);assert.equal(f.z,AIRPORT.heliAccess.z);
+});
+
+test('scheduled flight operating costs reach existing suppliers once and conserve money',()=>{
+ const s=setup();s.simulationAgeSeconds=8*3600+120;
+ assert.equal(s.businesses.garage,undefined);
+ const tourism=createTourismSystem({world:()=>s,weatherDanger:()=>0});
+ const total=liquidMoneySupply(),airlineCash=s.businesses['island-air'].cash,supplierCash=s.businesses['vehicle-showroom'].cash;
+ tourism.aviationTick();
+ assert.equal(s.businesses['island-air'].cash,airlineCash-24);
+ assert.equal(s.businesses['vehicle-showroom'].cash,supplierCash+6);
+ assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);
+ tourism.aviationTick();assert.equal(s.businesses['island-air'].cash,airlineCash-24);
 });
