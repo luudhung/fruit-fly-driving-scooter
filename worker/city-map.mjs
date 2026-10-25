@@ -1,6 +1,19 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 13;
-export const WORLD_HALF = 620;
+export const MAP_VERSION = 15;
+export const WORLD_HALF = 1150;
+export const AIRPORT = {
+ terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
+ runway:{x:-180,z:-520,w:320,d:22}, apron:{x:-180,z:-443,w:140,d:65},
+ helipad:{x:-85,z:-436,y:1}, heliAccess:{x:-85,z:-373},
+};
+export const ISLAND = {
+ x:160,z:790,rx:205,rz:135,
+ runway:{x:145,z:742,w:240,d:16}, terminal:{x:65,z:785,w:30,d:16},
+ gate:{x:65,z:795}, resort:{x:185,z:820,w:44,d:24}, beach:{x:255,z:834},
+};
+export const SEA={x:0,z:900,w:2300,d:860};
+export function onIsland(p,margin=0){return ((p.x-ISLAND.x)/(ISLAND.rx-margin))**2+((p.z-ISLAND.z)/(ISLAND.rz-margin))**2<1;}
+export function atSea(p){return p.z>470&&!onIsland(p);}
 export const PARK = { x:15, z:-170, w:150, d:260 };
 export const PARK_PONDS = [
  {id:"reservoir",x:15,z:-112,w:58,d:88},
@@ -86,7 +99,11 @@ export const LOCATIONS = [
   { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 67, z: 72.5 },
   { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 93, z: -14.5 },
   { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", x: 15, z: 43.5 },
-  { id: "heliport", type: "luxury", name: "Hansdrex Heli Tours", x: 15, z: 43.5 },
+  { id: "heliport", type: "luxury", name: "Hansdrex Airport · Heli Tours", ...AIRPORT.heliAccess },
+  { id: "airport", type: "transit", name: "Hansdrex City Airport · HCA", x:AIRPORT.terminal.x,z:AIRPORT.terminal.z },
+  { id: "island-airport", type: "transit", name: "Hansdrex Island Airport · HIA", x:ISLAND.terminal.x,z:ISLAND.terminal.z },
+  { id: "island-resort", type: "resort", name: "Hansdrex Island Resort", x:ISLAND.resort.x,z:ISLAND.resort.z },
+  { id: "island-beach", type: "social", name: "Hansdrex Island · Palm Beach", ...ISLAND.beach },
 
   { id: "factory", type: "job", name: "Hansdrex Sugar Works", x: -285, z: 75 },
   { id: "factory-east", type: "job", name: "Hansdrex Materials Plant", x: 285, z: 125 },
@@ -120,7 +137,11 @@ function place(b) {
  if(ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || overlaps(b,PARK,1) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
  BUILDINGS.push(b);return true;
 }
+place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
+place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
+place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
 for(const loc of LOCATIONS) {
+ if(['airport','island-airport','island-resort'].includes(loc.id))continue;
  if(['home','transit','social'].includes(loc.type)&&!['cafe','tea-house','cinema'].includes(loc.id))continue;
  if(['park','rooftop','heliport','farm'].includes(loc.id))continue;
  const outer=Math.abs(loc.x)>180;
@@ -130,8 +151,8 @@ for(const loc of LOCATIONS) {
 }
 // Existing signature skyline is preserved, then expanded with two new world landmarks.
 for(const [id,x,z,w,d,h] of [
- ['toronto',-11,43.5,11,12,133],
- ['empire',15,43.5,11,12,136],
+ ['toronto',-11,43.5,11,12,250],
+ ['empire',15,43.5,11,12,196],
  ['petronas',41,43.5,11,12,115],
  ['burj-khalifa',236,72.5,14,14,190],
  ['marina-bay',340,320,44,18,88],
@@ -190,6 +211,12 @@ for(let xi=0;xi<URBAN_X.length-1;xi++)for(let zi=0;zi<URBAN_Z.length-1;zi++){
 // Additional apartment clusters bridge the high-rise core into the mid-rise neighborhoods.
 for(const x of [-260,-210,210,260])for(const z of [-300,-240,180,240,300])addApartment(x,z,28+Math.max(0,62-distanceFromPark(x,z)*.16),12,16);
 
+// Reuse existing downtown footprints as residential towers for 300 residents and new families.
+for(const b of BUILDINGS.filter(b=>b.kind==='block'&&b.h>50).slice(0,24)){
+ b.id=`APT-${APARTMENTS.length+1}`;b.kind='apartment';b.capacity=10;b.rent=24;b.purchaseValue=5040;
+ APARTMENTS.push(b);
+}
+
 // Detached ground-house lots form the outer residential ring after the skyline has tapered down.
 export const HOUSE_LOTS=[];
 const outerHouseXs=[-350,-330,-310,-290,290,310,330,350];
@@ -210,6 +237,7 @@ export function entrance(p) {
 }
 export function blocked(p) {
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
+ if(atSea(p))return true;
  if(WATER.some(w=>contains(w,p,.25))&&!BRIDGES.some(b=>contains(b,p)))return true;
  return BUILDINGS.some(b=>contains(b,p,.45));
 }
@@ -272,6 +300,14 @@ function nearestCell(p,c) {
 }
 const routeCache=new Map();
 export function pedestrianRoute(start,dest,mode="walk") {
+ // The island is a separate pedestrian district. Never join it to the city lattice over water.
+ if(onIsland(start)||onIsland(dest)){
+  if(!onIsland(start)||!onIsland(dest)||mode!=="walk")return [];
+  const a=entrance(start),b=entrance(dest),hub={x:130,z:858};
+  const path=clearSegment(a,b)?[a,b]:[a,hub,b];
+  if(path.some((p,i)=>i&&!clearSegment(path[i-1],p)))return [];
+  return path.map(p=>({...p,mode:'walk',stage:'island-promenade'}));
+ }
  const a=mode==="walk"?entrance(start):start,b=mode==="walk"?entrance(dest):dest,c=costs(mode);
  const from=nearestCell(a,c),to=nearestCell(b,c);
  if(from<0||to<0)return [];

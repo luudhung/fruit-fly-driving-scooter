@@ -1,6 +1,9 @@
 import * as THREE from "three";
+import { CameraSprint } from "./camera-sprint";
+import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland} from "./city-landmarks";
+import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, WORLD_HALF, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
   id: string;
@@ -52,6 +55,9 @@ type FlyState = {
   parents: string[];
   vehicle?: string | null;
   transitMode?: string;
+  onPlane?:boolean;
+  airTrip?:{phase:string;cost:number};
+  heliTourStartedAt?:number;
   heliPassenger?: boolean;
   heliTourUntil?: number;
   illness?: string | null;
@@ -155,9 +161,9 @@ type CivilizationSnapshot = {
   births: number;
   deaths: number;
   mortality?:{byCause:Record<string,number>};
-  welfare?:{birthGrantPerChild:number;essentialMealPrice:number};
+  welfare?:{birthGrantPerChild:number;essentialMealPrice:number;populationTarget?:number;immigrationThreshold?:number};
   parkLeisure?:{passengers:number;completedRides:number};
-  helicopterTrial?:{passengerIds:string[];started:number;completed:number;active:string[];pending:string[];ticket:number;batchesStarted:number};
+  aviation?:{fares:{roundTrip:number;oneWay:number;resortNight:number;helicopter:number;beachActivity:number};seats:number;heliSeats:number;nextCityFlight:{departure:number};nextIslandFlight:{departure:number};weatherClosed:boolean;passengers:number;holidaymakers:number;completedHolidays:number;helicopterGuests:number};
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -280,6 +286,11 @@ if (graphicsSelect) {
   });
 }
 const settingsWrap = document.getElementById("settings-wrap");
+const cityToolbar=document.querySelector<HTMLElement>(".topbar");
+if(cityToolbar){
+  const fitToolbar=()=>document.documentElement.style.setProperty("--toolbar-bottom",`${Math.ceil(cityToolbar.getBoundingClientRect().bottom)}px`);
+  new ResizeObserver(fitToolbar).observe(cityToolbar);fitToolbar();
+}
 document.getElementById("settings-button")?.addEventListener("click", (event) => {
   event.stopPropagation();
   settingsWrap?.classList.toggle("open");
@@ -455,7 +466,13 @@ function renderSnapshot(s: CivilizationSnapshot) {
   connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
   if(!s.authoritative)residentDirectory.offline();
   const policy=document.getElementById("welfare-policy");
-  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · wheel ${s.parkLeisure?.passengers||0} riding / ${s.parkLeisure?.completedRides||0} completed · HELI TEST ${s.helicopterTrial?.completed||0}/10 complete · ${s.helicopterTrial?.active?.length||0} flying`:'Awaiting public-support policy update';
+  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · population target ${s.welfare.populationTarget||300} (immigration below ${s.welfare.immigrationThreshold||270}) · wheel ${s.parkLeisure?.passengers||0} riding / ${s.parkLeisure?.completedRides||0} completed`:'Awaiting public-support policy update';
+  const air=s.aviation;
+  const airBoard=document.getElementById("aviation-board");
+  const fareBoard=document.getElementById("aviation-fares");
+  const flightTime=(t:number)=>new Date(t*1000).toISOString().slice(11,16);
+  if(airBoard&&air)airBoard.textContent=`${air.weatherClosed?'WEATHER HOLD':'FLIGHTS OPERATING'} · HCA → HIA ${flightTime(air.nextCityFlight.departure)} · HIA → HCA ${flightTime(air.nextIslandFlight.departure)} · ${air.passengers}/${air.seats} airborne · ${air.holidaymakers} on holiday · ${air.completedHolidays} returned`;
+  if(fareBoard&&air)fareBoard.textContent=`Island return ${air.fares.roundTrip.toFixed(0)} H$ · full-board night ${air.fares.resortNight.toFixed(0)} H$ · kayak ${air.fares.beachActivity.toFixed(0)} H$ · skyline helicopter ${air.fares.helicopter.toFixed(0)} H$ / ${air.heliSeats} guests. Check in 30 game-min early. Return seat reserved; weather cancellations refunded.`;
   worldAge.textContent = formatAge(s.simulationAgeSeconds);
   population.textContent = `${num(living.length)} flies`;
   generation.textContent = num(s.generation);
@@ -546,7 +563,7 @@ function updateHeliTourState(flies:FlyState[]){
   updateSpriteText(heliOccupancy,`HELI TOUR · ${heliGuestCount} GUEST${heliGuestCount===1?"":"S"}`);
   if(riders.length){
     const lead=riders[0];
-    heliTarget.set(lead.x,Math.max(lead.y,28),lead.z);
+    heliTarget.set(lead.x,Math.max(lead.y,3),lead.z);
     heliOccupancy.visible=true;
   }else{
     heliTarget.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));
@@ -597,9 +614,9 @@ async function fetchSnapshot() {
 const host = $("world");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
-scene.fog = new THREE.Fog(0x93b8cf, 360, 1500);
+scene.fog = new THREE.Fog(0x93b8cf, 520, 2400);
 
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 1800);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 3000);
 const renderer = new THREE.WebGLRenderer({
   antialias: graphics.metroDetail >= 2,
   powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
@@ -912,6 +929,11 @@ function addBuilding(
   );
   roof.position.y = h + 0.18;
   group.add(roof);
+  if(h>55){
+    const cap=new THREE.Mesh(new THREE.BoxGeometry(w*.65,3.2,d*.65),new THREE.MeshStandardMaterial({color:0x718993,roughness:.4,metalness:.4}));cap.position.y=h+1.6;group.add(cap);
+    const trim=new THREE.Mesh(new THREE.BoxGeometry(w+.12,.16,d+.12),new THREE.MeshBasicMaterial({color:options.residential?0xe0be88:0x86b9c4}));trim.position.y=h-.5;group.add(trim);
+  }
+
 
   // Windows are fixed façade pixels: unlit/basic material means camera/light direction cannot make
   // them "slide" over the wall. A small physical offset also removes z-fighting shimmer.
@@ -959,21 +981,11 @@ for(const b of renderableCityBuildings)addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
 const landmarkCool=new THREE.MeshStandardMaterial({color:0x8db9d0,emissive:0x3c9fd4,emissiveIntensity:0.95,roughness:0.28});
 const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.38,metalness:0.58});
-function addEmpireStyleTower(x:number,z:number){const g=new THREE.Group(),stone=new THREE.MeshStandardMaterial({color:0xa4a19a,roughness:0.68,metalness:0.08});const tiers=[[11.5,11.5,38,19],[9.2,9.2,28,52],[6.8,6.8,22,77],[4.5,4.5,14,95]] as const;
-  for(const [w,d,h,y] of tiers){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stone);m.position.y=y;g.add(m);}for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(4.2-i*.7,3.4,4.2-i*.7),landmarkWarm);c.position.y=104+i*4;g.add(c);}
-  const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.72,25,8),landmarkMetal);spire.position.y=123;g.add(spire);const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.72,8,6),landmarkWarm);beacon.position.y=136;g.add(beacon);g.position.set(x,0,z);cityRoot.add(g);}
-addEmpireStyleTower(15,43.5);
-const empireLandmarkLabel=makeCanvasSprite("HANSDREX EMPIRE",24,1.25);empireLandmarkLabel.position.set(15,142,43.5);cityRoot.add(empireLandmarkLabel);
+buildHansdrexEmpire(cityRoot,makeCanvasSprite);
+buildHansdrexTower(cityRoot,makeCanvasSprite);
+const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 
-const heliPadCenter=new THREE.Vector3(23,101,43.5);
-const heliPadMat=new THREE.MeshStandardMaterial({color:0x343a3d,roughness:.56,metalness:.38});
-const heliMarkMat=new THREE.MeshBasicMaterial({color:0xf7e48f});
-const heliPad=new THREE.Mesh(new THREE.CylinderGeometry(5.2,5.2,.55,24),heliPadMat);heliPad.position.copy(heliPadCenter);cityRoot.add(heliPad);
-const heliH1=new THREE.Mesh(new THREE.BoxGeometry(5.3,.08,.62),heliMarkMat);heliH1.position.copy(heliPadCenter).add(new THREE.Vector3(0,.32,0));cityRoot.add(heliH1);
-const heliH2=new THREE.Mesh(new THREE.BoxGeometry(.62,.08,5.3),heliMarkMat);heliH2.position.copy(heliPadCenter).add(new THREE.Vector3(0,.33,0));cityRoot.add(heliH2);
-const heliBridge=new THREE.Mesh(new THREE.BoxGeometry(6.5,.45,2.1),landmarkMetal);heliBridge.position.set(19.2,100.6,43.5);cityRoot.add(heliBridge);
-const heliPadLabel=makeCanvasSprite("HANSDREX HELI TOURS",18,1.0);heliPadLabel.position.set(23,108,43.5);cityRoot.add(heliPadLabel);
-
+const heliPadCenter=new THREE.Vector3(AIRPORT.helipad.x,AIRPORT.helipad.y,AIRPORT.helipad.z);
 const heliTourGroup=new THREE.Group();
 const heliBodyMat=new THREE.MeshStandardMaterial({color:0x1f292f,roughness:.28,metalness:.54});
 const heliAccentMat=new THREE.MeshStandardMaterial({color:0xd8aa48,roughness:.32,metalness:.45});
@@ -992,10 +1004,6 @@ heliTourGroup.position.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));cityR
 const heliTarget=heliTourGroup.position.clone();
 let heliGuestCount=0;
 
-function addTorontoStyleTower(x:number,z:number){const g=new THREE.Group(),shaftMat=new THREE.MeshStandardMaterial({color:0xb6b8b7,roughness:0.55,metalness:0.16});const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.9,2.4,104,12),shaftMat);shaft.position.y=52;g.add(shaft);
-  const pod=new THREE.Mesh(new THREE.CylinderGeometry(4.7,3.8,7,18),landmarkCool);pod.position.y=86;g.add(pod);const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.24,6,18),landmarkWarm);ring.rotation.x=Math.PI/2;ring.position.y=89;g.add(ring);const antenna=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.68,42,8),landmarkMetal);antenna.position.y=111;g.add(antenna);const b=new THREE.Mesh(new THREE.SphereGeometry(0.62,8,6),landmarkCool);b.position.y=133;g.add(b);g.position.set(x,0,z);cityRoot.add(g);}
-addTorontoStyleTower(-11,43.5);
-const hansdrexTowerLabel=makeCanvasSprite("HANSDREX TOWER",23,1.2);hansdrexTowerLabel.position.set(-11,140,43.5);cityRoot.add(hansdrexTowerLabel);
 function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-3.1,3.1]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=2.35-i*.18,h=12.2-i*.35,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r,h,10),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(.7,1.8,10,9),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(6.2,1.5,2),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
 addPetronasTwinTowers(41,43.5);
 const petronasLabel=makeCanvasSprite("HANSDREX PETRONAS",22,1.15);petronasLabel.position.set(41,119,43.5);cityRoot.add(petronasLabel);
@@ -1222,6 +1230,8 @@ for(const train of metroTrains) train.group.matrixAutoUpdate=true;
 // These parts move every frame and must not inherit the static-city matrix freeze.
 wheelRotor.matrixAutoUpdate=true;
 for(const cabin of wheelCabins)cabin.matrixAutoUpdate=true;
+aviationVisual.plane.matrixAutoUpdate=true;
+for(const prop of aviationVisual.propellers)prop.matrixAutoUpdate=true;
 heliTourGroup.matrixAutoUpdate=true;
 heliRotor.matrixAutoUpdate=true;
 heliRotorCross.matrixAutoUpdate=true;
@@ -1412,7 +1422,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.lastTraceTime=trace.at(-1)?.t??visual.lastTraceTime;
     if(visual.route.length>12)visual.route=visual.route.slice(-8);
     if(visual.stationary){visual.route=[];visual.current.copy(visual.target);}
-    visual.group.visible=!fly.heliPassenger&&!fly.onTrain&&!fly.indoors;
+    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onTrain&&!fly.indoors;
     if(fly.currentLocationId==="rooftop"&&!fly.traveling)visual.group.visible=true;
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
@@ -1506,7 +1516,8 @@ let followSelected = false;
 let lastFrameAt = performance.now();
 let lastRenderedAt = 0;
 const TARGET_FRAME_MS = 1000 / graphics.fps;
-const pressed = new Set<string>();
+const cameraSprint=new CameraSprint();
+const pressed=cameraSprint.pressed;
 const freePosition = new THREE.Vector3(86, 54, 105);
 const lookDirection = new THREE.Vector3();
 const moveForward = new THREE.Vector3();
@@ -1536,6 +1547,14 @@ document.getElementById("park-view")?.addEventListener("click",()=>{
  const direction=new THREE.Vector3(PARK.x,12,PARK.z).sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
  camera.fov=50;camera.updateProjectionMatrix();
 });
+function frameDestination(position:THREE.Vector3,target:THREE.Vector3){
+ followSelected=false;cameraSprint.reset();freePosition.copy(position);
+ const direction=target.sub(position).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
+ camera.fov=52;camera.updateProjectionMatrix();
+}
+document.getElementById("skyline-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(160,180,270),new THREE.Vector3(5,122,43.5)));
+document.getElementById("airport-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(90,185,-230),new THREE.Vector3(-180,0,-465)));
+document.getElementById("island-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(440,245,1055),new THREE.Vector3(ISLAND.x,0,ISLAND.z)));
 setCameraOverview();
 camera.position.copy(freePosition);
 
@@ -1577,9 +1596,9 @@ const movementKeys = new Set([
   "KeyQ","KeyE","ShiftLeft","ShiftRight",
 ]);
 addEventListener("keydown", (e) => {
-  if(document.querySelector<HTMLDialogElement>("#resident-directory")?.open)return;
+  if(document.querySelector<HTMLDialogElement>("#resident-directory")?.open||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
   if (movementKeys.has(e.code)) {
-    pressed.add(e.code);
+    cameraSprint.down(e.code,performance.now(),e.repeat);
     e.preventDefault();
     followSelected = false;
   }
@@ -1592,10 +1611,10 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 });
-addEventListener("blur",()=>{pressed.clear();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
+addEventListener("blur",()=>{cameraSprint.reset();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
-addEventListener("keyup", (e) => {pressed.delete(e.code);if (movementKeys.has(e.code)) e.preventDefault();});
-document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;pressed.add(key);button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();pressed.delete(key);button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{pressed.delete(key);button.classList.remove("active");});});
+addEventListener("keyup", (e) => {cameraSprint.up(e.code);if (movementKeys.has(e.code)) e.preventDefault();});
+document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;cameraSprint.down(key,performance.now());button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();cameraSprint.up(key);button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{cameraSprint.up(key);button.classList.remove("active");});});
 
 const mobileInspectorToggle=document.getElementById("mobile-inspector-toggle") as HTMLButtonElement | null;
 mobileInspectorToggle?.addEventListener("click",(e)=>{
@@ -1658,15 +1677,14 @@ function updateFreeCamera(dt: number) {
     if (pressed.has("KeyE")) verticalAxis += 1;
     if (pressed.has("KeyQ")) verticalAxis -= 1;
 
-    const sprint = pressed.has("ShiftLeft") || pressed.has("ShiftRight");
-    const speed = (sprint ? 52 : 22) * dt;
+    const speed = 22 * cameraSprint.multiplier * dt;
     freePosition.addScaledVector(moveForward, forwardAxis * speed);
     freePosition.addScaledVector(moveRight, strafeAxis * speed);
     freePosition.y += verticalAxis * speed * 0.75;
 
     freePosition.x = THREE.MathUtils.clamp(freePosition.x, -WORLD_HALF, WORLD_HALF);
     freePosition.z = THREE.MathUtils.clamp(freePosition.z, -WORLD_HALF, WORLD_HALF);
-    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 260);
+    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 520);
   }
 
   camera.position.copy(freePosition);
@@ -1692,6 +1710,16 @@ function animate(now = performance.now()) {
 
   updateMetroTrains(now);
   updateParkWheel(now);
+  const gameNow=Number(snapshot?.simulationAgeSeconds||0)+Math.min(2.5,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120);
+  const pose=scheduledAircraft(gameNow);
+  const activePlane=(snapshot?.flies||[]).some(f=>f.onPlane);
+  if(snapshot?.aviation?.weatherClosed&&!activePlane){aviationVisual.plane.position.set(AIRPORT.terminal.x,3,-420);}
+  else{aviationVisual.plane.position.set(pose.x,pose.y,pose.z);aviationVisual.plane.rotation.y=pose.heading;}
+  for(const prop of aviationVisual.propellers)prop.rotation.z+=dt*(pose.phase==='flying'?40:8);
+  const heliLead=(snapshot?.flies||[]).find(f=>f.heliPassenger);
+  if(heliLead&&heliLead.heliTourStartedAt&&heliLead.heliTourUntil&&gameNow>=heliLead.heliTourStartedAt){
+    const h=helicopterPose(gameNow,heliLead.heliTourStartedAt,heliLead.heliTourUntil);heliTarget.set(h.x,h.y,h.z);heliTourGroup.rotation.y=h.heading;
+  }
   heliTourGroup.position.lerp(heliTarget,heliGuestCount>0?.18:.08);
   heliRotor.rotation.y+=dt*18;
   heliRotorCross.rotation.y+=dt*18;

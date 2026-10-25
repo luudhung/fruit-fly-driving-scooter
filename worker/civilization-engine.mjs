@@ -1,15 +1,17 @@
-import { MAP_VERSION, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, metroStationGeometry, trainState } from "./city-map.mjs";
+import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, metroStationGeometry, trainState } from "./city-map.mjs";
+import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
+import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
 
 const WORLD_ID = ENV.CIV_WORLD_ID || "WORLD-A";
 const EXPERIMENT_ID = ENV.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(ENV.CIV_WORLD_SEED || 948291);
 const GAME_SECONDS_PER_REAL_SECOND = Number(ENV.CIV_TIME_SCALE || 120);
-const TARGET_POPULATION = 130;
-const RECOVERY_POPULATION = 100;
-const WELFARE_VERSION = 1;
+const TARGET_POPULATION = 300;
+const RECOVERY_POPULATION = 300;
+const WELFARE_VERSION = 2;
 const INITIAL_POPULATION = Math.min(TARGET_POPULATION, Math.max(12, Number(ENV.CIV_INITIAL_POPULATION || RECOVERY_POPULATION)));
-const MAX_POPULATION = Math.min(132, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 132)));
+const MAX_POPULATION = Math.min(360, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 360)));
 const FLYWIRE_BRAIN_URL = (ENV.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(ENV.NEURAL_SYNC_INTERVAL_MS || 1000));
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
@@ -136,6 +138,9 @@ const JOBS = [
   { id: "music-hall", locationId: "music-hall", title: "music hall crew", wage: 5.1, shiftStart: 17, shiftEnd: 2 },
   { id: "nightclub", locationId: "nightclub", title: "nightclub staff", wage: 5.2, shiftStart: 19, shiftEnd: 3 },
   { id: "rooftop", locationId: "rooftop", title: "rooftop host", wage: 5.3, shiftStart: 17, shiftEnd: 1 },
+  { id:"airline-pilot",locationId:"airport",title:"island airline pilot",wage:10.8,shiftStart:7,shiftEnd:21 },
+  { id:"airport-ground",locationId:"airport",title:"airport ground crew",wage:6.5,shiftStart:7,shiftEnd:21 },
+  { id:"resort-host",locationId:"airport",title:"island resort host",wage:5.8,shiftStart:8,shiftEnd:18 },
   { id: "heli-pilot-day", locationId: "heliport", title: "helicopter sightseeing pilot", wage: 9.6, shiftStart: 8, shiftEnd: 16 },
   { id: "heli-pilot-evening", locationId: "heliport", title: "helicopter sightseeing pilot", wage: 10.2, shiftStart: 16, shiftEnd: 22 },
   { id: "heli-ground", locationId: "heliport", title: "heliport ground crew", wage: 6.8, shiftStart: 8, shiftEnd: 18 },
@@ -156,6 +161,9 @@ const BUSINESSES = {
   "music-hall": { inventory: 999, cash: 2300, price: 8.0, sector: "nightlife" },
   nightclub: { inventory: 999, cash: 2600, price: 10.0, sector: "nightlife" },
   rooftop: { inventory: 999, cash: 2500, price: 9.0, sector: "nightlife" },
+  "island-air": { inventory:999, cash:18000, price:45, sector:"aviation" },
+  "island-resort": { inventory:999, cash:12000, price:44, sector:"tourism" },
+  "travel-escrow": { inventory:0, cash:0, price:0, sector:"escrow" },
   "heli-tour": { inventory: 999, cash: 12000, price: 185, sector: "luxury-tourism" },
   "vehicle-showroom": { inventory: 80, cash: 60000, price: 650, sector: "automotive" },
 };
@@ -256,7 +264,7 @@ function migrateGroundHousesToSafeLots(previousMapVersion) {
     const owner=members[0],wasHouse=hh.housingType==="house",wasOwned=members.some(f=>f.ownsHome);
     if(!wasHouse||!assignGroundHouse(owner,Math.max(1,owner.homeTier||1),hh))assignApartment(owner,hh);
     if(!wasHouse&&wasOwned)owner.ownsHome=true;
-    for(const f of members){f.housingType=hh.housingType;f.housingUnitId=hh.unitId;f.homeX=hh.homeX;f.homeZ=hh.homeZ;}
+    for(const f of members){const wasAtHome=f.currentLocationId===f.homeId;f.homeId=owner.homeId;if(wasAtHome)f.currentLocationId=f.homeId;f.housingType=hh.housingType;f.housingUnitId=hh.unitId;f.homeX=hh.homeX;f.homeZ=hh.homeZ;}
   }
 }
 
@@ -444,6 +452,8 @@ function releaseHousingUnit(hh) {
 
 const eventSubscribers = new Set();
 let state = null;
+const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance});
+const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
 let tickBusy = false;
 let neuralSyncBusy = false;
 let lastNeuralSyncAt = 0;
@@ -1115,6 +1125,13 @@ function restoreState(persistedState) {
   migrateGroundHousesToSafeLots(previousMapVersion);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
+  if(Number(state.airportExpansionVersion||0)<1){
+    replenishResidents(TARGET_POPULATION,"Hansdrex airport and island expansion");
+    state.airportExpansionVersion=1;
+    state.helicopterFlight=null;
+    delete state.heliTrial;
+    for(const f of state.flies){f.heliPassenger=false;f.heliTourUntil=0;f.heliTrialRide=false;}
+  }
   ensureAcademyTeacher();
   ensurePoliticalSystem();
   ensureCentralBankBoard();
@@ -1163,11 +1180,12 @@ function freshState() {
     utilities: { powerPlant:{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0}, householdAccounts:{}, lastBillingDay:0, disconnectedHouseholds:0 },
     justice: { deathPenaltyEnabled:true, executions:0, convictions:0, acquittals:0 },
     mapVersion: MAP_VERSION,
+    airportExpansionVersion:1,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
     housing: null,
     currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
     weather: null,
-    heliTrial: { version:1, passengerIds:Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,"0")}`), startedIds:[], completedIds:[], batchesStarted:0, lastBatchAt:0 },
+
   };
   state = s;
   state.weather = makeWeather();
@@ -1190,6 +1208,8 @@ function freshState() {
 function ensureWelfare() {
   state.welfare ||= { birthGrants: {}, birthGrantTotal: 0, foodSubsidies: 0, leisureSubsidies: 0, emergencyFunding: 0 };
   state.welfare.birthGrants ||= {};
+  state.welfare.populationTarget=TARGET_POPULATION;
+  state.welfare.immigrationThreshold=Math.floor(TARGET_POPULATION*0.9);
   return state.welfare;
 }
 function fundPublicPayment(amount) {
@@ -1237,6 +1257,17 @@ function applyWelfareRecovery() {
   welfare.recoveredAt=state.simulationAgeSeconds;
   welfare.recoveryAdded=added;
   restockEssentials();
+  return added;
+}
+function maintainPopulation() {
+  const welfare=ensureWelfare();
+  const day=gameClock().day;
+  const living=state.flies.filter(f=>f.alive).length;
+  // One audited migration per game day; births and deaths still change the census.
+  if(living>=8&&(living>=welfare.immigrationThreshold||welfare.lastImmigrationDay===day))return 0;
+  const added=replenishResidents(TARGET_POPULATION,"city population support policy");
+  welfare.lastImmigrationDay=day;
+  welfare.immigrationTotal=Number(welfare.immigrationTotal||0)+added;
   return added;
 }
 function restockEssentials() {
@@ -1573,6 +1604,7 @@ function nearestTransitStation(x, z) {
 }
 
 function chooseTravelMode(fly,dest){
+  if(onIsland(fly)||onIsland(dest))return {mode:"walk",metro:null,route:pedestrianRoute(fly,dest)};
   const distance=Math.hypot(dest.x-fly.x,dest.z-fly.z),danger=weatherDanger();
   const metro=planMetroRoute(fly,dest);
   const ownsCar=fly.vehicle==="premium car"||fly.vehicle==="compact car";
@@ -2131,12 +2163,15 @@ function brainChooseAction(fly, clock) {
   }
 
   const heliPrice=heliTourTicketPrice();
-  const luxuryEligible=fly.stress>=55||["affluent","wealthy","elite"].includes(fly.socialClass)||(fly.money+fly.savings)>heliPrice*8;
-  if(age>=18&&luxuryEligible&&heliTourAvailable(clock)&&fly.energy>28&&(fly.stress>=55||fly.money+fly.savings>heliPrice*1.2)){
-    const classBonus=fly.socialClass==="elite"?34:fly.socialClass==="wealthy"?27:fly.socialClass==="affluent"?19:8;
-    const visualCuriosity=brain.dynamic.curiosity*32+neuralDrive(fly,"exploreDrive")*24+fly.excitement*0.22+fly.traits.ambition*12;
-    const affordability=Math.min(24,(fly.money+fly.savings)/Math.max(1,heliPrice*3));
-    add("heliport","taking a Hansdrex helicopter sightseeing tour",visualCuriosity+classBonus+affordability+(fly.stress>=55?fly.stress*0.6:0)-fly.sleepDebt*0.22-weatherDanger()*90);
+  const available=fly.money+fly.savings;
+  if(age>=18&&tourism.affordable(fly,heliPrice)&&heliTourAvailable(clock)&&fly.energy>45&&state.simulationAgeSeconds-Number(fly.lastHeliAt||-86400)>86400){
+    const visualCuriosity=brain.dynamic.curiosity*34+neuralDrive(fly,"exploreDrive")*28+fly.excitement*.22+fly.traits.ambition*12;
+    add("heliport","taking a Hansdrex helicopter sightseeing tour",visualCuriosity+Math.min(24,available/(heliPrice*3))+18-weatherDanger()*90);
+  }
+  const job=JOBS.find(j=>j.id===fly.jobId);
+  const offShift=!job||!personalWorkWindow(fly,job,clock.hour);
+  if(offShift&&clock.hour>=6&&clock.hour<17&&weatherDanger()<.22&&tourism.canHoliday(fly)&&clock.day-Number(fly.lastHolidayDay??-8)>=6){
+    add("airport","taking a holiday on Hansdrex Island",48+brain.dynamic.curiosity*34+fly.stress*.35+neuralDrive(fly,"exploreDrive")*22);
   }
 
   ensureCognitiveProfile(fly);
@@ -2274,6 +2309,12 @@ function chooseDestination(fly, clock) {
 }
 
 function startJourney(fly,chosen) {
+  if(!fly.traveling&&fly.indoors&&fly.currentLocationId===chosen.id){
+    fly.action=chosen.action;fly.pendingAction=null;
+    fly.sleeping=chosen.action==="sleeping"&&fly.indoors&&chosen.id===fly.homeId;
+    fly.actionUntil=state.simulationAgeSeconds+brainRange(fly,1200,4200);
+    return;
+  }
   if(fly.indoors){const door=entrance(fly);fly.x=door.x;fly.z=door.z;fly.y=1.1;fly.movementTrace=[];}
   fly.onTrain=false;
   fly.targetLocationId = chosen.id;
@@ -2651,123 +2692,47 @@ function simulateParkWheel(fly){
  return true;
 }
 
-const HELI_TRIAL_IDS=Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,"0")}`);
-
-function ensureHeliTrialState(){
-  state.heliTrial ||= {version:1,passengerIds:[...HELI_TRIAL_IDS],startedIds:[],completedIds:[],batchesStarted:0,lastBatchAt:0};
-  state.heliTrial.passengerIds=Array.isArray(state.heliTrial.passengerIds)&&state.heliTrial.passengerIds.length?state.heliTrial.passengerIds:[...HELI_TRIAL_IDS];
-  state.heliTrial.startedIds=Array.isArray(state.heliTrial.startedIds)?state.heliTrial.startedIds:[];
-  state.heliTrial.completedIds=Array.isArray(state.heliTrial.completedIds)?state.heliTrial.completedIds:[];
-  state.heliTrial.batchesStarted=Number(state.heliTrial.batchesStarted||0);
-  state.heliTrial.lastBatchAt=Number(state.heliTrial.lastBatchAt||0);
-  return state.heliTrial;
-}
-
-function commissionHeliTrial(clock=gameClock()){
-  const trial=ensureHeliTrialState(),now=state.simulationAgeSeconds;
-  const livingById=new Map(state.flies.filter(f=>f.alive).map(f=>[f.id,f]));
-  const active=trial.passengerIds
-    .map(id=>livingById.get(id))
-    .filter(f=>f&&f.heliPassenger&&Number(f.heliTourUntil||0)>now);
-  if(active.length)return active;
-  const completed=new Set(trial.completedIds);
-  const pending=trial.passengerIds.map(id=>livingById.get(id)).filter(f=>f&&!completed.has(f.id));
-  if(!pending.length)return [];
-  // The commissioning ride is free and may run outside normal commercial hours, but not in severe simulated weather.
-  if(weatherDanger()>0.55)return [];
-  ensureHeliTourStaff();
-  const batch=pending.slice(0,4);
-  const startsAt=now+120,endsAt=startsAt+1800;
-  state.helicopterFlight={startsAt,endsAt,trial:true};
-  trial.batchesStarted+=1;trial.lastBatchAt=now;
-  for(const fly of batch){
-    if(!trial.startedIds.includes(fly.id))trial.startedIds.push(fly.id);
-    fly.heliTrialRide=true;
-    fly.lastHeliTicket=0;
-    fly.heliTourStartedAt=startsAt;
-    fly.heliTourUntil=endsAt;
-    fly.heliPassenger=true;
-    fly.traveling=false;fly.sleeping=false;fly.indoors=false;
-    fly.currentLocationId="heliport";fly.targetLocationId="heliport";
-    fly.x=23;fly.y=103;fly.z=43.5;fly.targetX=23;fly.targetZ=43.5;
-    fly.transitMode="helicopter";fly.transitStage="boarding";fly.action="boarding free Hansdrex helicopter trial";
-    fly.excitement=clamp(fly.excitement+14);fly.stress=clamp(fly.stress-3);
-    brainRemember(fly,"heli_trial_ticket",{price:0,batch:trial.batchesStarted});
-    emit("heli_trial_ticket",`${fly.id} received a FREE commissioning ticket for Hansdrex Heli Tours.`,{flyId:fly.id,price:0,batch:trial.batchesStarted});
-  }
-  emit("heli_trial_batch",`Hansdrex Heli Tours started free test batch ${trial.batchesStarted}: ${batch.map(f=>f.id).join(", ")}.`,{flyIds:batch.map(f=>f.id),price:0});
-  console.log(`[heli-trial] batch ${trial.batchesStarted} FREE riders=${batch.map(f=>f.id).join(",")}`);
-  return batch;
-}
-
-function heliTourTicketPrice(){
-  return 185*Number(state.centralBank?.priceLevel||1);
-}
-
+function heliTourTicketPrice(){return tourismFares(state.centralBank?.priceLevel).helicopter;}
 function heliTourAvailable(clock){
-  if(weatherDanger()>0.22)return false;
-  if(clock.hour<8||clock.hour>=22)return false;
+  if(weatherDanger()>.22||clock.hour<8||clock.hour>=20)return false;
   const staff=ensureHeliTourStaff();
-  const pilots=staff.filter((f)=>String(f.jobId||"").startsWith("heli-pilot"));
-  return pilots.some(p=>!p.traveling&&p.currentLocationId==="heliport"&&personalWorkWindow(p,JOBS.find(j=>j.id===p.jobId),clock.hour));
+  return staff.some(p=>String(p.jobId||"").startsWith("heli-pilot")&&!p.traveling&&p.currentLocationId==="heliport");
 }
-
 function simulateHeliTour(fly,clock){
-  const now=state.simulationAgeSeconds;
-  if(fly.heliTourUntil&&now<fly.heliTourUntil){
-    const start=Number(fly.heliTourStartedAt||now),duration=Math.max(1,fly.heliTourUntil-start),progress=clamp((now-start)/duration,0,1);
-    if(now<start){fly.x=23;fly.y=103;fly.z=43.5;fly.indoors=false;fly.heliPassenger=true;fly.action="boarding Hansdrex helicopter";return true;}
-    const angle=progress*Math.PI*2-Math.PI/2;
-    const radius=105+Math.sin(progress*Math.PI*4)*16;
-    fly.heliPassenger=true;
-    fly.traveling=false;
-    fly.transitMode="helicopter";
-    fly.transitStage="sightseeing-flight";
-    fly.action="helicopter sightseeing over Hansdrex";
-    fly.x=15+Math.cos(angle)*radius;
-    fly.z=34+Math.sin(angle)*radius*0.72;
-    fly.y=158+Math.sin(progress*Math.PI*2)*8;
-    fly.indoors=false;
-    fly.vx=fly.vz=0;
-    fly.excitement=clamp(fly.excitement+0.12);
-    fly.stress=clamp(fly.stress-0.10);
-    return true;
-  }
-  if(fly.heliTourUntil&&now>=fly.heliTourUntil){
-    fly.heliTourUntil=0;fly.heliTourStartedAt=0;fly.heliPassenger=false;
-    fly.transitMode="walk";fly.transitStage=null;fly.currentLocationId="heliport";fly.targetLocationId="heliport";
-    fly.x=15;fly.z=43.5;fly.y=1.4;fly.indoors=true;fly.targetX=fly.x;fly.targetZ=fly.z;fly.action="finished Hansdrex helicopter tour";fly.actionUntil=now+900;
-    fly.happiness=clamp(fly.happiness+10);fly.excitement=clamp(fly.excitement+16);fly.stress=clamp(fly.stress-12);
-    brainRemember(fly,"heli_tour_completed",{weather:weatherLabel(),ticket:fly.lastHeliTicket||0});
-    if(fly.heliTrialRide){
-      const trial=ensureHeliTrialState();
-      if(!trial.completedIds.includes(fly.id))trial.completedIds.push(fly.id);
-      fly.heliTrialRide=false;
-      emit("heli_trial_complete",`${fly.id} completed the FREE Hansdrex helicopter commissioning ride.`,{flyId:fly.id,price:0});
-      console.log(`[heli-trial] completed ${fly.id} FREE ticket`);
+  const now=state.simulationAgeSeconds,pad=AIRPORT.helipad;
+  if(fly.heliPassenger&&fly.heliTourUntil){
+    if(now>=fly.heliTourUntil){
+      Object.assign(fly,{heliPassenger:false,heliTourUntil:0,heliTourStartedAt:0,transitMode:"walk",transitStage:null,
+        currentLocationId:"heliport",targetLocationId:"heliport",x:AIRPORT.heliAccess.x,z:AIRPORT.heliAccess.z,y:1.1,
+        traveling:false,indoors:true,action:"finished Hansdrex airport helicopter tour",actionUntil:now+1800});
+      fly.targetX=fly.x;fly.targetZ=fly.z;fly.happiness=clamp(fly.happiness+10);fly.stress=clamp(fly.stress-12);
+      emit("heli_landing",`${fly.id} landed at Hansdrex Airport after a paid skyline tour.`,{flyId:fly.id,ticket:fly.lastHeliTicket});
+      return true;
     }
-    emit("heli_landing",`${fly.id} landed after a Hansdrex skyline helicopter tour.`,{flyId:fly.id,ticket:fly.lastHeliTicket||0});
+    const pose=now<fly.heliTourStartedAt?{x:pad.x,y:3,z:pad.z}:helicopterPose(now,fly.heliTourStartedAt,fly.heliTourUntil);
+    Object.assign(fly,{x:pose.x,y:pose.y,z:pose.z,traveling:false,indoors:false,sleeping:false,vx:0,vz:0,transitMode:"helicopter",transitStage:now<fly.heliTourStartedAt?"boarding":"sightseeing-flight"});
+    fly.action=now<fly.heliTourStartedAt?"boarding helicopter at Hansdrex Airport":"helicopter sightseeing over Hansdrex";
     return true;
   }
   if(fly.currentLocationId!=="heliport"||fly.traveling||fly.action!=="taking a Hansdrex helicopter sightseeing tour")return false;
-  const active=state.flies.filter((f)=>f.alive&&f.heliPassenger&&Number(f.heliTourUntil||0)>now).length;
-  const fare=heliTourTicketPrice();
-  const subsidized=fly.stress>=55;
-  const price=subsidized?0:fare;
-  if(active>=4||(state.helicopterFlight&&now>=state.helicopterFlight.startsAt&&now<state.helicopterFlight.endsAt)){fly.action="waiting for the next Hansdrex helicopter";fly.actionUntil=now+600;return true;}
-  if(!heliTourAvailable(clock)){fly.action="heli tour cancelled by weather or operating hours";fly.actionUntil=now+1200;fly.stress=clamp(fly.stress-1);return true;}
-  if(fly.money+fly.savings<price){fly.action="could not afford the helicopter tour";fly.actionUntil=now+1800;return true;}
-  const cash=Math.min(fly.money,price);fly.money-=cash;fly.savings-=Math.max(0,price-cash);
-  if(subsidized){fundPublicPayment(fare);ensureWelfare().leisureSubsidies+=fare;}
-  state.businesses["heli-tour"].cash+=fare;fly.expensesLifetime+=price;state.totalTransactions+=1;
-  if(!state.helicopterFlight||now>=state.helicopterFlight.endsAt)state.helicopterFlight={startsAt:now+600,endsAt:now+2400};
-  fly.lastHeliTicket=price;fly.heliTourStartedAt=state.helicopterFlight.startsAt;fly.heliTourUntil=state.helicopterFlight.endsAt;fly.heliPassenger=true;
-  fly.transitMode="helicopter";fly.transitStage="boarding";fly.action="boarding Hansdrex helicopter";
-  fly.excitement=clamp(fly.excitement+12);
-  brainRemember(fly,"heli_tour_purchase",{price,socialClass:fly.socialClass,weather:weatherLabel()});
-  emit("heli_boarding",`${fly.id} paid ${price.toFixed(0)} ${CURRENCY_CODE} and boarded Hansdrex Heli Tours.`,{flyId:fly.id,price,socialClass:fly.socialClass});
+  const active=state.flies.filter(f=>f.alive&&f.heliPassenger&&f.heliTourUntil>now).length;
+  if(active>=AVIATION.heliSeats||(state.helicopterFlight&&now>=state.helicopterFlight.startsAt&&now<state.helicopterFlight.endsAt)){
+    fly.action="waiting for the next airport helicopter";fly.actionUntil=now+900;return true;
+  }
+  const price=heliTourTicketPrice();
+  if(!heliTourAvailable(clock)||!tourism.affordable(fly,price)){
+    fly.action="helicopter unavailable · protecting essential savings";fly.actionUntil=now+1800;return true;
+  }
+  const cash=Math.min(fly.money,price);fly.money-=cash;fly.savings-=price-cash;
+  state.businesses["heli-tour"].cash+=price;fly.expensesLifetime+=price;state.totalTransactions++;
+  if(!state.helicopterFlight||now>=state.helicopterFlight.endsAt)state.helicopterFlight={startsAt:now+600,endsAt:now+600+AVIATION.heliSeconds};
+  Object.assign(fly,{lastHeliTicket:price,lastHeliAt:now,heliTourStartedAt:state.helicopterFlight.startsAt,heliTourUntil:state.helicopterFlight.endsAt,
+    heliPassenger:true,transitMode:"helicopter",transitStage:"boarding",action:"boarding helicopter at Hansdrex Airport"});
+  emit("heli_boarding",`${fly.id} paid ${price.toFixed(0)} H$ for an airport skyline helicopter tour.`,{flyId:fly.id,price});
+  rememberHeliPurchase(fly,price);
   return true;
 }
+function rememberHeliPurchase(fly,price){brainRemember(fly,"heli_tour_purchase",{price,location:"airport"});}
 
 function vehicleShopping(fly) {
   if(fly.traveling||fly.vehicle||fly.currentLocationId!=="vehicle-showroom"||!String(fly.action||"").includes("vehicle"))return;
@@ -3481,7 +3446,7 @@ function maintainHouseholds(){
   const home=state.housing.households[f.householdId],old=state.housing.households[partner.householdId];
   if(!home||!old||old.members.length>1||partner.ownsHome)continue;
   old.members=old.members.filter(id=>id!==partner.id);releaseHousingUnit(old);delete state.housing.households[old.id];
-  home.members.push(partner.id);partner.householdId=home.id;partner.housingUnitId=home.unitId;partner.housingType=home.housingType;partner.homeX=home.homeX;partner.homeZ=home.homeZ;partner.actionUntil=0;
+  home.members.push(partner.id);partner.householdId=home.id;partner.housingUnitId=home.unitId;partner.housingType=home.housingType;partner.homeId=f.homeId;partner.homeX=home.homeX;partner.homeZ=home.homeZ;partner.actionUntil=0;
   emit("household",`${f.id} and ${partner.id} chose to share a home.`,{householdId:home.id});
  }
 }
@@ -3491,6 +3456,7 @@ function tickFly(fly, clock) {
   if(fly.health<=0){fly.alive=false;fly.causeOfDeath="fatal injuries or illness";state.deaths++;emit("death",`${fly.id} died after health reached zero.`,{flyId:fly.id});return;}
   if(lawEnforcement(fly)) return;
   if(simulateParkWheel(fly))return;
+  if(simulateIslandHoliday(fly,clock))return;
   if(simulateHeliTour(fly,clock)) return;
   ensureCognitiveProfile(fly);
   ensureProfessionalTraining(fly);
@@ -3530,6 +3496,7 @@ function tickFly(fly, clock) {
   chooseDestination(fly, clock);
   moveFly(fly);
   if(simulateParkWheel(fly))return;
+  if(simulateIslandHoliday(fly,clock))return;
   if(simulateHeliTour(fly,clock)) return;
   needsAndActivities(fly, clock);
   applyPowerEffects(fly,clock);
@@ -3553,6 +3520,9 @@ function tickFly(fly, clock) {
 
 function compactFly(f) {
   return {
+    heliTourStartedAt:Number(f.heliTourStartedAt||0),
+    onPlane:Boolean(f.onPlane),
+    airTrip:f.airTrip?{phase:f.airTrip.phase,outbound:f.airTrip.outbound,inbound:f.airTrip.inbound,cost:f.airTrip.cost}:null,
     id: f.id,
     name: f.name,
     sex: f.sex,
@@ -3748,7 +3718,7 @@ function getState() {
     mapVersion:MAP_VERSION,
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
-    helicopterTrial:(()=>{const t=ensureHeliTrialState();return {passengerIds:t.passengerIds,started:t.startedIds.length,completed:t.completedIds.length,active:living.filter(f=>f.heliPassenger&&t.passengerIds.includes(f.id)).map(f=>f.id),pending:t.passengerIds.filter(id=>!t.completedIds.includes(id)),ticket:0,batchesStarted:t.batchesStarted};})(),
+    aviation:aviationSummary(),
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
@@ -3808,8 +3778,7 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       for(const fly of state.flies)tickFly(fly,clock);
-      // Start the next free commissioning batch only after expired riders have been landed/marked complete.
-      commissionHeliTrial(clock);
+      aviationTick();
       simulateEnterprises(clock);
       simulatePowerGrid(clock);
       updateMonetaryPolicy(clock);
@@ -3824,7 +3793,7 @@ async function tick(options = {}) {
 
       if(state.foodReserve<2000)restockEssentials();
       // Archived deaths must never disable the emergency population floor.
-      if(state.flies.filter(f=>f.alive).length<8)replenishResidents(24,"emergency immigration");
+      maintainPopulation();
     }
   } catch (error) {
     console.error("[civilization] tick failed", error);
@@ -3848,8 +3817,8 @@ function getSimulationConfig() {
 
 // Runtime-neutral engine exports. Node/Railway and Cloudflare adapters both use these.
 export {
-  simulateParkWheel,applyWelfareRecovery,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,
-  simulateHeliTour,ensureHeliTrialState,commissionHeliTrial,spend,related,maintainHouseholds,startJourney,
+  simulateParkWheel,applyWelfareRecovery,maintainPopulation,replenishResidents,payBirthGrant,completePregnancy,mortalityReport,
+  simulateHeliTour,bookIslandHoliday,simulateIslandHoliday,aviationSummary,spend,related,maintainHouseholds,startJourney,
   needsAndActivities,payAndFinance,professionalService,reproduction,socialLife,recordInfidelity,revealInfidelity,
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,

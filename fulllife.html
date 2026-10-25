@@ -11,7 +11,7 @@
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     #world{position:fixed;inset:0;background:#07100e}
     #world canvas{width:100%;height:100%;display:block}
-    .topbar{position:fixed;z-index:10;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+    .topbar{flex-wrap:wrap;position:fixed;z-index:10;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
     .brand,.status,.card,.clock-pill{border:1px solid var(--line);background:rgba(8,18,16,.94);box-shadow:0 10px 28px rgba(0,0,0,.18)}
     .brand{padding:11px 13px;border-radius:14px}
     .brand b{font-size:16px;letter-spacing:-.025em}
@@ -23,8 +23,8 @@
     .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 12px rgba(240,197,106,.7)}
     .status[data-state="authoritative"] .dot{background:var(--ok);box-shadow:0 0 12px rgba(102,227,157,.7)}
     .status[data-state="offline"] .dot{background:#ef6b6b;box-shadow:0 0 12px rgba(239,107,107,.7)}
-    .left{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;left:14px;top:78px;width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
-    .right{max-height:calc(100dvh - 150px);overflow:auto;position:fixed;z-index:9;right:14px;top:78px;width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
+    .left{max-height:calc(100dvh - var(--toolbar-bottom,66px) - 84px);overflow:auto;position:fixed;z-index:9;left:14px;top:calc(var(--toolbar-bottom,66px) + 12px);width:min(370px,calc(100vw - 28px));display:grid;gap:10px}
+    .right{max-height:calc(100dvh - var(--toolbar-bottom,66px) - 84px);overflow:auto;position:fixed;z-index:9;right:14px;top:calc(var(--toolbar-bottom,66px) + 12px);width:min(350px,calc(100vw - 28px));display:grid;gap:10px}
     .card{border-radius:16px;overflow:hidden}
     .head{padding:10px 12px;border-bottom:1px solid var(--line);font:850 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;gap:8px}
     .panel-toggle{pointer-events:auto;border:1px solid var(--line);background:rgba(255,255,255,.06);color:#fff;border-radius:7px;width:25px;height:22px;cursor:pointer;font:900 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -33,7 +33,7 @@
     .card.collapsed>:not(.head){display:none!important}
     .left .card.collapsed{justify-self:start}.right .card.collapsed{justify-self:end}
     .settings-wrap{position:relative;pointer-events:auto}
-    .settings-button{height:38px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:rgba(8,18,16,.94);color:#fff;cursor:pointer;font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}
+    .settings-button{pointer-events:auto;height:38px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:rgba(8,18,16,.94);color:#fff;cursor:pointer;font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}
     .settings-menu{display:none;position:absolute;right:0;top:44px;width:245px;padding:12px;border:1px solid var(--line);border-radius:14px;background:rgba(8,18,16,.98);box-shadow:0 14px 36px rgba(0,0,0,.32)}
     .settings-wrap.open .settings-menu{display:block}
     .settings-menu label{display:block;font:800 9px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
@@ -55,7 +55,7 @@
     .bottom{position:fixed;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);width:min(820px,calc(100vw - 28px));pointer-events:none}
     .notice{padding:10px 12px;border-radius:14px;font-size:9px;line-height:1.45;color:rgba(236,245,241,.64)}
     .notice b{color:#fff}
-    .hint{position:fixed;z-index:8;left:50%;top:14px;transform:translateX(-50%);font:700 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.45);pointer-events:none}
+    .hint{position:fixed;z-index:8;left:50%;bottom:78px;transform:translateX(-50%);max-width:700px;width:calc(100vw - 60px);text-align:center;padding:9px 12px;border-radius:10px;background:rgba(8,18,16,.7);font:700 9px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.7);pointer-events:none}
     .mobile-controls{display:none;position:fixed;z-index:12;inset:0;pointer-events:none;touch-action:none}
     .mobile-pad,.mobile-altitude{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));display:grid;gap:7px;pointer-events:auto}
     .mobile-pad{left:18px;grid-template-columns:52px 52px 52px;grid-template-areas:". up ." "left down right"}
@@ -70,7 +70,7 @@
       body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
       .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
     }
-    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:72px;max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
+    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:calc(var(--toolbar-bottom,60px) + 8px);max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
     .status{pointer-events:auto;color:inherit;cursor:pointer;white-space:normal;text-align:left}.status:hover{border-color:var(--ok)}
     .population-button{border:0;color:inherit;text-align:left;cursor:pointer}.population-button:hover{background:#183228}.population-button:focus-visible,.status:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
     #park-view{pointer-events:auto}
@@ -98,6 +98,9 @@
     <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
     <button type="button" class="status" id="connection" data-state="connecting" aria-haspopup="dialog" aria-controls="resident-directory" title="Open living residents and rankings"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></button>
     <button class="settings-button" id="park-view" type="button" title="View Central Park and the free Great Wheel">♧ CENTRAL PARK</button>
+    <button class="settings-button" id="skyline-view" type="button">♜ SKYLINE</button>
+    <button class="settings-button" id="airport-view" type="button">✈ AIRPORT</button>
+    <button class="settings-button" id="island-view" type="button">☀ ISLAND</button>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button">⚙ GRAPHICS</button>
       <div class="settings-menu">
@@ -112,9 +115,13 @@
       </div>
     </div>
   </div>
-  <div class="hint">WASD / ARROWS MOVE · LOOK DOWN + W/↑ DESCENDS · Q/E DOWN/UP · SHIFT SPRINT · DRAG LOOK · SCROLL ZOOM · F FOLLOW FLY · C CITY VIEW</div>
+  <div class="hint">WASD / ARROWS MOVE · LOOK DOWN + W/↑ DESCENDS · Q/E DOWN/UP · DOUBLE-TAP W/↑ FOR 2× SPEED · SHIFT SPRINT · DRAG LOOK · SCROLL ZOOM · F FOLLOW FLY · C CITY VIEW</div>
 
   <aside class="left">
+    <section class="card" id="aviation-card">
+      <div class="head"><span>Hansdrex Air & Island</span><button class="panel-toggle" data-panel="aviation-card" type="button">−</button></div>
+      <div class="legend" style="padding-top:10px"><span id="aviation-board">Connecting to departures…</span><br><span id="aviation-fares">Island flights, full-board resort and airport helicopter tours.</span><br>Residents buy their own tickets and keep an essential-spending reserve. Camera: tap ▲ twice and hold for 2× speed.</div>
+    </section>
     <section class="card" id="city-card">
       <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
       <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span></div>

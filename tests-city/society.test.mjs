@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation,recordInfidelity,revealInfidelity,endRelationship,commissionHeliTrial,simulateHeliTour,planMetroRoute,maybeRoamInsidePark} from '../worker/civilization-server.mjs';
+import {freshState,startJourney,moveFly,needsAndActivities,payAndFinance,professionalService,spend,liquidMoneySupply,inheritHousehold,maintainHouseholds,migrateGroundHousesToSafeLots,migrateResidentNavigation,recordInfidelity,revealInfidelity,endRelationship,simulateHeliTour,planMetroRoute,maybeRoamInsidePark} from '../worker/civilization-server.mjs';
 import {entrance,blocked,BUILDINGS,PARK} from '../worker/city-map.mjs';
 function base(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0};return s;}
 test('sleep begins only after arrival inside the assigned home and remains motionless',()=>{
@@ -53,25 +53,6 @@ test('infidelity is persisted as relationship state and discovery creates jealou
  assert.equal(actor.partnerId,null);assert.equal(partner.partnerId,null);
 });
 
-test('free helicopter commissioning trial starts with residents 1 through 4 and zero-price tickets',()=>{
- const s=base();
- s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};
- const batch=commissionHeliTrial({hour:12,day:1,minute:0});
- assert.deepEqual(batch.map(f=>f.id),['FLY-00001','FLY-00002','FLY-00003','FLY-00004']);
- for(const f of batch){assert.equal(f.lastHeliTicket,0);assert.equal(f.heliPassenger,true);assert.equal(f.transitMode,'helicopter');}
- assert.equal(s.heliTrial.batchesStarted,1);
-});
-test('helicopter trial advances through all first ten residents in batches',()=>{
- const s=base();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};
- for(let batchNo=0;batchNo<3;batchNo++){
-   const batch=commissionHeliTrial({hour:12,day:1,minute:0});
-   assert.ok(batch.length>0&&batch.length<=4);
-   s.simulationAgeSeconds=Math.max(...batch.map(f=>f.heliTourUntil));
-   for(const f of batch)simulateHeliTour(f,{hour:12,day:1,minute:0});
- }
- assert.deepEqual([...s.heliTrial.completedIds].sort(),Array.from({length:10},(_,i)=>`FLY-${String(i+1).padStart(5,'0')}`).sort());
-});
-
 test('metro route includes stairs, a visible platform wait and a station exit',()=>{
  const s=base(),f=s.flies[0];
  f.x=-300;f.z=-300;f.vehicle=null;f.money=100;
@@ -96,4 +77,16 @@ test('resident can leave the park path and roam across legal Central Park interi
  assert.ok(Math.abs(f.finalTargetX-PARK.x)<PARK.w/2);
  assert.ok(Math.abs(f.finalTargetZ-PARK.z)<PARK.d/2);
  assert.equal(blocked({x:f.finalTargetX,z:f.finalTargetZ}),false);
+});
+
+test('choosing sleep while already home stays indoors without another journey',()=>{
+ const s=base(),f=s.flies[0];Object.assign(f,{currentLocationId:f.homeId,indoors:true,traveling:false,x:f.homeX,z:f.homeZ});
+ startJourney(f,{id:f.homeId,action:'sleeping'});
+ assert.equal(f.traveling,false);assert.equal(f.indoors,true);assert.equal(f.sleeping,true);assert.equal(f.x,f.homeX);
+});
+test('partners moving in share one logical home as well as coordinates',()=>{
+ const s=base(),a=s.flies[0],b=s.flies[1];a.partnerId=b.id;b.partnerId=a.id;
+ a.affection=b.affection=100;a.traveling=b.traveling=false;b.ownsHome=false;a.relationshipSince=b.relationshipSince=0;
+ a.homeId='apt-east';b.homeId='apt-west';s.simulationAgeSeconds=86400*12;
+ maintainHouseholds();assert.equal(a.householdId,b.householdId);assert.equal(a.homeId,b.homeId);assert.equal(a.homeX,b.homeX);assert.equal(a.homeZ,b.homeZ);
 });
