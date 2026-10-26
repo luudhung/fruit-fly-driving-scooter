@@ -72,3 +72,6 @@ snapshots/
 /test-results/
 .env.production
 .claude/
+
+# Lossless full-connectome runtime assets, generated during the Vercel build.
+public/neural/

@@ -8,6 +8,14 @@
       {
         "name": "CIVILIZATION",
         "class_name": "CivilizationWorld"
+      },
+      {
+        "name": "NEURAL_BRAINS",
+        "class_name": "FlyWireBrainShard"
+      },
+      {
+        "name": "NEURAL_COORDINATOR",
+        "class_name": "FlyWireNeuralCoordinator"
       }
     ]
   },
@@ -17,11 +25,26 @@
       "new_sqlite_classes": [
         "CivilizationWorld"
       ]
+    },
+    {
+      "tag": "v2-flywire-neural",
+      "new_sqlite_classes": [
+        "FlyWireBrainShard",
+        "FlyWireNeuralCoordinator"
+      ]
     }
   ],
   "vars": {
     "CIV_WORLD_ID": "WORLD-A",
     "CIV_ALARM_INTERVAL_MS": "60000",
-    "CIV_IDLE_MAX_STEPS": "90"
+    "CIV_IDLE_MAX_STEPS": "12",
+    "NEURAL_ENABLED": "1",
+    "NEURAL_ASSET_ORIGIN": "https://fruit-fly-driving-scooter.vercel.app",
+    "NEURAL_INTERVAL_MS": "360000",
+    "NEURAL_STEPS_PER_CYCLE": "128"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
   }
 }

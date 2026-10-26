@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {freshState,applyWelfareRecovery,payBirthGrant,needsAndActivities,mortalityReport,liquidMoneySupply,completePregnancy,maintainPopulation,restoreState} from '../worker/civilization-engine.mjs';
-test('extinction recovery adds exactly 300 with homes and independent brains, preserving dead history, once',()=>{
+test('extinction recovery adds exactly 500 with homes and independent brains, preserving dead history, once',()=>{
  const s=freshState();for(const f of s.flies){f.alive=false;f.causeOfDeath='natural causes';f.thirst=100;}
  s.deaths=s.flies.length;const old=[...s.flies];s.welfare.recoveryVersion=0;
- assert.equal(applyWelfareRecovery(),300);const live=s.flies.filter(f=>f.alive);
- assert.equal(live.length,300);assert.equal(new Set(live.map(f=>f.brain.id)).size,300);
+ assert.equal(applyWelfareRecovery(),500);const live=s.flies.filter(f=>f.alive);
+ assert.equal(live.length,500);assert.equal(new Set(live.map(f=>f.brain.id)).size,500);
  assert.ok(live.every(f=>f.householdId&&f.housingUnitId));assert.ok(old.every(f=>!f.alive));
  assert.equal(applyWelfareRecovery(),0);assert.equal(s.deaths,old.length);
  assert.equal(mortalityReport().byCause['natural causes'],old.length);
@@ -41,24 +41,24 @@ test('park wheel admits a penniless resident and reduces stress after a real rou
  s.simulationAgeSeconds=end;simulateParkWheel(f);assert.equal(f.wheelRideUntil,0);assert.equal(f.money,0);assert.ok(f.stress<70);assert.equal(s.parkLeisure.completedRides,1);
 });
 
-test('restoring 13 survivors adds 287 residents once and preserves survivors and death history',()=>{
+test('restoring 13 survivors adds 487 residents once and preserves survivors and death history',()=>{
  const s=freshState();s.flies=s.flies.slice(0,117);
  for(let i=0;i<104;i++){s.flies[i].alive=false;s.flies[i].causeOfDeath='natural causes';}
  s.deaths=104;s.airportExpansionVersion=0;s.welfare.recoveryVersion=1;s.mapVersion=13;
  const survivors=s.flies.filter(f=>f.alive).map(f=>({id:f.id,brain:f.brain.id,money:f.money,savings:f.savings}));
  const age=s.simulationAgeSeconds;
  restoreState(s);
- assert.equal(s.flies.filter(f=>f.alive).length,300);assert.equal(s.deaths,104);assert.equal(s.simulationAgeSeconds,age);
+ assert.equal(s.flies.filter(f=>f.alive).length,500);assert.equal(s.deaths,104);assert.equal(s.simulationAgeSeconds,age);
  for(const previous of survivors){const f=s.flies.find(f=>f.id===previous.id);assert.deepEqual({id:f.id,brain:f.brain.id,money:f.money,savings:f.savings},previous);}
  assert.ok(s.flies.filter(f=>f.alive).every(f=>f.housingUnitId));
  const count=s.flies.length;restoreState(s);assert.equal(s.flies.length,count);
 });
-test('population support replenishes below 270 at most daily and never revives the dead',()=>{
- const s=freshState(),archived=s.flies.slice(0,31);
- for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=31;
- assert.equal(maintainPopulation(),31);assert.equal(s.flies.filter(f=>f.alive).length,300);
+test('population support replenishes below 450 at most daily and never revives the dead',()=>{
+ const s=freshState(),archived=s.flies.slice(0,51);
+ for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=51;
+ assert.equal(maintainPopulation(),51);assert.equal(s.flies.filter(f=>f.alive).length,500);
  assert.ok(archived.every(f=>!f.alive));
- for(const f of s.flies.filter(f=>f.alive).slice(0,31))f.alive=false;
+ for(const f of s.flies.filter(f=>f.alive).slice(0,51))f.alive=false;
  assert.equal(maintainPopulation(),0);s.simulationAgeSeconds+=86400;
- assert.equal(maintainPopulation(),31);assert.equal(s.flies.filter(f=>f.alive).length,300);
+ assert.equal(maintainPopulation(),51);assert.equal(s.flies.filter(f=>f.alive).length,500);
 });

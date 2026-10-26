@@ -6,6 +6,7 @@ export const MAP_VERSION:number, WORLD_HALF:number;
 export const AIRPORT:{terminal:Rect;gate:Point;runway:Rect;apron:Rect;helipad:Point&{y:number};heliAccess:Point};
 export const ISLAND:{x:number;z:number;rx:number;rz:number;runway:Rect;terminal:Rect;gate:Point;resort:Rect;beach:Point};
 export const SEA:Rect;
+export const MANSION:Rect&{h:number};
 export function onIsland(p:Point,margin?:number):boolean;
 export function atSea(p:Point):boolean;
 export const PARK:Rect;

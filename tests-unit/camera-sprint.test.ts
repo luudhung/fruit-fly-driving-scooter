@@ -8,7 +8,7 @@ test('double forward press gives exactly 2x while held; release, blur, and slow 
  c.reset();assert.equal(c.pressed.size,0);assert.equal(c.multiplier,1);c.down('KeyW',1200);assert.equal(c.multiplier,1);
  c.up('KeyW');c.down('KeyW',1700);assert.equal(c.multiplier,1);
 });
-test('simultaneous forward bindings and shift never stack speed beyond 2x',()=>{
- const c=new CameraSprint();c.down('KeyW',0);c.down('ArrowUp',50);assert.equal(c.multiplier,1);c.down('ShiftLeft',60);assert.equal(c.multiplier,2);
- c.down('ShiftRight',65);assert.equal(c.multiplier,2);c.up('ShiftLeft');assert.equal(c.multiplier,2);c.up('ShiftRight');assert.equal(c.multiplier,1);
+test('simultaneous forward bindings and control never stack speed beyond 2x',()=>{
+ const c=new CameraSprint();c.down('KeyW',0);c.down('ArrowUp',50);assert.equal(c.multiplier,1);c.down('ControlLeft',60);assert.equal(c.multiplier,2);
+ c.down('ControlRight',65);assert.equal(c.multiplier,2);c.up('ControlLeft');assert.equal(c.multiplier,2);c.up('ControlRight');assert.equal(c.multiplier,1);
 });

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {AIRPORT,ISLAND,SEA} from '../worker/city-map.mjs';
+import {AIRPORT,ISLAND,SEA,MANSION} from '../worker/city-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const stone=new THREE.MeshStandardMaterial({color:0xc8c5b9,roughness:.65,metalness:.12});
 const metal=new THREE.MeshStandardMaterial({color:0xa8bdc6,roughness:.26,metalness:.7});
@@ -88,9 +88,10 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  const r=ISLAND.resort;box(g,r.w,9,r.d,r.x,5,r.z,stone);box(g,r.w+4,.7,r.d+4,r.x,10,r.z,gold);
  for(const z of [-1,1])for(let i=-4;i<=4;i++){box(g,2.8,4,.1,r.x+i*4.5,5,r.z+z*(r.d/2+.1),glass);box(g,.2,7,.2,r.x+i*4.5,4,r.z+z*(r.d/2+3),metal);}
  slab(r.x,r.z+22,32,10,new THREE.MeshStandardMaterial({color:0x5bd4d1,roughness:.18}),.8);
- for(let i=0;i<5;i++){const x=100+i*32,z=884;box(g,15,5,12,x,3,z,stone);const roof=new THREE.Mesh(new THREE.ConeGeometry(12,4,4),gold);roof.rotation.y=Math.PI/4;roof.position.set(x,7,z);g.add(roof);}
+ for(let i=0;i<5;i++){const x=100+i*32,z=884;if(Math.abs(x-MANSION.x)<MANSION.w/2+9)continue;box(g,15,5,12,x,3,z,stone);const roof=new THREE.Mesh(new THREE.ConeGeometry(12,4,4),gold);roof.rotation.y=Math.PI/4;roof.position.set(x,7,z);g.add(roof);}
  for(let i=0;i<26;i++){
   const a=i*2.399,x=ISLAND.x+Math.cos(a)*(i%2?172:126),z=ISLAND.z+Math.sin(a)*105;
+  if(Math.abs(x-MANSION.x)<MANSION.w/2+7&&Math.abs(z-MANSION.z)<MANSION.d/2+7)continue;
   if(z<790||Math.abs(x-r.x)<30&&Math.abs(z-r.z)<35)continue;
   const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.35,.65,9,6),new THREE.MeshStandardMaterial({color:0x8c6b49}));trunk.position.set(x,5,z);g.add(trunk);
   for(let j=0;j<4;j++){const leaf=new THREE.Mesh(new THREE.ConeGeometry(3.5,7,4),new THREE.MeshStandardMaterial({color:0x287d54,roughness:1}));leaf.scale.set(1,.2,1);leaf.rotation.y=j*Math.PI/2;leaf.position.set(x+Math.cos(j*Math.PI/2)*2.5,9,z+Math.sin(j*Math.PI/2)*2.5);g.add(leaf);}

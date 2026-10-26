@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 15;
+export const MAP_VERSION = 17;
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -11,6 +11,7 @@ export const ISLAND = {
  runway:{x:145,z:742,w:240,d:16}, terminal:{x:65,z:785,w:30,d:16},
  gate:{x:65,z:795}, resort:{x:185,z:820,w:44,d:24}, beach:{x:255,z:834},
 };
+export const MANSION={x:110,z:864,w:80,d:48,h:10.5};
 export const SEA={x:0,z:900,w:2300,d:860};
 export function onIsland(p,margin=0){return ((p.x-ISLAND.x)/(ISLAND.rx-margin))**2+((p.z-ISLAND.z)/(ISLAND.rz-margin))**2<1;}
 export function atSea(p){return p.z>470&&!onIsland(p);}
@@ -140,6 +141,7 @@ function place(b) {
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
 place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
 place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
+place({id:'hansdrex-mansion',...MANSION,kind:'mansion'});
 for(const loc of LOCATIONS) {
  if(['airport','island-airport','island-resort'].includes(loc.id))continue;
  if(['home','transit','social'].includes(loc.type)&&!['cafe','tea-house','cinema'].includes(loc.id))continue;
@@ -211,8 +213,8 @@ for(let xi=0;xi<URBAN_X.length-1;xi++)for(let zi=0;zi<URBAN_Z.length-1;zi++){
 // Additional apartment clusters bridge the high-rise core into the mid-rise neighborhoods.
 for(const x of [-260,-210,210,260])for(const z of [-300,-240,180,240,300])addApartment(x,z,28+Math.max(0,62-distanceFromPark(x,z)*.16),12,16);
 
-// Reuse existing downtown footprints as residential towers for 300 residents and new families.
-for(const b of BUILDINGS.filter(b=>b.kind==='block'&&b.h>50).slice(0,24)){
+// Reuse existing downtown footprints as residential towers for 500 residents and new families.
+for(const b of BUILDINGS.filter(b=>b.kind==='block'&&b.h>50).slice(0,44)){
  b.id=`APT-${APARTMENTS.length+1}`;b.kind='apartment';b.capacity=10;b.rent=24;b.purchaseValue=5040;
  APARTMENTS.push(b);
 }
@@ -303,7 +305,7 @@ export function pedestrianRoute(start,dest,mode="walk") {
  // The island is a separate pedestrian district. Never join it to the city lattice over water.
  if(onIsland(start)||onIsland(dest)){
   if(!onIsland(start)||!onIsland(dest)||mode!=="walk")return [];
-  const a=entrance(start),b=entrance(dest),hub={x:130,z:858};
+  const a=entrance(start),b=entrance(dest),hub={x:155,z:838};
   const path=clearSegment(a,b)?[a,b]:[a,hub,b];
   if(path.some((p,i)=>i&&!clearSegment(path[i-1],p)))return [];
   return path.map(p=>({...p,mode:'walk',stage:'island-promenade'}));

@@ -1,3 +1,4 @@
+export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {
   freshState,
@@ -9,6 +10,7 @@ import {
   snapshotLooksUsable,
   setNeuralSyncEnabled,
   getSimulationConfig,
+  getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,
 } from "../../worker/civilization-engine.mjs";
 
 const SNAPSHOT_META_KEY = "snapshot:meta";
@@ -159,6 +161,9 @@ export class CivilizationWorld extends DurableObject {
       }
       await this.ensureAlarm();
     });
+    if(env.NEURAL_ENABLED==='1'&&env.NEURAL_COORDINATOR){
+      ctx.waitUntil(this.ready.then(()=>env.NEURAL_COORDINATOR.getByName(env.CIV_WORLD_ID||DEFAULT_WORLD_ID).ensureRunning()).catch(error=>console.error(JSON.stringify({event:'neural_start_failed',error:String(error)}))));
+    }
   }
 
   withLock(fn) {
@@ -192,7 +197,10 @@ export class CivilizationWorld extends DurableObject {
     const raw = getRawState();
     if (!snapshotLooksUsable(raw)) freshState();
 
-    const maxSteps = reason === "alarm" ? this.idleMaxSteps() : 24;
+    // Preserve elapsed game time while bounding decision samples as the city grows.
+    const population = getRawState().flies.filter(fly=>fly.alive).length;
+    const decisionBudget = Math.max(4, Math.min(24, Math.floor(6000/Math.max(1,population))));
+    const maxSteps = reason === "alarm" ? Math.min(this.idleMaxSteps(),decisionBudget) : decisionBudget;
     const steps = Math.min(
       maxSteps,
       Math.max(1, Math.ceil(elapsedRealSeconds)),
@@ -230,6 +238,19 @@ export class CivilizationWorld extends DurableObject {
     });
   }
 
+  async getNeuralInputs(){
+    await this.ready;
+    return this.withLock(async()=>({worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:getNeuralAgents()}));
+  }
+  async applyNeuralBatch(batch){
+    await this.ready;
+    return this.withLock(async()=>{const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(true);return status;});
+  }
+  async neuralCycleFailed(details){
+    await this.ready;
+    return this.withLock(async()=>{markNeuralCycleFailed(details);return getNeuralStatus();});
+  }
+
   async fetch(request) {
     return this.withLock(async () => {
       await this.ready;
@@ -239,6 +260,15 @@ export class CivilizationWorld extends DurableObject {
       }
 
       const url = new URL(request.url);
+      // Observing checkpoints does not force additional city decision work.
+      if(url.pathname==='/api/civilization/neural'){
+        const status=getNeuralStatus(),freshFor=Math.max(120000,Number(status.intervalMs||1000)*3);
+        return json({...status,brains:getRawState().flies.filter(f=>f.alive).map(f=>{
+          const fc=f.brain?.fullConnectome;
+          return {id:f.id,brainId:f.brain?.id,connected:Boolean(fc?.connected&&Date.now()-Number(fc.lastSyncAt||0)<=freshFor),neurons:fc?.neurons||0,edges:fc?.edges||0,steps:fc?.neuralStepsTotal||0,spikesThisBatch:fc?.spikesThisBatch||0,lastSyncAt:fc?.lastSyncAt||0};
+        })});
+      }
+
       const advance = await this.advanceTo(Date.now(), "request");
 
       if (url.pathname === "/health") {
@@ -256,6 +286,7 @@ export class CivilizationWorld extends DurableObject {
           alarmIntervalMs: this.alarmIntervalMs(),
           sampledCatchup: advance,
           storage: this.storageStats,
+          neural:getNeuralStatus(),
         });
       }
 

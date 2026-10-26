@@ -1,5 +1,9 @@
 import * as THREE from "three";
+import {InstancedResidents} from "./instanced-residents";
 import { CameraSprint } from "./camera-sprint";
+import {buildMansion} from "./mansion-renderer.ts";
+import {PlayerController} from "./player-controller.ts";
+import {mansionSpawn,mansionRoomAt} from "./mansion-layout.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland} from "./city-landmarks";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
@@ -90,6 +94,7 @@ type FlyState = {
     consumeDrive: number;
     motorDrive: number;
     regionActivity?: number[];
+    engine?:string;stepsPerCycle?:number;spikesThisBatch?:number;lastSyncAt?:number;
   } | null;
   brainDynamic?: {
     fatigue: number;
@@ -178,6 +183,7 @@ type CivilizationSnapshot = {
   daysPerYear?: number;
   neuralBridge?: {
     connected?: boolean;
+    allBrainsReady?:boolean;livingBrains?:number;intervalMs?:number;stepsPerCycle?:number;minNeuralSteps?:number;lastCompleteCycleAt?:number;
     topologyShared?: boolean;
     independentDynamicState?: boolean;
     registeredBrains?: number;
@@ -339,7 +345,7 @@ window.addEventListener("unhandledrejection",(event)=>{
   if(connection.dataset.state==="connecting")setConnection("connecting","APP ERROR · CENSUS RETRYING ▾");
 });
 
-const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://civilization-core-production.up.railway.app").replace(/\/$/, "");
+const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
 const SNAPSHOT_CACHE_KEY = "fulllife:last-good-civilization-snapshot:v1";
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
@@ -439,34 +445,41 @@ function renderInspector(fly: FlyState | null) {
   exciteMeter.style.width = `${fly.excitement}%`;
   healthMeter.style.width = `${fly.health}%`;
 
-  const activity = [
+  const modeledActivity = [
     fly.stress / 100,
     fly.hunger / 100,
     fly.excitement / 100,
     fly.happiness / 100,
     fly.energy / 100,
   ];
+  const measured=Boolean(fc?.connected&&fc.fullConnectome);
+  const activity=measured?(fc?.regionActivity||[]).map(v=>1-Math.exp(-v*95)):modeledActivity;
+  const title=document.getElementById("brain-card-title");if(title)title.textContent=measured?'Measured FlyWire activity':'Modeled activity · brain pending';
   ([...brainGrid.children] as HTMLElement[]).forEach((cell, i) => {
     const a = activity[i % activity.length] ?? 0;
     cell.style.background = `rgba(102,227,157,${0.05 + a * 0.9})`;
     cell.style.boxShadow = a > 0.72 ? `0 0 8px rgba(102,227,157,${a * 0.65})` : "none";
   });
-  brainNote.textContent =
-    `${fly.brainId || "brain"} / ${fly.id}: brain choice “${fly.brainDecision || fly.action}” (${Math.round((fly.brainConfidence ?? 0) * 100)}%). Stress ${fly.stress.toFixed(0)} · hunger ${fly.hunger.toFixed(0)} · excitement ${fly.excitement.toFixed(0)} · happiness ${fly.happiness.toFixed(0)} · energy ${fly.energy.toFixed(0)}. Full-connectome drives are read from this fly’s independent Rust Sim buffer; the green grid remains a compact visualization, not a neuron-by-neuron anatomical map.`;
+  brainNote.textContent = measured
+    ? `${fly.brainId}: ${num(fc!.neurons)} neurons · ${num(fc!.edges)} connections · ${num(fc!.neuralStepsTotal)} LIF steps measured. The grid shows regional spike rates. Each step is 1 biological millisecond; budgeted batches run slower than biological real time.`
+    : `${fly.brainId||'Brain'}: awaiting a full-connectome checkpoint. These bands show city-state inputs, not measured neuronal spikes.`;
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
   snapshot = s;
   snapshotReceivedAt=performance.now();
-  const neuralLive = Boolean(s.neuralBridge?.connected && s.neuralBridge?.independentDynamicState);
+  const neuralLive = Boolean(s.neuralBridge?.allBrainsReady && s.neuralBridge?.independentDynamicState);
   const living=(s.flies||[]).filter(f=>f.alive);
   residentDirectory.update(living,s.deaths,s.births,s.mortality?.byCause);
   setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
   if(s.mapVersion!==MAP_VERSION)setConnection("connecting",`${living.length} ALIVE · WORKER UPDATE NEEDED ▾`);
-  connection.title=`Open ${living.length} living residents. Brain registry: ${s.neuralBridge?.registeredBrains||0} historical registrations; this is not the living population.`;
+  connection.title=`Open ${living.length} living residents. ${s.neuralBridge?.registeredBrains||0}/${living.length} independent full-connectome brains have fresh measured checkpoints.`;
+  const neuralCensus=document.getElementById("neural-census"),neuralCadence=document.getElementById("neural-cadence");
+  if(neuralCensus)neuralCensus.textContent=`${s.neuralBridge?.registeredBrains||0} / ${living.length} · ${neuralLive?'FULL GRAPH':'WARMING'}`;
+  if(neuralCadence)neuralCadence.textContent=s.neuralBridge?.intervalMs?`${s.neuralBridge.stepsPerCycle||0} steps / ${Math.round(s.neuralBridge.intervalMs/60000)} min · ${s.neuralBridge.error?'retrying':'CPU budgeted'}`:'Preparing full FlyWire…';
   if(!s.authoritative)residentDirectory.offline();
   const policy=document.getElementById("welfare-policy");
-  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · population target ${s.welfare.populationTarget||300} (immigration below ${s.welfare.immigrationThreshold||270}) · wheel ${s.parkLeisure?.passengers||0} riding / ${s.parkLeisure?.completedRides||0} completed`:'Awaiting public-support policy update';
+  if(policy)policy.textContent=s.welfare?`Birth grant ${s.welfare.birthGrantPerChild.toLocaleString()} H$ / child · meals ${s.welfare.essentialMealPrice} H$ · water & park rides free · population target ${s.welfare.populationTarget||500} (immigration below ${s.welfare.immigrationThreshold||450}) · wheel ${s.parkLeisure?.passengers||0} riding / ${s.parkLeisure?.completedRides||0} completed`:'Awaiting public-support policy update';
   const air=s.aviation;
   const airBoard=document.getElementById("aviation-board");
   const fareBoard=document.getElementById("aviation-fares");
@@ -616,11 +629,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
 scene.fog = new THREE.Fog(0x93b8cf, 520, 2400);
 
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.2, 3000);
+const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 3000);
 const renderer = new THREE.WebGLRenderer({
-  antialias: graphics.metroDetail >= 2,
+  antialias: true,
+  logarithmicDepthBuffer: true,
   powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
-  precision: graphicsPreset === "ultra" && !coarseDevice ? "highp" : "mediump",
+  precision: "highp",
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
@@ -630,6 +644,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = graphicsPreset === "ultra" ? 1.18 : graphicsPreset === "high" ? 1.14 : graphicsPreset === "medium" ? 1.10 : 1.06;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
+renderer.domElement.dataset.depthMode="logarithmic-highp";
 renderer.domElement.addEventListener("webglcontextlost",(event)=>{
   event.preventDefault();
   console.error("[fulllife] WebGL context lost");
@@ -984,6 +999,7 @@ const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.3
 buildHansdrexEmpire(cityRoot,makeCanvasSprite);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
+buildMansion(cityRoot,makeCanvasSprite);
 
 const heliPadCenter=new THREE.Vector3(AIRPORT.helipad.x,AIRPORT.helipad.y,AIRPORT.helipad.z);
 const heliTourGroup=new THREE.Group();
@@ -1281,7 +1297,7 @@ function makeCanvasSprite(text: string, fontSize = 54, scale = 2.2): THREE.Sprit
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
   sprite.scale.set(scale * 2, scale, 1);
   sprite.userData.text = text;
   return sprite;
@@ -1328,64 +1344,32 @@ function flyStatusEmoji(fly: FlyState) {
   return "";
 }
 
-const MAX_RENDERED_FLIES = graphics.maxFlies;
+const MAX_RENDERED_FLIES = 600;
 const flyVisuals = new Map<string, FlyVisual>();
-const flyPickables: THREE.Object3D[] = [];
-const bodyMat = new THREE.MeshStandardMaterial({ color: 0x33261f, roughness: 0.55 });
-const abdomenMat = new THREE.MeshStandardMaterial({ color: 0x5a3f2a, roughness: 0.65 });
-const eyeMat = new THREE.MeshStandardMaterial({ color: 0xa51e24, emissive: 0x440000, emissiveIntensity: 0.6 });
-const wingMat = new THREE.MeshStandardMaterial({
-  color: 0xdcecff,
-  transparent: true,
-  opacity: 0.48,
-  roughness: 0.15,
-  metalness: 0,
-  side: THREE.DoubleSide,
-  depthWrite: false,
-});
+const residentBodies=new InstancedResidents(scene,640);
+const flyPickables=residentBodies.pickables;
 
 function createFlyVisual(id: string): FlyVisual {
   const group = new THREE.Group();
   group.scale.setScalar(graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18);
 
-  // Ultra-light fly: two body meshes + two wings. The server still simulates every fly
-  // independently; this only cuts browser draw calls.
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.45, 7, 5), bodyMat);
-  thorax.scale.set(1, 0.82, 1.12);
-  thorax.userData.flyId = id;
-  group.add(thorax);
-
-  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.38, 7, 5), abdomenMat);
-  abdomen.scale.set(0.88, 0.74, 1.45);
-  abdomen.position.z = 0.55;
-  abdomen.userData.flyId = id;
-  group.add(abdomen);
-
-  for (const sx of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.CircleGeometry(0.58, 7), wingMat);
-    wing.scale.set(1.35, 0.55, 1);
-    wing.rotation.set(Math.PI / 2.7, 0, sx * 0.72);
-    wing.position.set(sx * 0.42, 0.26, 0.06);
-    group.add(wing);
-  }
-
   const halo = new THREE.Mesh(
     new THREE.RingGeometry(0.62, 0.82, 10),
-    new THREE.MeshBasicMaterial({ color: 0xffe48a, transparent: true, opacity: 0, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color: 0xffe48a, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite:false }),
   );
   halo.rotation.x = -Math.PI / 2;
   halo.position.y = -0.58;
   group.add(halo);
 
   // No canvas texture is allocated until this fly actually needs a visible status icon.
-  const status = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+  const status = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false }));
   status.scale.set(2.8, 1.4, 1);
   status.userData.text = "";
   status.position.set(0, 1.45, 0);
   status.visible = false;
   group.add(status);
 
-  flyPickables.push(thorax, abdomen);
+
   // Child geometry is static relative to the fly; only the parent group moves.
   group.children.forEach((child) => {
     child.updateMatrix();
@@ -1427,20 +1411,18 @@ function syncFlyMeshes(flies: FlyState[]) {
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
     visual.group.scale.setScalar(ageScale * visibilityScale);
-    (visual.halo.material as THREE.MeshBasicMaterial).opacity = selectedFlyId === fly.id ? 0.85 : 0;
+    (visual.halo.material as THREE.MeshBasicMaterial).opacity = .85;visual.halo.visible=selectedFlyId===fly.id;
     const emoji = flyStatusEmoji(fly);
-    const showStatus = Boolean(emoji) && (selectedFlyId===fly.id || graphics.metroDetail>=2);
+    const showStatus = Boolean(emoji) && selectedFlyId===fly.id;
     visual.status.visible = showStatus;
     if (showStatus) updateSpriteText(visual.status, emoji);
-    if (Math.abs(fly.vx) + Math.abs(fly.vz) > 0.001) {
-      visual.group.rotation.y = Math.atan2(fly.vx, fly.vz);
-    }
+
   }
 
   for (const [id, visual] of flyVisuals) {
     if (!active.has(id)) {
       scene.remove(visual.group);
-      for(let i=flyPickables.length-1;i>=0;i--)if(flyPickables[i].userData.flyId===id)flyPickables.splice(i,1);
+
       visual.status.material.map?.dispose();visual.status.material.dispose();
       flyVisuals.delete(id);
     }
@@ -1518,14 +1500,17 @@ let lastRenderedAt = 0;
 const TARGET_FRAME_MS = 1000 / graphics.fps;
 const cameraSprint=new CameraSprint();
 const pressed=cameraSprint.pressed;
-const freePosition = new THREE.Vector3(86, 54, 105);
+const player=new PlayerController();
+const freePosition = new THREE.Vector3(player.x,player.y,player.z);
 const lookDirection = new THREE.Vector3();
 const moveForward = new THREE.Vector3();
 const moveRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 
 function setCameraOverview() {
+  document.body.classList.remove("mansion-visit");
   followSelected = false;
+  player.teleport(420,290,510,true);
   freePosition.set(420, 290, 510);
   cameraYaw = -2.47;
   cameraPitch = -0.40;
@@ -1543,19 +1528,26 @@ function cameraForward(out = new THREE.Vector3()) {
 }
 
 document.getElementById("park-view")?.addEventListener("click",()=>{
- followSelected=false;freePosition.set(205,235,105);
+ document.body.classList.remove("mansion-visit");
+ followSelected=false;player.teleport(205,235,105,true);freePosition.set(205,235,105);
  const direction=new THREE.Vector3(PARK.x,12,PARK.z).sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
  camera.fov=50;camera.updateProjectionMatrix();
 });
 function frameDestination(position:THREE.Vector3,target:THREE.Vector3){
- followSelected=false;cameraSprint.reset();freePosition.copy(position);
+ document.body.classList.remove("mansion-visit");
+ followSelected=false;cameraSprint.reset();player.teleport(position.x,position.y,position.z,true);freePosition.copy(position);
  const direction=target.sub(position).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
  camera.fov=52;camera.updateProjectionMatrix();
 }
 document.getElementById("skyline-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(160,180,270),new THREE.Vector3(5,122,43.5)));
 document.getElementById("airport-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(90,185,-230),new THREE.Vector3(-180,0,-465)));
 document.getElementById("island-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(440,245,1055),new THREE.Vector3(ISLAND.x,0,ISLAND.z)));
-setCameraOverview();
+function visitMansion(){
+ document.body.classList.add("mansion-visit");
+ followSelected=false;cameraSprint.reset();player.teleport(mansionSpawn.x,mansionSpawn.y,mansionSpawn.z);freePosition.set(player.x,player.y,player.z);cameraYaw=0;cameraPitch=0;camera.fov=68;camera.updateProjectionMatrix();
+}
+document.getElementById("mansion-view")?.addEventListener("click",visitMansion);
+visitMansion();
 camera.position.copy(freePosition);
 
 renderer.domElement.tabIndex = 0;
@@ -1593,17 +1585,19 @@ renderer.domElement.addEventListener("wheel", (e) => {
 const movementKeys = new Set([
   "KeyW","KeyA","KeyS","KeyD",
   "ArrowUp","ArrowDown","ArrowLeft","ArrowRight",
-  "KeyQ","KeyE","ShiftLeft","ShiftRight",
+  "KeyQ","KeyE","Space","ShiftLeft","ShiftRight","ControlLeft","ControlRight",
 ]);
 addEventListener("keydown", (e) => {
   if(document.querySelector<HTMLDialogElement>("#resident-directory")?.open||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
   if (movementKeys.has(e.code)) {
     cameraSprint.down(e.code,performance.now(),e.repeat);
+    if(e.code==="Space")player.jumpDown(performance.now(),e.repeat);
     e.preventDefault();
     followSelected = false;
   }
   if (e.code === "KeyF" && selectedFlyId) {
     followSelected = !followSelected;
+    if(!followSelected)player.teleport(freePosition.x,freePosition.y,freePosition.z,true);
     e.preventDefault();
   }
   if (e.code === "KeyC") {
@@ -1611,10 +1605,10 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 });
-addEventListener("blur",()=>{cameraSprint.reset();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
+addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
-addEventListener("keyup", (e) => {cameraSprint.up(e.code);if (movementKeys.has(e.code)) e.preventDefault();});
-document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;cameraSprint.down(key,performance.now());button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();cameraSprint.up(key);button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{cameraSprint.up(key);button.classList.remove("active");});});
+addEventListener("keyup", (e) => {cameraSprint.up(e.code);if(e.code==="Space")player.jumpUp();if (movementKeys.has(e.code)) e.preventDefault();});
+document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;cameraSprint.down(key,performance.now());if(key==="Space")player.jumpDown(performance.now());button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();cameraSprint.up(key);if(key==="Space")player.jumpUp();button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{cameraSprint.up(key);if(key==="Space")player.jumpUp();button.classList.remove("active");});});
 
 const mobileInspectorToggle=document.getElementById("mobile-inspector-toggle") as HTMLButtonElement | null;
 mobileInspectorToggle?.addEventListener("click",(e)=>{
@@ -1633,7 +1627,7 @@ renderer.domElement.addEventListener("click", (e) => {
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
   const hit = raycaster.intersectObjects(flyPickables, false)[0];
-  const id = hit?.object?.userData?.flyId as string | undefined;
+  const id = residentBodies.flyId(hit?.instanceId);
   if (!id) return;
   selectedFlyId = id;
   const fly = latestFlyStates.get(id) || null;
@@ -1644,7 +1638,7 @@ renderer.domElement.addEventListener("click", (e) => {
     if (mobileInspectorToggle) mobileInspectorToggle.textContent="CLOSE INFO";
   }
   for (const [fid, visual] of flyVisuals) {
-    (visual.halo.material as THREE.MeshBasicMaterial).opacity = fid === id ? 0.85 : 0;
+    visual.halo.visible=fid===id;
   }
 });
 
@@ -1659,34 +1653,25 @@ function updateFreeCamera(dt: number) {
       cameraPitch = Math.asin(THREE.MathUtils.clamp(toward.y, -1, 1));
     }
   } else {
-    cameraForward(moveForward);
-    if (moveForward.lengthSq() < 1e-5) moveForward.set(0,0,-1);
-    moveForward.normalize();
-    moveRight.set(moveForward.x,0,moveForward.z);
-    if(moveRight.lengthSq()<1e-5) moveRight.set(0,0,-1);
-    moveRight.normalize();
-    moveRight.crossVectors(moveRight,worldUp).normalize();
-
-    let forwardAxis = 0;
-    let strafeAxis = 0;
-    let verticalAxis = 0;
-    if (pressed.has("KeyW") || pressed.has("ArrowUp")) forwardAxis += 1;
-    if (pressed.has("KeyS") || pressed.has("ArrowDown")) forwardAxis -= 1;
-    if (pressed.has("KeyD") || pressed.has("ArrowRight")) strafeAxis += 1;
-    if (pressed.has("KeyA") || pressed.has("ArrowLeft")) strafeAxis -= 1;
-    if (pressed.has("KeyE")) verticalAxis += 1;
-    if (pressed.has("KeyQ")) verticalAxis -= 1;
-
-    const speed = 22 * cameraSprint.multiplier * dt;
-    freePosition.addScaledVector(moveForward, forwardAxis * speed);
-    freePosition.addScaledVector(moveRight, strafeAxis * speed);
-    freePosition.y += verticalAxis * speed * 0.75;
-
-    freePosition.x = THREE.MathUtils.clamp(freePosition.x, -WORLD_HALF, WORLD_HALF);
-    freePosition.z = THREE.MathUtils.clamp(freePosition.z, -WORLD_HALF, WORLD_HALF);
-    freePosition.y = THREE.MathUtils.clamp(freePosition.y, 1.4, 520);
+    let forward=0,strafe=0;
+    if(pressed.has("KeyW")||pressed.has("ArrowUp"))forward++;
+    if(pressed.has("KeyS")||pressed.has("ArrowDown"))forward--;
+    if(pressed.has("KeyD")||pressed.has("ArrowRight"))strafe++;
+    if(pressed.has("KeyA")||pressed.has("ArrowLeft"))strafe--;
+    const descending=pressed.has("KeyQ")||pressed.has("ShiftLeft")||pressed.has("ShiftRight");
+    const sprint=pressed.has("ControlLeft")||pressed.has("ControlRight")?2:cameraSprint.multiplier;
+    player.update(dt,{forward,strafe,yaw:cameraYaw,sprint,ascend:pressed.has("Space")||pressed.has("KeyE"),descend:descending});
+    freePosition.set(player.x,player.y,player.z);
   }
 
+  const mode=followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
+  const room=mansionRoomAt(player.x,player.z,player.feet)||"Hansdrex Island / City";
+  const hud=document.getElementById("player-mode"),roomHud=document.getElementById("player-room");
+  if(hud&&hud.textContent!==mode)hud.textContent=mode;
+  if(roomHud&&roomHud.textContent!==room)roomHud.textContent=room;
+  renderer.domElement.dataset.playerMode=mode;
+  renderer.domElement.dataset.playerPosition=`${freePosition.x.toFixed(2)},${freePosition.y.toFixed(2)},${freePosition.z.toFixed(2)}`;
+  document.body.classList.toggle("player-flying",player.flying);
   camera.position.copy(freePosition);
   cameraForward(lookDirection);
   camera.lookAt(freePosition.clone().add(lookDirection));
@@ -1699,15 +1684,16 @@ function animate(now = performance.now()) {
   const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
   lastFrameAt = now;
 
-  for (const visual of flyVisuals.values()) {
+  residentBodies.begin();
+  for (const [id,visual] of flyVisuals) {
     const next=visual.route[0]||visual.target;
     visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
     visual.group.position.copy(visual.current);
-    const wingBeat = Math.sin(now * 0.035) * 0.08;
-    visual.group.rotation.z = visual.stationary?0:wingBeat;
+    residentBodies.add(id,visual.current.x,visual.current.y,visual.current.z,visual.group.scale.x,visual.group.visible);
   }
 
+  residentBodies.finish();
   updateMetroTrains(now);
   updateParkWheel(now);
   const gameNow=Number(snapshot?.simulationAgeSeconds||0)+Math.min(2.5,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120);

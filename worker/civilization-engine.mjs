@@ -7,11 +7,11 @@ const WORLD_ID = ENV.CIV_WORLD_ID || "WORLD-A";
 const EXPERIMENT_ID = ENV.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(ENV.CIV_WORLD_SEED || 948291);
 const GAME_SECONDS_PER_REAL_SECOND = Number(ENV.CIV_TIME_SCALE || 120);
-const TARGET_POPULATION = 300;
-const RECOVERY_POPULATION = 300;
-const WELFARE_VERSION = 2;
+const TARGET_POPULATION = 500;
+const RECOVERY_POPULATION = 500;
+const WELFARE_VERSION = 3;
 const INITIAL_POPULATION = Math.min(TARGET_POPULATION, Math.max(12, Number(ENV.CIV_INITIAL_POPULATION || RECOVERY_POPULATION)));
-const MAX_POPULATION = Math.min(360, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 360)));
+const MAX_POPULATION = Math.min(600, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 600)));
 const FLYWIRE_BRAIN_URL = (ENV.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(ENV.NEURAL_SYNC_INTERVAL_MS || 1000));
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
@@ -1183,7 +1183,6 @@ function freshState() {
     airportExpansionVersion:1,
     populationBootstrapVersion: POPULATION_BOOTSTRAP_VERSION,
     housing: null,
-    currency: { code: CURRENCY_CODE, name: CURRENCY_NAME },
     weather: null,
 
   };
@@ -1350,14 +1349,14 @@ function nearestCompatiblePartner(fly) {
 
 function neuralDrive(fly, key) {
   const fc = fly.brain?.fullConnectome;
-  if (!fc?.connected) return 0;
+  if (!fc?.connected || (state.neuralBridge?.intervalMs && Date.now()-Number(fc.lastSyncAt||0)>state.neuralBridge.intervalMs*3)) return 0;
   const value = Number(fc[key] || 0);
   return Number.isFinite(value) ? clamp(value, 0, 1) : 0;
 }
 
 function applyFullConnectomeBias(fly, action, utility) {
   const fc = fly.brain?.fullConnectome;
-  if (!fc?.connected) return utility;
+  if (!fc?.connected || (state.neuralBridge?.intervalMs && Date.now()-Number(fc.lastSyncAt||0)>state.neuralBridge.intervalMs*3)) return utility;
 
   const approach = neuralDrive(fly, "approachDrive");
   const avoid = neuralDrive(fly, "avoidDrive");
@@ -1386,13 +1385,9 @@ function socialSignalFor(fly) {
   return clamp(1 - fly.loneliness / 130 + fly.traits.sociability * 0.35, 0, 1);
 }
 
-async function syncFullConnectomeBrains() {
-  if (!state || neuralSyncBusy || Date.now() - lastNeuralSyncAt < NEURAL_SYNC_INTERVAL_MS) return;
-  neuralSyncBusy = true;
-  lastNeuralSyncAt = Date.now();
-
-  try {
-    const agents = state.flies
+function getNeuralAgents() {
+  if(!state)return [];
+  return state.flies
       .filter((fly) => fly.alive && fly.brain?.id)
       .map((fly) => {
         const target = fly.targetLocationId === fly.homeId
@@ -1419,25 +1414,21 @@ async function syncFullConnectomeBrains() {
           sleeping: Boolean(fly.sleeping),
         };
       });
+}
 
-    if (!agents.length) return;
-
-    const response = await fetch(`${FLYWIRE_BRAIN_URL}/civilization/brains/sync`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ agents }),
-      signal: AbortSignal.timeout(25_000),
-    });
-    if (!response.ok) throw new Error(`FlyWire worker HTTP ${response.status}`);
-    const payload = await response.json();
-    const outputs = Array.isArray(payload.outputs) ? payload.outputs : [];
-
+function applyNeuralOutputs(outputs, metadata={}) {
     const byId = new Map(state.flies.map((fly) => [fly.brain?.id, fly]));
     for (const output of outputs) {
       const fly = byId.get(output.brain_id);
-      if (!fly?.brain) continue;
+      if (!fly?.alive || !fly.brain || !output.full_connectome || !Number.isFinite(output.neural_steps_total) || output.neural_steps_total < Number(fly.brain.fullConnectome?.neuralStepsTotal||0)) continue;
       fly.brain.fullConnectome = {
         connected: true,
+        engine:output.engine||"full-flywire-rust",
+        sourceSha256:output.source_sha256||null,
+        lastCycleId:metadata.cycleId||output.cycle_id||null,
+        stepsPerCycle:metadata.stepsPerCycle||output.steps_this_batch||0,
+        spikesThisBatch:Number(output.spikes_this_batch||0),
+        biologicalMsTotal:Number(output.biological_ms_total||output.neural_steps_total||0),
         lastSyncAt: Date.now(),
         neuralStepsTotal: Number(output.neural_steps_total || 0),
         activeNeurons: Number(output.active_neurons || 0),
@@ -1459,6 +1450,57 @@ async function syncFullConnectomeBrains() {
         regionActivity: output.region_activity || [],
       };
     }
+  const living=state.flies.filter(f=>f.alive);
+  const connected=living.filter(f=>f.brain?.fullConnectome?.connected&&f.brain.fullConnectome.fullConnectome);
+  const previous=state.neuralBridge||{};
+  state.neuralBridge={...previous,connected:connected.length>0,error:null,topologyShared:true,independentDynamicState:true,
+    engine:metadata.sourceSha256?'full-flywire-event-lif-v1':previous.engine,
+    registeredBrains:connected.length,livingBrains:living.length,steppedBrains:outputs.length,
+    updatedBrainsInCycle:living.filter(f=>f.brain?.fullConnectome?.lastCycleId===metadata.cycleId).length,
+    schedulerCursor:metadata.completedBefore||0,lastSyncAt:Date.now(),intervalMs:metadata.intervalMs||previous.intervalMs||null,
+    stepsPerCycle:metadata.stepsPerCycle||previous.stepsPerCycle||null,graphBytes:metadata.graphBytes||previous.graphBytes||null,
+    sourceSha256:metadata.sourceSha256||previous.sourceSha256||null,
+    ...(metadata.complete?{lastCompleteCycleAt:Date.now(),lastCompleteCycleId:metadata.cycleId,cycleDurationMs:Date.now()-Number(metadata.startedAt||Date.now())}:{}),
+  };
+  return getNeuralStatus();
+}
+function getNeuralStatus(){
+  const bridge=state?.neuralBridge||{};
+  const living=state?.flies?.filter(f=>f.alive)||[];
+  const freshFor=Math.max(120000,Number(bridge.intervalMs||1000)*3);
+  const connected=living.filter(f=>f.brain?.fullConnectome?.connected&&f.brain.fullConnectome.fullConnectome&&Date.now()-Number(f.brain.fullConnectome.lastSyncAt||0)<=freshFor);
+  const steps=connected.map(f=>Number(f.brain.fullConnectome.neuralStepsTotal||0));
+  return {...bridge,connected:connected.length>0,registeredBrains:connected.length,livingBrains:living.length,
+    allBrainsReady:living.length>0&&connected.length===living.length,
+    minNeuralSteps:steps.length?Math.min(...steps):0,maxNeuralSteps:steps.length?Math.max(...steps):0,
+    mode:connected.length===living.length&&living.length?'FULL_CONNECTOME':connected.length?'WARMING_FULL_CONNECTOME':'AWAITING_FULL_CONNECTOME',
+    biologicalTimeScale:'Each neural step is 1 biological millisecond. CPU-budgeted batches do not run at biological real time.'};
+}
+function markNeuralCycleFailed(details){
+  state.neuralBridge={...(state.neuralBridge||{}),error:details.error,lastErrorAt:Date.now()};
+}
+
+async function syncFullConnectomeBrains() {
+  if (!state || neuralSyncBusy || Date.now() - lastNeuralSyncAt < NEURAL_SYNC_INTERVAL_MS) return;
+  neuralSyncBusy = true;
+  lastNeuralSyncAt = Date.now();
+
+  try {
+    const agents = getNeuralAgents();
+
+    if (!agents.length) return;
+
+    const response = await fetch(`${FLYWIRE_BRAIN_URL}/civilization/brains/sync`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ agents }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!response.ok) throw new Error(`FlyWire worker HTTP ${response.status}`);
+    const payload = await response.json();
+    const outputs = Array.isArray(payload.outputs) ? payload.outputs : [];
+
+    applyNeuralOutputs(outputs);
 
     state.neuralBridge = {
       connected: true,
@@ -3606,7 +3648,7 @@ function compactFly(f) {
     brainDecisionCount: Number(f.brain?.decisionCount || 0),
     brainMemoryCount: Number(f.brain?.memory?.episodes?.length || 0),
     fullConnectome: f.brain?.fullConnectome ? {
-      connected: Boolean(f.brain.fullConnectome.connected),
+      connected: Boolean(f.brain.fullConnectome.connected && (!state.neuralBridge?.intervalMs || Date.now()-Number(f.brain.fullConnectome.lastSyncAt||0)<=state.neuralBridge.intervalMs*3)),
       fullConnectome: Boolean(f.brain.fullConnectome.fullConnectome),
       neurons: Number(f.brain.fullConnectome.neurons || 0),
       edges: Number(f.brain.fullConnectome.edges || 0),
@@ -3622,6 +3664,11 @@ function compactFly(f) {
       exploreDrive: Number(f.brain.fullConnectome.exploreDrive || 0),
       consumeDrive: Number(f.brain.fullConnectome.consumeDrive || 0),
       motorDrive: Number(f.brain.fullConnectome.motorDrive || 0),
+      engine:f.brain.fullConnectome.engine||null,
+      sourceSha256:f.brain.fullConnectome.sourceSha256||null,
+      stepsPerCycle:f.brain.fullConnectome.stepsPerCycle||0,
+      spikesThisBatch:f.brain.fullConnectome.spikesThisBatch||0,
+      lastSyncAt:Number(f.brain.fullConnectome.lastSyncAt||0),
       regionActivity: f.brain.fullConnectome.regionActivity || [],
     } : null,
     brainDynamic: f.brain ? {
@@ -3666,7 +3713,7 @@ function getState() {
   return {
     authoritative: true,
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
-    modelDisclosure: "Each fly has a unique brainId and an independent full-connectome neural-state buffer (membrane voltage, refractory state, synaptic state, spikes and sensory input) in the FlyWire Rust worker. The immutable FlyWire topology/weights are shared once. Offspring get a fresh dynamic neural state; no parent neural activity or memory buffer is reused. Full-connectome brains are CPU time-sliced round-robin, so they do not all advance at biological real-time simultaneously.",
+    modelDisclosure: "Each living fly is assigned the complete 139,255-neuron, 15,091,983-edge FlyWire LIF graph. Shared topology is packed losslessly; membrane voltage, refractory and synaptic states and spikes are checkpointed independently per brain. Actual neural activity biases city decisions and movement through a synthetic sensory/behavior interface. The neuralBridge reports measured connection and step counters; disconnected or stale brains are not counted as running. Neural batches are CPU-budgeted and are not biological real time. The model remains an approximate LIF and city model, not a validated biological city simulation.",
     worldId: WORLD_ID,
     experimentId: EXPERIMENT_ID,
     worldSeed: String(WORLD_SEED),
@@ -3739,7 +3786,7 @@ function getState() {
       label: weatherLabel(),
       sunset: state.weather?.sunset || { active: false, quality: 0 },
     },
-    neuralBridge: state.neuralBridge || { connected: false },
+    neuralBridge: getNeuralStatus(),
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
     flies: living.map(compactFly),
@@ -3823,5 +3870,5 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  getSimulationConfig
+  getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

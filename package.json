@@ -33,7 +33,7 @@
     "deploy:vercel": "npm run build && vercel --prod",
     "deploy:r2": "bash tools/upload_to_r2.sh",
     "prebuild": "node tools/prepare-vercel-assets.mjs",
-    "test:city": "node --test tests-city/*.test.mjs",
+    "test:city": "node --test tests-city/*.test.mjs tests-neural/*.test.mjs",
     "dev:civilization:cloudflare": "npx --yes wrangler@4 dev --config cloudflare/wrangler.jsonc",
     "deploy:civilization:cloudflare": "npx --yes wrangler@4 deploy --config cloudflare/wrangler.jsonc",
     "check:cloudflare": "npx --yes wrangler@4 deploy --config cloudflare/wrangler.jsonc --dry-run --outdir .wrangler-dry-run"

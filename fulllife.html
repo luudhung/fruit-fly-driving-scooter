@@ -61,6 +61,9 @@
     .mobile-pad{left:18px;grid-template-columns:52px 52px 52px;grid-template-areas:". up ." "left down right"}
     .mobile-altitude{right:18px;grid-template-columns:56px}
     .mobile-control{width:52px;height:52px;border-radius:16px;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 20px/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
+    .mobile-control[data-key="KeyQ"]{visibility:hidden}body.player-flying .mobile-control[data-key="KeyQ"]{visibility:visible}
+    body.mansion-visit .left,body.mansion-visit .right,body.mansion-visit .bottom,body.mansion-visit .hint,body.mansion-visit #mobile-inspector-toggle{display:none}
+    .player-hud{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 15px;border-radius:13px;background:rgba(8,18,16,.8);color:#f2ead7;pointer-events:none;font:600 11px/1.4 system-ui;max-width:calc(100vw - 220px);text-align:center}.player-hud b{color:#d9c288;letter-spacing:.14em;font-size:9px}.player-hud small{font-size:9px;color:#b5c4bc}.bottom,.hint{bottom:112px}
     .mobile-control:active,.mobile-control.active{background:rgba(255,255,255,.20);color:#fff;transform:scale(.96)}
     .mobile-control[data-key="KeyW"]{grid-area:up}.mobile-control[data-key="KeyA"]{grid-area:left}.mobile-control[data-key="KeyS"]{grid-area:down}.mobile-control[data-key="KeyD"]{grid-area:right}
     .mobile-inspector-toggle{display:none;position:fixed;right:18px;top:74px;z-index:14;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.55);backdrop-filter:blur(5px);color:rgba(255,255,255,.82);border-radius:14px;padding:10px 12px;font:800 11px/1 system-ui;letter-spacing:.08em}
@@ -101,6 +104,7 @@
     <button class="settings-button" id="skyline-view" type="button">♜ SKYLINE</button>
     <button class="settings-button" id="airport-view" type="button">✈ AIRPORT</button>
     <button class="settings-button" id="island-view" type="button">☀ ISLAND</button>
+    <button class="settings-button" id="mansion-view" type="button" title="Walk into your private island mansion">⌂ MY MANSION</button>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button">⚙ GRAPHICS</button>
       <div class="settings-menu">
@@ -115,7 +119,7 @@
       </div>
     </div>
   </div>
-  <div class="hint">WASD / ARROWS MOVE · LOOK DOWN + W/↑ DESCENDS · Q/E DOWN/UP · DOUBLE-TAP W/↑ FOR 2× SPEED · SHIFT SPRINT · DRAG LOOK · SCROLL ZOOM · F FOLLOW FLY · C CITY VIEW</div>
+  <div class="hint">WASD / ARROWS WALK · SPACE JUMP · DOUBLE-TAP SPACE / ↟ TO FLY · HOLD TO RISE · SHIFT / − TO DESCEND · DOUBLE-TAP W FOR 2× SPEED · CTRL SPRINT · DRAG LOOK · F FOLLOW · C CITY VIEW</div>
 
   <aside class="left">
     <section class="card" id="aviation-card">
@@ -128,6 +132,8 @@
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <button type="button" class="stat population-button" id="population-button" aria-haspopup="dialog" aria-controls="resident-directory"><span>Alive now · View residents ↗</span><b id="population">—</b></button>
+        <div class="stat"><span>Full brains running</span><b id="neural-census">—</b></div>
+        <div class="stat"><span>Neural update budget</span><b id="neural-cadence" style="font-size:11px">—</b></div>
         <div class="stat"><span>Generation</span><b id="generation">—</b></div>
         <div class="stat"><span>Clock speed</span><b id="speed">—</b></div>
         <div class="stat"><span>Births · since city began</span><b id="births">—</b></div>
@@ -186,15 +192,16 @@
       </div>
     </section>
     <section class="card" id="brain-card">
-      <div class="head"><span>Synthetic cognitive activity</span><button class="panel-toggle" data-panel="brain-card" type="button">−</button></div>
+      <div class="head"><span id="brain-card-title">FlyWire activity</span><button class="panel-toggle" data-panel="brain-card" type="button">−</button></div>
       <div class="brain-grid" id="brain-grid"></div>
       <div class="legend" id="brain-note">Activity bands reflect modeled drives (stress, hunger, excitement, happiness, energy), not biological neural recordings.</div>
     </section>
   </aside>
 
+  <div class="player-hud"><b id="player-mode">WALKING</b><span id="player-room">Hansdrex Mansion</span><small>Nhảy: Space / ↟ · Chạm đúp để bay · Giữ để lên · − / Shift để xuống</small></div>
   <div class="mobile-controls" id="mobile-controls" aria-label="Mobile camera controls">
     <div class="mobile-pad"><button class="mobile-control" data-key="KeyW">▲</button><button class="mobile-control" data-key="KeyA">◀</button><button class="mobile-control" data-key="KeyS">▼</button><button class="mobile-control" data-key="KeyD">▶</button></div>
-    <div class="mobile-altitude"><button class="mobile-control" data-key="KeyE">＋</button><button class="mobile-control" data-key="KeyQ">−</button></div>
+    <div class="mobile-altitude"><button class="mobile-control" data-key="Space" aria-label="Jump; double tap to toggle flying; hold to rise">↟</button><button class="mobile-control" data-key="KeyQ" aria-label="Fly downward">−</button></div>
   </div>
 
   <script type="module" src="/src/fulllife.ts"></script>

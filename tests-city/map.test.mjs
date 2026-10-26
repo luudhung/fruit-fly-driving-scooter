@@ -51,7 +51,7 @@ test('park-edge housing and iconic skyline survive the v11 downtown expansion',(
 });
 
 test('downtown is dense around Central Park and tapers toward detached-house districts',()=>{
- const blocks=BUILDINGS.filter(b=>b.kind==='block');
+ const blocks=BUILDINGS.filter(b=>b.kind==='block'||b.kind==='apartment');
  assert.ok(blocks.length>=45,`expected dense downtown, got ${blocks.length} blocks`);
  const distanceFromPark=(b)=>{
    const dx=Math.max(Math.abs(b.x-PARK.x)-PARK.w/2,0),dz=Math.max(Math.abs(b.z-PARK.z)-PARK.d/2,0);

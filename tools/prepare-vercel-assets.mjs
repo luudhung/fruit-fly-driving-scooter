@@ -1,5 +1,6 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
+import {writePackedConnectome} from "./pack-connectome.mjs";
 
 if (!process.env.VERCEL) {
   console.log("[prepare-vercel-assets] not running on Vercel; skip");
@@ -12,6 +13,7 @@ const CHUNK_BYTES = 24 * 1024 * 1024;
 const userOrigin = process.env.FLY_ASSET_ORIGIN?.replace(/\/$/, "");
 const origins = [
   userOrigin,
+  "https://fruit-fly-driving-scooter.vercel.app",
   "https://luudhung.me/fruit-fly-driving-scooter",
   "https://luudhung.github.io/fruit-fly-driving-scooter",
 ].filter(Boolean);
@@ -110,3 +112,8 @@ await copyChunked("vnc.bin");
 await copyChunked("flybody.bundle.bin");
 
 console.log("[prepare-vercel-assets] full FlyWire + MANC + flybody assets prepared for Vercel");
+
+const brainParts=JSON.parse(await readFile(path.join(PUBLIC,'brain.bin.parts.json'),'utf8'));
+const completeGraph=Buffer.concat(await Promise.all(brainParts.parts.map(p=>readFile(path.join(PUBLIC,p.file)))));
+const compactGraph=await writePackedConnectome(completeGraph,path.join(PUBLIC,'neural'));
+console.log('[prepare-vercel-assets] lossless event graph: '+compactGraph.numNeurons+' neurons, '+compactGraph.numEdges+' edges, '+compactGraph.totalBytes+' bytes');
