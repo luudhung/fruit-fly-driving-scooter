@@ -78,6 +78,7 @@ export class FlyWireBrainShard extends DurableObject{
   if(agents.some(a=>!/^BRAIN-\d{6,}$/.test(a.brain_id)))throw Error('Invalid brain identifier');
   const sql=this.ctx.storage.sql,graph=await loadGraph(sql,this.ctx.storage,this.env.NEURAL_ASSET_ORIGIN),outputs=[];
   const started=Date.now(),steps=Math.max(1,Math.min(256,Math.floor(batch.steps||128)));
+  let computed=0;
   for(const sense of agents){
    const row=sql.exec('SELECT snapshot,output,cycle_id FROM brain_states WHERE id=?',sense.brain_id).toArray()[0];
    if(row?.cycle_id===batch.cycleId){outputs.push(JSON.parse(row.output));continue;}
@@ -88,7 +89,7 @@ export class FlyWireBrainShard extends DurableObject{
    sql.exec('INSERT INTO brain_states(id,snapshot,output,cycle_id) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot,output=excluded.output,cycle_id=excluded.cycle_id',sense.brain_id,checkpoint,JSON.stringify(output),batch.cycleId);
    await this.ctx.storage.sync();outputs.push(output);
    // Leave CPU headroom; a retry reuses already committed results for the same cycle.
-   if(Date.now()-started>18000)break;
+   if(++computed>=4||Date.now()-started>12000)break;
   }
   if(outputs.length===agents.length&&agents.length){
    const ids=agents.map(a=>a.brain_id),marks=ids.map(()=>'?').join(',');
