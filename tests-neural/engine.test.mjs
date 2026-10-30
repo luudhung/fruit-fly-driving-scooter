@@ -68,3 +68,15 @@ test('full-brain counters require real outputs for all living residents and reje
  assert.equal(getNeuralStatus().registeredBrains,499);assert.equal(getNeuralStatus().allBrainsReady,false);
  assert.equal(getRawState().flies.length,500);
 });
+
+test('replaying a committed batch preserves its actual computation time and measured step count',()=>{
+ const s=freshState(),agent=getNeuralAgents()[0],oldTime=Date.now()-7200000;
+ const output={brain_id:agent.brain_id,full_connectome:true,neurons:139255,edges:15091983,neural_steps_total:128,steps_this_batch:128,computed_at_ms:oldTime};
+ applyNeuralOutputs([output],{cycleId:'old-retry',intervalMs:720000,stepsPerCycle:16});
+ assert.equal(s.flies[0].brain.fullConnectome.lastSyncAt,oldTime);
+ assert.equal(s.flies[0].brain.fullConnectome.stepsPerCycle,128);
+ assert.equal(getNeuralStatus().registeredBrains,0);
+ applyNeuralOutputs([{...output,neural_steps_total:144,steps_this_batch:16,computed_at_ms:Date.now()}],{cycleId:'new',intervalMs:720000,stepsPerCycle:16});
+ assert.equal(getNeuralStatus().registeredBrains,1);assert.equal(getNeuralStatus().minNeuralSteps,144);
+ applyNeuralOutputs([output],{cycleId:'late-old'});assert.equal(s.flies[0].brain.fullConnectome.neuralStepsTotal,144);
+});

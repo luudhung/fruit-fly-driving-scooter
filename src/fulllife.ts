@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import {InstancedResidents} from "./instanced-residents";
+import {bindTouchControls,touchButtonSize} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
 import {buildMansion} from "./mansion-renderer.ts";
 import {PlayerController} from "./player-controller.ts";
-import {mansionSpawn,mansionRoomAt} from "./mansion-layout.ts";
+import {mansionSpawn} from "./mansion-layout.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland} from "./city-landmarks";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
@@ -291,6 +292,22 @@ if (graphicsSelect) {
     location.reload();
   });
 }
+const touchSizeInput=document.getElementById("touch-button-size") as HTMLInputElement|null;
+const touchSizeValue=document.getElementById("touch-button-size-value");
+let preferredTouchSize=72;
+try{const saved=localStorage.getItem("fulllife_touch_button_size");if(saved!==null)preferredTouchSize=Number(saved);}catch{}
+function applyTouchSize(){
+ const {size,maximum}=touchButtonSize(preferredTouchSize,innerWidth);
+ document.documentElement.style.setProperty("--touch-size",`${size}px`);
+ document.body.classList.toggle("touch-controls-stacked",size*4+66>innerWidth);
+ if(touchSizeInput){touchSizeInput.max=String(maximum);touchSizeInput.value=String(size);}
+ if(touchSizeValue)touchSizeValue.textContent=`${size} px`;
+}
+touchSizeInput?.addEventListener("input",()=>{
+ preferredTouchSize=Number(touchSizeInput.value);applyTouchSize();
+ try{localStorage.setItem("fulllife_touch_button_size",String(preferredTouchSize));}catch{}
+});
+addEventListener("resize",applyTouchSize);applyTouchSize();
 const settingsWrap = document.getElementById("settings-wrap");
 const cityToolbar=document.querySelector<HTMLElement>(".topbar");
 if(cityToolbar){
@@ -299,10 +316,11 @@ if(cityToolbar){
 }
 document.getElementById("settings-button")?.addEventListener("click", (event) => {
   event.stopPropagation();
-  settingsWrap?.classList.toggle("open");
+  const open=settingsWrap?.classList.toggle("open");
+  (event.currentTarget as HTMLElement).setAttribute("aria-expanded",String(Boolean(open)));
 });
 document.addEventListener("click", (event) => {
-  if (settingsWrap && !settingsWrap.contains(event.target as Node)) settingsWrap.classList.remove("open");
+  if (settingsWrap && !settingsWrap.contains(event.target as Node)){settingsWrap.classList.remove("open");document.getElementById("settings-button")?.setAttribute("aria-expanded","false");}
 });
 document.querySelectorAll<HTMLButtonElement>(".panel-toggle").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1553,13 +1571,14 @@ camera.position.copy(freePosition);
 renderer.domElement.tabIndex = 0;
 renderer.domElement.style.outline = "none";
 renderer.domElement.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
   dragging = true;
   moved = false;
   lastX = e.clientX;
   lastY = e.clientY;
   followSelected = false;
   renderer.domElement.style.cursor = "grabbing";
-  renderer.domElement.focus();
+  renderer.domElement.focus({preventScroll:true});
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener("pointermove", (e) => {
@@ -1576,6 +1595,7 @@ renderer.domElement.addEventListener("pointerup", () => {
   dragging = false;
   renderer.domElement.style.cursor = "grab";
 });
+renderer.domElement.addEventListener("contextmenu",e=>e.preventDefault());
 renderer.domElement.addEventListener("wheel", (e) => {
   e.preventDefault();
   camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.018, 24, 78);
@@ -1608,7 +1628,10 @@ addEventListener("keydown", (e) => {
 addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
 addEventListener("keyup", (e) => {cameraSprint.up(e.code);if(e.code==="Space")player.jumpUp();if (movementKeys.has(e.code)) e.preventDefault();});
-document.querySelectorAll<HTMLButtonElement>(".mobile-control").forEach((button)=>{const key=button.dataset.key;if(!key)return;const down=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();followSelected=false;cameraSprint.down(key,performance.now());if(key==="Space")player.jumpDown(performance.now());button.classList.add("active");try{button.setPointerCapture(e.pointerId);}catch{}};const up=(e:PointerEvent)=>{e.preventDefault();e.stopPropagation();cameraSprint.up(key);if(key==="Space")player.jumpUp();button.classList.remove("active");};button.addEventListener("pointerdown",down);button.addEventListener("pointerup",up);button.addEventListener("pointercancel",up);button.addEventListener("lostpointercapture",()=>{cameraSprint.up(key);if(key==="Space")player.jumpUp();button.classList.remove("active");});});
+bindTouchControls(document.querySelectorAll<HTMLButtonElement>(".mobile-control"),{
+ down(key,now){followSelected=false;cameraSprint.down(key,now);if(key==="Space")player.jumpDown(now);},
+ up(key){cameraSprint.up(key);if(key==="Space")player.jumpUp();},
+});
 
 const mobileInspectorToggle=document.getElementById("mobile-inspector-toggle") as HTMLButtonElement | null;
 mobileInspectorToggle?.addEventListener("click",(e)=>{
@@ -1665,10 +1688,6 @@ function updateFreeCamera(dt: number) {
   }
 
   const mode=followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
-  const room=mansionRoomAt(player.x,player.z,player.feet)||"Hansdrex Island / City";
-  const hud=document.getElementById("player-mode"),roomHud=document.getElementById("player-room");
-  if(hud&&hud.textContent!==mode)hud.textContent=mode;
-  if(roomHud&&roomHud.textContent!==room)roomHud.textContent=room;
   renderer.domElement.dataset.playerMode=mode;
   renderer.domElement.dataset.playerPosition=`${freePosition.x.toFixed(2)},${freePosition.y.toFixed(2)},${freePosition.z.toFixed(2)}`;
   document.body.classList.toggle("player-flying",player.flying);

@@ -41,7 +41,7 @@
     "NEURAL_ENABLED": "1",
     "NEURAL_ASSET_ORIGIN": "https://fruit-fly-driving-scooter.vercel.app",
     "NEURAL_INTERVAL_MS": "360000",
-    "NEURAL_STEPS_PER_CYCLE": "128"
+    "NEURAL_STEPS_PER_CYCLE": "16"
   },
   "observability": {
     "enabled": true,

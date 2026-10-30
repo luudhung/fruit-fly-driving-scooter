@@ -6,12 +6,13 @@
   <title>Hansdrex City of Fruit Fly — Full Life</title>
   <meta name="description" content="Hansdrex City of Fruit Fly — persistent full-life civilization with independent brains, weather, transport, economy, relationships and city life." />
   <style>
-    :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.84);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.58);--ok:#66e39d;--warn:#f0c56a}
+    :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.84);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.58);--ok:#66e39d;--warn:#f0c56a;--touch-size:72px;--touch-gap:10px}
     *{box-sizing:border-box}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}input,textarea,[contenteditable=true]{-webkit-user-select:text;user-select:text}
     #world{position:fixed;inset:0;background:#07100e}
-    #world canvas{width:100%;height:100%;display:block}
-    .topbar{flex-wrap:wrap;position:fixed;z-index:10;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+    #world canvas{width:100%;height:100%;display:block;touch-action:none}
+    .topbar{flex-wrap:wrap;position:fixed;z-index:20;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
     .brand,.status,.card,.clock-pill{border:1px solid var(--line);background:rgba(8,18,16,.94);box-shadow:0 10px 28px rgba(0,0,0,.18)}
     .brand{padding:11px 13px;border-radius:14px}
     .brand b{font-size:16px;letter-spacing:-.025em}
@@ -38,6 +39,7 @@
     .settings-wrap.open .settings-menu{display:block}
     .settings-menu label{display:block;font:800 9px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
     .settings-menu select{width:100%;padding:8px;border-radius:9px;border:1px solid var(--line);background:#0a1714;color:#fff;font:800 11px ui-monospace,SFMono-Regular,Menlo,monospace}
+    .touch-size-setting{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.touch-size-setting label{display:flex;justify-content:space-between;gap:8px}.touch-size-setting output{color:#fff}.touch-size-setting input{display:block;width:100%;height:38px;margin:0;touch-action:pan-x;accent-color:var(--ok)}
     .settings-note{margin-top:8px;font-size:9px;line-height:1.45;color:var(--muted)}
     .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line)}
     .stat{padding:10px 12px;background:rgba(7,16,14,.92)}
@@ -57,23 +59,23 @@
     .notice b{color:#fff}
     .hint{position:fixed;z-index:8;left:50%;bottom:78px;transform:translateX(-50%);max-width:700px;width:calc(100vw - 60px);text-align:center;padding:9px 12px;border-radius:10px;background:rgba(8,18,16,.7);font:700 9px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.7);pointer-events:none}
     .mobile-controls{display:none;position:fixed;z-index:12;inset:0;pointer-events:none;touch-action:none}
-    .mobile-pad,.mobile-altitude{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));display:grid;gap:7px;pointer-events:auto}
-    .mobile-pad{left:18px;grid-template-columns:52px 52px 52px;grid-template-areas:". up ." "left down right"}
-    .mobile-altitude{right:18px;grid-template-columns:56px}
-    .mobile-control{width:52px;height:52px;border-radius:16px;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 20px/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
+    .mobile-pad,.mobile-altitude{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));display:grid;gap:var(--touch-gap);pointer-events:none}
+    .mobile-pad{left:max(16px,env(safe-area-inset-left));grid-template-columns:repeat(3,var(--touch-size));grid-template-areas:". up ." "left down right"}
+    .mobile-altitude{right:max(16px,env(safe-area-inset-right));grid-template-columns:var(--touch-size)}body.touch-controls-stacked .mobile-altitude{bottom:calc(max(22px,env(safe-area-inset-bottom)) + var(--touch-size)*2 + var(--touch-gap)*2)}
+    .mobile-control{pointer-events:auto;width:var(--touch-size);height:var(--touch-size);border-radius:calc(var(--touch-size)*.27);border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 calc(var(--touch-size)*.38)/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
     .mobile-control[data-key="KeyQ"]{visibility:hidden}body.player-flying .mobile-control[data-key="KeyQ"]{visibility:visible}
     body.mansion-visit .left,body.mansion-visit .right,body.mansion-visit .bottom,body.mansion-visit .hint,body.mansion-visit #mobile-inspector-toggle{display:none}
-    .player-hud{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 15px;border-radius:13px;background:rgba(8,18,16,.8);color:#f2ead7;pointer-events:none;font:600 11px/1.4 system-ui;max-width:calc(100vw - 220px);text-align:center}.player-hud b{color:#d9c288;letter-spacing:.14em;font-size:9px}.player-hud small{font-size:9px;color:#b5c4bc}.bottom,.hint{bottom:112px}
     .mobile-control:active,.mobile-control.active{background:rgba(255,255,255,.20);color:#fff;transform:scale(.96)}
     .mobile-control[data-key="KeyW"]{grid-area:up}.mobile-control[data-key="KeyA"]{grid-area:left}.mobile-control[data-key="KeyS"]{grid-area:down}.mobile-control[data-key="KeyD"]{grid-area:right}
     .mobile-inspector-toggle{display:none;position:fixed;right:18px;top:74px;z-index:14;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.55);backdrop-filter:blur(5px);color:rgba(255,255,255,.82);border-radius:14px;padding:10px 12px;font:800 11px/1 system-ui;letter-spacing:.08em}
     @media(max-width:980px),(pointer:coarse){
+      .settings-menu{position:fixed;top:calc(var(--toolbar-bottom,126px) + 8px);left:auto;right:14px;width:min(320px,calc(100vw - 28px));max-height:calc(100dvh - var(--toolbar-bottom,126px) - 150px);overflow-y:auto}
       .hint{display:none}.mobile-controls{display:block}.mobile-inspector-toggle{display:block}
       .right{display:block;position:fixed;top:118px;right:12px;bottom:110px;width:min(86vw,340px);z-index:13;overflow:auto;transform:translateX(calc(100% + 28px));transition:transform .22s ease;pointer-events:none}
       body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
       .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
     }
-    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:calc(var(--toolbar-bottom,60px) + 8px);max-width:min(78vw,310px)}.bottom{display:none}.mobile-control{width:48px;height:48px;border-radius:15px}.mobile-pad{grid-template-columns:48px 48px 48px}.mobile-altitude{grid-template-columns:52px}.mobile-inspector-toggle{right:14px;top:70px}}
+    @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:calc(var(--toolbar-bottom,60px) + 8px);max-width:min(78vw,310px)}.bottom{display:none}.mobile-inspector-toggle{right:14px;top:70px}}
     .status{pointer-events:auto;color:inherit;cursor:pointer;white-space:normal;text-align:left}.status:hover{border-color:var(--ok)}
     .population-button{border:0;color:inherit;text-align:left;cursor:pointer}.population-button:hover{background:#183228}.population-button:focus-visible,.status:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
     #park-view{pointer-events:auto}
@@ -106,8 +108,8 @@
     <button class="settings-button" id="island-view" type="button">☀ ISLAND</button>
     <button class="settings-button" id="mansion-view" type="button" title="Walk into your private island mansion">⌂ MY MANSION</button>
     <div class="settings-wrap" id="settings-wrap">
-      <button class="settings-button" id="settings-button" type="button">⚙ GRAPHICS</button>
-      <div class="settings-menu">
+      <button class="settings-button" id="settings-button" type="button" aria-expanded="false" aria-controls="settings-menu">⚙ CÀI ĐẶT</button>
+      <div class="settings-menu" id="settings-menu">
         <label for="graphics-preset">Graphics quality</label>
         <select id="graphics-preset">
           <option value="low">Low · fastest</option>
@@ -115,7 +117,8 @@
           <option value="high">High · detailed NYC-style metro</option>
           <option value="ultra">Ultra · full detail</option>
         </select>
-        <div class="settings-note">Graphics quality never changes the city layout or number of buildings/homes. Low → Ultra only changes render quality such as anti-aliasing, pixel density, window detail, trees, metro detail and weather particles. The persistent civilization and brains continue on the server.</div>
+        <div class="touch-size-setting"><label for="touch-button-size">Kích thước nút <output id="touch-button-size-value" for="touch-button-size">72 px</output></label><input id="touch-button-size" type="range" min="48" max="104" step="4" value="72" /><div class="settings-note">Nút di chuyển và nhảy đổi cỡ ngay, tự lưu trên thiết bị. Chạm đúp ↟ để bật/tắt bay.</div></div>
+        <div class="settings-note">Chất lượng đồ họa chỉ thay đổi hình ảnh; cư dân và thành phố vẫn tiếp tục chạy nền.</div>
       </div>
     </div>
   </div>
@@ -198,10 +201,9 @@
     </section>
   </aside>
 
-  <div class="player-hud"><b id="player-mode">WALKING</b><span id="player-room">Hansdrex Mansion</span><small>Nhảy: Space / ↟ · Chạm đúp để bay · Giữ để lên · − / Shift để xuống</small></div>
   <div class="mobile-controls" id="mobile-controls" aria-label="Mobile camera controls">
-    <div class="mobile-pad"><button class="mobile-control" data-key="KeyW">▲</button><button class="mobile-control" data-key="KeyA">◀</button><button class="mobile-control" data-key="KeyS">▼</button><button class="mobile-control" data-key="KeyD">▶</button></div>
-    <div class="mobile-altitude"><button class="mobile-control" data-key="Space" aria-label="Jump; double tap to toggle flying; hold to rise">↟</button><button class="mobile-control" data-key="KeyQ" aria-label="Fly downward">−</button></div>
+    <div class="mobile-pad"><button class="mobile-control" type="button" data-key="KeyW" aria-label="Đi tới; chạm đúp để chạy nhanh">▲</button><button class="mobile-control" type="button" data-key="KeyA" aria-label="Đi sang trái">◀</button><button class="mobile-control" type="button" data-key="KeyS" aria-label="Đi lùi">▼</button><button class="mobile-control" type="button" data-key="KeyD" aria-label="Đi sang phải">▶</button></div>
+    <div class="mobile-altitude"><button class="mobile-control" type="button" data-key="Space" aria-label="Jump; double tap to toggle flying; hold to rise">↟</button><button class="mobile-control" type="button" data-key="KeyQ" aria-label="Fly downward">−</button></div>
   </div>
 
   <script type="module" src="/src/fulllife.ts"></script>

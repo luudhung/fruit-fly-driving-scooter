@@ -108,10 +108,10 @@ export class FlyWireNeuralCoordinator extends DurableObject{
   const writeBudgetInterval=Math.ceil(Math.max(1,population)*86400/60000)*1000;
   return Math.max(360000,writeBudgetInterval,Math.min(3600000,Number(this.env.NEURAL_INTERVAL_MS||360000)));
  }
- steps(){return Math.max(1,Math.min(256,Number(this.env.NEURAL_STEPS_PER_CYCLE||128)));}
+ steps(){return Math.max(1,Math.min(256,Number(this.env.NEURAL_STEPS_PER_CYCLE||16)));}
  async ensureRunning(){
-  const alarm=await this.ctx.storage.getAlarm();
-  if(alarm==null&&!this.running)await this.ctx.storage.setAlarm(Date.now()+1500);
+  const alarm=await this.ctx.storage.getAlarm(),pending=await this.ctx.storage.get('cycle');
+  if(!this.running&&(alarm==null||pending&&alarm>Date.now()+3000))await this.ctx.storage.setAlarm(Date.now()+1500);
   return {scheduled:true,intervalMs:this.interval(),stepsPerCycle:this.steps()};
  }
  async alarm(){return this.withLock(async()=>{
@@ -126,9 +126,10 @@ export class FlyWireNeuralCoordinator extends DurableObject{
     cycle={id:`${Date.now()}-${inputs.worldId}`,startedAt:Date.now(),agents:inputs.agents,cursor:0,completed:0,steps:this.steps(),intervalMs:this.interval(inputs.agents.length)};
     await this.ctx.storage.put('cycle',cycle);
    }
+   // Apply a lower configured budget to a resumed cycle without discarding checkpoints.
+   cycle.steps=Math.min(cycle.steps,this.steps());
    const groups=Array.from({length:SHARDS},()=>[]);
    for(const agent of cycle.agents)groups[brainShard(agent.brain_id)].push(agent);
-   const deadline=Date.now()+90000;
    for(;cycle.cursor<SHARDS;cycle.cursor++){
     const agents=groups[cycle.cursor];
     if(agents.length){
@@ -139,7 +140,8 @@ export class FlyWireNeuralCoordinator extends DurableObject{
      cycle.completed+=agents.length;
     }
     await this.ctx.storage.put('cycle',{...cycle,cursor:cycle.cursor+1});
-    if(Date.now()>deadline){await this.ctx.storage.setAlarm(Date.now()+3000);return;}
+    // Yield after one shard, so a long alarm cannot hold up observability and city RPCs.
+    if(cycle.cursor<SHARDS-1){await this.ctx.storage.setAlarm(Date.now()+1500);return;}
    }
    await this.world().applyNeuralBatch({outputs:[],cycleId:cycle.id,totalBrains:cycle.agents.length,completedBefore:cycle.completed,complete:true,intervalMs:cycle.intervalMs,stepsPerCycle:cycle.steps,sourceSha256:SOURCE_SHA,graphBytes:61207438,startedAt:cycle.startedAt});
    await this.ctx.storage.delete('cycle');

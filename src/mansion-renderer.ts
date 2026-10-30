@@ -19,7 +19,6 @@ export function buildMansion(parent:THREE.Group,_sign:Sign){
   for(let i=0;i<boxes.length;i++){const a=boxes[i];transform.position.set(a.x,a.y,a.z);transform.scale.set(a.w,a.h,a.d);transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);}
   mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();root.add(mesh);
  }
- const title=sign('HANSDREX MANSION',14,1.4);title.position.set(110,5.1,831.5);root.add(title);
  for(const r of mansionRooms){const s=sign(r.name,Math.min(9,r.name.length*.3),.8);s.position.set(r.x,(r.floor?MANSION_UPPER:MANSION_FLOOR)+3.7,r.z);root.add(s);}
  return root;
 }
