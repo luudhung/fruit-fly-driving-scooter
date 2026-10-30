@@ -303,10 +303,7 @@ export class CivilizationWorld extends DurableObject {
         if(url.searchParams.get('view')==='observer'){
           // The map needs recent motion, not the complete movement history of 500 residents.
           payload.flies=payload.flies.map(f=>({...f,movementTrace:(f.movementTrace||[]).slice(-8)}));
-          if((request.headers.get('accept-encoding')||'').includes('gzip')){
-            const compressed=await gzipJson(payload);
-            return new Response(compressed,{headers:corsHeaders({'content-type':'application/json; charset=utf-8','content-encoding':'gzip','vary':'Accept-Encoding'})});
-          }
+          // The Workers HTTP layer negotiates compression once for the client.
         }
         return json(payload);
       }
