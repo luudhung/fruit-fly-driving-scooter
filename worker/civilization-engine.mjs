@@ -1595,7 +1595,7 @@ function chooseTravelMode(fly,dest){
  };
  if(car&&distance>35&&fly.money+fly.savings>.3&&danger<.94&&(fly.roadDuty||!thrifty&&brainRand(fly)<.86)){const plan=drive();if(plan)return plan;}
  const metro=distance>34?planMetroRoute(fly,dest):null;
- if(metro&&fly.money>=metro.fare&&(thrifty||distance>80||!car))return{mode:'metro',metro,route:metro.waypoints};
+ if(metro&&(fly.transitPass||fly.money+fly.savings>=metro.fare)&&(thrifty||distance>80||!car))return{mode:'metro',metro,route:metro.waypoints};
  if(car&&distance>45&&fly.money+fly.savings>.3&&danger<.94){const plan=drive();if(plan)return plan;}
  if(fly.vehicle==='scooter'&&distance>35&&distance<170&&danger<.42)return{mode:'scooter',metro:null,route:buildRoadRoute(fly,dest,'scooter',fly.parkedCar,roadLife.destination(fly,dest))};
  return{mode:'walk',metro:null,route:buildPedestrianRoute(fly,dest)};
@@ -2372,7 +2372,10 @@ function moveFly(fly) {
           return;
         }
         const fare=0.5;
-        if(!fly.transitPass&&!spend(fly,fare,state.businesses.transit||state.treasury)){fly.traveling=false;fly.actionUntil=0;fly.pendingAction=null;return;}
+        if(!fly.transitPass){
+          if(fly.money<fare&&fly.money+fly.savings>=fare){const withdrawal=fare-fly.money;fly.savings-=withdrawal;fly.money+=withdrawal;}
+          if(!spend(fly,fare,state.businesses.transit||state.treasury)){fly.traveling=false;fly.actionUntil=0;fly.pendingAction=null;return;}
+        }
         fly.metroBoardingsThisTrip=Number(fly.metroBoardingsThisTrip||0)+1;
         if(fly.metroBoardingsThisTrip>1){state.transit=state.transit||{};state.transit.transfers=Number(state.transit.transfers||0)+1;emit("metro_transfer",`${fly.id} changed to ${fly.metroLineId} at an interchange.`,{flyId:fly.id,lineId:fly.metroLineId});}
         fly.onTrain=true;fly.action=`riding metro ${fly.metroLineId}`;fly.transitStage="on-train";fly.y=t.y;

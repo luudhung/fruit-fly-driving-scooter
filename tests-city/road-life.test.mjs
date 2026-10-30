@@ -17,7 +17,7 @@ test('easy car finance conserves cash, charges a small deposit and pays the inst
 test('metro itineraries include real interchange walks, stairs and boarding on each line',()=>{
  const p=planNetworkMetroRoute({x:-300,z:10},{x:130,z:-325});assert.ok(p&&p.transfers>=1);assert.ok(p.waypoints.some(w=>w.stage==='interchange-walk'));assert.equal(p.waypoints.filter(w=>w.stage==='station-entry').length,p.legs.length);
  for(const leg of p.legs)assert.ok(METRO_LINES.some(l=>l.id===leg.lineId));
- const s=freshState(),f=s.flies[0];Object.assign(f,{x:-300,z:10,vehicle:'compact car',money:100,traits:{...f.traits,thrift:1}});assert.equal(chooseTravelMode(f,{x:130,z:-325}).mode,'metro');
+ const s=freshState(),f=s.flies[0];Object.assign(f,{x:-300,z:10,vehicle:'compact car',money:0,savings:100,transitPass:false,traits:{...f.traits,thrift:1}});assert.equal(chooseTravelMode(f,{x:130,z:-325}).mode,'metro');
 });
 test('drivers learn from rewards and penalties, so their later risk choices can change',()=>{
  const s=freshState(),f=s.flies[0];f.traits.risk=.95;f.lawAwareness=.15;f.excitement=95;
@@ -36,9 +36,9 @@ test('a 500-resident city builds sustained real-owner road traffic with legal pa
 
 test('a passenger physically boards two lines and walks the interchange before arrival',()=>{
  const s=freshState(),f=s.flies[0],dest=BUILDINGS.find(b=>b.id==='garage'),p=planNetworkMetroRoute({x:-310,z:10},entrance(dest));assert.ok(p&&p.transfers>=1);
- Object.assign(f,{x:-310,z:10,y:1.1,alive:true,indoors:false,sleeping:false,traveling:true,onTrain:false,money:1000,energy:95,health:100,hunger:10,vehicle:null,targetLocationId:'garage',routeWaypoints:p.waypoints,routeIndex:0,metroLineId:p.lineId,metroBoardingsThisTrip:0,transitMode:p.waypoints[0].mode,targetX:p.waypoints[0].x,targetZ:p.waypoints[0].z});
+ Object.assign(f,{x:-310,z:10,y:1.1,alive:true,indoors:false,sleeping:false,traveling:true,onTrain:false,money:0,savings:100,transitPass:false,energy:95,health:100,hunger:10,vehicle:null,targetLocationId:'garage',routeWaypoints:p.waypoints,routeIndex:0,metroLineId:p.lineId,metroBoardingsThisTrip:0,transitMode:p.waypoints[0].mode,targetX:p.waypoints[0].x,targetZ:p.waypoints[0].z});
  const stages=new Set();for(let i=0;i<2000&&f.traveling;i++){s.simulationAgeSeconds+=getSimulationConfig().gameSecondsPerRealSecond*.5;moveFly(f);stages.add(f.transitStage);}
- assert.equal(f.traveling,false);assert.ok(f.metroBoardingsThisTrip>=2);assert.ok(s.transit.transfers>=1);assert.ok(stages.has('interchange-walk'));assert.equal(f.currentLocationId,'garage');assert.equal(f.x,dest.x);assert.equal(f.z,dest.z);
+ assert.equal(f.traveling,false);assert.ok(f.metroBoardingsThisTrip>=2);assert.ok(s.transit.transfers>=1);assert.ok(stages.has('interchange-walk'));assert.equal(f.currentLocationId,'garage');assert.equal(f.x,dest.x);assert.equal(f.z,dest.z);assert.equal(f.savings,100-f.metroBoardingsThisTrip*.5);
 });
 
 test('exhausted shelter residents recover across expired action timers before resuming trips',()=>{
