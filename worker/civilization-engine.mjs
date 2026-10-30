@@ -1,4 +1,6 @@
-import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, metroStationGeometry, trainState } from "./city-map.mjs";
+import {planNetworkMetroRoute} from './metro-planner.mjs';
+import {createRoadLife} from './road-life.mjs';
+import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -30,71 +32,7 @@ const VERSION = {
   economicVersion: "adaptive-hansdrex-dollar-education-economy-0.7.0",
 };
 
-const METRO_ROUTE_LINES = METRO_LINES;
-
-
-function nearestPointIndex(points, x, z) {
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < points.length; i += 1) {
-    const [px,pz] = points[i];
-    const d = Math.hypot(px - x, pz - z);
-    if (d < bestD) { bestD = d; best = i; }
-  }
-  return { index: best, distance: bestD };
-}
-
-function linePathDistance(points, a, b) {
-  const lo = Math.min(a,b);
-  const hi = Math.max(a,b);
-  let total = 0;
-  for (let i = lo; i < hi; i += 1) {
-    total += Math.hypot(points[i+1][0]-points[i][0], points[i+1][1]-points[i][1]);
-  }
-  return total;
-}
-
-function stationStairWaypoints(from,to,lineId,descending=false){
-  const points=[];
-  const steps=7;
-  for(let i=1;i<=steps;i++){
-    const u=i/steps;
-    points.push({
-      x:from.x+(to.x-from.x)*u,
-      z:from.z+(to.z-from.z)*u,
-      y:from.y+(to.y-from.y)*u,
-      mode:"walk",
-      lineId,
-      stage:descending?"station-stairs-down":"station-stairs-up",
-    });
-  }
-  return points;
-}
-
-function planMetroRoute(fly, dest) {
-  let best=null;
-  for(const line of METRO_ROUTE_LINES){
-    const entry=nearestPointIndex(line.points,fly.x,fly.z),exit=nearestPointIndex(line.points,dest.x,dest.z);
-    const score=entry.distance+exit.distance+linePathDistance(line.points,entry.index,exit.index)*0.18;
-    if(!best||score<best.score)best={line,entry,exit,score};
-  }
-  if(!best||best.entry.index===best.exit.index)return null;
-  const waypoints=[];
-  const entryGeo=metroStationGeometry(best.line,best.entry.index);
-  const exitGeo=metroStationGeometry(best.line,best.exit.index);
-  waypoints.push(...buildPedestrianRoute({x:fly.x,z:fly.z},entryGeo.access));
-  waypoints.push(...stationStairWaypoints(entryGeo.access,entryGeo.platform,best.line.id,false));
-  const dir=best.exit.index>best.entry.index?1:-1;
-  waypoints.push({...entryGeo.platform,mode:"walk",lineId:best.line.id,stage:"station-entry",stationIndex:best.entry.index,exitIndex:best.exit.index,direction:dir});
-  for(let i=best.entry.index;i!==best.exit.index+dir;i+=dir){
-    const [x,z]=best.line.points[i];
-    waypoints.push({x,z,y:best.line.height,mode:"metro",lineId:best.line.id,stage:"on-train"});
-  }
-  waypoints.push({...exitGeo.platform,mode:"walk",lineId:best.line.id,stage:"station-exit"});
-  waypoints.push(...stationStairWaypoints(exitGeo.platform,exitGeo.access,best.line.id,true));
-  waypoints.push(...buildPedestrianRoute(exitGeo.access,dest));
-  return{lineId:best.line.id,waypoints,score:best.score,entryIndex:best.entry.index,exitIndex:best.exit.index};
-}
+const planMetroRoute=planNetworkMetroRoute;
 
 
 const JOBS = [
@@ -166,6 +104,7 @@ const BUSINESSES = {
   "travel-escrow": { inventory:0, cash:0, price:0, sector:"escrow" },
   "heli-tour": { inventory: 999, cash: 12000, price: 185, sector: "luxury-tourism" },
   "vehicle-showroom": { inventory: 80, cash: 60000, price: 650, sector: "automotive" },
+  "vehicle-supplier": { inventory: 0, cash: 0, price: 320, sector: "automotive-supply" },
 };
 const VEHICLE_CATALOG = [
   { id:"scooter", price:420 },
@@ -454,6 +393,7 @@ const eventSubscribers = new Set();
 let state = null;
 const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance});
 const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
+const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney});
 let tickBusy = false;
 let neuralSyncBusy = false;
 let lastNeuralSyncAt = 0;
@@ -1646,27 +1586,19 @@ function nearestTransitStation(x, z) {
 }
 
 function chooseTravelMode(fly,dest){
-  if(onIsland(fly)||onIsland(dest))return {mode:"walk",metro:null,route:pedestrianRoute(fly,dest)};
-  const distance=Math.hypot(dest.x-fly.x,dest.z-fly.z),danger=weatherDanger();
-  const metro=planMetroRoute(fly,dest);
-  const ownsCar=fly.vehicle==="premium car"||fly.vehicle==="compact car";
-  const ownsScooter=fly.vehicle==="scooter";
-  // Metro is an ordinary city option. Brains weigh trip length, thrift, weather and vehicle ownership.
-  if(metro&&distance>34&&fly.money>=0.5){
-    const metroUtility=
-      clamp(distance/150,0,1)*0.28+
-      neuralDrive(fly,"avoidDrive")*0.16+
-      Number(fly.traits?.thrift||0.5)*0.18+
-      danger*0.24+
-      (!ownsCar&&!ownsScooter?0.20:ownsCar?-0.08:0.03)+
-      brainRand(fly)*0.10;
-    if(distance>105||metroUtility>0.41)return{mode:"metro",metro,route:metro.waypoints};
-  }
-  if(ownsCar){
-    if(distance>45&&fly.money>1.2&&neuralDrive(fly,"avoidDrive")<0.88&&danger<0.80) return{mode:"car",metro:null,route:buildRoadRoute({x:fly.x,z:fly.z},dest,"car",fly.parkedCar)};
-  }
-  if(distance>35&&ownsScooter&&fly.money>0.6&&distance<170&&danger<0.42) return{mode:"scooter",metro:null,route:buildRoadRoute({x:fly.x,z:fly.z},dest,"scooter",fly.parkedCar)};
-  return{mode:"walk",metro:null,route:buildPedestrianRoute({x:fly.x,z:fly.z},dest)};
+ if(onIsland(fly)||onIsland(dest))return{mode:"walk",metro:null,route:pedestrianRoute(fly,dest)};
+ const distance=Math.hypot(dest.x-fly.x,dest.z-fly.z),danger=weatherDanger(),car=String(fly.vehicle||'').includes('car'),thrifty=Number(fly.traits?.thrift||0)>=.76;
+ const drive=()=>{
+  const park=roadLife.destination(fly,dest),at=fly.traveling&&fly.transitMode==='car'?{x:fly.x,z:fly.z}:fly.parkedCar;
+  const route=buildRoadRoute(fly,dest,'car',at,park);
+  return route.some(p=>p.mode==='car')?{mode:'car',metro:null,route}:null;
+ };
+ if(car&&distance>35&&fly.money+fly.savings>.3&&danger<.94&&(fly.roadDuty||!thrifty&&brainRand(fly)<.86)){const plan=drive();if(plan)return plan;}
+ const metro=distance>34?planMetroRoute(fly,dest):null;
+ if(metro&&fly.money>=metro.fare&&(thrifty||distance>80||!car))return{mode:'metro',metro,route:metro.waypoints};
+ if(car&&distance>45&&fly.money+fly.savings>.3&&danger<.94){const plan=drive();if(plan)return plan;}
+ if(fly.vehicle==='scooter'&&distance>35&&distance<170&&danger<.42)return{mode:'scooter',metro:null,route:buildRoadRoute(fly,dest,'scooter',fly.parkedCar,roadLife.destination(fly,dest))};
+ return{mode:'walk',metro:null,route:buildPedestrianRoute(fly,dest)};
 }
 
 function nightlifeOpen(clock) {
@@ -1790,7 +1722,7 @@ function netWorth(fly) {
     ? Math.max(0, Number(business.cash || 0) + Number(business.assetValue || 0) - Number(business.loanBalance || 0))
     : 0;
   fly.businessEquity = equity;
-  return fly.money + fly.savings + fly.homeEquity + equity - fly.debt - fly.bankLoan;
+  return fly.money + fly.savings + fly.homeEquity + equity - fly.debt - fly.bankLoan + Number(fly.vehicleAssetValue||0) - Number(fly.vehicleLoan?.balance||0);
 }
 
 function updateSocialClass(fly) {
@@ -2199,9 +2131,9 @@ function brainChooseAction(fly, clock) {
   add("clinic", "seeking care", (100 - fly.health) * 1.05 + (fly.illness ? 55 : 0));
   add("hospital-central", "going to Hansdrex hospital", (100 - fly.health) * 1.28 + (fly.illness ? 72 : 0));
   add("corner-shop", "shopping", fly.excitement * 0.28 + Math.min(25, fly.money / 30));
-  if(!fly.vehicle&&fly.ageYears>=18&&fly.savings>450){
+  if(!fly.vehicle&&fly.ageYears>=18&&fly.money+fly.savings>15){
     const mobilityNeed=fly.traits.ambition*26+fly.excitement*0.18+neuralDrive(fly,"exploreDrive")*20+Math.min(20,fly.savings/100);
-    add("vehicle-showroom","shopping for a vehicle",mobilityNeed);
+    add("vehicle-showroom","shopping for a vehicle",mobilityNeed+(fly.traits.thrift<.76?35:0));
   }
 
   const heliPrice=heliTourTicketPrice();
@@ -2336,7 +2268,15 @@ function brainChooseAction(fly, clock) {
 }
 
 function chooseDestination(fly, clock) {
+  if((fly.roadDuty||fly.mobilityShopping)&&fly.traveling&&fly.hunger<92&&fly.energy>20)return;
   if (!fly.alive) return;
+  // Keep a real recovery episode across short action timers; exhausted shelter occupants
+  // can nap indoors instead of entering an endless exhausted commute.
+  if(!fly.traveling&&fly.indoors&&(fly.energy<15||fly.recoveringEnergy&&fly.energy<65||fly.sleeping&&fly.energy<75)){
+    fly.recoveringEnergy=true;fly.action=fly.currentLocationId===fly.homeId?"sleeping":"resting indoors";
+    fly.actionUntil=state.simulationAgeSeconds+600;return;
+  }
+  if(fly.recoveringEnergy){fly.recoveringEnergy=false;fly.actionUntil=0;fly.sleeping=false;}
   const distToTarget = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
 
   // Once a fly commits to a destination, keep that decision until arrival.
@@ -2358,7 +2298,7 @@ function startJourney(fly,chosen) {
     return;
   }
   if(fly.indoors){const door=entrance(fly);fly.x=door.x;fly.z=door.z;fly.y=1.1;fly.movementTrace=[];}
-  fly.onTrain=false;
+  fly.onTrain=false;fly.metroBoardingsThisTrip=0;
   fly.targetLocationId = chosen.id;
   fly.action = chosen.action;
   fly.pendingAction=chosen.action;fly.indoors=false;
@@ -2433,6 +2373,8 @@ function moveFly(fly) {
         }
         const fare=0.5;
         if(!fly.transitPass&&!spend(fly,fare,state.businesses.transit||state.treasury)){fly.traveling=false;fly.actionUntil=0;fly.pendingAction=null;return;}
+        fly.metroBoardingsThisTrip=Number(fly.metroBoardingsThisTrip||0)+1;
+        if(fly.metroBoardingsThisTrip>1){state.transit=state.transit||{};state.transit.transfers=Number(state.transit.transfers||0)+1;emit("metro_transfer",`${fly.id} changed to ${fly.metroLineId} at an interchange.`,{flyId:fly.id,lineId:fly.metroLineId});}
         fly.onTrain=true;fly.action=`riding metro ${fly.metroLineId}`;fly.transitStage="on-train";fly.y=t.y;
         state.transit=state.transit||{boardings:0,completedTrips:0};state.transit.boardings++;
         fly.metroExitIndex=currentWp.exitIndex;
@@ -2440,7 +2382,7 @@ function moveFly(fly) {
         emit("metro_boarding",`${fly.id} boarded ${fly.metroLineId} after waiting on the platform.`,{flyId:fly.id,lineId:fly.metroLineId,fare});
         return;
       }
-      if(currentWp?.stage==="parking")fly.parkedCar={x:fly.x,z:fly.z};
+      if(currentWp?.stage==="parking"){fly.parkedCar=fly.destinationParking||parkingPoint(fly);fly.carPosition=null;fly.destinationParking=null;}
       fly.routeIndex += 1;
       const next = fly.routeWaypoints[fly.routeIndex];
       fly.targetX = next.x;
@@ -2463,6 +2405,7 @@ function moveFly(fly) {
     if (fly.traveling) {
       const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
       fly.traveling = false;
+      roadLife.arrived(fly);
       fly.action=fly.pendingAction||fly.action;
       fly.pendingAction=null;
       fly.indoors=fly.currentLocationId===fly.homeId||BUILDINGS.some(b=>b.id===fly.currentLocationId)||["rooftop","heliport"].includes(fly.currentLocationId);
@@ -2491,6 +2434,7 @@ function moveFly(fly) {
     return;
   }
 
+  if(fly.transitMode==="car"&&roadLife.stepDriver(fly)){fly.vx=fly.vz=0;fly.trafficStatus="traffic inspection after an incident";return;}
   const vehicleBoost =
     fly.transitMode === "metro" ? 8.8 :
     fly.transitMode === "car" ? 4.6 :
@@ -2498,7 +2442,7 @@ function moveFly(fly) {
 
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
-  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost;
+  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost * (fly.transitMode==="car"&&fly.brain?.driving?.style==="reckless"?1.28:1);
   const danger = weatherDanger();
   const weatherFactor =
     fly.transitMode === "metro" ? 1 :
@@ -2510,7 +2454,7 @@ function moveFly(fly) {
   // brain chooses to violate the signal. Violations are recorded and enforceable.
   const controlledCrossing=["car","scooter"].includes(fly.transitMode)||(fly.transitMode==="walk"&&fly.transitStage==="crosswalk");
   if(controlledCrossing&&shouldStopAtRed({...fly,transitMode:fly.transitMode==="walk"?"scooter":fly.transitMode})){
-    const violationUrge=(fly.traits.risk||0)*0.65+(1-(fly.lawAwareness||0.7))*0.55+neuralDrive(fly,"approachDrive")*0.12;
+    const violationUrge=(fly.brain?.driving?.style==="reckless"?.38:0)+(fly.traits.risk||0)*0.65+(1-(fly.lawAwareness||0.7))*0.55+neuralDrive(fly,"approachDrive")*0.12;
     if(violationUrge>0.78&&brainRand(fly)<0.02){recordLawViolation(fly,fly.transitMode==="walk"?"crossing against the signal":"running a red light",fly.transitMode==="walk"?0.6:1.1);}
     else{fly.vx=fly.vz=0;fly.trafficStatus=fly.transitMode==="walk"?"waiting at pedestrian signal":"waiting at red light";fly.stress=clamp(fly.stress+(1-(fly.lawAwareness||0.7))*0.02);return;}
   } else fly.trafficStatus=null;
@@ -2521,12 +2465,12 @@ function moveFly(fly) {
   fly.vx = ux * step;
   fly.vz = uz * step;
   const nextPosition={x:fly.x+fly.vx,z:fly.z+fly.vz};
-  if(!clearSegment(fly,nextPosition)){fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
+  if(!clearSegment(fly,nextPosition)){if(fly.transitMode==="car"){roadLife.park(fly);fly.carPosition=null;roadLife.arrived(fly);}fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
   const activeWp=fly.routeWaypoints?.[fly.routeIndex];
   const targetY=Number.isFinite(activeWp?.y)?activeWp.y:1.1;
   const yBlend=dist>0?Math.min(1,step/dist):1;
   fly.x=nextPosition.x;fly.z=nextPosition.z;fly.y=fly.y+(targetY-fly.y)*yBlend;
-  if(["car","scooter"].includes(fly.transitMode))fly.parkedCar={x:fly.x,z:fly.z};
+  if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
   const remaining = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
   if (Number.isFinite(fly.travelLastDistance)) {
@@ -2777,15 +2721,10 @@ function simulateHeliTour(fly,clock){
 function rememberHeliPurchase(fly,price){brainRemember(fly,"heli_tour_purchase",{price,location:"airport"});}
 
 function vehicleShopping(fly) {
-  if(fly.traveling||fly.vehicle||fly.currentLocationId!=="vehicle-showroom"||!String(fly.action||"").includes("vehicle"))return;
-  const level=Number(state.centralBank?.priceLevel||1),affordable=VEHICLE_CATALOG.map((v)=>({...v,price:v.price*level})).filter((v)=>v.price<=fly.savings*0.88);
-  if(!affordable.length||state.businesses["vehicle-showroom"].inventory<1)return;
-  const desire=fly.traits.ambition*0.28+neuralDrive(fly,"approachDrive")*0.24+neuralDrive(fly,"exploreDrive")*0.18+fly.excitement/100*0.14+(fly.savings>1000?0.12:0);
-  if(brainRand(fly)<0.035+desire*0.08){
-    const choice=desire>0.72?affordable[affordable.length-1]:affordable[Math.floor(brainRand(fly)*affordable.length)];
-    fly.savings-=choice.price;fly.vehicle=choice.id;fly.parkedCar=parkingPoint(fly);state.businesses["vehicle-showroom"].cash+=choice.price;state.businesses["vehicle-showroom"].inventory=Math.max(0,state.businesses["vehicle-showroom"].inventory-1);state.totalTransactions+=1;fly.happiness=clamp(fly.happiness+8);fly.excitement=clamp(fly.excitement+12);brainRemember(fly,"vehicle_purchase",{vehicle:choice.id,price:choice.price});
-    emit("vehicle_purchase",`${fly.id} independently decided to buy a ${choice.id} at Hansdrex Motors for ${choice.price.toFixed(0)} ${CURRENCY_CODE}.`,{flyId:fly.id,vehicle:choice.id,price:choice.price});
-  }
+ if(fly.traveling||fly.vehicle||fly.currentLocationId!=="vehicle-showroom"||!String(fly.action||"").includes("vehicle"))return;
+ const thrifty=Number(fly.traits?.thrift||0)>=.76;
+ if(!thrifty&&brainRand(fly)<.55)roadLife.buy(fly,'compact car',true);
+ else if(thrifty&&fly.savings>900&&brainRand(fly)<.06)roadLife.buy(fly,'scooter',false);
 }
 function romanceUtility(a, b) {
   const neuralA = neuralDrive(a, "socialDrive") * 0.20 + neuralDrive(a, "approachDrive") * 0.12 - neuralDrive(a, "avoidDrive") * 0.10;
@@ -3335,7 +3274,7 @@ function needsAndActivities(fly, clock) {
   fly.thirst = clamp(fly.thirst + 0.082);
   fly.caffeine = clamp(fly.caffeine - 0.075);
   const atHome = fly.currentLocationId === fly.homeId && !fly.traveling;
-  const sleeping = Boolean(fly.action==="sleeping" && atHome && !fly.traveling && fly.indoors);
+  const sleeping = Boolean(!fly.traveling && fly.indoors && (fly.action==="sleeping"&&atHome||fly.action==="resting indoors"&&fly.recoveringEnergy));
   fly.sleeping = sleeping;
 
   if (sleeping) {
@@ -3529,7 +3468,7 @@ function tickFly(fly, clock) {
     emit("retirement", `${fly.id} retired at age ${fly.ageYears.toFixed(1)}.`, { flyId: fly.id });
   }
 
-  if(!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
+  if(!fly.roadDuty&&!fly.mobilityShopping&&fly.transitMode!=="car"&&!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
     const shelter=LOCATIONS.filter(l=>BUILDINGS.some(b=>b.id===l.id)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
     const route=buildPedestrianRoute(fly,shelter);
     if(route.length){fly.targetLocationId=shelter.id;fly.pendingAction="sheltering from bad weather";fly.action="walking to shelter";fly.routeWaypoints=route;fly.routeIndex=0;fly.targetX=route[0].x;fly.targetZ=route[0].z;fly.traveling=true;fly.transitMode="walk";fly.metroLineId=null;}
@@ -3620,6 +3559,9 @@ function compactFly(f) {
     children: f.children,
     parents: f.parents,
     vehicle: f.vehicle,
+    vehicleLoan:f.vehicleLoan?{balance:f.vehicleLoan.balance,dailyPayment:f.vehicleLoan.dailyPayment,annualRate:0,paid:f.vehicleLoan.paid}:null,
+    drivingStyle:f.brain?.driving?.style||"careful",drivingExperiences:f.brain?.driving?.experiences||0,drivingFines:f.brain?.driving?.fines||0,
+    carPosition:f.carPosition||null,metroTransfers:Math.max(0,Number(f.metroBoardingsThisTrip||0)-1),
     transitMode: f.transitMode || "walk",
     transitStage: f.transitStage || null,
     metroLineId: f.metroLineId || null,
@@ -3766,6 +3708,7 @@ function getState() {
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     aviation:aviationSummary(),
+    roadTraffic:roadLife.summary(),
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
@@ -3825,7 +3768,9 @@ async function tick(options = {}) {
        const host=state.flies.find(f=>f.alive&&f.ageYears>=21&&f.ageYears<65&&!f.jobId&&!f.businessEmployeeOf);
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
+      roadLife.normalizeParking();
       for(const fly of state.flies)tickFly(fly,clock);
+      roadLife.tick();
       aviationTick();
       simulateEnterprises(clock);
       simulatePowerGrid(clock);
@@ -3871,5 +3816,5 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
+  roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

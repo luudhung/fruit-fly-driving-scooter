@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 17;
+export const MAP_VERSION = 18;
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -126,11 +126,11 @@ export const LOCATIONS = [
 
 export const METRO_LINES = [
  {id:"M1",height:9,points:[[-310,0],[-210,0],[-102,0],[2,0],[122,0],[210,0],[310,0]]},
- {id:"M2",height:11,points:[[-102,-340],[-102,-220],[-102,-116],[-102,0],[-102,145],[-102,260],[-102,340]]},
+ {id:"M2",height:11,points:[[-102,-340],[-102,-220],[-102,-116],[-102,0],[-102,87],[-102,145],[-102,260],[-102,340]]},
  {id:"M3",height:13,points:[[-310,87],[-210,87],[-102,87],[2,87],[122,87],[210,87],[310,87]]},
- {id:"M4",height:15,points:[[122,-340],[122,-220],[122,-116],[122,0],[122,145],[122,260],[122,340]]},
+ {id:"M4",height:15,points:[[122,-340],[122,-220],[122,-116],[122,0],[122,87],[122,145],[122,260],[122,340]]},
  {id:"M5",height:17,points:[[-210,-340],[-102,-340],[2,-340],[122,-340],[210,-340]]},
- {id:"M6",height:19,points:[[310,-340],[310,-220],[310,0],[310,180],[310,340]]}
+ {id:"M6",height:19,points:[[310,-340],[310,-220],[310,0],[310,87],[310,180],[310,340]]}
 ];
 
 export const BUILDINGS=[];
@@ -368,12 +368,28 @@ export function trainState(line,seconds) {
  return {x:stops[from][0]+(stops[to][0]-stops[from][0])*u,z:stops[from][1]+(stops[to][1]-stops[from][1])*u,y:line.height,from,to,direction:Math.sign(to-from),dwelling:t<dwell};
 }
 
-export function parkingPoint(p) {
- const candidates=ROADS.map(r=>r.w>r.d?{x:Math.max(r.x-r.w/2+2,Math.min(r.x+r.w/2-2,p.x)),z:r.z}:{x:r.x,z:Math.max(r.z-r.d/2+2,Math.min(r.z+r.d/2-2,p.z))});
- return candidates.filter(q=>!blocked(q)).sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z))[0];
+// Marked parallel bays stay inside the curb, clear of intersections, bridges and stations.
+export const PARKING_SPACES=[];
+const parkingKeys=new Set();
+for(const r of ROADS){
+ const horizontal=r.w>r.d,half=(horizontal?r.w:r.d)/2,center=horizontal?r.x:r.z;
+ for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
+  const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
+  if(Math.abs(p.x)>335||Math.abs(p.z)>335||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
+  if(ROADS.some(o=>o!==r&&(o.w>o.d)!==horizontal&&contains(o,p,8)))continue;
+  if(METRO_LINES.some(l=>l.points.some(([x,z])=>Math.hypot(p.x-x,p.z-z)<12)))continue;
+  const key=`${p.x.toFixed(2)},${p.z.toFixed(2)}`;if(parkingKeys.has(key))continue;parkingKeys.add(key);
+  PARKING_SPACES.push({...p,id:`CURB-${key}`,spaceId:`CURB-${key}`,heading:horizontal?side*Math.PI/2:side<0?0:Math.PI,axis:horizontal?'x':'z',w:horizontal?5:2,d:horizontal?2:5});
+ }
 }
-export function vehicleRoute(start,dest,mode='car',parked=null) {
- const a=parked||parkingPoint(start),b=parkingPoint(dest);
+export function parkingPoint(p,occupied=new Set()) {
+ let best=null,distance=Infinity;
+ for(const q of PARKING_SPACES){if(occupied.has(q.id))continue;const d=Math.hypot(q.x-p.x,q.z-p.z);if(d<distance){best=q;distance=d;}}
+ return best?{...best}:null;
+}
+export function vehicleRoute(start,dest,mode='car',parked=null,destinationParking=null) {
+ const a=parked||parkingPoint(start),b=destinationParking||parkingPoint(dest);
+ if(!a||!b)return pedestrianRoute(start,dest);
  const access=pedestrianRoute(start,a),drive=pedestrianRoute(a,b,mode),exit=pedestrianRoute(b,dest);
  if(!access.length||!drive.length||!exit.length)return pedestrianRoute(start,dest);
  return [...access,...drive.map(p=>({...p,stage:'road'})),{...b,mode,stage:'parking'},...exit];

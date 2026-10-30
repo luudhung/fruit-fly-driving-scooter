@@ -1,3 +1,4 @@
+import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
@@ -22,7 +23,9 @@ type FlyState = {
   traveling?:boolean; indoors?:boolean; onTrain?:boolean; metroLineId?:string; transitStage?:string|null; householdId?:string; housingUnitId?:string; housingType?:string;
   wheelRideUntil?:number;
   wheelSeat?:number|null;
-  parkedCar?:{x:number;z:number}|null;
+  parkedCar?:{x:number;z:number;heading?:number}|null;
+  vehicleLoan?:{balance:number;dailyPayment:number;annualRate:number};
+  drivingStyle?:string;drivingExperiences?:number;drivingFines?:number;metroTransfers?:number;
   movementTrace?:Array<{x:number;y:number;z:number;t:number}>;
   causeOfDeath?: string | null;
   x: number; y: number; z: number;
@@ -149,6 +152,7 @@ type WeatherState = {
 type CivilizationSnapshot = {
   authoritative: boolean;
   mapVersion?:number;
+  roadTraffic?:{drivingCars:number;targetDrivingCars:number;carOwners:number;parkedCars:number;recklessDrivers:number;chaosActive:boolean;incidents:RoadIncident[]};
   transit?:{boardings:number;completedTrips:number;passengers:number;waiting:number};
   activity?:{working:number;sleeping:number;indoors:number;traveling:number};
   simulationStatus?: string;
@@ -440,7 +444,7 @@ function renderInspector(fly: FlyState | null) {
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
-  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0),1)} H$ + power ${num(fly.utilityDebt||0,1)} · ${fly.powerOn===false?"POWER CUT":"powered"} · ${fly.vehicle||fly.transitMode||"walk"}`;
+  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0),1)} H$ + power ${num(fly.utilityDebt||0,1)} · ${fly.powerOn===false?"POWER CUT":"powered"} · ${fly.vehicle||fly.transitMode||"walk"}${fly.vehicleLoan?` · trả góp ${num(fly.vehicleLoan.balance,1)} H$ còn lại (${fly.vehicleLoan.dailyPayment}/ngày, 0%)`:""}${fly.vehicle?.includes("car")&&fly.drivingStyle?` · ${fly.drivingStyle==="reckless"?"lái liều":"lái cẩn thận"} · ${fly.drivingExperiences||0} kinh nghiệm · ${fly.drivingFines||0} lần phạt`:""}${fly.metroTransfers?` · ${fly.metroTransfers} lần đổi tuyến`:""}`;
   flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
   flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
   flyRelationshipEl.textContent = fly.partnerId
@@ -513,7 +517,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   generation.textContent = num(s.generation);
   speed.textContent = "1s = 2m";
   const activity=document.getElementById("city-activity");if(activity)activity.textContent=s.activity?`${s.activity.working} working · ${s.activity.traveling} traveling · ${s.activity.indoors} indoors`:"Awaiting activity telemetry";
-  const transit=document.getElementById("transit-activity");if(transit)transit.textContent=s.transit?`${s.transit.passengers} aboard · ${s.transit.waiting} waiting · ${s.transit.completedTrips} completed trips`:"Awaiting transit telemetry";
+  const transit=document.getElementById("transit-activity");if(transit)transit.textContent=s.transit?`${s.transit.passengers} aboard · ${s.transit.waiting} waiting · ${s.transit.completedTrips} completed trips${s.roadTraffic?` · ${s.roadTraffic.drivingCars} ô tô đang chạy · ${s.roadTraffic.parkedCars} đỗ sát lề`:""}`:"Awaiting transit telemetry";
   for(const t of metroTrains){if(t.label)updateSpriteText(t.label,`${METRO_LINES[t.lineIndex].id} · ${(s.flies||[]).filter(f=>f.onTrain&&f.metroLineId===METRO_LINES[t.lineIndex].id).length} RIDERS`);}
   births.textContent = num(s.births);
   deaths.textContent = num(s.deaths);
@@ -1215,7 +1219,8 @@ function addMetroStation(line:typeof metroLines[number],index:number,lineIndex:n
   const towardTrack=new THREE.Vector3(geo.track.x-geo.platform.x,0,geo.track.z-geo.platform.z).normalize();
   edge.position.set(geo.platform.x+towardTrack.x*2.15,geo.platform.y+.03,geo.platform.z+towardTrack.z*2.15);cityRoot.add(edge);
   addMetroStaircase(geo.access,geo.platform);
-  const accessSign=makeCanvasSprite(`${line.id} METRO ↑`,18,.85);accessSign.position.set(geo.access.x,3.1,geo.access.z);cityRoot.add(accessSign);
+  const interchangeLines=METRO_LINES.filter(other=>other.id!==line.id&&other.points.some(([x,z])=>x===line.points[index][0]&&z===line.points[index][1])).map(other=>other.id);
+  const accessSign=makeCanvasSprite(`${line.id} METRO ↑${interchangeLines.length?` · ↔ ${interchangeLines.join(" / ")}`:""}`,18,.85);accessSign.position.set(geo.access.x,3.1,geo.access.z);cityRoot.add(accessSign);
   if(graphics.metroDetail>=1){
     const canopy=new THREE.Mesh(new THREE.BoxGeometry(horizontal?12:4.4,.28,horizontal?4.4:12),new THREE.MeshStandardMaterial({color:0x535b60,roughness:0.55,metalness:0.45}));
     canopy.position.set(geo.platform.x,geo.platform.y+2.55,geo.platform.z);cityRoot.add(canopy);
@@ -1440,7 +1445,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.lastTraceTime=trace.at(-1)?.t??visual.lastTraceTime;
     if(visual.route.length>12)visual.route=visual.route.slice(-8);
     if(visual.stationary){visual.route=[];visual.current.copy(visual.target);}
-    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onTrain&&!fly.indoors;
+    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onTrain&&!fly.indoors&&!(fly.traveling&&fly.transitMode==="car");
     if(fly.currentLocationId==="rooftop"&&!fly.traveling)visual.group.visible=true;
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
@@ -1465,7 +1470,7 @@ function syncFlyMeshes(flies: FlyState[]) {
 
 
 const homeVisuals=new Map<string,THREE.Group>();
-const carVisuals=new Map<string,THREE.Group>();
+const personalCars=new PersonalCars(scene);
 function syncHomes(flies:FlyState[]){
  const occupied=new Set(flies.filter(f=>f.alive&&f.housingType==="house").map(f=>f.housingUnitId));
  for(const b of BUILDINGS.filter(b=>b.kind==="house")){
@@ -1474,17 +1479,7 @@ function syncHomes(flies:FlyState[]){
   const roof=new THREE.Mesh(new THREE.ConeGeometry(5.2,2.6,4),new THREE.MeshStandardMaterial({color:0x775545,roughness:.9}));roof.rotation.y=Math.PI/4;roof.position.y=5.5;g.add(roof);homeVisuals.set(b.id,g);
  }
  for(const [id,g]of homeVisuals)g.visible=occupied.has(id);
- for(const f of flies){
-  if(!f.alive||!f.vehicle?.includes("car"))continue;
-  let g=carVisuals.get(f.id);
-  if(!g){g=new THREE.Group();const paint=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(seeded(Number(f.id.replace(/\D/g,"")))*1,.48,.43),metalness:.4,roughness:.3});const body=new THREE.Mesh(new THREE.BoxGeometry(1.8,.7,3.4),paint);body.position.y=.65;g.add(body);const cabin=new THREE.Mesh(new THREE.BoxGeometry(1.5,.6,1.7),landmarkCool);cabin.position.y=1.2;g.add(cabin);for(const x of [-.9,.9])for(const z of [-1,1]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.32,.32,.2,8),trafficBoxMat);wheel.rotation.z=Math.PI/2;wheel.position.set(x,.35,z);g.add(wheel);}scene.add(g);carVisuals.set(f.id,g);}
-  const driving=f.traveling&&f.transitMode==="car";
-  g.visible=Boolean(driving||f.parkedCar);
-  if(driving){g.position.set(f.x,0,f.z);if(Math.abs(f.vx)+Math.abs(f.vz)>.01)g.rotation.y=Math.atan2(f.vx,f.vz);}
-  else if(f.parkedCar)g.position.set(f.parkedCar.x,0,f.parkedCar.z);
- }
- const live=new Set(flies.filter(f=>f.alive&&f.vehicle?.includes("car")).map(f=>f.id));
- for(const [id,g]of carVisuals)if(!live.has(id)){scene.remove(g);carVisuals.delete(id);}
+ personalCars.sync(flies,snapshot?.roadTraffic?.incidents);
 }
 
 function updateDayNight(hour: number, minute: number, weather: WeatherState = {}) {
@@ -1730,6 +1725,7 @@ function animate(now = performance.now()) {
   }
 
   residentBodies.finish();
+  personalCars.update(dt);
   updateMetroTrains(now);
   updateParkWheel(now);
   const gameNow=presentationClock.read(now);
