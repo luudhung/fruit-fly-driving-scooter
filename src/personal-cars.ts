@@ -23,7 +23,7 @@ export class PersonalCars{
   const points:number[]=[];
   for(const p of PARKING_SPACES){
    const x=p.w/2,z=p.d/2;
-   for(const [a,b,c,d]of [[-x,-z,x,-z],[x,-z,x,z],[x,z,-x,z],[-x,z,-x,-z]])points.push(p.x+a,.035,p.z+b,p.x+c,.035,p.z+d);
+   for(const [a,b,c,d]of [[-x,-z,x,-z],[x,-z,x,z],[x,z,-x,z],[-x,z,-x,-z]])points.push(p.x+a,.16,p.z+b,p.x+c,.16,p.z+d);
   }
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(points,3));
   scene.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({color:0xc9c4a3,transparent:true,opacity:.55,depthWrite:false})));
@@ -43,7 +43,7 @@ export class PersonalCars{
   }
   for(const id of this.cars.keys())if(!live.has(id))this.cars.delete(id);
   let count=0;
-  for(const incident of incidents.slice(-24))for(const side of [-1,1]){this.dummy.position.set(incident.x+side*.8,.45,incident.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.cones.setMatrixAt(count++,this.dummy.matrix);}
+  for(const incident of incidents.slice(-24))for(const side of [-1,1]){this.dummy.position.set(incident.x+side*.8,.59,incident.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.cones.setMatrixAt(count++,this.dummy.matrix);}
   this.cones.count=count;this.cones.instanceMatrix.needsUpdate=true;
  }
  update(dt:number){
@@ -53,11 +53,11 @@ export class PersonalCars{
    car.x+=dx*blend;car.z+=dz*blend;
    if(car.route.length&&Math.hypot(dx,dz)<.35)car.route.shift();
    if(car.driving&&Math.hypot(dx,dz)>.05)car.heading=Math.atan2(dx,dz);else if(!car.driving)car.heading=car.targetHeading;
-   d.rotation.set(0,car.heading,0);d.position.set(car.x,.65,car.z);d.updateMatrix();this.body.setMatrixAt(index,d.matrix);
+   d.rotation.set(0,car.heading,0);d.position.set(car.x,.79,car.z);d.updateMatrix();this.body.setMatrixAt(index,d.matrix);
    this.body.setColorAt(index,car.color);
-   d.position.y=1.2;d.updateMatrix();this.cabin.setMatrixAt(index,d.matrix);
+   d.position.y=1.34;d.updateMatrix();this.cabin.setMatrixAt(index,d.matrix);
    let wheel=0;const sin=Math.sin(car.heading),cos=Math.cos(car.heading);
-   for(const x of [-.9,.9])for(const z of [-1,1]){d.position.set(car.x+x*cos+z*sin,.35,car.z-x*sin+z*cos);d.updateMatrix();this.wheels.setMatrixAt(index*4+wheel++,d.matrix);}
+   for(const x of [-.9,.9])for(const z of [-1,1]){d.position.set(car.x+x*cos+z*sin,.49,car.z-x*sin+z*cos);d.updateMatrix();this.wheels.setMatrixAt(index*4+wheel++,d.matrix);}
    index++;
   }
   this.body.count=this.cabin.count=index;this.wheels.count=index*4;
