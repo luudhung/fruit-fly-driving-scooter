@@ -1,3 +1,4 @@
+import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
 import {InstancedResidents} from "./instanced-residents";
@@ -617,7 +618,7 @@ async function fetchSnapshotOnce() {
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    payload = await response.json() as CivilizationSnapshot;
+    payload = await readCitySnapshot(response) as CivilizationSnapshot;
     if (!usableSnapshot(payload)) throw new Error("invalid or empty civilization snapshot");
     window.clearTimeout(timeout);
     if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds)return;
