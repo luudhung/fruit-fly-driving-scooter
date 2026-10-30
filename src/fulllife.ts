@@ -1,3 +1,4 @@
+import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
 import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize} from "./touch-controls.ts";
@@ -365,6 +366,7 @@ window.addEventListener("unhandledrejection",(event)=>{
 
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
 const SNAPSHOT_CACHE_KEY = "fulllife:last-good-civilization-snapshot:v1";
+const presentationClock=new CityClock();
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
 let latestFlyStates = new Map<string, FlyState>();
@@ -484,6 +486,7 @@ function renderInspector(fly: FlyState | null) {
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
+  if(!presentationClock.accept(s.simulationAgeSeconds,performance.now(),s.timeScale||120))return;
   snapshot = s;
   snapshotReceivedAt=performance.now();
   const neuralLive = Boolean(s.neuralBridge?.allBrainsReady && s.neuralBridge?.independentDynamicState);
@@ -602,20 +605,25 @@ function updateHeliTourState(flies:FlyState[]){
   }
 }
 
-async function fetchSnapshot() {
+async function fetchSnapshotOnce() {
   // The civilization keeps running on Railway; hidden tabs do not need to poll/render it.
   if (document.hidden) return;
   let payload: CivilizationSnapshot;
+  const controller=new AbortController(),timeout=window.setTimeout(()=>controller.abort(),12000);
   try {
-    const response = await fetch(`${apiBase}/api/civilization/state`, {
+    const response = await fetch(`${apiBase}/api/civilization/state?view=observer`, {
+      signal:controller.signal,
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     payload = await response.json() as CivilizationSnapshot;
     if (!usableSnapshot(payload)) throw new Error("invalid or empty civilization snapshot");
+    window.clearTimeout(timeout);
+    if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds)return;
     saveCachedSnapshot(payload);
   } catch (error) {
+    window.clearTimeout(timeout);
     console.error("[fulllife] civilization fetch failed", error);
     const cached = snapshot && usableSnapshot(snapshot) ? snapshot : loadCachedSnapshot();
     if (cached && (!snapshot || !usableSnapshot(snapshot))) {
@@ -646,6 +654,13 @@ const host = $("world");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
 scene.fog = new THREE.Fog(0x93b8cf, 520, 2400);
+
+let snapshotFetchPending=false;
+async function fetchSnapshot(){
+ if(snapshotFetchPending||document.hidden)return;
+ snapshotFetchPending=true;try{await fetchSnapshotOnce();}finally{snapshotFetchPending=false;}
+}
+addEventListener("visibilitychange",()=>{if(!document.hidden)void fetchSnapshot();});
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 3000);
 const renderer = new THREE.WebGLRenderer({
@@ -909,7 +924,7 @@ for(let i=0;i<FERRIS_WHEEL.seats;i++){
 }
 const wheelSign=makeCanvasSprite("HANSDREX GREAT WHEEL · FREE",34,2.1);wheelSign.position.set(FERRIS_WHEEL.x,8,FERRIS_WHEEL.z+FERRIS_WHEEL.radius+9);cityRoot.add(wheelSign);
 function updateParkWheel(now:number){
- const seconds=Number(snapshot?.simulationAgeSeconds||0)+(Math.min(2,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120));
+ const seconds=presentationClock.read(now);
  wheelRotor.rotation.z=seconds/FERRIS_WHEEL.period*Math.PI*2;
  wheelCabins.forEach((cab,i)=>{const p=wheelCabin(seconds,i);cab.position.set(p.x-FERRIS_WHEEL.x,p.y-FERRIS_WHEEL.y,0);});
  for(const f of latestFlyStates.values()){if(!f.wheelRideUntil||f.wheelSeat==null)continue;const v=flyVisuals.get(f.id);if(v){const p=wheelCabin(seconds,f.wheelSeat);v.group.position.set(p.x,p.y-.5,p.z);}}
@@ -1281,7 +1296,7 @@ function updateMetroStationOccupancy(flies:FlyState[]){
 }
 
 function updateMetroTrains(now:number){
- const seconds=(snapshot?.simulationAgeSeconds||0)/Math.max(1,snapshot?.timeScale||120)+Math.min(3,(now-snapshotReceivedAt)/1000);
+ const seconds=presentationClock.read(now)/Math.max(1,snapshot?.timeScale||120);
  for(const train of metroTrains){
   const line=METRO_LINES[train.lineIndex],t=trainState(line,seconds);
   train.group.position.set(t.x,t.y,t.z);
@@ -1565,7 +1580,8 @@ function visitMansion(){
  followSelected=false;cameraSprint.reset();player.teleport(mansionSpawn.x,mansionSpawn.y,mansionSpawn.z);freePosition.set(player.x,player.y,player.z);cameraYaw=0;cameraPitch=0;camera.fov=68;camera.updateProjectionMatrix();
 }
 document.getElementById("mansion-view")?.addEventListener("click",visitMansion);
-visitMansion();
+document.body.classList.add("mansion-visit");
+player.teleport(8,1.9,-35.4);freePosition.set(player.x,player.y,player.z);cameraYaw=-.07;cameraPitch=0;camera.fov=68;camera.updateProjectionMatrix();
 camera.position.copy(freePosition);
 
 renderer.domElement.tabIndex = 0;
@@ -1715,7 +1731,11 @@ function animate(now = performance.now()) {
   residentBodies.finish();
   updateMetroTrains(now);
   updateParkWheel(now);
-  const gameNow=Number(snapshot?.simulationAgeSeconds||0)+Math.min(2.5,(now-snapshotReceivedAt)/1000)*Number(snapshot?.timeScale||120);
+  const gameNow=presentationClock.read(now);
+  if(snapshot){
+    const hour=Math.floor(gameNow%86400/3600),minute=Math.floor(gameNow%3600/60),text=`${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
+    if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}
+  }
   const pose=scheduledAircraft(gameNow);
   const activePlane=(snapshot?.flies||[]).some(f=>f.onPlane);
   if(snapshot?.aviation?.weatherClosed&&!activePlane){aviationVisual.plane.position.set(AIRPORT.terminal.x,3,-420);}

@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {CityClock}from'../src/city-clock.ts';
+test('repeated and out-of-order snapshots never restart the train animation',()=>{const c=new CityClock();c.accept(1000,0,120);assert.equal(c.read(2500),1300);c.accept(1000,2500,120);assert.equal(c.read(3000),1360);assert.equal(c.accept(900,3000,120),false);assert.equal(c.read(3500),1420);c.accept(1400,3500,120);assert.equal(c.read(3500),1420);assert.equal(c.read(4000),1480);});
+test('a tab returning from a long absence accepts fresh server time; prediction is bounded',()=>{const c=new CityClock();c.accept(100,0,120);assert.equal(c.read(3600000),3700);c.accept(10000,3600000,120);assert.equal(c.read(3601000),10120);});

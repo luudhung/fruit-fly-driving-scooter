@@ -3810,7 +3810,8 @@ function getState() {
 }
 
 async function tick(options = {}) {
-  if (tickBusy || !state) return;
+  // Durable Object callers already serialize access through their object queue.
+  if ((tickBusy && !options.serialized) || !state) return;
   tickBusy = true;
   try {
     if (!state.paused) {

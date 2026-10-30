@@ -209,13 +209,14 @@ export class CivilizationWorld extends DurableObject {
     const totalGameSeconds = elapsedRealSeconds * timeScale;
     const gameSecondsPerStep = Math.max(1, totalGameSeconds / steps);
 
+    const ageBefore=Number(getRawState().simulationAgeSeconds||0);
     for (let index = 0; index < steps; index += 1) {
-      await tick({ gameSeconds: gameSecondsPerStep, syncBrain: false });
+      await tick({ gameSeconds: gameSecondsPerStep, syncBrain: false,serialized:true });
     }
 
     this.lastWallClockMs = nowMs;
     getRawState().updatedAt = new Date(nowMs).toISOString();
-    return { elapsedRealSeconds, steps, gameSecondsPerStep };
+    return { elapsedRealSeconds, steps, gameSecondsPerStep,advancedGameSeconds:Number(getRawState().simulationAgeSeconds||0)-ageBefore };
   }
 
   async persistIfDue(force = false) {
@@ -299,6 +300,14 @@ export class CivilizationWorld extends DurableObject {
           alarmIntervalMs: this.alarmIntervalMs(),
           sampledCatchup: advance,
         };
+        if(url.searchParams.get('view')==='observer'){
+          // The map needs recent motion, not the complete movement history of 500 residents.
+          payload.flies=payload.flies.map(f=>({...f,movementTrace:(f.movementTrace||[]).slice(-8)}));
+          if((request.headers.get('accept-encoding')||'').includes('gzip')){
+            const compressed=await gzipJson(payload);
+            return new Response(compressed,{headers:corsHeaders({'content-type':'application/json; charset=utf-8','content-encoding':'gzip','vary':'Accept-Encoding'})});
+          }
+        }
         return json(payload);
       }
 
