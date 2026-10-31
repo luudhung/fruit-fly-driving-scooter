@@ -1,3 +1,4 @@
+import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
 import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState } from "./city-map.mjs";
@@ -391,6 +392,7 @@ function releaseHousingUnit(hh) {
 
 const eventSubscribers = new Set();
 let state = null;
+let vehicleHeadway=null;
 const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance});
 const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
 const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney});
@@ -564,19 +566,12 @@ function jittered(loc, radius = 3) {
 }
 
 // Navigation follows the geometry used by the renderer.
-const CITY_ROAD_X=[-154,-102,-76,-50,-24,2,28,54,80,106,159,260];
-const CITY_ROAD_Z=[-234,-184,-150,-145,-116,-100,-87,-58,-50,-29,0,29,50,58,87,100,116,145,150];
-const nearestValue=(arr,value)=>arr.reduce((best,v)=>Math.abs(v-value)<Math.abs(best-value)?v:best,arr[0]);
 const buildPedestrianRoute=pedestrianRoute;
 const buildRoadRoute=vehicleRoute;
 const legalDestinationPoint=entrance;
-function trafficPhase(){return Math.floor(state.simulationAgeSeconds/Math.max(1,GAME_SECONDS_PER_REAL_SECOND))%60;}
-function shouldStopAtRed(fly){
-  if(!["car","scooter"].includes(fly.transitMode)) return false;
-  const nearestX=nearestValue(CITY_ROAD_X,fly.targetX), nearestZ=nearestValue(CITY_ROAD_Z,fly.targetZ);
-  if(Math.hypot(fly.targetX-nearestX,fly.targetZ-nearestZ)>1.2) return false;
-  const dx=fly.targetX-fly.x,dz=fly.targetZ-fly.z,ns=Math.abs(dz)>=Math.abs(dx),phase=trafficPhase();
-  return ns ? phase>=30 : phase<30;
+function stopForSignal(fly,end){
+ if(!["car","scooter"].includes(fly.transitMode))return null;
+ return signalBarrier(fly,end,state.simulationAgeSeconds/Math.max(1,GAME_SECONDS_PER_REAL_SECOND));
 }
 function trainedSkillsForJob(jobId,title=""){
   if(jobId==="police") return {law:1,patrol:0.92,deescalation:0.88,arrestProcedure:0.95};
@@ -630,7 +625,11 @@ function ensureUtilityState(){
   state.utilities=state.utilities||{powerPlant:{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0},householdAccounts:{},lastBillingDay:0,disconnectedHouseholds:0};
   state.utilities.powerPlant=state.utilities.powerPlant||{cash:65000,fuelReserve:18000,maintenance:0.94,generation:0,capacity:0,demand:0,gridOnline:true,lastHourKey:-1,outages:0,totalRevenue:0};
   state.utilities.householdAccounts=state.utilities.householdAccounts||{};ensureHousingState();
-  for(const hh of Object.values(state.housing?.households||{})) state.utilities.householdAccounts[hh.id]=state.utilities.householdAccounts[hh.id]||{balance:0,powerOn:true,overdueDays:0,lastBilledDay:0,lastPaymentDay:0,illegalConnectionUntil:0,usage:0};
+  // Account creation is lazy per household; do not scan every household for every resident.
+}
+function utilityAccount(id){
+ ensureUtilityState();
+ return state.utilities.householdAccounts[id] ||= {balance:0,powerOn:true,overdueDays:0,lastBilledDay:0,lastPaymentDay:0,illegalConnectionUntil:0,usage:0};
 }
 function ensurePowerPlantStaff(){
   const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId));if(staff.length>=5)return staff;
@@ -640,14 +639,14 @@ function ensurePowerPlantStaff(){
 }
 function householdMembers(hhId){const hh=state.housing?.households?.[hhId];if(!hh)return[];return(hh.members||[]).map((id)=>state.flies.find((f)=>f.id===id&&f.alive)).filter(Boolean);}
 function collectElectricBill(hhId,amount){let remaining=Math.max(0,amount),paid=0;const members=householdMembers(hhId).sort((a,b)=>(b.money+b.savings)-(a.money+a.savings));for(const fly of members){if(remaining<=0)break;const p=Math.min(Math.max(0,fly.money),remaining);fly.money-=p;remaining-=p;paid+=p;}if(remaining>0)for(const fly of members){if(remaining<=0)break;const acc=state.utilities.householdAccounts[hhId];if(!(acc.overdueDays>0||fly.traits.thrift<0.62||neuralDrive(fly,"avoidDrive")>0.58))continue;const p=Math.min(Math.max(0,fly.savings),remaining);fly.savings-=p;remaining-=p;paid+=p;}if(paid>0){state.utilities.powerPlant.cash+=paid;state.utilities.powerPlant.totalRevenue+=paid;state.totalTransactions+=1;}return paid;}
-function householdHasPower(fly){ensureUtilityState();const acc=state.utilities.householdAccounts?.[fly.householdId],illegal=Number(acc?.illegalConnectionUntil||0)>state.simulationAgeSeconds;return Boolean(state.utilities.powerPlant.gridOnline&&(acc?.powerOn!==false||illegal));}
+function householdHasPower(fly){ensureUtilityState();const acc=utilityAccount(fly.householdId),illegal=Number(acc?.illegalConnectionUntil||0)>state.simulationAgeSeconds;return Boolean(state.utilities.powerPlant.gridOnline&&(acc?.powerOn!==false||illegal));}
 function billElectricity(clock){
   ensureUtilityState();if(state.utilities.lastBillingDay===clock.day)return;state.utilities.lastBillingDay=clock.day;const level=Number(state.centralBank?.priceLevel||1);
-  for(const hh of Object.values(state.housing?.households||{})){const acc=state.utilities.householdAccounts[hh.id],members=householdMembers(hh.id);if(!members.length)continue;const tier=Math.max(...members.map((f)=>Number(f.homeTier||0)),0),usage=(hh.housingType==="house"?7.5+tier*2.6:5.5)+Math.max(0,members.length-1)*1.25,bill=usage*0.34*level;acc.usage=usage;acc.balance+=bill;acc.lastBilledDay=clock.day;const paid=collectElectricBill(hh.id,acc.balance);acc.balance=Math.max(0,acc.balance-paid);if(acc.balance>0.5)acc.overdueDays+=1;else{acc.overdueDays=0;acc.lastPaymentDay=clock.day;}const wasOn=acc.powerOn!==false;if(acc.overdueDays>=2||acc.balance>18+members.length*4)acc.powerOn=false;if(!acc.powerOn&&acc.balance<1.5){acc.powerOn=true;acc.overdueDays=0;acc.illegalConnectionUntil=0;emit("power_reconnected","Electricity restored to household "+hh.id+".",{householdId:hh.id});}if(wasOn&&!acc.powerOn)emit("power_cut","Hansdrex Power disconnected household "+hh.id+" for unpaid debt "+acc.balance.toFixed(1)+" "+CURRENCY_CODE+".",{householdId:hh.id,debt:acc.balance});}
+  for(const hh of Object.values(state.housing?.households||{})){const acc=utilityAccount(hh.id),members=householdMembers(hh.id);if(!members.length)continue;const tier=Math.max(...members.map((f)=>Number(f.homeTier||0)),0),usage=(hh.housingType==="house"?7.5+tier*2.6:5.5)+Math.max(0,members.length-1)*1.25,bill=usage*0.34*level;acc.usage=usage;acc.balance+=bill;acc.lastBilledDay=clock.day;const paid=collectElectricBill(hh.id,acc.balance);acc.balance=Math.max(0,acc.balance-paid);if(acc.balance>0.5)acc.overdueDays+=1;else{acc.overdueDays=0;acc.lastPaymentDay=clock.day;}const wasOn=acc.powerOn!==false;if(acc.overdueDays>=2||acc.balance>18+members.length*4)acc.powerOn=false;if(!acc.powerOn&&acc.balance<1.5){acc.powerOn=true;acc.overdueDays=0;acc.illegalConnectionUntil=0;emit("power_reconnected","Electricity restored to household "+hh.id+".",{householdId:hh.id});}if(wasOn&&!acc.powerOn)emit("power_cut","Hansdrex Power disconnected household "+hh.id+" for unpaid debt "+acc.balance.toFixed(1)+" "+CURRENCY_CODE+".",{householdId:hh.id,debt:acc.balance});}
   state.utilities.disconnectedHouseholds=Object.values(state.utilities.householdAccounts).filter((a)=>a.powerOn===false).length;
 }
 function simulatePowerGrid(clock){
-  ensureUtilityState();ensurePowerPlantStaff();const plant=state.utilities.powerPlant,hourKey=clock.day*24+clock.hour;if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId)),onDuty=staff.filter((f)=>!f.traveling&&f.currentLocationId==="power"&&(String(f.action||"").startsWith("working")||personalWorkWindow(f,JOBS.find((j)=>j.id===f.jobId),clock.hour))),connected=Object.values(state.utilities.householdAccounts).filter((a)=>a.powerOn!==false).length;
+  ensureUtilityState();ensurePowerPlantStaff();const plant=state.utilities.powerPlant,hourKey=clock.day*24+clock.hour;if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId)),onDuty=staff.filter((f)=>!f.traveling&&f.currentLocationId==="power"&&(String(f.action||"").startsWith("working")||personalWorkWindow(f,JOBS.find((j)=>j.id===f.jobId),clock.hour))),connected=new Set(state.flies.filter(f=>f.alive&&f.householdId&&utilityAccount(f.householdId).powerOn!==false).map(f=>f.householdId)).size;
   plant.maintenance=clamp(Number(plant.maintenance||0.9)-weatherDanger()*0.004+onDuty.length*0.0015,0.38,1);plant.capacity=90+onDuty.length*62+plant.maintenance*95;plant.demand=45+connected*1.35+Object.keys(state.businesses||{}).length*4.2;
   if(plant.fuelReserve<1200&&plant.cash>900){plant.cash-=650;state.externalTrade=state.externalTrade||{exports:0,imports:0};state.externalTrade.imports+=650;plant.fuelReserve+=6500;emit("power_fuel","Hansdrex Power purchased fuel reserves.",{fuelReserve:plant.fuelReserve});}
   plant.fuelReserve=Math.max(0,plant.fuelReserve-Math.max(12,plant.demand*0.055));const fuelFactor=plant.fuelReserve>0?1:0.25;plant.generation=Math.min(plant.capacity*plant.maintenance*fuelFactor,plant.demand*1.08);const online=plant.generation>=plant.demand*0.72;if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit("grid_restored","Hansdrex electrical grid returned to stable operation.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit("grid_outage","Hansdrex grid entered a blackout.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}billElectricity(clock);
@@ -895,7 +894,7 @@ function weatherLabel(weather = state?.weather) {
 }
 
 function isSunsetWindow(clock = gameClock()) {
-  return clock.hour === 17 || clock.hour === 18;
+  return clock.hour >= 16 && clock.hour < 20;
 }
 
 function sunsetQuality() {
@@ -2356,6 +2355,8 @@ function moveFly(fly) {
   const dist = Math.hypot(dx, dz);
 
   if (dist <= 0.85) {
+    const barrier=stopForSignal(fly,{x:fly.targetX,z:fly.targetZ});
+    if(barrier&&!fly.signalEncounter?.permit&&barrier.distance<dist-.001){fly.vx=fly.vz=0;fly.trafficStatus="waiting at red light";return;}
     fly.vx = 0;
     fly.vz = 0;
     fly.x = fly.targetX;
@@ -2453,18 +2454,21 @@ function moveFly(fly) {
     fly.transitMode === "scooter" ? (1 - danger * 0.42) :
     (1 - danger * 0.58);
 
-  // Law-aware traffic behavior: vehicles stop at red unless a high-risk, low-awareness
-  // brain chooses to violate the signal. Violations are recorded and enforceable.
-  const controlledCrossing=["car","scooter"].includes(fly.transitMode)||(fly.transitMode==="walk"&&fly.transitStage==="crosswalk");
-  if(controlledCrossing&&shouldStopAtRed({...fly,transitMode:fly.transitMode==="walk"?"scooter":fly.transitMode})){
-    const violationUrge=(fly.brain?.driving?.style==="reckless"?.38:0)+(fly.traits.risk||0)*0.65+(1-(fly.lawAwareness||0.7))*0.55+neuralDrive(fly,"approachDrive")*0.12;
-    if(violationUrge>0.78&&brainRand(fly)<0.02){recordLawViolation(fly,fly.transitMode==="walk"?"crossing against the signal":"running a red light",fly.transitMode==="walk"?0.6:1.1);}
-    else{fly.vx=fly.vz=0;fly.trafficStatus=fly.transitMode==="walk"?"waiting at pedestrian signal":"waiting at red light";fly.stress=clamp(fly.stress+(1-(fly.lawAwareness||0.7))*0.02);return;}
-  } else fly.trafficStatus=null;
-
   const ux = dx / dist;
   const uz = dz / dist;
-  const step = Math.min(Math.max(0.08, baseSpeed * weatherFactor), dist);
+  let step = Math.min(Math.max(0.08, baseSpeed * weatherFactor), dist);
+  const barrier=stopForSignal(fly,{x:fly.x+ux*step,z:fly.z+uz*step});
+  if(barrier){
+    const key=`${barrier.id}:${barrier.axis}:${Math.sign(dx||dz)}`;
+    if(fly.signalEncounter?.key!==key){
+      // One decision per encounter: routine waiting must not reroll a violation every tick.
+      const reckless=fly.brain?.driving?.style==="reckless";
+      fly.signalEncounter={key,permit:reckless&&fly.traits.risk>.8&&fly.lawAwareness<.35&&brainRand(fly)<.005};
+      if(fly.signalEncounter.permit)recordLawViolation(fly,"running a red light",1.1);
+    }
+    if(!fly.signalEncounter.permit){step=Math.min(step,barrier.distance);fly.trafficStatus="waiting at red light";}
+  }else{fly.signalEncounter=null;fly.trafficStatus=null;}
+  if(vehicleHeadway&&["car","scooter"].includes(fly.transitMode)){const limit=vehicleHeadway(fly,{x:fly.x+ux*step,z:fly.z+uz*step});if(limit<step){step=limit;fly.trafficStatus="queuing behind traffic";}}
   fly.vx = ux * step;
   fly.vz = uz * step;
   const nextPosition={x:fly.x+fly.vx,z:fly.z+fly.vz};
@@ -3523,6 +3527,7 @@ function compactFly(f) {
     traveling:Boolean(f.traveling),indoors:Boolean(f.indoors),onTrain:Boolean(f.onTrain),
     parkedCar:f.parkedCar||null,
     movementTrace:f.movementTrace||[],
+    trafficSignalPermit:Boolean(f.signalEncounter?.permit),
     currentLocationId: f.currentLocationId,
     targetLocationId: f.targetLocationId,
     hunger: Number(f.hunger.toFixed(1)),
@@ -3650,7 +3655,18 @@ function compactFly(f) {
   };
 }
 
-function getState() {
+function observerFly(f,selectedId){
+ if(f.id===selectedId)return {...compactFly(f),movementTrace:(f.movementTrace||[]).slice(-8)};
+ const record={};
+ for(const key of ['id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
+  const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
+ }
+ record.trafficStatus=f.trafficStatus||null;record.trafficSignalPermit=Boolean(f.signalEncounter?.permit);
+ record.parkedCar=f.parkedCar?{x:f.parkedCar.x,z:f.parkedCar.z,heading:f.parkedCar.heading}:null;
+ record.movementTrace=(f.movementTrace||[]).slice(-8).map(p=>({x:Math.round(p.x*100)/100,y:Math.round((p.y||1.1)*100)/100,z:Math.round(p.z*100)/100,t:p.t}));
+ return record;
+}
+function getState(options={}) {
   const living = state.flies.filter((f) => f.alive);
   const moneySupply = liquidMoneySupply();
   const clock = gameClock();
@@ -3735,7 +3751,7 @@ function getState() {
     neuralBridge: getNeuralStatus(),
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
-    flies: living.map(compactFly),
+    flies: living.map(f=>options.observer?observerFly(f,options.selectedId):compactFly(f)),
     selectedFly: selected ? {
       id: selected.id,
       brainId: selected.brain?.id,
@@ -3772,7 +3788,9 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
+      vehicleHeadway=createVehicleIndex(state.flies);
       for(const fly of state.flies)tickFly(fly,clock);
+      vehicleHeadway=null;
       roadLife.tick();
       aviationTick();
       simulateEnterprises(clock);

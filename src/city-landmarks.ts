@@ -7,21 +7,24 @@ const glass=new THREE.MeshStandardMaterial({color:0x38677d,roughness:.18,metalne
 const gold=new THREE.MeshStandardMaterial({color:0xd7b570,emissive:0xb88b35,emissiveIntensity:.35,metalness:.55,roughness:.3});
 const warm=new THREE.MeshBasicMaterial({color:0xffd898,toneMapped:false});
 const teal=new THREE.MeshBasicMaterial({color:0x72dfdc,toneMapped:false});
+const facadeMaterials:THREE.MeshStandardMaterial[]=[];
+function facade(source=glass,color=0xffbd61,strength=1.7){const m=source.clone();m.emissive.setHex(color);m.emissiveIntensity=0;m.userData.nightStrength=strength;facadeMaterials.push(m);return m;}
+export function updateLandmarkLighting(night:number){for(const m of facadeMaterials)m.emissiveIntensity=.04+night*m.userData.nightStrength;gold.emissiveIntensity=.2+night*1.4;}
 function box(g:THREE.Group,w:number,h:number,d:number,x:number,y:number,z:number,m:THREE.Material){const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);g.add(b);return b;}
 function cylinder(g:THREE.Group,top:number,bottom:number,h:number,y:number,m:THREE.Material,segments=24){const b=new THREE.Mesh(new THREE.CylinderGeometry(top,bottom,h,segments),m);b.position.y=y;g.add(b);return b;}
 function ring(g:THREE.Group,r:number,y:number,m:THREE.Material,tube=.12){const b=new THREE.Mesh(new THREE.TorusGeometry(r,tube,6,40),m);b.rotation.x=Math.PI/2;b.position.y=y;g.add(b);}
 function sign(g:THREE.Group,make:Sign,text:string,x:number,y:number,z:number,w=30,h=1.4){const s=make(text,w,h);s.position.set(x,y,z);g.add(s);return s;}
 export function buildHansdrexTower(root:THREE.Group,make:Sign){
- const g=new THREE.Group();g.position.set(-11,0,43.5);
- cylinder(g,4.9,5.2,2,1,stone);cylinder(g,.72,2.7,192,97,stone);
+ const g=new THREE.Group();g.position.set(-11,0,43.5);const towerGlass=facade();
+ cylinder(g,4.9,5.2,2,1,stone);cylinder(g,.72,2.7,192,97,facade(stone,0x336b9b,.7));
  // Three tapering buttresses, continuous elevator glazing and a deep observation pod.
  for(let i=0;i<3;i++){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.25,1.15,146,3),stone);leg.position.set(Math.cos(i*Math.PI*2/3)*1.4,75,Math.sin(i*Math.PI*2/3)*1.4);g.add(leg);}
- box(g,.3,144,.14,0,74,2.15,glass);box(g,.10,144,.12,.35,74,2.15,teal);
- cylinder(g,5.35,1.25,8,149,metal);cylinder(g,5.35,5.35,6,156,glass);
+ box(g,.3,144,.14,0,74,2.15,towerGlass);box(g,.10,144,.12,.35,74,2.15,teal);
+ cylinder(g,5.35,1.25,8,149,metal);cylinder(g,5.35,5.35,6,156,towerGlass);
  cylinder(g,4.6,5.35,3,160.5,metal);cylinder(g,1.4,4.6,4,164,stone);
  for(const y of [153,159,162])ring(g,y===162?4.5:5.37,y,y===159?teal:gold);
  for(let i=0;i<24;i++){const a=i*Math.PI/12;box(g,.12,6,.12,Math.cos(a)*5.36,156,Math.sin(a)*5.36,metal);}
- cylinder(g,.72,.8,8,196.5,stone);cylinder(g,2.7,1.1,3,201.5,metal);cylinder(g,2.7,2.7,3,204.5,glass);ring(g,2.72,206,teal);
+ cylinder(g,.72,.8,8,196.5,stone);cylinder(g,2.7,1.1,3,201.5,metal);cylinder(g,2.7,2.7,3,204.5,towerGlass);ring(g,2.72,206,teal);
  cylinder(g,.52,.9,8,211,metal);
  for(let i=0;i<8;i++)cylinder(g,.20-i*.02,.24-i*.02,4.3,217+i*4.3,i%2?stone:new THREE.MeshStandardMaterial({color:0xd55243,roughness:.6}),10);
  cylinder(g,.04,.13,3,248.5,metal);ring(g,.4,249, warm,.09);
@@ -35,12 +38,12 @@ export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
   box(g,w,h,d,0,base+h/2,0,stone);box(g,w+.2,.4,d+.2,0,base+h,0,gold);
   for(const sx of [-1,1])for(const sz of [-1,1])box(g,.19,h,.19,sx*(w/2+.01),base+h/2,sz*(d/2+.01),metal);
   for(let y=base+2;y<base+h-1;y+=2.8)for(let col=-1;col<=1;col++)for(const face of [-1,1]){
-   dummy.position.set(col*w*.26,y,face*(d/2+.025));dummy.scale.set(.7,1.5,.03);dummy.rotation.set(0,0,0);dummy.updateMatrix();matrices.push(dummy.matrix.clone());
-   dummy.position.set(face*(w/2+.025),y,col*d*.26);dummy.scale.set(.03,1.5,.7);dummy.updateMatrix();matrices.push(dummy.matrix.clone());
+   dummy.position.set(col*w*.26,y,face*(d/2+.08));dummy.scale.set(.7,1.5,.03);dummy.rotation.set(0,0,0);dummy.updateMatrix();matrices.push(dummy.matrix.clone());
+   dummy.position.set(face*(w/2+.08),y,col*d*.26);dummy.scale.set(.03,1.5,.7);dummy.updateMatrix();matrices.push(dummy.matrix.clone());
   }
   base+=h;
  }
- const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),glass,matrices.length);matrices.forEach((m,i)=>windows.setMatrixAt(i,m));g.add(windows);
+ const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),facade(),matrices.length);matrices.forEach((m,i)=>windows.setMatrixAt(i,m));g.add(windows);
  for(let i=0;i<4;i++){cylinder(g,1.1-i*.17,1.3-i*.17,1.6,175+i*1.7,i%2?gold:stone,8);}
  cylinder(g,.15,.53,14,188,metal,12);cylinder(g,.05,.15,2,196, warm,8);
  sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);root.add(g);

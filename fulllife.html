@@ -2,16 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
   <title>Hansdrex City of Fruit Fly — Full Life</title>
   <meta name="description" content="Hansdrex City of Fruit Fly — persistent full-life civilization with independent brains, weather, transport, economy, relationships and city life." />
   <style>
     :root{color-scheme:dark;--bg:#07100e;--panel:rgba(8,18,16,.84);--line:rgba(255,255,255,.10);--muted:rgba(236,245,241,.58);--ok:#66e39d;--warn:#f0c56a;--touch-size:72px;--touch-gap:10px}
     *{box-sizing:border-box}
-    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    html,body{touch-action:none;margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:#eef6f2;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}input,textarea,[contenteditable=true]{-webkit-user-select:text;user-select:text}
     #world{position:fixed;inset:0;background:#07100e}
     #world canvas{width:100%;height:100%;display:block;touch-action:none}
+    button,a,select{touch-action:manipulation} .events,.resident-table-wrap,.settings-menu{touch-action:pan-y}
     .topbar{flex-wrap:wrap;position:fixed;z-index:20;left:14px;right:14px;top:14px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
     .brand,.status,.card,.clock-pill{border:1px solid var(--line);background:rgba(8,18,16,.94);box-shadow:0 10px 28px rgba(0,0,0,.18)}
     .brand{padding:11px 13px;border-radius:14px}

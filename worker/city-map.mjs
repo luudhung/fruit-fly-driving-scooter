@@ -237,11 +237,23 @@ export function entrance(p) {
  if(b)return {x:b.x,z:b.z+b.d/2+1.2};
  return {x:p.x,z:p.z};
 }
+// Static geometry indices are rebuilt with this map module/version, shared by all route queries.
+const SPATIAL_CELL=24;
+function indexRectangles(rects,margin=0){
+ const bins=new Map();
+ for(const r of rects)for(let x=Math.floor((r.x-r.w/2-margin)/SPATIAL_CELL);x<=Math.floor((r.x+r.w/2+margin)/SPATIAL_CELL);x++)for(let z=Math.floor((r.z-r.d/2-margin)/SPATIAL_CELL);z<=Math.floor((r.z+r.d/2+margin)/SPATIAL_CELL);z++){
+  const key=`${x},${z}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(r);
+ }
+ return bins;
+}
+const emptyGeometry=[];
+const nearbyGeometry=(bins,p)=>bins.get(`${Math.floor(p.x/SPATIAL_CELL)},${Math.floor(p.z/SPATIAL_CELL)}`)||emptyGeometry;
+const buildingBins=indexRectangles(BUILDINGS,.45),roadBins=indexRectangles(ROADS);
 export function blocked(p) {
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
  if(atSea(p))return true;
  if(WATER.some(w=>contains(w,p,.25))&&!BRIDGES.some(b=>contains(b,p)))return true;
- return BUILDINGS.some(b=>contains(b,p,.45));
+ return nearbyGeometry(buildingBins,p).some(b=>contains(b,p,.45));
 }
 export function clearSegment(a,b) {
  const n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.6));
@@ -257,6 +269,7 @@ for(const r of ROADS) {
 // Park loop, internal stroll and entrance connections.
 for(const r of PARK_PATHS)walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w/2,z:r.z}}:{a:{x:r.x,z:r.z-r.d/2},b:{x:r.x,z:r.z+r.d/2}});
 export const WALKWAYS=walks;
+const walkBins=indexRectangles(walks.map(w=>({x:(w.a.x+w.b.x)/2,z:(w.a.z+w.b.z)/2,w:Math.abs(w.a.x-w.b.x),d:Math.abs(w.a.z-w.b.z),a:w.a,b:w.b})),1.8);
 // Small A* lattice: cached blocked cells, weighted sidewalks and exact segment validation.
 const STEP=2,MIN=-380,MAX=380,SIZE=(MAX-MIN)/STEP+1;
 const costCache=new Map();
@@ -270,13 +283,13 @@ function costs(mode="walk") {
   // Walking is sidewalk-biased in the city, but Central Park is a genuine free-roam
   // pedestrian district. Grass/meadows are legal to cross; paths are only cheaper, not mandatory.
   let c=contains(PARK,p,0)?1.55:8;
-  if(mode!=="walk"){walkCosts[iz*SIZE+ix]=ROADS.some(r=>contains(r,p))?1:0;continue;}
-  for(const w of walks) {
+  if(mode!=="walk"){walkCosts[iz*SIZE+ix]=nearbyGeometry(roadBins,p).some(r=>contains(r,p))?1:0;continue;}
+  for(const w of nearbyGeometry(walkBins,p)) {
    const x=Math.max(Math.min(w.a.x,w.b.x),Math.min(Math.max(w.a.x,w.b.x),p.x));
    const z=Math.max(Math.min(w.a.z,w.b.z),Math.min(Math.max(w.a.z,w.b.z),p.z));
    if(Math.hypot(p.x-x,p.z-z)<1.8){c=contains(PARK,p,0)?0.72:1;break;}
   }
-  if(c>1.6&&ROADS.some(r=>contains(r,p)))c=18;
+  if(c>1.6&&nearbyGeometry(roadBins,p).some(r=>contains(r,p)))c=18;
   walkCosts[iz*SIZE+ix]=c;
  }
  costCache.set(mode,walkCosts);return walkCosts;

@@ -1,14 +1,16 @@
+import {CitySky,skyLight} from "./city-sky.ts";
+import {INTERSECTIONS,signalState} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
 import {InstancedResidents} from "./instanced-residents";
-import {bindTouchControls,touchButtonSize} from "./touch-controls.ts";
+import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
 import {buildMansion} from "./mansion-renderer.ts";
 import {PlayerController} from "./player-controller.ts";
 import {mansionSpawn} from "./mansion-layout.ts";
-import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland} from "./city-landmarks";
+import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
@@ -404,7 +406,7 @@ function saveCachedSnapshot(value: CivilizationSnapshot) {
 
 const residentDirectory=createResidentDirectory((id)=>{
  const fly=latestFlyStates.get(id);if(!fly?.alive)return;
- selectedFlyId=id;followSelected=false;renderInspector(fly);
+ selectedFlyId=id;followSelected=false;renderInspector(fly);void fetchSnapshot();
  const target=new THREE.Vector3(fly.x,Math.max(1,fly.y),fly.z);
  freePosition.copy(target).add(new THREE.Vector3(-20,24,26));
  const direction=target.clone().sub(freePosition).normalize();cameraYaw=Math.atan2(direction.x,direction.z);cameraPitch=Math.asin(direction.y);
@@ -616,7 +618,7 @@ async function fetchSnapshotOnce() {
   let payload: CivilizationSnapshot;
   const controller=new AbortController(),timeout=window.setTimeout(()=>controller.abort(),12000);
   try {
-    const response = await fetch(`${apiBase}/api/civilization/state?view=observer`, {
+    const response = await fetch(`${apiBase}/api/civilization/state?view=observer${selectedFlyId?`&selected=${encodeURIComponent(selectedFlyId)}`:""}`, {
       signal:controller.signal,
       headers: { Accept: "application/json" },
       cache: "no-store",
@@ -708,6 +710,7 @@ scene.add(sunFill);
 const moon = new THREE.DirectionalLight(0xa9c3ff, 0.35);
 moon.position.set(130, 120, -150);
 scene.add(moon);
+const citySky=new CitySky(scene,coarseDevice?500:900);
 
 const weatherFlash = new THREE.PointLight(0xdce8ff, 0, 420, 1.4);
 weatherFlash.position.set(0, 120, 0);
@@ -846,18 +849,13 @@ function addCrossing(x:number,z:number) {
   for(const dx of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.008,3.2),crossingMat);m.position.set(x+dx,0.165,z-6.1);cityRoot.add(m);}
   for(const dz of [-2.4,-0.8,0.8,2.4]){const m=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.008,0.8),crossingMat);m.position.set(x-6.2,0.166,z+dz);cityRoot.add(m);}
 }
-const signalAvenues=avenueXs.filter((_,i)=>i%graphics.trafficStride===0);
-const signalStreets=streetZs.filter((_,i)=>i%graphics.trafficStride===0);
-for(let xi=0;xi<signalAvenues.length;xi+=1) for(let zi=0;zi<signalStreets.length;zi+=1){
-  const x=signalAvenues[xi],z=signalStreets[zi],offset=0;
-  if(contains(PARK,{x,z},5))continue;
-  addTrafficHead(x+6.4,z+6.2,"ns",offset); addTrafficHead(x-6.4,z-6.2,"ew",offset); addCrossing(x,z);
+for(const [index,{x,z}]of INTERSECTIONS.entries()){
+ if(index%graphics.trafficStride)continue;
+ addTrafficHead(x+6.4,z+6.2,"ns",0);addTrafficHead(x-6.4,z-6.2,"ew",0);addCrossing(x,z);
 }
 function updateTrafficSignals(seconds:number){
   for(const s of trafficSignals){
-    const phase=(seconds+s.offset)%60;
-    const nsGreen=phase<25, nsYellow=phase>=25&&phase<30, ewGreen=phase>=30&&phase<55, ewYellow=phase>=55;
-    const green=s.axis==="ns"?nsGreen:ewGreen, yellow=s.axis==="ns"?nsYellow:ewYellow, red=!green&&!yellow;
+    const state=signalState(seconds+s.offset,s.axis),green=state==="green",yellow=state==="yellow",red=state==="red";
     s.red.color.setHex(red?0xff2b2b:0x3a0808); s.yellow.color.setHex(yellow?0xffc928:0x302707); s.green.color.setHex(green?0x35ef87:0x07351c);
   }
 }
@@ -1485,15 +1483,14 @@ function syncHomes(flies:FlyState[]){
 function updateDayNight(hour: number, minute: number, weather: WeatherState = {}) {
   activeWeather = weather;
   const t = hour + minute / 60;
-  const sunHeight = Math.sin(((t - 6) / 24) * Math.PI * 2);
-  const daylight = THREE.MathUtils.clamp((sunHeight + 0.18) * 1.2, 0.04, 1);
+  const {daylight,dusk}=skyLight(t);
   const night = 1 - daylight;
 
   const dayColor = new THREE.Color(0x91b6cf);
-  const sunsetQuality = weather.sunset?.active ? (weather.sunset?.quality || 0) : 0;
+  const sunsetQuality = Math.max(dusk,weather.sunset?.active ? (weather.sunset?.quality || 0) : 0);
   const duskColor = new THREE.Color(
     sunsetQuality > 0.45 ? 0xe27f52 :
-    t > 17 && t < 20 ? 0xbc836d : 0x263852
+    t >= 16 && t < 20 ? 0xd86144 : 0x263852
   );
   const cloud = THREE.MathUtils.clamp(weather.cloudCover || 0, 0, 1);
   const storm = weather.condition === "thunderstorm" ? 1 : weather.condition === "heavy_rain" ? 0.7 : 0;
@@ -1506,6 +1503,8 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   // Keep the expanded overview readable at night: the city is simulated, not a black-screen test.
   hemi.intensity = 0.68 + daylight * 1.30;
   sun.intensity = (0.18 + daylight * 2.42) * (1 - cloud * 0.48);
+  sun.color.setHex(t>=16&&t<20?0xff8758:0xffe0aa);
+  updateLandmarkLighting(night);
   sunFill.intensity = (0.10 + daylight * 0.46) * (1 - cloud * 0.36);
   moon.intensity = 0.28 + night * 0.78 * (1 - cloud * 0.28);
   // Fake sun direction stays fixed for a stable, inexpensive city-lighting look.
@@ -1582,6 +1581,8 @@ camera.position.copy(freePosition);
 
 renderer.domElement.tabIndex = 0;
 renderer.domElement.style.outline = "none";
+blockBrowserGestures();
+for(const type of ["touchstart","touchend","dblclick"])renderer.domElement.addEventListener(type,event=>{if(event.cancelable)event.preventDefault();},{passive:false});
 renderer.domElement.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   dragging = true;
@@ -1665,6 +1666,7 @@ renderer.domElement.addEventListener("click", (e) => {
   const id = residentBodies.flyId(hit?.instanceId);
   if (!id) return;
   selectedFlyId = id;
+  void fetchSnapshot();
   const fly = latestFlyStates.get(id) || null;
   renderInspector(fly);
   if (matchMedia("(max-width:980px), (pointer:coarse)").matches) {
@@ -1708,6 +1710,7 @@ function updateFreeCamera(dt: number) {
   camera.lookAt(freePosition.clone().add(lookDirection));
 }
 
+let lastSkyMinute=-1;
 function animate(now = performance.now()) {
   requestAnimationFrame(animate);
   if (document.hidden || now - lastRenderedAt < TARGET_FRAME_MS) return;
@@ -1725,10 +1728,12 @@ function animate(now = performance.now()) {
   }
 
   residentBodies.finish();
-  personalCars.update(dt);
+  personalCars.update(dt,(snapshot?.simulationAgeSeconds||0)/Math.max(1,snapshot?.timeScale||120));
   updateMetroTrains(now);
   updateParkWheel(now);
   const gameNow=presentationClock.read(now);
+  const visualHour=(gameNow%86400)/3600;
+  if(Math.floor(gameNow/60)!==lastSkyMinute){lastSkyMinute=Math.floor(gameNow/60);updateDayNight(Math.floor(visualHour),Math.floor((visualHour%1)*60),activeWeather);}
   if(snapshot){
     const hour=Math.floor(gameNow%86400/3600),minute=Math.floor(gameNow%3600/60),text=`${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
     if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}
@@ -1775,12 +1780,13 @@ function animate(now = performance.now()) {
   }
 
   updateFreeCamera(dt);
+  citySky.update(visualHour,camera.position,activeWeather.cloudCover||0);
   renderer.render(scene, camera);
 }
 // Start census polling before the first animation frame. All Three.js globals are initialized by
 // this point, but a render-frame failure must never prevent the city census from connecting.
 void fetchSnapshot();
-window.setInterval(fetchSnapshot,2500);
+window.setInterval(fetchSnapshot,5000);
 try {
   animate();
 } catch(error) {

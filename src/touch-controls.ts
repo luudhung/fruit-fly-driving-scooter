@@ -22,6 +22,8 @@ export function bindTouchControls(buttons:Iterable<HTMLButtonElement>,handlers:T
   };
   listen(button,'pointerdown',down,{passive:false});listen(button,'pointerup',up);listen(button,'pointercancel',up);listen(button,'lostpointercapture',up);
   listen(button,'contextmenu',e=>e.preventDefault());
+  // Safari's compatibility touch/double-click defaults can otherwise zoom after a double jump.
+  for(const type of ['touchstart','touchend','dblclick'])listen(button,type,e=>{if(e.cancelable)e.preventDefault();e.stopPropagation();},{passive:false});
   listen(button,'click',e=>{e.preventDefault();e.stopPropagation();});
  }
  listen(events,'pointerup',up,true);listen(events,'pointercancel',up,true);listen(events,'blur',releaseAll);
@@ -31,4 +33,11 @@ export function bindTouchControls(buttons:Iterable<HTMLButtonElement>,handlers:T
 export function touchButtonSize(preferred:number,viewportWidth:number){
  const maximum=Math.max(48,Math.min(104,48+4*Math.floor(((viewportWidth-52)/3-48)/4)));
  return {size:Math.min(maximum,Math.max(48,Number.isFinite(preferred)?Math.round(preferred/4)*4:72)),maximum};
+}
+
+/** WebKit gesture events are separate from Pointer Events and must be cancelled explicitly. */
+export function blockBrowserGestures(target:EventTarget=document){
+ const stop=(e:Event)=>{if(e.cancelable)e.preventDefault();};
+ for(const type of ['gesturestart','gesturechange','gestureend'])target.addEventListener(type,stop,{passive:false});
+ return ()=>{for(const type of ['gesturestart','gesturechange','gestureend'])target.removeEventListener(type,stop);};
 }

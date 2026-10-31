@@ -36,7 +36,7 @@
   ],
   "vars": {
     "CIV_WORLD_ID": "WORLD-A",
-    "CIV_ALARM_INTERVAL_MS": "60000",
+    "CIV_ALARM_INTERVAL_MS": "5000",
     "CIV_IDLE_MAX_STEPS": "12",
     "NEURAL_ENABLED": "1",
     "NEURAL_ASSET_ORIGIN": "https://fruit-fly-driving-scooter.vercel.app",

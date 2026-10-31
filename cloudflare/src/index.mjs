@@ -17,7 +17,7 @@ const SNAPSHOT_META_KEY = "snapshot:meta";
 const CHUNK_PREFIX = "snapshot:chunk:";
 const CHUNK_SIZE = 1_500_000;
 const DEFAULT_WORLD_ID = "WORLD-A";
-const DEFAULT_ALARM_INTERVAL_MS = 60_000;
+const DEFAULT_ALARM_INTERVAL_MS = 5_000;
 const DEFAULT_IDLE_MAX_STEPS = 90;
 const ACTIVE_PERSIST_INTERVAL_MS = 60_000;
 
@@ -174,7 +174,7 @@ export class CivilizationWorld extends DurableObject {
 
   alarmIntervalMs() {
     const configured = Number(this.env.CIV_ALARM_INTERVAL_MS || DEFAULT_ALARM_INTERVAL_MS);
-    return Math.max(60_000, Math.min(3_600_000, configured));
+    return Math.max(5_000, Math.min(60_000, configured));
   }
 
   idleMaxSteps() {
@@ -184,7 +184,7 @@ export class CivilizationWorld extends DurableObject {
 
   async ensureAlarm() {
     const current = await this.ctx.storage.getAlarm();
-    if (current == null) {
+    if (current == null || current > Date.now()+this.alarmIntervalMs()+1000) {
       await this.ctx.storage.setAlarm(Date.now() + this.alarmIntervalMs());
     }
   }
@@ -203,7 +203,7 @@ export class CivilizationWorld extends DurableObject {
     const maxSteps = reason === "alarm" ? Math.min(this.idleMaxSteps(),decisionBudget) : decisionBudget;
     const steps = Math.min(
       maxSteps,
-      Math.max(1, Math.ceil(elapsedRealSeconds)),
+      Math.max(1, Math.floor(elapsedRealSeconds)),
     );
     const timeScale = Number(getRawState()?.timeScale || getSimulationConfig().gameSecondsPerRealSecond || 120);
     const totalGameSeconds = elapsedRealSeconds * timeScale;
@@ -216,7 +216,7 @@ export class CivilizationWorld extends DurableObject {
 
     this.lastWallClockMs = nowMs;
     getRawState().updatedAt = new Date(nowMs).toISOString();
-    return { elapsedRealSeconds, steps, gameSecondsPerStep,advancedGameSeconds:Number(getRawState().simulationAgeSeconds||0)-ageBefore };
+    return this.lastAdvance={ elapsedRealSeconds, steps, gameSecondsPerStep,advancedGameSeconds:Number(getRawState().simulationAgeSeconds||0)-ageBefore };
   }
 
   async persistIfDue(force = false) {
@@ -234,7 +234,7 @@ export class CivilizationWorld extends DurableObject {
   async alarm() {
     return this.withLock(async () => {
       await this.advanceTo(Date.now(), "alarm");
-      await this.persistIfDue(true);
+      await this.persistIfDue(false);
       await this.ctx.storage.setAlarm(Date.now() + this.alarmIntervalMs());
     });
   }
@@ -270,7 +270,10 @@ export class CivilizationWorld extends DurableObject {
         })});
       }
 
-      const advance = await this.advanceTo(Date.now(), "request");
+      // Observers read the world; the background alarm owns its cadence, independent of viewers.
+      const observing=request.method==="GET";
+      const advance=observing?{...(this.lastAdvance||{}),snapshotAgeSeconds:Math.max(0,(Date.now()-this.lastWallClockMs)/1000)}:await this.advanceTo(Date.now(),"request");
+      await this.ensureAlarm();
 
       if (url.pathname === "/health") {
         await this.persistIfDue(false);
@@ -293,7 +296,7 @@ export class CivilizationWorld extends DurableObject {
 
       if (url.pathname === "/api/civilization/state") {
         await this.persistIfDue(false);
-        const payload = getState();
+        const payload = getState({observer:url.searchParams.get("view")==="observer",selectedId:url.searchParams.get("selected")});
         payload.runtime = {
           platform: "cloudflare-durable-object",
           persistence: "sqlite-gzip-chunks",
