@@ -1,3 +1,4 @@
+import {CityMotion,type MotionPlan} from "./city-motion.ts";
 import {CitySky,skyLight} from "./city-sky.ts";
 import {INTERSECTIONS,signalState} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
@@ -16,6 +17,7 @@ import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
+  motion?:MotionPlan|null;
   id: string;
   name: string;
   sex: "F" | "M";
@@ -1310,6 +1312,7 @@ function updateMetroTrains(now:number){
 
 // ---------- fly rendering ----------
 type FlyVisual = {
+  motion:CityMotion;hasMotion:boolean;
   group: THREE.Group;
   target: THREE.Vector3;
   current: THREE.Vector3;
@@ -1413,7 +1416,7 @@ function createFlyVisual(id: string): FlyVisual {
     child.matrixAutoUpdate = false;
   });
   scene.add(group);
-  return { group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status, route:[],lastTraceTime:-1,stationary:false };
+  return { motion:new CityMotion(),hasMotion:false,group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status, route:[],lastTraceTime:-1,stationary:false };
 }
 
 function syncFlyMeshes(flies: FlyState[]) {
@@ -1434,8 +1437,10 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.target.set(fly.x, fly.y, fly.z);
     if(fly.currentLocationId==="rooftop"&&!fly.traveling){visual.target.set(11+seeded(Number(fly.id.replace(/\D/g,"")))*8,99,47);}
     visual.stationary=Boolean(fly.sleeping||!fly.traveling);
+    visual.hasMotion=Boolean(fly.motion&&!visual.stationary);
+    if(fly.motion)visual.motion.accept(fly,fly.motion);
     const trace=(fly.movementTrace||[]).filter(p=>p.t>visual!.lastTraceTime);
-    for(const p of trace){
+    for(const p of visual.hasMotion?[]:trace){
       const last=visual.route.at(-1)||visual.current;
       if(!clearSegment({x:last.x,z:last.z},p)){visual.route=[];visual.current.set(p.x,p.y,p.z);}
       else visual.route.push(new THREE.Vector3(p.x,p.y,p.z));
@@ -1718,8 +1723,10 @@ function animate(now = performance.now()) {
   const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
   lastFrameAt = now;
 
+  const gameNow=presentationClock.read(now);
   residentBodies.begin();
   for (const [id,visual] of flyVisuals) {
+    if(visual.hasMotion){visual.motion.advance(dt,gameNow,snapshot?.timeScale||120);visual.target.set(visual.motion.x,visual.motion.y,visual.motion.z);visual.route=[];}
     const next=visual.route[0]||visual.target;
     visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
@@ -1728,10 +1735,9 @@ function animate(now = performance.now()) {
   }
 
   residentBodies.finish();
-  personalCars.update(dt,(snapshot?.simulationAgeSeconds||0)/Math.max(1,snapshot?.timeScale||120));
+  personalCars.update(dt,gameNow,Math.max(1,snapshot?.timeScale||120));
   updateMetroTrains(now);
   updateParkWheel(now);
-  const gameNow=presentationClock.read(now);
   const visualHour=(gameNow%86400)/3600;
   if(Math.floor(gameNow/60)!==lastSkyMinute){lastSkyMinute=Math.floor(gameNow/60);updateDayNight(Math.floor(visualHour),Math.floor((visualHour%1)*60),activeWeather);}
   if(snapshot){

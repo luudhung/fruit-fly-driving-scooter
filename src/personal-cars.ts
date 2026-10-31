@@ -1,9 +1,10 @@
-import {signalBarrier} from '../worker/traffic.mjs';
+import {CityMotion,type MotionPlan} from './city-motion.ts';
+import {signalBarrier,createVehicleIndex} from '../worker/traffic.mjs';
 import * as THREE from 'three';
 import {PARKING_SPACES,clearSegment} from '../worker/city-map.mjs';
 
-type Driver={trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;x:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;z:number;t:number}>};
-type Car={signalPermit?:boolean;color:THREE.Color;x:number;z:number;heading:number;targetX:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;z:number}>};
+type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;x:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;z:number;t:number}>};
+type Car={motion?:CityMotion;hasMotion?:boolean;signalPermit?:boolean;color:THREE.Color;x:number;z:number;heading:number;targetX:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;z:number}>};
 export type RoadIncident={id:string;x:number;z:number;repairAt:number};
 
 /** All personal vehicles share three draw calls, including their four wheels. */
@@ -38,8 +39,10 @@ export class PersonalCars{
    let car=this.cars.get(f.id);
    if(!car){car={color:new THREE.Color().setHSL((Number(f.id.replace(/\D/g,''))*.61803398875)%1,.48,.43),x:p.x,z:p.z,heading,targetX:p.x,targetZ:p.z,targetHeading:heading,driving,lastTrace:-1,route:[]};this.cars.set(f.id,car);}
    if(!driving||!car.driving){car.route=[];car.x=p.x;car.z=p.z;car.heading=heading;}
-   else for(const q of f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route=[];car.x=q.x;car.z=q.z;}}
+   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route=[];car.x=q.x;car.z=q.z;}}
    if(car.route.length>12)car.route=car.route.slice(-8);
+   car.hasMotion=Boolean(driving&&f.motion);
+   if(car.hasMotion){car.motion ||= new CityMotion();car.motion.accept(f,f.motion!);car.route=[];}
    car.signalPermit=Boolean(f.trafficSignalPermit);
    car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;car.targetX=p.x;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
   }
@@ -48,9 +51,12 @@ export class PersonalCars{
   for(const incident of incidents.slice(-24))for(const side of [-1,1]){this.dummy.position.set(incident.x+side*.8,.59,incident.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.cones.setMatrixAt(count++,this.dummy.matrix);}
   this.cones.count=count;this.cones.instanceMatrix.needsUpdate=true;
  }
- update(dt:number,signalSeconds=0){
+ update(dt:number,gameSeconds=0,timeScale=120){
+  const signalSeconds=gameSeconds/timeScale;
+  const headway=createVehicleIndex(Array.from(this.cars,([id,c])=>({id,alive:true,traveling:c.driving,transitMode:'car',x:c.motion&&c.hasMotion?c.motion.x:c.x,z:c.motion&&c.hasMotion?c.motion.z:c.z,targetX:c.motion?.targetX??c.targetX,targetZ:c.motion?.targetZ??c.targetZ})));
   let index=0;const d=this.dummy;d.scale.set(1,1,1);
-  for(const car of this.cars.values()){if(index>=this.capacity)break;
+  for(const [id,car]of this.cars){if(index>=this.capacity)break;
+   if(car.hasMotion&&car.motion){car.motion.advance(dt,gameSeconds,timeScale,(from,to)=>headway({...from,id},to));car.targetX=car.motion.x;car.targetZ=car.motion.z;car.route=[];}
    const next=car.route[0]||{x:car.targetX,z:car.targetZ},blend=Math.min(1,dt*(car.route.length>3?10:6)),dx=next.x-car.x,dz=next.z-car.z;
    const barrier=car.driving&&!car.signalPermit?signalBarrier(car,{x:car.x+dx*blend,z:car.z+dz*blend},signalSeconds):null;
    const length=Math.hypot(dx,dz),fraction=barrier&&length>0?Math.min(blend,barrier.distance/length):blend;

@@ -2456,7 +2456,8 @@ function moveFly(fly) {
 
   const ux = dx / dist;
   const uz = dz / dist;
-  let step = Math.min(Math.max(0.08, baseSpeed * weatherFactor), dist);
+  fly.motionSpeed=Math.max(0.08,baseSpeed*weatherFactor);
+  let step = Math.min(fly.motionSpeed, dist);
   const barrier=stopForSignal(fly,{x:fly.x+ux*step,z:fly.z+uz*step});
   if(barrier){
     const key=`${barrier.id}:${barrier.axis}:${Math.sign(dx||dz)}`;
@@ -2480,6 +2481,7 @@ function moveFly(fly) {
   if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
   const remaining = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
+  if(step<.001&&fly.trafficStatus){fly.travelStuckTicks=0;fly.travelLastDistance=remaining;return;}
   if (Number.isFinite(fly.travelLastDistance)) {
     if (remaining >= fly.travelLastDistance - 0.02) fly.travelStuckTicks += 1;
     else fly.travelStuckTicks = 0;
@@ -3655,12 +3657,22 @@ function compactFly(f) {
   };
 }
 
+function motionPlan(f){
+ if(!f.traveling||f.onTrain||f.onPlane||f.heliPassenger)return null;
+ const points=[{x:f.targetX,y:f.routeWaypoints?.[f.routeIndex]?.y??f.y,z:f.targetZ}];
+ for(const p of (f.routeWaypoints||[]).slice(Number(f.routeIndex||0)+1,Number(f.routeIndex||0)+9)){
+  if(p.mode!==f.transitMode||p.stage==='station-entry'||p.stage==='parking')break;
+  points.push({x:p.x,y:p.y??1.1,z:p.z});
+ }
+ return {at:state.simulationAgeSeconds,speed:Number(f.motionSpeed||Math.hypot(f.vx,f.vz)||2.5),mode:f.transitMode,points,blocked:Number(f.trafficHoldUntil||0)>state.simulationAgeSeconds,signalPermit:Boolean(f.signalEncounter?.permit)};
+}
 function observerFly(f,selectedId){
- if(f.id===selectedId)return {...compactFly(f),movementTrace:(f.movementTrace||[]).slice(-8)};
+ if(f.id===selectedId)return {...compactFly(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
  for(const key of ['id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
+ record.motion=motionPlan(f);
  record.trafficStatus=f.trafficStatus||null;record.trafficSignalPermit=Boolean(f.signalEncounter?.permit);
  record.parkedCar=f.parkedCar?{x:f.parkedCar.x,z:f.parkedCar.z,heading:f.parkedCar.heading}:null;
  record.movementTrace=(f.movementTrace||[]).slice(-8).map(p=>({x:Math.round(p.x*100)/100,y:Math.round((p.y||1.1)*100)/100,z:Math.round(p.z*100)/100,t:p.t}));
