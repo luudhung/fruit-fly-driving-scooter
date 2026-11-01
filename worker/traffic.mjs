@@ -43,7 +43,10 @@ export function createVehicleIndex(drivers){
    if(other.id===f.id)continue;
    const ox=other.x-f.x,oz=other.z-f.z,along=ox*ux+oz*uz,lateral=Math.abs(ox*uz-oz*ux);
    const hx=other.targetX-other.x,hz=other.targetZ-other.z;
-   if(along<=.05||lateral>2.4||hx*ux+hz*uz<0)continue;
+   const headingLength=Math.hypot(hx,hz),sameDirection=headingLength>.01&&(hx*ux+hz*uz)/headingLength>.7;
+   // A crossing/turning car is not a leader in this lane. Treating a perpendicular
+   // vehicle as a zero-dot-product leader creates circular waits at junctions.
+   if(along<=.05||lateral>2.4||!sameDirection)continue;
    allowed=Math.min(allowed,Math.max(0,along-5));
   }
   return allowed;

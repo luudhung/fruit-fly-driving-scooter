@@ -36,3 +36,11 @@ test('obsolete electric accounts do not increase active city power demand',async
  await tick({gameSeconds:120,syncBrain:false,serialized:true});assert.ok(s.utilities.powerPlant.demand<1000,`stale demand ${s.utilities.powerPlant.demand}`);
  assert.ok(s.utilities.householdAccounts['retired-1'],'preserve historical accounts');
 });
+
+test('headway ignores perpendicular traffic and vehicles waiting to turn across another lane',()=>{
+ const east={id:'east',alive:true,traveling:true,transitMode:'car',x:0,z:0,targetX:30,targetZ:0};
+ const north={...east,id:'north',x:4,z:1,targetX:4,targetZ:30};
+ const atTurn={...north,id:'turn',targetX:4,targetZ:1};
+ assert.equal(createVehicleIndex([east,north,atTurn])(east,{x:12,z:0}),12);
+ assert.equal(createVehicleIndex([east,{...north,targetX:30,targetZ:1}])(east,{x:12,z:0}),0,'same-direction leader still protects its queue');
+});
