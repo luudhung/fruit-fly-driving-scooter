@@ -65,3 +65,26 @@ test('only explicit emergency vehicles can bypass a red light',()=>{
  assert.ok(signalBarrier({x:110,z:1.5},{x:140,z:1.5},0));
  assert.equal(signalBarrier({x:110,z:1.5,emergency:true},{x:140,z:1.5},0),null);
 });
+
+test('opposing lanes may enter and leave the same junction without circular gridlock',()=>{
+ const east={id:'east',alive:true,traveling:true,transitMode:'car',x:110,z:1.5,y:1.1,targetX:170,targetZ:1.5};
+ const west={...east,id:'west',x:125,z:-1.5,targetX:80,targetZ:-1.5};
+ assert.equal(createVehicleIndex([east,west])(east,{x:130,z:1.5}),20);
+});
+
+test('legacy co-located same-direction cars separate using deterministic departure priority',()=>{
+ const a={id:'a',alive:true,traveling:true,transitMode:'car',x:0,z:1000,targetX:30,targetZ:1000},b={...a,id:'b'};
+ const index=createVehicleIndex([a,b]);assert.equal(index(a,{x:12,z:1000}),12);assert.equal(index(b,{x:12,z:1000}),0);
+ a.x=12;assert.equal(createVehicleIndex([a,b])(b,{x:12,z:1000}),7);
+});
+test('same-direction traffic on a separate parallel lane does not block a junction',()=>{
+ const a={id:'a',alive:true,traveling:true,transitMode:'car',x:110,z:1.5,targetX:170,targetZ:1.5};
+ const b={...a,id:'b',x:125,z:-1.5};
+ assert.equal(createVehicleIndex([a,b])(a,{x:130,z:1.5}),20);
+});
+test('shallow merging paths choose one leader without weakening an ordinary lane queue',()=>{
+ const a={id:'a',alive:true,traveling:true,transitMode:'car',x:0,z:1000,targetX:10,targetZ:998};
+ const b={...a,id:'b',z:999,targetZ:1001};const index=createVehicleIndex([a,b]);
+ assert.ok(index(a,{x:10,z:998})>10);assert.equal(index(b,{x:10,z:1001}),0);
+ const leader={...a,id:'leader',x:3,z:999.4};assert.equal(createVehicleIndex([a,leader])(a,{x:10,z:998}),0);
+});

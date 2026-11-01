@@ -67,8 +67,17 @@ export function createVehicleIndex(drivers){
   for(const other of nearby(Math.min(f.x,end.x)-6,Math.max(f.x,end.x)+6,Math.min(f.z,end.z)-6,Math.max(f.z,end.z)+6)){
    if(other.id===f.id||Math.abs(other.y-fy)>2)continue;
    const ox=other.x-f.x,oz=other.z-f.z,along=ox*ux+oz*uz,lateral=Math.abs(ox*uz-oz*ux),h=other.heading;
+   // A legacy checkpoint may contain two co-located cars. Release one deterministically,
+   // then let normal headway create a gap; no resident or vehicle is repositioned.
+   if(Math.hypot(ox,oz)<.25&&h&&h.x*ux+h.z*uz>.7){
+    if(String(other.id).localeCompare(String(f.id))<0)allowed=0;
+    continue;
+   }
    // Crossing and opposite-direction cars do not become false same-lane leaders.
    if(along<=.05||lateral>2.2||!h||h.x*ux+h.z*uz<=.7)continue;
+   // Two shallow merging paths can each project the other car ahead. A strict
+   // queue rule then stops both forever; give one deterministic merge priority.
+   if(along<5&&ox*h.x+oz*h.z<-.05&&String(other.id).localeCompare(String(f.id))>0)continue;
    allowed=Math.min(allowed,Math.max(0,along-5));
   }
   // Do not enter a junction until its box and downstream receiving space are clear.
@@ -79,8 +88,17 @@ export function createVehicleIndex(drivers){
    const blocked=occupants.some(other=>{
     if(other.id===f.id||Math.abs(other.y-fy)>2)return false;
     const inBox=other.x>minX&&other.x<maxX&&other.z>minZ&&other.z<maxZ;
-    if(inBox)return true;
-    const h=other.heading,along=(ns?other.z:other.x),exit=dir>0?box.hi:box.lo,after=(along-exit)*dir,lateral=Math.abs((ns?other.x:other.z)-coordinate);
+    // Opposing traffic occupies its own lane and must drain simultaneously.
+    // Treating it as a blocked receiving box creates circular queues between junctions.
+    const h=other.heading;if(inBox){
+     if(!h)return true;
+     const alignment=h.x*ux+h.z*uz,dx=other.x-f.x,dz=other.z-f.z;
+     if(alignment>.7&&String(other.id).localeCompare(String(f.id))>0&&(Math.hypot(dx,dz)<.25||dx*ux+dz*uz<5&&dx*h.x+dz*h.z<-.05))return false;
+     // Parallel neighboring lanes and a vehicle behind this approach cannot block its entry.
+     if(Math.abs(alignment)>.7)return alignment>.7&&Math.abs(dx*uz-dz*ux)<2.2&&dx*ux+dz*uz>.05;
+     return true;
+    }
+    const along=(ns?other.z:other.x),exit=dir>0?box.hi:box.lo,after=(along-exit)*dir,lateral=Math.abs((ns?other.x:other.z)-coordinate);
     return h&&h.x*ux+h.z*uz>.7&&after>=0&&after<STOP+5&&lateral<2.2;
    });
    if(blocked){allowed=Math.min(allowed,entry.distance);break;}

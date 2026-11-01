@@ -11,13 +11,18 @@ export class StreetLighting{
  constructor(root:THREE.Group,roads:Rect[],buildings:Building[]){
   const lamps:Array<{x:number;z:number;dx:number;dz:number}>=[];
   const stairs=METRO_LINES.flatMap(l=>l.points.flatMap((_,i)=>metroStationGeometry(l,i).stairs));
-  const clear=(x:number,z:number)=>!PARKING_SPACES.some(s=>contains(s,{x,z},.5))&&!stairs.some(s=>Math.hypot(s.x-x,s.z-z)<1.7)&&!buildings.some(b=>contains(b,{x,z},.8))&&!WATER.some(w=>contains(w,{x,z},.4))&&!BRIDGES.some(b=>contains(b,{x,z},3))&&!UNDERPASSES.some(u=>Math.abs(x-u.x)<u.w/2+5&&Math.abs(z-u.z)<u.halfLength+4);
+  const clear=(x:number,z:number)=>!roads.some(r=>contains(r,{x,z},.25))&&!PARKING_SPACES.some(s=>contains(s,{x,z},.5))&&!stairs.some(s=>Math.hypot(s.x-x,s.z-z)<1.7)&&!buildings.some(b=>contains(b,{x,z},.8))&&!WATER.some(w=>contains(w,{x,z},.4))&&!BRIDGES.some(b=>contains(b,{x,z},3))&&!UNDERPASSES.some(u=>Math.abs(x-u.x)<u.w/2+5&&Math.abs(z-u.z)<u.halfLength+4);
   for(const r of roads){const ns=r.d>r.w,len=ns?r.d:r.w,width=ns?r.w:r.d;if(len<26||width<5.5)continue;
-   const slots=Math.max(1,Math.floor((len-12)/30));
-   for(let i=0;i<slots;i++){const along=-len/2+12+(i+.5)*(len-24)/slots;
+   // Place within each block, rather than sampling every 30m across the whole road.
+   // A regular sample otherwise lands in every junction on the 26–29m core grid.
+   const origin=ns?r.z:r.x,lo=origin-len/2,hi=origin+len/2;
+   const cuts=[lo,...roads.filter(o=>(o.d>o.w)!==ns).filter(o=>ns?Math.abs(o.x-r.x)<=o.w/2:Math.abs(o.z-r.z)<=o.d/2).map(o=>ns?o.z:o.x).filter(v=>v>lo&&v<hi),hi].sort((a,b)=>a-b);
+   const sites:number[]=[];
+   for(let i=1;i<cuts.length;i++){const gap=cuts[i]-cuts[i-1];if(gap<16)continue;const count=Math.max(1,Math.floor(gap/32));for(let j=0;j<count;j++)sites.push(cuts[i-1]+(j+.5)*gap/count-origin);}
+   for(const along of sites){
     const cx=r.x+(ns?0:along),cz=r.z+(ns?along:0);
     // Keep junction sightlines and all crossing road mouths clear.
-    if(roads.some(other=>other!==r&&(other.d>other.w)!==ns&&contains(other,{x:cx,z:cz},10)))continue;
+    if(roads.some(other=>other!==r&&(other.d>other.w)!==ns&&contains(other,{x:cx,z:cz},3.5)))continue;
     for(const side of [-1,1]){const dx=ns?side:0,dz=ns?0:side,x=cx+dx*(width/2+1.65),z=cz+dz*(width/2+1.65);
      if(!clear(x,z)||lamps.some(l=>Math.hypot(l.x-x,l.z-z)<15))continue;lamps.push({x,z,dx,dz});
     }
