@@ -1,3 +1,4 @@
+import {createRoadMaterial} from './road-lighting.ts';
 import * as THREE from 'three';
 import {BRIDGES,SPORTS_VENUES} from '../worker/city-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
@@ -13,7 +14,7 @@ export function buildRiverBridges(root:THREE.Group){
  const beam=new THREE.CylinderGeometry(1,1,1,6),up=new THREE.Vector3(0,1,0),dummy=new THREE.Object3D();
  for(const bridge of BRIDGES){
   const main=bridge.z===0,rise=main?36:14,steps=main?32:20,half=bridge.w/2,side=bridge.d/2-.6;
-  block(root,bridge.w,.5,bridge.d,bridge.x,-.12,bridge.z,new THREE.MeshStandardMaterial({color:0x424b50,roughness:.9}));
+  block(root,bridge.w,.5,bridge.d,bridge.x,-.12,bridge.z,createRoadMaterial(0x424b50,.9));
   for(const sideSign of [-1,1]){
    block(root,bridge.w,.16,2.4,bridge.x,.26,bridge.z+sideSign*6,new THREE.MeshStandardMaterial({color:0xd0c6ad,roughness:.95}));
    block(root,bridge.w,.4,.16,bridge.x,.4,bridge.z+sideSign*4.65,concrete);

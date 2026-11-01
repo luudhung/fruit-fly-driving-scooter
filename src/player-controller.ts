@@ -1,5 +1,6 @@
 import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
+import {FlightDoubleTap} from './flight-double-tap.ts';
 export const PLAYER_EYE=1.7;
 const RADIUS=.32,HEIGHT=1.78,STEP=.29,EPS=.0001;
 export type PlayerInput={forward:number;strafe:number;yaw:number;sprint:number;ascend:boolean;descend:boolean};
@@ -56,17 +57,17 @@ function collides(x:number,z:number,feet:number){
 /** First-person walking, gravity, step-up collision and Minecraft-style creative flight. */
 export class PlayerController{
  x=110;y=2.55;z=819;flying=false;grounded=false;verticalVelocity=0;
- private lastJump=-Infinity;private jumpHeld=false;
+ private readonly jumpTap=new FlightDoubleTap();
  get feet(){return this.y-PLAYER_EYE;}
  get swimming(){return terrain(this.x,this.z)<0&&this.feet<.1&&!this.flying;}
- teleport(x:number,y:number,z:number,flying=false){this.x=x;this.y=y;this.z=z;this.flying=flying;this.grounded=false;this.verticalVelocity=0;this.lastJump=-Infinity;this.jumpHeld=false;}
+ teleport(x:number,y:number,z:number,flying=false){this.x=x;this.y=y;this.z=z;this.flying=flying;this.grounded=false;this.verticalVelocity=0;this.jumpTap.reset();}
  jumpDown(now:number,repeat=false){
-  if(repeat||this.jumpHeld)return;this.jumpHeld=true;
-  if(now-this.lastJump<=280){this.flying=!this.flying;this.verticalVelocity=0;this.grounded=false;this.lastJump=-Infinity;}
-  else{this.lastJump=now;if(!this.flying&&this.grounded){this.verticalVelocity=7.15;this.grounded=false;}}
+  const tap=this.jumpTap.down(now,repeat);if(tap==='ignored')return;
+  if(tap==='double'){this.flying=!this.flying;this.verticalVelocity=0;this.grounded=false;}
+  else if(!this.flying&&this.grounded){this.verticalVelocity=7.15;this.grounded=false;}
  }
- jumpUp(){this.jumpHeld=false;}
- resetInput(){this.jumpHeld=false;this.lastJump=-Infinity;}
+ jumpUp(now?:number){this.jumpTap.up(now);}
+ resetInput(){this.jumpTap.reset();}
  update(dt:number,input:PlayerInput){
   refreshUrbanCollision();
   const count=Math.max(1,Math.ceil(Math.min(.1,dt)/.008)),step=Math.min(.1,dt)/count;

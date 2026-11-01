@@ -1,3 +1,4 @@
+import {createRoadMaterial} from './road-lighting.ts';
 import {buildParisBuilding} from './paris-district.ts';
 import type {FireServiceSnapshot} from '../worker/fire-service.mjs';
 import * as THREE from 'three';
@@ -18,7 +19,7 @@ export class UrbanWorldRenderer{
  private jets:THREE.LineSegments;
  private dummy=new THREE.Object3D();
  private phase=0;
- private materials={wall:new THREE.MeshStandardMaterial({color:0xa4afb0,roughness:.88}),scaffold:new THREE.MeshStandardMaterial({color:0xb8a75a,metalness:.4,roughness:.6}),rubble:new THREE.MeshStandardMaterial({color:0x585252,roughness:1}),glass:new THREE.MeshBasicMaterial({color:0xedcc85,toneMapped:false}),road:new THREE.MeshStandardMaterial({color:0x30373a,roughness:.97}),curb:new THREE.MeshStandardMaterial({color:0xb4b4a6,roughness:1}),paint:new THREE.MeshBasicMaterial({color:0xdacb92,toneMapped:false}),dirt:new THREE.MeshStandardMaterial({color:0x8a795e,roughness:1}),cone:new THREE.MeshBasicMaterial({color:0xe8a35c})};
+ private materials={wall:new THREE.MeshStandardMaterial({color:0xa4afb0,roughness:.88}),scaffold:new THREE.MeshStandardMaterial({color:0xb8a75a,metalness:.4,roughness:.6}),rubble:new THREE.MeshStandardMaterial({color:0x585252,roughness:1}),glass:new THREE.MeshBasicMaterial({color:0xedcc85,toneMapped:false}),road:createRoadMaterial(0x30373a),curb:new THREE.MeshStandardMaterial({color:0xb4b4a6,roughness:1}),paint:new THREE.MeshBasicMaterial({color:0xdacb92,toneMapped:false}),dirt:new THREE.MeshStandardMaterial({color:0x8a795e,roughness:1}),cone:new THREE.MeshBasicMaterial({color:0xe8a35c})};
  constructor(private root:THREE.Group){
   this.flames=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,5),new THREE.MeshBasicMaterial({color:0xff7c29,toneMapped:false,transparent:true,opacity:.9,depthWrite:false}),96);
   this.smoke=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshBasicMaterial({color:0x55545d,transparent:true,opacity:.36,depthWrite:false}),120);

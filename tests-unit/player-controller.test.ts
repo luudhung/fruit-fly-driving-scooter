@@ -29,6 +29,13 @@ test('the complete staircase climbs to the upper gallery and upstairs rooms are 
 test('held/repeated jump is never treated as a second tap, and blur clears tap history',()=>{
  const p=new PlayerController();p.jumpDown(100);p.jumpDown(150,true);assert.equal(p.flying,false);p.jumpUp();p.resetInput();p.jumpDown(200);assert.equal(p.flying,false);
 });
+test('a normal double Space with release timestamps enables flight, holding rises, and a new pair disables it',()=>{
+ const p=new PlayerController();p.teleport(25,3,790);run(p,1);const floor=p.y;
+ p.jumpDown(1000);run(p,.12);p.jumpUp(1120);p.jumpDown(1450);assert.equal(p.flying,true);
+ run(p,.8,{ascend:true});assert.ok(p.y>floor+8);p.jumpDown(1650,true);assert.equal(p.flying,true);p.jumpUp(2250);
+ p.jumpDown(2300);p.jumpUp(2400);assert.equal(p.flying,true,'long-held flight ascent is not the first tap of a new pair');p.jumpDown(2750);p.jumpUp(2820);assert.equal(p.flying,false);
+ run(p,3);assert.ok(Math.abs(p.y-floor)<.001);
+});
 
 test('metro sidewalk stairs can actually be climbed on foot without flight',async()=>{
  const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs');

@@ -1,3 +1,4 @@
+import {createRoadMaterial} from './road-lighting.ts';
 import * as THREE from 'three';
 import {UNDERPASSES,WORLD_HALF,ROADS,type Rect} from '../worker/city-map.mjs';
 /** Excavate only the grade-separated riverbank corridors; the bridge deck stays at surface level. */
@@ -13,7 +14,7 @@ export function surfaceRoadPieces(r:Rect){
  if(from<end)result.push({x:r.x,z:(from+end)/2,w:r.w,d:end-from});return result;
 }
 export function buildUnderpasses(root:THREE.Group){
- const asphalt=new THREE.MeshStandardMaterial({color:0x252d31,roughness:.95}),wall=new THREE.MeshStandardMaterial({color:0xa5aaa6,roughness:.9}),paint=new THREE.LineBasicMaterial({color:0xede0ab}),lamps=new THREE.MeshBasicMaterial({color:0xffe0a0,toneMapped:false});
+ const asphalt=createRoadMaterial(0x252d31,.95),wall=new THREE.MeshStandardMaterial({color:0xa5aaa6,roughness:.9}),paint=new THREE.LineBasicMaterial({color:0xede0ab}),lamps=new THREE.MeshBasicMaterial({color:0xffe0a0,toneMapped:false});
  // Keep upper-level bank promenades outside the ramp excavations.
  for(const r of ROADS.filter(r=>r.d>r.w&&(r.x===372||r.x===500)))for(const side of [-1,1]){const offset=r.x===372?8:10.5;const walk=new THREE.Mesh(new THREE.BoxGeometry(2.3,.13,r.d),wall);walk.position.set(r.x+side*offset,.135,r.z);root.add(walk);}
  for(const t of UNDERPASSES){
