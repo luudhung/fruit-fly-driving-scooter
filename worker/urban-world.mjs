@@ -1,19 +1,23 @@
+import {createFireService} from './fire-service.mjs';
+import * as cityGeometry from './city-map.mjs';
+import {validDevelopmentLot,planAccessRoad,MIN_ALLEY} from './urban-roads.mjs';
 import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,contains,overlaps,entrance,blocked,pedestrianRoute,applyUrbanGeometry} from './city-map.mjs';
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
 const live=f=>f.alive&&f.ageYears>=18&&f.ageYears<76&&f.health>35;
 const MAX_FIRES=3,MAX_PROJECTS=5,DAY=86400;
-const available=f=>live(f)&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','power','power-evening','power-night','grid-dispatch'].includes(f.jobId);
+const available=f=>live(f)&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance}){
  let byId=new Map(),nextCrewAt=-1;
  const people=()=>[...world().flies,...(world().cityVisitors?.visitors||[]).filter(v=>v.alive&&!v.departed)];
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),u=()=>raw().urbanWorld;
+ const fireService=createFireService({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance});
  const roll=()=>{const sample=raw().flies.find(f=>f.alive&&f.brain);return sample?random(sample):.5;};
  const report=(type,text,payload={})=>emit(type,text,payload);
  function account(id){return raw().businesses[id] ||= {cash:0,inventory:0,price:0,sector:'civic'};}
  function transfer(from,to,amount){amount=Math.max(0,Math.min(Number(amount)||0,Number(from.cash||0)));if(amount<=0)return 0;from.cash-=amount;to.cash=Number(to.cash||0)+amount;raw().totalTransactions=Number(raw().totalTransactions||0)+1;return amount;}
- function geometry(){return {buildings:Object.values(u().buildings),floods:u().floods.filter(f=>f.depth>.35)};}
+ function geometry(){return {buildings:Object.values(u().buildings),floods:u().floods.filter(f=>f.depth>.35),roads:u().roads.filter(r=>r.stage==='operational')};}
  function apply(){applyUrbanGeometry(geometry());}
  function building(id){return BUILDINGS.find(b=>b.id===id);}
  function stateFor(id){
@@ -27,7 +31,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function taskSite(id,b){const point=entrance({x:b.x,z:b.z});return addLocation(id,{x:point.x,z:point.z+2},id.startsWith('CIVIC-FIRE')?'Fire response staging':'Construction staging');}
  function ensure(){
   const s=raw();s.urbanWorld ||= {version:1,buildings:{},fires:[],projects:[],floods:[],nextFireAt:now()+DAY*.55,nextGrowthAt:now()+DAY*.7,nextFloodCheckAt:now()+1800,nextProjectId:1,nextIncidentId:1,lastTickAt:now(),completedProjects:0,extinguishedFires:0,displaced:0,materialsDelivered:0,safety:{water:16000,stationCash:0},history:[]};
-  const v=s.urbanWorld;v.buildings ||= {};v.fires ||= [];v.projects ||= [];v.floods ||= [];v.history ||= [];v.safety ||= {water:16000,stationCash:0};
+  const v=s.urbanWorld;v.buildings ||= {};v.fires ||= [];v.projects ||= [];v.floods ||= [];v.history ||= [];v.roads ||= [];v.growthCursor=Number(v.growthCursor||0);v.safety ||= {water:16000,stationCash:0};
   for(const name of ['civic-escrow','civic-materials','civic-recovery'])account(name);
   if(!v.materialStockInitialized){account('civic-materials').inventory=2000;v.materialStockInitialized=true;}
   byId=new Map(people().map(f=>[f.id,f]));
@@ -36,7 +40,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   for(const fire of v.fires){const b=building(fire.buildingId)||v.buildings[fire.buildingId];if(b)taskSite(`CIVIC-FIRE-${fire.id}`,b);}
   for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b)taskSite(`CIVIC-SITE-${p.id}`,b);}
  }
- function init(){ensure();nextCrewAt=-1;apply();return snapshot();}
+ function init(){ensure();nextCrewAt=-1;apply();fireService.init();return snapshot();}
  function rememberEvent(f,kind,payload){remember(f,kind,payload);f.urbanMemories=(f.urbanMemories||[]).concat({kind,t:now(),...payload}).slice(-8);}
  function householdUnits(b){return Object.values(raw().housing?.households||{}).filter(h=>h.unitId===b.id);}
  function evacuate(b,cause){
@@ -69,6 +73,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function releaseTask(f){if(!f?.urbanTask)return;f.urbanTask=null;f.actionUntil=0;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;}
  function present(f,targetId){const target=LOCATIONS.find(l=>l.id===targetId);return f?.alive&&!f.traveling&&target&&Math.hypot(f.x-target.x,f.z-target.z)<9;}
  function crewFor(fireOrProject,type,b,max){
+  if(type==='fire'&&fireService.enabled())return;
   const ref=type==='fire'?fireOrProject.teamIds:fireOrProject.workerIds;
   for(let i=ref.length-1;i>=0;i--){const f=byId.get(ref[i]);if(!f?.alive||!f.urbanTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<8||f.hunger>95){releaseTask(f);ref.splice(i,1);}}
   if(now()<nextCrewAt||ref.length>=max)return;
@@ -100,35 +105,55 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   // With no fuel/surviving structure the fire burns out; the damage is still permanent.
   if(fire.intensity<=.05||b.health<=0){
-   fire.containedAt=now();u().extinguishedFires++;setStage(b,b.health<18?'collapsed':'damaged');for(const id of fire.teamIds)releaseTask(byId.get(id));
+   fire.containedAt=now();u().extinguishedFires++;setStage(b,b.health<18?'collapsed':'damaged');for(const id of fire.teamIds){const crew=byId.get(id);if(!crew?.fireEngineDuty)releaseTask(crew);}
    report('fire_extinguished',`The fire at ${b.id} is out. Inspection and repair are still required.`,{buildingId:b.id,waterUsed:fire.waterUsed});
    u().history.push({type:'fire',buildingId:b.id,t:now(),damage:100-b.health});u().history=u().history.slice(-24);
   }
  }
  function estimate(b){return Math.max(220,Math.round(b.w*b.d*(.4+b.h*.018)));}
- function submitProject(buildingId,{ownerId=null,kind='repair',height=null}={}){
+ function submitProject(buildingId,{ownerId=null,kind='repair',height=null,accessRoads=[]}={}){
   ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS||u().projects.some(p=>p.buildingId===buildingId&&!['complete','cancelled'].includes(p.stage)))return null;
   const b=stateFor(buildingId);if(!b||u().fires.some(f=>f.buildingId===buildingId&&!f.containedAt))return null;
-  const owner=ownerId?byId.get(ownerId):null,cost=estimate(b)*(kind==='new'?2:Math.max(.25,(100-b.health)/100));
+  const owner=ownerId?byId.get(ownerId):null,roadArea=accessRoads.reduce((sum,r)=>sum+r.w*r.d,0),cost=estimate(b)*(kind==='new'?2:Math.max(.25,(100-b.health)/100))+Math.ceil(roadArea*1.3);
   if(owner&&Number(owner.money||0)+Number(owner.savings||0)<cost+100)return null;
   if(!owner&&Number(raw().treasury.cash||0)<cost)return null;
   if(owner){let remaining=cost;const cash=Math.min(owner.money,remaining);owner.money-=cash;remaining-=cash;owner.savings-=remaining;account('civic-escrow').cash+=cost;raw().totalTransactions++;}
   else transfer(raw().treasury,account('civic-escrow'),cost);
-  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,ownerId:owner?.id||null,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(kind==='new'?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:height||b.h};
+  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,ownerId:owner?.id||null,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(kind==='new'?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:height||b.h,roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0};
+  project.materialsRequired+=project.roadMaterialsRequired;
+  for(const [index,road]of accessRoads.entries()){const record={...road,id:`ROAD-${project.id}-${index+1}`,projectId:project.id,buildingId,ownerId:owner?.id||null,stage:'planned',progress:0};u().roads.push(record);project.roadIds.push(record.id);}
   u().projects.push(project);b.ownerId=owner?.id||b.ownerId;taskSite(`CIVIC-SITE-${project.id}`,b);
   report('construction_contract',`${owner?.id||'City recovery fund'} commissioned ${kind} at ${buildingId}.`,{buildingId,projectId:project.id,budget:cost});return project;
  }
+ function developmentContext(){
+  return {bounds:{minX:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
+ }
+ function develop(lot,ownerId){
+  ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS)return null;
+  const owner=byId.get(ownerId);if(!owner||!live(owner))return null;
+  lot={...lot,id:lot.id||`CIVIC-${Math.round(lot.x)}-${Math.round(lot.z)}`,kind:'civic'};
+  if(!validDevelopmentLot(lot,developmentContext())||u().buildings[lot.id])return null;
+  const connection=planAccessRoad(lot,developmentContext());if(!connection)return null;
+  u().buildings[lot.id]={...lot,health:100,stage:'cleared',progress:0,ownerId:owner.id};apply();
+  const project=submitProject(lot.id,{ownerId:owner.id,kind:'new',accessRoads:connection.roads});
+  if(project){project.frontage=connection.frontage;const firstRoad=u().roads.find(r=>r.id===project.roadIds[0]);if(firstRoad){firstRoad.frontage={...connection.frontage};firstRoad.servesLocationId=lot.id;}rememberEvent(owner,'commissioned_building',{buildingId:lot.id,accessRoads:project.roadIds});return project;}
+  delete u().buildings[lot.id];apply();return null;
+ }
  function grow(){
-  if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS)return;
-  const owners=raw().flies.filter(f=>live(f)&&!f.urbanTask&&Number(f.money||0)+Number(f.savings||0)>1800).sort((a,b)=>(b.money+b.savings)-(a.money+a.savings));
+  ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS)return;
+  const owners=raw().flies.filter(f=>available(f)&&Number(f.money||0)+Number(f.savings||0)>1800).sort((a,b)=>(b.money+b.savings)-(a.money+a.savings));
   const owner=owners[Math.min(owners.length-1,Math.floor(roll()*Math.min(6,owners.length)))];if(!owner)return;
-  // Finite validated lots; a build must fit the real road/water/building map.
-  for(let z=-220;z<=220;z+=20)for(let x=514;x<=846;x+=20){
-   const lot={id:`CIVIC-${Math.round(x)}-${Math.round(z)}`,x,z,w:10,d:12,h:18+Math.floor(roll()*3)*6,kind:'civic'};
-   if(BUILDINGS.some(b=>overlaps(b,lot,2))||ROADS.some(r=>overlaps(r,lot,2))||WATER.some(r=>overlaps(r,lot,1))||SPORTS_VENUES.some(r=>overlaps(r,lot,2))||overlaps(PARK,lot,1))continue;
-   if(Object.keys(u().buildings).filter(k=>k.startsWith('CIVIC-')).length>=8)return;
-   u().buildings[lot.id]={...lot,health:100,stage:'cleared',progress:0,ownerId:owner.id};apply();
-   const project=submitProject(lot.id,{ownerId:owner.id,kind:'new'});if(project){rememberEvent(owner,'commissioned_building',{buildingId:lot.id});return;}delete u().buildings[lot.id];apply();
+  const frontier=ROADS.filter(r=>r.x+r.w/2>480&&r.z-r.d/2<450);if(!frontier.length)return;
+  // Explore a bounded batch of grass beside the growing network, not a fixed catalog of lots.
+  // Completed developments have no arbitrary count limit: land, alleys, access and capital limit growth.
+  for(let attempt=0;attempt<192;attempt++){
+   const cursor=++u().growthCursor,hash=(n)=>{let v=Math.imul(n^0x9e3779b9,0x85ebca6b);v^=v>>>13;return (v>>>0)/4294967296;};
+   const anchor=frontier[Math.floor(hash(cursor)*frontier.length)],horizontal=anchor.w>anchor.d;
+   const along=hash(cursor+17)-.5,side=hash(cursor+53)<.5?-1:1,gap=14+hash(cursor+97)*42;
+   const x=Math.round((horizontal?anchor.x+along*anchor.w:anchor.x+side*(anchor.w/2+gap))/2)*2;
+   const z=Math.round((horizontal?anchor.z+side*(anchor.d/2+gap):anchor.z+along*anchor.d)/2)*2;
+   const lot={x,z,w:10+Math.floor(hash(cursor+131)*3)*2,d:12+Math.floor(hash(cursor+193)*3)*2,h:18+Math.floor(hash(cursor+251)*3)*6};
+   if(develop(lot,owner.id))return;
   }
  }
  function advanceProject(p,dt){
@@ -160,9 +185,19 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    if(!courier?.alive||courier.urbanTask?.id!==p.id){const replacement=onsite[0];replacement.urbanTask.phase='collecting';replacement.urbanTask.deliveryFor=p.id;p.courierId=replacement.id;startJourney(replacement,{id:'construction',action:'collecting construction materials'});}
    p.pauseReason='waiting for material delivery';return;
   }
+  if(p.roadIds?.length&&Number(p.roadProgress||0)<1){
+   const roads=u().roads.filter(r=>p.roadIds.includes(r.id)),length=roads.reduce((sum,r)=>sum+Math.max(r.w,r.d),0),next=Math.min(1,Number(p.roadProgress||0)+onsite.length*dt/Math.max(7200,length*240));
+   const hourlyWages=onsite.length*3,wages=Math.min(Math.max(0,p.budget-p.spent),hourlyWages*dt/3600);
+   if(wages<=0){p.pauseReason='road labor budget exhausted';return;}
+   p.spent+=payCrew(onsite.map(f=>f.id),hourlyWages,dt,wages);
+   const used=(next-Number(p.roadProgress||0))*Number(p.roadMaterialsRequired||0);p.materialsUsed+=used;p.roadMaterialsUsed=Number(p.roadMaterialsUsed||0)+used;p.roadProgress=next;p.stage='roadworks';p.pauseReason='building the property access road';
+   for(const road of roads){road.stage=next>=1?'operational':'construction';road.progress=next;}
+   if(next>=1){apply();u().completedRoads=Number(u().completedRoads||0)+roads.length;report('access_road_opened',`Workers opened ${roads.length} new street segment(s) serving ${b.id}.`,{projectId:p.id,roadIds:p.roadIds});}
+   return;
+  }
   p.stage='construction';p.pauseReason=null;setStage(b,'construction');
   const increment=onsite.length*dt/(p.kind==='new'?72000:36000);
-  const next=Math.min(1,p.progress+increment),needed=(next-p.progress)*p.materialsRequired;
+  const next=Math.min(1,p.progress+increment),needed=(next-p.progress)*(p.materialsRequired-Number(p.roadMaterialsRequired||0));
   if(p.materialsUsed+needed>p.materialsDelivered+1e-6){p.pauseReason='out of materials';return;}
   // Pay for worker time. A lone worker takes longer, but cannot spend a three-person
   // crew's hourly wage and exhaust an otherwise fully funded small repair.
@@ -197,8 +232,8 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    for(const f of people())if(f.alive&&Number(f.y||1.1)<4&&v.floods.some(z=>contains(z,f))){
     f.health=clamp(f.health-1);f.stress=clamp(f.stress+9);f.actionUntil=0;
     // Preserve committed vehicle routes so a taxi can resume after water recedes.
-    if(!f.cityService&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter)f.traveling=false;
-    if(!f.cityService&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter){
+    if(!f.cityService&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance)f.traveling=false;
+    if(!f.cityService&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance){
      let escape=null;for(let radius=3;radius<=44&&!escape;radius+=3)for(const [dx,dz]of [[-1,0],[1,0],[0,-1],[0,1]]){const p={x:f.x+dx*radius,z:f.z+dz*radius};if(!blocked(p)){escape=p;break;}}
      if(escape)f.urbanFloodEscape={...escape,lastAt:now()};
     }
@@ -208,6 +243,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  }
  function tick(gameSeconds,clock){
   ensure();const dt=Math.max(0,Math.min(Number(gameSeconds)||0,Math.max(0,now()-Number(u().lastTickAt||0))));u().lastTickAt=now();if(!dt)return;
+  fireService.tick(dt,clock);
   for(const fire of u().fires.slice())if(!fire.containedAt)detectAndFight(fire,dt);
   u().fires=u().fires.filter(f=>!f.containedAt||now()-f.containedAt<7200);
   for(const p of u().projects){
@@ -231,6 +267,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(u().safety.water<2000&&raw().treasury.cash>=120){transfer(raw().treasury,account('civic-materials'),120);u().safety.water+=14000;}
  }
  function handleResident(f,clock){
+  if(fireService.handleResident(f,clock))return true;
   if(f.urbanFloodEscape){
    const e=f.urbanFloodEscape,dx=e.x-f.x,dz=e.z-f.z,dist=Math.hypot(dx,dz),elapsed=Math.max(0,now()-e.lastAt);e.lastAt=now();
    const step=Math.min(dist,elapsed/120*1.4);if(dist>.1){f.x+=dx/dist*step;f.z+=dz/dist*step;}
@@ -255,7 +292,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    job.materialsDelivered=Math.min(job.materialsOrdered,job.materialsDelivered+Number(task.materials||0));u().materialsDelivered+=Number(task.materials||0);task.materials=0;task.phase='onsite';report('materials_delivered',`${f.id} delivered materials to ${job.buildingId}.`,{projectId:job.id,materials:job.materialsDelivered});
   }
   moveFly(f);needsAndActivities(f,clock);payAndFinance(f,clock);
-  if(present(f,task.targetId)){f.action=task.type==='fire'?'fighting a building fire':job.stage==='clearance'?'clearing rubble':'working at a construction site';f.actionUntil=now()+600;f.indoors=false;}
+  if(present(f,task.targetId)){f.action=task.type==='fire'?'fighting a building fire':job.stage==='clearance'?'clearing rubble':job.stage==='roadworks'?'building a property access road':'working at a construction site';f.actionUntil=now()+600;f.indoors=false;}
   return true;
  }
  function isUnavailable(locationId,f=null){
@@ -271,7 +308,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(f.ageYears>=18&&f.energy>35&&f.health>50&&u().fires.some(v=>!v.containedAt&&v.detected))add('police','reporting an emergency',45+(f.traits?.empathy||0)*20);
  }
  function snapshot(){
-  ensure();return {version:1,buildings:Object.values(u().buildings).map(b=>({...b})),fires:u().fires.filter(f=>!f.containedAt).map(f=>{const b=stateFor(f.buildingId);return {...f,x:b?.x,z:b?.z,h:b?.h,crew:f.teamIds.map(id=>byId.get(id)).filter(v=>present(v,`CIVIC-FIRE-${f.id}`)).map(v=>({x:v.x,z:v.z}))};}),projects:u().projects.filter(p=>p.stage!=='complete').map(p=>({...p,x:u().buildings[p.buildingId]?.x,z:u().buildings[p.buildingId]?.z})),floods:u().floods.map(f=>({...f})),completedProjects:u().completedProjects,extinguishedFires:u().extinguishedFires,displaced:u().displaced,water:Math.round(u().safety.water),materialsDelivered:u().materialsDelivered,history:u().history.slice(-12)};
+  ensure();return {version:1,buildings:Object.values(u().buildings).map(b=>({...b})),fires:u().fires.filter(f=>!f.containedAt).map(f=>{const b=stateFor(f.buildingId);return {...f,x:b?.x,z:b?.z,h:b?.h,crew:f.teamIds.map(id=>byId.get(id)).filter(v=>present(v,`CIVIC-FIRE-${f.id}`)).map(v=>({x:v.x,z:v.z}))};}),projects:u().projects.filter(p=>p.stage!=='complete').map(p=>({...p,x:u().buildings[p.buildingId]?.x,z:u().buildings[p.buildingId]?.z})),roads:u().roads.map(r=>({...r})),completedRoads:Number(u().completedRoads||0),fireService:fireService.snapshot(),floods:u().floods.map(f=>({...f})),completedProjects:u().completedProjects,extinguishedFires:u().extinguishedFires,displaced:u().displaced,water:Math.round(u().safety.water),materialsDelivered:u().materialsDelivered,history:u().history.slice(-12)};
  }
- return {init,tick,handleResident,addChoices,snapshot,ignite,submitProject,grow,isUnavailable};
+ return {init,tick,handleResident,addChoices,snapshot,ignite,submitProject,grow,develop,isUnavailable,fireService};
 }

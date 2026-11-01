@@ -33,7 +33,7 @@ test('observer projection keeps census, positions and selected brain while omitt
 });
 test('obsolete electric accounts do not increase active city power demand',async()=>{
  const s=freshState();for(let i=0;i<1000;i++)s.utilities.householdAccounts[`retired-${i}`]={powerOn:true};
- await tick({gameSeconds:120,syncBrain:false,serialized:true});assert.ok(s.utilities.powerPlant.demand<1000,`stale demand ${s.utilities.powerPlant.demand}`);
+ await tick({gameSeconds:120,syncBrain:false,serialized:true});assert.ok(s.utilities.powerPlant.demand<Object.values(s.housing.households).filter(h=>h.members.some(id=>s.flies.some(f=>f.id===id&&f.alive))).length*8,`stale demand ${s.utilities.powerPlant.demand}`);
  assert.ok(s.utilities.householdAccounts['retired-1'],'preserve historical accounts');
 });
 
@@ -43,4 +43,25 @@ test('headway ignores perpendicular traffic and vehicles waiting to turn across 
  const atTurn={...north,id:'turn',targetX:4,targetZ:1};
  assert.equal(createVehicleIndex([east,north,atTurn])(east,{x:12,z:0}),12);
  assert.equal(createVehicleIndex([east,{...north,targetX:30,targetZ:1}])(east,{x:12,z:0}),0,'same-direction leader still protects its queue');
+});
+
+test('cars clear a dense junction cluster instead of finding another red line inside it',()=>{
+ const approach=signalBarrier({x:-112,z:0},{x:-80,z:0},0);assert.ok(approach);assert.ok(Math.abs(approach.distance-2.6)<.01);
+ assert.equal(signalBarrier({x:-99,z:0},{x:-78,z:0},0),null,'already inside the combined -102/-92 junction');
+});
+test('a blocked junction holds new arrivals outside, then releases them as the occupant drains',()=>{
+ const follower={id:'follower',alive:true,traveling:true,transitMode:'car',x:110,z:1.5,y:1.1,targetX:170,targetZ:1.5};
+ const leader={...follower,id:'leader',x:125};let index=createVehicleIndex([follower,leader]);
+ assert.ok(Math.abs(index(follower,{x:130,z:1.5})-4.6)<.01,'wait at the stop line instead of blocking the box');
+ assert.equal(index(leader,{x:145,z:1.5}),20,'a current occupant is free to leave');
+ leader.x=150;index=createVehicleIndex([follower,leader]);assert.equal(index(follower,{x:130,z:1.5}),20,'clear receiving space releases the next vehicle');
+});
+test('crossing occupants drain, while an upper deck and tunnel never form false queues',()=>{
+ const f={id:'f',alive:true,traveling:true,transitMode:'car',x:110,z:1.5,y:1.1,targetX:170,targetZ:1.5},cross={...f,id:'cross',x:122,z:2,targetX:122,targetZ:-30};
+ const index=createVehicleIndex([f,cross]);assert.ok(index(f,{x:130,z:1.5})<5);assert.equal(index(cross,{x:122,z:-18}),20);
+ const below={...f,id:'below',x:118,y:-5.1};assert.equal(createVehicleIndex([f,below])(f,{x:130,z:1.5}),20);
+});
+test('only explicit emergency vehicles can bypass a red light',()=>{
+ assert.ok(signalBarrier({x:110,z:1.5},{x:140,z:1.5},0));
+ assert.equal(signalBarrier({x:110,z:1.5,emergency:true},{x:140,z:1.5},0),null);
 });

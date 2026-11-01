@@ -22,3 +22,15 @@ test('nearby vehicle headway limits local motion without discarding its route',(
  const m=new CityMotion();m.accept({x:0,z:0},plan());for(let i=0;i<60;i++)m.advance(1/60,0,120,from=>Math.max(0,3-from.x));assert.ok(Math.abs(m.x-3)<.001);
  run(m,1);assert.ok(m.x>6.9);
 });
+test('walking a vertical platform lift consumes travel time and continues onto the concourse',()=>{
+ const m=new CityMotion();m.accept({x:0,y:1.1,z:0},plan({speed:4,points:[{x:0,y:9.1,z:0},{x:20,y:9.1,z:0}]}));
+ run(m,1);assert.ok(Math.abs(m.y-5.1)<1e-6);assert.equal(m.x,0);
+ run(m,2);assert.ok(Math.abs(m.y-9.1)<1e-6);assert.ok(Math.abs(m.x-4)<1e-6);
+});
+test('an emergency plan travels at twice normal speed and can pass a red signal',()=>{
+ const normal=new CityMotion(),emergency=new CityMotion();
+ normal.accept({x:110,y:1.1,z:1.5},plan({mode:'car',speed:11,points:[{x:170,y:1.1,z:1.5}]}));
+ emergency.accept({x:110,y:1.1,z:1.5},plan({mode:'car',speed:22,signalPermit:true,points:[{x:170,y:1.1,z:1.5}]}));
+ run(normal,1,60,40*120);run(emergency,1,60,0);
+ assert.ok(Math.abs(normal.x-121)<1e-6);assert.ok(Math.abs(emergency.x-132)<1e-6);
+});

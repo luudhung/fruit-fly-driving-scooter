@@ -1,5 +1,6 @@
+import {createVehicleRouter} from './vehicle-network.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 19;
+export const MAP_VERSION = 20;
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -31,13 +32,13 @@ export const PARK_PATHS = [
 ];
 export const FERRIS_WHEEL={x:18,z:-218,y:33,radius:30,seats:20,period:7200};
 export function wheelCabin(seconds,seat){const a=seconds/FERRIS_WHEEL.period*Math.PI*2+seat/FERRIS_WHEEL.seats*Math.PI*2;return {x:FERRIS_WHEEL.x+Math.cos(a)*FERRIS_WHEEL.radius,y:FERRIS_WHEEL.y+Math.sin(a)*FERRIS_WHEEL.radius,z:FERRIS_WHEEL.z};}
-export const RIVER={id:"hansdrex-river",x:430,z:-80,w:96,d:1100};
+export const RIVER={id:"hansdrex-river",x:430,z:0,w:96,d:WORLD_HALF*2+4};
 // Administrative footprint: 360×480 is exactly one third of the 720×720 original urban core.
 export const RIVERSIDE={id:'riverside',name:'Hansdrex Riverside',x:680,z:0,w:360,d:480};
 export const SPORTS_VENUES=[
  {id:'stadium',name:'Hansdrex Riverside Stadium',x:770,z:200,w:44,d:62},
  {id:'tennis',name:'Riverside Tennis Club',x:830,z:120,w:42,d:56},
- {id:'riverside-park',name:'Riverside Gardens',x:530,z:200,w:42,d:58},
+ {id:'riverside-park',name:'Riverside Gardens',x:530,z:120,w:42,d:58},
 ];
 export const HARBOR={id:"hansdrex-harbor",x:120,z:420,w:560,d:90};
 export const WATER = [...PARK_PONDS,RIVER,HARBOR];
@@ -67,11 +68,23 @@ for(const z of STREETS){
 for(const x of [-430,372])road(x,0,8,820);
 for(const z of [-400,400])road(-30,z,800,10);
 for(const x of [500,560,620,680,740,800,860])road(x,0,9.5,480);
-for(const z of [-240,-160,-80,0,80,160,240])road(680,z,360,9);
+for(const z of [-240,-160,-80,0,80,160,240])road(Math.abs(z)===160?710:680,z,Math.abs(z)===160?300:360,9);
 for(const z of [-180,0,180])road(430,z,160,10);
+// The bridge axis continues straight across the east bank, with no park in its approach.
+for(const z of [-180,180])road(685,z,350,6);
 export const BRIDGES=[-180,0,180].map(z=>({x:430,z,w:160,d:16,landmark:z===0}));
+export const UNDERPASSES=BRIDGES.flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
+export function underpassAt(p){return UNDERPASSES.find(t=>Math.abs(p.x-t.x)<=t.w/2+.2&&Math.abs(p.z-t.z)<t.halfLength);}
+export function roadTravelY(p,axis='z'){
+ if(axis!=='z')return 1.1;const t=underpassAt(p);if(!t)return 1.1;
+ const distance=Math.abs(p.z-t.z),fraction=distance<=t.coveredHalf?1:(t.halfLength-distance)/(t.halfLength-t.coveredHalf);
+ return 1.1-t.depth*Math.max(0,Math.min(1,fraction));
+}
+export function isGradeSeparated(p){return UNDERPASSES.some(t=>Math.abs(p.x-t.x)<.5&&Math.abs(p.z-t.z)<=t.coveredHalf);}
+
 
 export const LOCATIONS = [
+ {id:'firestation',type:'fire-service',name:'Riverside Fire and Rescue',x:830,z:-200},
  {id:'riverside-homes',type:'home',name:'Riverside Residences',x:650,z:120},
  {id:'riverside-market',type:'food',name:'Riverside Market',x:590,z:40},
  {id:'riverside-cafe',type:'food',name:'Riverbank Cafe',x:590,z:-40},
@@ -148,7 +161,8 @@ export const METRO_LINES = [
  {id:"M3",height:13,points:[[-310,87],[-210,87],[-102,87],[2,87],[122,87],[210,87],[310,87]]},
  {id:"M4",height:15,points:[[122,-340],[122,-220],[122,-116],[122,0],[122,87],[122,145],[122,260],[122,340]]},
  {id:"M5",height:17,points:[[-210,-340],[-102,-340],[2,-340],[122,-340],[210,-340]]},
- {id:"M6",height:19,points:[[310,-340],[310,-220],[310,0],[310,87],[310,180],[310,340]]}
+ {id:"M6",height:19,points:[[310,-340],[310,-220],[310,0],[310,87],[310,180],[310,340]]},
+ {id:"M7",height:23,points:[[122,-340],[210,-340],[310,-340],[310,-180],[500,-180],[620,-180],[620,0],[740,0],[740,160],[860,160]]}
 ];
 
 export const BUILDINGS=[];
@@ -167,7 +181,7 @@ for(const loc of LOCATIONS) {
  const outer=Math.abs(loc.x)>180;
  const w=outer?24:Math.abs(loc.x)>=125?18:10;
  const d=outer?20:14;
- place({...loc,w,d,h:loc.id==='riverside-office'?96:loc.id==='riverside-hotel'?72:loc.type==='job'?36:loc.type==='health'?24:loc.type==='nightlife'?20:12,kind:'destination'});
+ place({...loc,w:loc.id==='firestation'?34:w,d:loc.id==='firestation'?24:d,h:loc.id==='firestation'?11:loc.id==='riverside-office'?96:loc.id==='riverside-hotel'?72:loc.type==='job'?36:loc.type==='health'?24:loc.type==='nightlife'?20:12,kind:'destination'});
 }
 // Existing signature skyline is preserved, then expanded with two new world landmarks.
 for(const [id,x,z,w,d,h] of [
@@ -178,6 +192,7 @@ for(const [id,x,z,w,d,h] of [
  ['marina-bay',340,320,44,18,88],
 ]) place({id,x,z,w,d,h,kind:'landmark'});
 
+LOCATIONS.push({id:'marina-bay',name:'Marina Bay Sands Hotel',type:'hotel',x:340,z:320});
 export const APARTMENTS=[];
 function addApartment(x,z,h=38,w=11,d=16){
  const b={id:`APT-${APARTMENTS.length+1}`,x,z,w,d,h,kind:'apartment',capacity:10,rent:24,purchaseValue:5040};
@@ -251,10 +266,11 @@ for(const z of [-350,-330,330,350])for(const x of [-260,-220,-180,-140,-100,-60,
 }
 
 // A compact mixed skyline rather than another full downtown. Append IDs to preserve old titles.
-for(const [x,z,h]of [[650,-200,84],[590,-120,62],[650,40,78],[710,120,58],[770,40,48],[830,-120,54]])addApartment(x,z,h,24,34);
+for(const [x,z,h]of [[650,-200,84],[590,-120,62],[650,40,78],[710,120,58],[770,40,48],[830,-120,54]])addApartment(x,z,h,24,28);
 for(const x of [530,590,650,710,770,830])for(const z of [-200,-120,-40,40,120,200]){
- const seed=Math.abs(x*7+z*13),height=x<620?32+seed%27:14+seed%25;
- place({id:`RIVERSIDE-${x}-${z}`,x,z,w:30,d:42,h:height,kind:'block'});
+ const seed=Math.abs(x*7+z*13),height=19+(seed%4)*3,depth=Math.abs(z)===200?28:42;
+ const b={id:`RIVERSIDE-${x}-${z}`,x,z,w:42,d:depth,h:height,kind:'block'};
+ if(place(b)&&[590,710].includes(x)&&Math.abs(z)===200){b.kind='apartment';b.capacity=30;b.rent=24;b.purchaseValue=5040;APARTMENTS.push(b);}
 }
 
 export function entrance(p) {
@@ -274,7 +290,9 @@ function indexRectangles(rects,margin=0){
 const emptyGeometry=[];
 const nearbyGeometry=(bins,p)=>bins.get(`${Math.floor(p.x/SPATIAL_CELL)},${Math.floor(p.z/SPATIAL_CELL)}`)||emptyGeometry;
 let buildingBins=indexRectangles(BUILDINGS,.45);
-const roadBins=indexRectangles(ROADS);
+let roadBins=indexRectangles(ROADS);
+const BASE_ROADS=ROADS.map(r=>({...r}));
+export let URBAN_ROADS=[];
 const BASE_URBAN_BUILDINGS=BUILDINGS.map(b=>({...b}));
 let urbanGeometryKey='',urbanNavigationKey='';
 export let urbanGeometryRevision=0;
@@ -286,10 +304,13 @@ export function effectiveBuildingHeight(b){
  return b.h;
 }
 /** Apply durable world changes on both server and viewer; invalidate navigation only on geometry changes. */
-export function applyUrbanGeometry({buildings=[],floods=[]}={}){
- const key=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.h,b.stage,Math.floor(Number(b.progress||0)*10)]),floods.map(f=>[f.id,f.x,f.z,f.w,f.d,Math.round(Number(f.depth||0)*10)])]);
+export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
+ const key=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.h,b.stage,Math.floor(Number(b.progress||0)*10)]),floods.map(f=>[f.id,f.x,f.z,f.w,f.d,Math.round(Number(f.depth||0)*10)]),roads.map(r=>[r.id,r.x,r.z,r.w,r.d,r.stage])]);
  if(key===urbanGeometryKey)return false;
  urbanGeometryKey=key;urbanGeometryRevision++;
+ URBAN_ROADS=roads.filter(r=>r.stage==='operational'&&[r.x,r.z,r.w,r.d].every(Number.isFinite)&&r.w>0&&r.d>0).map(r=>({...r}));
+ ROADS.splice(0,ROADS.length,...BASE_ROADS,...URBAN_ROADS);roadBins=indexRectangles(ROADS);
+ rebuildWalkways();
  const existing=new Map(BUILDINGS.map(b=>[b.id,b]));
  BUILDINGS.length=0;
  for(const base of BASE_URBAN_BUILDINGS){const target=existing.get(base.id)||{};for(const k of Object.keys(target))delete target[k];Object.assign(target,base);BUILDINGS.push(target);}
@@ -304,7 +325,8 @@ export function applyUrbanGeometry({buildings=[],floods=[]}={}){
  }
  URBAN_FLOODS=floods.filter(f=>[f.x,f.z,f.w,f.d,f.depth].every(Number.isFinite)&&f.depth>.35).slice(0,4).map(f=>({...f}));
  buildingBins=indexRectangles(BUILDINGS.filter(b=>effectiveBuildingHeight(b)>0),.45);
- const navKey=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.stage==='cleared']),URBAN_FLOODS.map(f=>[f.id,f.x,f.z,f.w,f.d])]);
+ rebuildParkingSpaces();
+ const navKey=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.stage==='cleared']),URBAN_FLOODS.map(f=>[f.id,f.x,f.z,f.w,f.d]),URBAN_ROADS.map(r=>[r.id,r.x,r.z,r.w,r.d])]);
  if(navKey!==urbanNavigationKey){urbanNavigationKey=navKey;costCache.clear();segmentCache.clear();routeCache.clear();}
  return true;
 }
@@ -322,19 +344,24 @@ export function clearSegment(a,b) {
 }
 // A graph of actual sidewalks, park paths and bridge walks, never imaginary infinite streets.
 const walks=[];
-for(const r of ROADS) {
- if(r.w>r.d)for(const s of [-1,1])walks.push({a:{x:r.x-r.w/2,z:r.z+s*(r.d/2+1.4)},b:{x:r.x+r.w/2,z:r.z+s*(r.d/2+1.4)}});
- else for(const s of [-1,1])walks.push({a:{x:r.x+s*(r.w/2+1.4),z:r.z-r.d/2},b:{x:r.x+s*(r.w/2+1.4),z:r.z+r.d/2}});
-}
-// Park loop, internal stroll and entrance connections.
-for(const r of PARK_PATHS)walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w/2,z:r.z}}:{a:{x:r.x,z:r.z-r.d/2},b:{x:r.x,z:r.z+r.d/2}});
 export const WALKWAYS=walks;
-const walkBins=indexRectangles(walks.map(w=>({x:(w.a.x+w.b.x)/2,z:(w.a.z+w.b.z)/2,w:Math.abs(w.a.x-w.b.x),d:Math.abs(w.a.z-w.b.z),a:w.a,b:w.b})),1.8);
+let walkBins=new Map();
+function rebuildWalkways(){
+ walks.length=0;
+ for(const r of ROADS){
+  if(r.w>r.d)for(const side of [-1,1])walks.push({a:{x:r.x-r.w/2,z:r.z+side*(r.d/2+1.4)},b:{x:r.x+r.w/2,z:r.z+side*(r.d/2+1.4)}});
+  else for(const side of [-1,1]){const offset=r.x===372?8:r.x===500?10.5:r.w/2+1.4;walks.push({a:{x:r.x+side*offset,z:r.z-r.d/2},b:{x:r.x+side*offset,z:r.z+r.d/2}});}
+ }
+ for(const bridge of BRIDGES)for(const side of [-1,1])walks.push({a:{x:bridge.x-bridge.w/2,z:bridge.z+side*6},b:{x:bridge.x+bridge.w/2,z:bridge.z+side*6}});
+ for(const r of PARK_PATHS)walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w/2,z:r.z}}:{a:{x:r.x,z:r.z-r.d/2},b:{x:r.x,z:r.z+r.d/2}});
+ walkBins=indexRectangles(walks.map(w=>({x:(w.a.x+w.b.x)/2,z:(w.a.z+w.b.z)/2,w:Math.abs(w.a.x-w.b.x),d:Math.abs(w.a.z-w.b.z),a:w.a,b:w.b})),1.8);
+}
+rebuildWalkways();
 // Small A* lattice: cached blocked cells, weighted sidewalks and exact segment validation.
 const STEP=2;
 const NAV_REGIONS=[
  {id:'city',minX:-440,maxX:380,minZ:-440,maxZ:410},
- {id:'riverside',minX:480,maxX:880,minZ:-260,maxZ:260},
+ {id:'riverside',minX:480,maxX:WORLD_HALF-20,minZ:-WORLD_HALF+20,maxZ:450},
 ].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
 const regionFor=p=>NAV_REGIONS[p.x>430?1:0];
 const costCache=new Map();
@@ -345,7 +372,7 @@ function costs(mode="walk",region=NAV_REGIONS[0]) {
  const walkCosts=new Float32Array(region.nx*region.nz);
  for(let iz=0;iz<region.nz;iz++)for(let ix=0;ix<region.nx;ix++) {
   const p={x:region.minX+ix*STEP,z:region.minZ+iz*STEP};
-  if(blocked(p))continue;
+  if(blocked(p)||mode==="walk"&&openUnderpass(p))continue;
   // Walking is sidewalk-biased in the city, but Central Park is a genuine free-roam
   // pedestrian district. Grass/meadows are legal to cross; paths are only cheaper, not mandatory.
   let c=contains(PARK,p,0)?1.55:8;
@@ -366,6 +393,8 @@ class Heap {
  pop(){const top=this.a[0],last=this.a.pop();if(this.a.length){let i=0;while(i*2+1<this.a.length){let j=i*2+1;if(j+1<this.a.length&&this.a[j+1][0]<this.a[j][0])j++;if(this.a[j][0]>=last[0])break;this.a[i]=this.a[j];i=j;}this.a[i]=last;}return top;}
 }
 const point = (i,region)=>({x:region.minX+(i%region.nx)*STEP,z:region.minZ+Math.floor(i/region.nx)*STEP});
+function openUnderpass(p){return UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+2.75&&Math.abs(p.z-t.z)<t.halfLength)&&!BRIDGES.some(b=>contains(b,p));}
+function walkingClearSegment(a,b){const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.6));for(let i=0;i<=steps;i++){const p={x:a.x+(b.x-a.x)*i/steps,z:a.z+(b.z-a.z)*i/steps};if(blocked(p)||openUnderpass(p))return false;}return true;}
 function nearestCell(p,c,region) {
  const ix=Math.round((p.x-region.minX)/STEP),iz=Math.round((p.z-region.minZ)/STEP);
  for(let radius=0;radius<10;radius++) {
@@ -373,14 +402,16 @@ function nearestCell(p,c,region) {
   for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
    const x=ix+dx,z=iz+dz;if(x<0||z<0||x>=region.nx||z>=region.nz)continue;
    const i=z*region.nx+x,q=point(i,region),dist=Math.hypot(p.x-q.x,p.z-q.z);
-   if(c[i]&&dist<d&&clearSegment(p,q)){best=i;d=dist;}
+   if(c[i]&&dist<d&&walkingClearSegment(p,q)){best=i;d=dist;}
   }
   if(best>=0)return best;
  }
  return -1;
 }
 const routeCache=new Map();
+const vehicleRouter=createVehicleRouter({roads:()=>ROADS,clearSegment,underpasses:()=>UNDERPASSES,roadTravelY});
 export function pedestrianRoute(start,dest,mode="walk") {
+ if(mode==='car'||mode==='scooter')return vehicleRouter.route(start,dest,mode);
  // The island is a separate pedestrian district. Never join it to the city lattice over water.
  if(onIsland(start)||onIsland(dest)){
   if(!onIsland(start)||!onIsland(dest)||mode!=="walk")return [];
@@ -393,12 +424,13 @@ export function pedestrianRoute(start,dest,mode="walk") {
  // A route restarted on a bridge first reaches a bank before entering its local region lattice.
  if(start.x>380&&start.x<480){
   const bridge=BRIDGES.find(b=>contains(b,start));if(!bridge)return [];
-  const bank={x:to.id==='city'?350:510,z:bridge.z};
+  const side=Math.sign(start.z-bridge.z)||1,bank={x:to.id==='city'?350:510,z:bridge.z+side*6};
   const tail=pedestrianRoute(bank,dest,mode);return clearSegment(start,bank)&&tail.length?[{...start,mode,stage:'bridge'},...tail]:[];
  }
  if(from!==to){
   const bridge=BRIDGES.reduce((best,b)=>Math.abs(start.z-b.z)+Math.abs(dest.z-b.z)<Math.abs(start.z-best.z)+Math.abs(dest.z-best.z)?b:best,BRIDGES[1]);
-  const west={x:350,z:bridge.z},east={x:510,z:bridge.z},entry=from.id==='city'?west:east,exit=from.id==='city'?east:west;
+  const side=Math.sign(start.z+dest.z-bridge.z*2)||1,walkOffset=mode==='walk'?side*6:0;
+  const west={x:350,z:bridge.z+walkOffset},east={x:510,z:bridge.z+walkOffset},entry=from.id==='city'?west:east,exit=from.id==='city'?east:west;
   const a=localRoute(start,entry,mode,from),b=localRoute(exit,dest,mode,to);
   if(!a.length||!b.length||!clearSegment(entry,exit))return [];
   return [...a,{...exit,mode,stage:'bridge'},...b];
@@ -438,17 +470,26 @@ function localRoute(start,dest,mode,region){
 }
 export function metroStationGeometry(line,index) {
  const p=line.points[index],prev=line.points[Math.max(0,index-1)],next=line.points[Math.min(line.points.length-1,index+1)];
- const dx=next[0]-prev[0],dz=next[1]-prev[1],len=Math.hypot(dx,dz)||1;
- const px=-dz/len,pz=dx/len;
- const side=index%2===0?1:-1;
- const platformOffset=3.4,accessOffset=8.2;
- return {
-  track:{x:p[0],z:p[1],y:line.height},
-  platform:{x:p[0]+px*platformOffset*side,z:p[1]+pz*platformOffset*side,y:line.height+.25},
-  access:{x:p[0]+px*accessOffset*side,z:p[1]+pz*accessOffset*side,y:1.1},
-  axis:Math.abs(dx)>=Math.abs(dz)?"x":"z",
-  side,
- };
+ const dx=next[0]-prev[0],dz=next[1]-prev[1],axis=Math.abs(dx)>=Math.abs(dz)?'x':'z';
+ const along=axis==='x'?{x:1,z:0}:{x:0,z:1},perp=axis==='x'?{x:0,z:1}:{x:1,z:0};
+ const width=Math.max(6,...ROADS.filter(r=>(r.w>r.d)===(axis==='x')&&contains(r,{x:p[0],z:p[1]},.2)).map(r=>Math.min(r.w,r.d)));
+ const offset=width/2+1.22,candidates=[];
+ for(const side of [index%2===0?1:-1,index%2===0?-1:1])for(const direction of [-1,1]){
+  const point=(u,v,y)=>({x:p[0]+along.x*u+perp.x*v,z:p[1]+along.z*u+perp.z*v,y});
+  const access=point(direction*21,side*offset,1.1);
+  // Two narrow flights share a landing. Both run parallel to the sidewalk, outside traffic lanes.
+  const stairs=[point(direction*21,side*offset-.5,1.1),point(direction*7,side*offset-.5,line.height/2+1.125),point(direction*7,side*offset+.5,line.height/2+1.125),point(direction*21,side*offset+.5,line.height+1.15)];
+  let violations=0;for(let u=7;u<=21;u+=1)for(const v of [-.98,0,.98]){
+   const q=point(direction*u,side*offset+v,1.1);
+   if(ROADS.some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q))violations++;
+  }
+  candidates.push({side,access,stairs,violations});
+ }
+ candidates.sort((a,b)=>a.violations-b.violations);const best=candidates[0],side=best.side;
+ const platform={x:p[0]+perp.x*3.4*side,z:p[1]+perp.z*3.4*side,y:line.height+1.15};
+ // The elevated approach can cross a lane safely; its ground staircase cannot.
+ const top=best.stairs.at(-1),landing={x:top.x,z:top.z,y:top.y};
+ return {track:{x:p[0],z:p[1],y:line.height},platform,access:best.stairs[0],axis,side,stairs:[...best.stairs,landing,platform],accessViolations:best.violations};
 }
 
 export function trainState(line,seconds) {
@@ -466,11 +507,14 @@ export function trainState(line,seconds) {
 
 // Marked parallel bays stay inside the curb, clear of intersections, bridges and stations.
 export const PARKING_SPACES=[];
-const parkingKeys=new Set();
+export function rebuildParkingSpaces(){
+ PARKING_SPACES.length=0;const parkingKeys=new Set();
 for(const r of ROADS){
+ if(Math.min(r.w,r.d)<8.5)continue;
  const horizontal=r.w>r.d,half=(horizontal?r.w:r.d)/2,center=horizontal?r.x:r.z;
  for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
   const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
+  if(UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+3&&Math.abs(p.z-t.z)<t.halfLength+8))continue;
   if((!contains(RIVERSIDE,p,-8)&&(Math.abs(p.x)>335||Math.abs(p.z)>335))||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
   if(ROADS.some(o=>o!==r&&(o.w>o.d)!==horizontal&&contains(o,p,8)))continue;
   if(METRO_LINES.some(l=>l.points.some(([x,z])=>Math.hypot(p.x-x,p.z-z)<12)))continue;
@@ -478,6 +522,17 @@ for(const r of ROADS){
   PARKING_SPACES.push({...p,id:`CURB-${key}`,spaceId:`CURB-${key}`,heading:horizontal?side*Math.PI/2:side<0?0:Math.PI,axis:horizontal?'x':'z',w:horizontal?5:2,d:horizontal?2:5});
  }
 }
+ for(const r of URBAN_ROADS){
+  if(!r.frontage||!r.servesLocationId)continue;
+  const lot=BUILDINGS.find(b=>b.id===r.servesLocationId);if(!lot)continue;
+  const horizontal=r.w>r.d,side=Math.sign(horizontal?lot.z-r.frontage.z:lot.x-r.frontage.x)||1;
+  const p={x:r.frontage.x+(horizontal?0:side*3.8),z:r.frontage.z+(horizontal?side*3.8:0)};
+  if(blocked(p))continue;
+  const id=`CURB-ACCESS-${r.servesLocationId}`;
+  PARKING_SPACES.push({...p,id,spaceId:id,heading:horizontal?side*Math.PI/2:side<0?0:Math.PI,axis:horizontal?'x':'z',w:horizontal?5.5:2.2,d:horizontal?2.2:5.5,loading:true,servesLocationId:r.servesLocationId});
+ }
+}
+rebuildParkingSpaces();
 export function parkingPoint(p,occupied=new Set()) {
  let best=null,distance=Infinity;
  for(const q of PARKING_SPACES){if(occupied.has(q.id))continue;const d=Math.hypot(q.x-p.x,q.z-p.z);if(d<distance){best=q;distance=d;}}

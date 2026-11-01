@@ -4,6 +4,9 @@ type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const steel=new THREE.MeshStandardMaterial({color:0x657b86,roughness:.55,metalness:.5});
 const concrete=new THREE.MeshStandardMaterial({color:0xa7aaa5,roughness:.9});
 const white=new THREE.LineBasicMaterial({color:0xf4eee1});
+const bridgeLights:Array<THREE.PointsMaterial|THREE.LineBasicMaterial|THREE.MeshBasicMaterial>=[];
+export function updateBridgeLighting(night:number){for(const material of bridgeLights){material.opacity=.15+Math.max(0,Math.min(1,night))*.85;}}
+
 function block(root:THREE.Group,w:number,h:number,d:number,x:number,y:number,z:number,material:THREE.Material){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);m.position.set(x,y,z);root.add(m);return m;}
 /** All arch members share geometry and a draw call, rather than one mesh per steel bar. */
 export function buildRiverBridges(root:THREE.Group){
@@ -11,6 +14,10 @@ export function buildRiverBridges(root:THREE.Group){
  for(const bridge of BRIDGES){
   const main=bridge.z===0,rise=main?36:14,steps=main?32:20,half=bridge.w/2,side=bridge.d/2-.6;
   block(root,bridge.w,.5,bridge.d,bridge.x,-.12,bridge.z,new THREE.MeshStandardMaterial({color:0x424b50,roughness:.9}));
+  for(const sideSign of [-1,1]){
+   block(root,bridge.w,.16,2.4,bridge.x,.26,bridge.z+sideSign*6,new THREE.MeshStandardMaterial({color:0xd0c6ad,roughness:.95}));
+   block(root,bridge.w,.4,.16,bridge.x,.4,bridge.z+sideSign*4.65,concrete);
+  }
   const bars:Array<{a:THREE.Vector3;b:THREE.Vector3;r:number}>=[];
   const add=(ax:number,ay:number,az:number,bx:number,by:number,bz:number,r=.22)=>bars.push({a:new THREE.Vector3(ax,ay,az),b:new THREE.Vector3(bx,by,bz),r});
   const arch=(t:number)=>2.6+rise*Math.sin(Math.PI*t);
@@ -29,7 +36,14 @@ export function buildRiverBridges(root:THREE.Group){
   const mesh=new THREE.InstancedMesh(beam,steel,bars.length);
   bars.forEach(({a,b,r},i)=>{const delta=b.clone().sub(a);dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,delta.clone().normalize());dummy.scale.set(r,delta.length(),r);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});root.add(mesh);
   const lamps:number[]=[];for(let i=0;i<=steps;i++){const t=i/steps;for(const sideSign of [-1,1])lamps.push(bridge.x-half+bridge.w*t,arch(t),bridge.z+sideSign*side);}
-  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(lamps,3));root.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0xffd488,size:.38,toneMapped:false})));
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(lamps,3));
+  const pinLight=new THREE.PointsMaterial({color:0xffd488,size:.55,toneMapped:false,transparent:true,depthWrite:false});bridgeLights.push(pinLight);root.add(new THREE.Points(geo,pinLight));
+  const ribbon:number[]=[];for(let i=0;i<steps;i++)for(const sign of [-1,1])ribbon.push(bridge.x-half+bridge.w*i/steps,arch(i/steps)+.18,bridge.z+sign*side,bridge.x-half+bridge.w*(i+1)/steps,arch((i+1)/steps)+.18,bridge.z+sign*side);
+  const ribbonGeo=new THREE.BufferGeometry();ribbonGeo.setAttribute('position',new THREE.Float32BufferAttribute(ribbon,3));const glow=new THREE.LineBasicMaterial({color:0xffd19a,transparent:true,depthWrite:false,toneMapped:false});bridgeLights.push(glow);root.add(new THREE.LineSegments(ribbonGeo,glow));
+  const count=(Math.floor(bridge.w/20)+1)*2,posts=new THREE.InstancedMesh(new THREE.CylinderGeometry(.065,.09,2.8,5),steel,count),bulbMaterial=new THREE.MeshBasicMaterial({color:0xffe1a1,toneMapped:false,transparent:true});bridgeLights.push(bulbMaterial);
+  const bulbs=new THREE.InstancedMesh(new THREE.SphereGeometry(.22,6,4),bulbMaterial,count);let lampIndex=0;
+  for(let i=0;i<=Math.floor(bridge.w/20);i++)for(const sign of [-1,1]){dummy.position.set(bridge.x-half+i*20,1.7,bridge.z+sign*7.35);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();posts.setMatrixAt(lampIndex,dummy.matrix);dummy.position.y=3.15;dummy.updateMatrix();bulbs.setMatrixAt(lampIndex++,dummy.matrix);}root.add(posts,bulbs);
+
  }
 }
 function fieldLines(root:THREE.Group,segments:number[][],x:number,z:number){

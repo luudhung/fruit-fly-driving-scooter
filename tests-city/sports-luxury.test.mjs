@@ -18,7 +18,7 @@ test('one-time founding grant selects ten wealthiest living adults after liabili
  const ownership=d.helicopters.map(h=>h.ownerId),before=supply(t.s);t.s.flies[0].money=1e7;const after=supply(t.s);t.restore();assert.deepEqual(t.s.sportsLuxury.helicopters.map(h=>h.ownerId),ownership);assert.equal(supply(t.s),after);assert.ok(after>before);
 });
 test('roof pads sit on actual broad roofs and all aircraft have distinct home bays',()=>{
- const t=setup();for(const p of privateHelipads().filter(p=>p.rooftop)){const b=BUILDINGS.find(b=>b.id===p.locationId);assert.ok(b&&p.y>b.h&&b.w>=18&&b.d>=18);}
+ const t=setup();for(const p of privateHelipads().filter(p=>p.rooftop)){const b=BUILDINGS.find(b=>b.id===p.locationId);assert.ok(b&&p.y>b.h&&(p.radius??6)*2<=b.w&&(p.radius??6)*2<=b.d);}
  assert.ok(privateHelipads().filter(p=>p.rooftop).length>=3);assert.equal(new Set(t.s.sportsLuxury.helicopters.map(h=>h.padId)).size,10);
 });
 test('private flight charges exactly once at takeoff, persists mid-air, lands and completes a ground transfer',()=>{
@@ -35,7 +35,7 @@ test('bad weather cancels before takeoff without charging and landing-pad reserv
  t.s.weather.condition='thunderstorm';t.system.handleResident(f,t.at(h.flight.departure-10));assert.equal(h.flight,null);assert.equal(f.privateFlight,null);assert.equal(f.money+f.savings,before);assert.ok(t.system.padAvailable(to.id,'another'));
 });
 test('airport access goes around the terminal instead of through its walls',()=>{
- const t=setup(),h=t.s.sportsLuxury.helicopters.find(h=>h.padId.startsWith('PAD-AIRPORT')),f=putAtPad(t.s,h);assert.ok(t.system.beginPrivate(f,'PAD-island-resort'));
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0];h.padId='PAD-AIRPORT-1';const f=putAtPad(t.s,h);assert.ok(t.system.beginPrivate(f,'PAD-island-resort'));
  const path=f.privateFlight.walk;assert.ok(path.length>=3);for(let i=1;i<path.length;i++)assert.ok(clearSegment(path[i-1],path[i]));
 });
 test('private flight cruise stays above the tallest skyline, endpoints stay at physical pads',()=>{
@@ -66,4 +66,22 @@ test('a helicopter held in an estate remains inheritable when its child becomes 
  const t=setup(),h=t.s.sportsLuxury.helicopters[0],former=t.s.flies.find(f=>f.id===h.ownerId),heir=t.s.flies[0];former.alive=false;former.children=[heir.id];heir.ageYears=17;
  t.system.tick(120,t.at(120));assert.equal(h.ownerId,null);assert.equal(h.estateOwnerId,former.id);
  t.restore();const restored=t.s.sportsLuxury.helicopters.find(o=>o.id===h.id),adult=t.s.flies.find(f=>f.id===heir.id);adult.ageYears=18;t.system.tick(120,t.at(4000));assert.equal(restored.ownerId,heir.id);assert.equal(restored.estateOwnerId,undefined);assert.ok(Number.isFinite(restored.nextTripAt));
+});
+
+test('all ten private owners park on real rooftops and legacy airport parking migrates once',()=>{
+ const t=setup(),pads=privateHelipads(),fleet=t.s.sportsLuxury.helicopters;
+ assert.ok(fleet.every(h=>pads.find(p=>p.id===h.padId)?.rooftop));assert.ok(pads.filter(p=>p.rooftop).length>10);
+ const owners=fleet.map(h=>[h.id,h.ownerId]),cash=supply(t.s);for(let i=0;i<fleet.length;i++)fleet[i].padId=`PAD-AIRPORT-${i+1}`;
+ delete t.s.sportsLuxury.familyParkingVersion;t.restore();const migrated=t.s.sportsLuxury.helicopters.map(h=>h.padId);
+ assert.deepEqual(t.s.sportsLuxury.helicopters.map(h=>[h.id,h.ownerId]),owners);assert.equal(new Set(migrated).size,10);assert.ok(migrated.every(id=>pads.find(p=>p.id===id)?.rooftop));assert.equal(supply(t.s),cash);
+ t.restore();assert.deepEqual(t.s.sportsLuxury.helicopters.map(h=>h.padId),migrated);
+});
+
+test('a family rooftop belongs to the real home, includes children and follows an adult heir',()=>{
+ const t=setup(),fleet=t.s.sportsLuxury.helicopters,units=BUILDINGS.filter(b=>b.kind==='apartment').slice(0,10);t.s.housing={households:{}};
+ for(let i=0;i<fleet.length;i++){const f=t.s.flies.find(f=>f.id===fleet[i].ownerId),b=units[i];f.householdId=`FAMILY-${i}`;f.housingUnitId=b.id;f.homeX=b.x;f.homeZ=b.z;t.s.housing.households[f.householdId]={id:f.householdId,unitId:b.id,members:[f.id]};}
+ const parent=t.s.flies.find(f=>f.id===fleet[0].ownerId),child=t.s.flies[0];Object.assign(child,{ageYears:12,householdId:parent.householdId,housingUnitId:parent.housingUnitId});parent.children=[child.id];t.s.housing.households[parent.householdId].members.push(child.id);
+ delete t.s.sportsLuxury.familyParkingVersion;t.restore();const h=t.s.sportsLuxury.helicopters[0],p=t.system.snapshot().pads.find(p=>p.id===h.padId);assert.equal(p.locationId,parent.housingUnitId);assert.ok(h.familyIds.includes(child.id));assert.equal(h.familyHouseholdId,parent.householdId);
+ const before=supply(t.s),restoredParent=t.s.flies.find(f=>f.id===parent.id),restoredChild=t.s.flies.find(f=>f.id===child.id);restoredParent.alive=false;t.system.tick(120,t.at(120));assert.equal(h.ownerId,null);assert.ok(h.familyIds.includes(child.id));
+ restoredChild.ageYears=18;t.system.tick(120,t.at(4000));t.system.tick(120,t.at(4120));assert.equal(h.ownerId,child.id);assert.equal(h.homePadId,`PAD-${child.housingUnitId}`);assert.equal(supply(t.s),before);
 });

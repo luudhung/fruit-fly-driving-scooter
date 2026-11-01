@@ -1,6 +1,9 @@
+import {buildParisBuilding} from './paris-district.ts';
+import type {FireServiceSnapshot} from '../worker/fire-service.mjs';
 import * as THREE from 'three';
-import {BUILDINGS,applyUrbanGeometry,type UrbanBuildingRecord,type UrbanFlood} from '../worker/city-map.mjs';
-export type UrbanWorldSnapshot={buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
+import {BUILDINGS,PARKING_SPACES,applyUrbanGeometry,type UrbanBuildingRecord,type UrbanFlood} from '../worker/city-map.mjs';
+export type UrbanRoad={id:string;x:number;z:number;w:number;d:number;stage:string;progress?:number;projectId?:string};
+export type UrbanWorldSnapshot={roads?:UrbanRoad[];completedRoads?:number;fireService?:FireServiceSnapshot;buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
 type Registered={group:THREE.Group;originalMaterials:Map<THREE.Material,THREE.Color>;height:number;privateMaterials?:boolean};
 /** Only the viewer animates particles and machinery; durable world outcomes come from the server. */
 export class UrbanWorldRenderer{
@@ -8,13 +11,14 @@ export class UrbanWorldRenderer{
  private dynamic=new Map<string,THREE.Group>();
  private sites=new Map<string,THREE.Group>();
  private waters=new Map<string,THREE.Mesh>();
+ private roadMeshes=new Map<string,THREE.Group>();
  private state:UrbanWorldSnapshot={buildings:[],fires:[],projects:[],floods:[]};
  private flames:THREE.InstancedMesh;
  private smoke:THREE.InstancedMesh;
  private jets:THREE.LineSegments;
  private dummy=new THREE.Object3D();
  private phase=0;
- private materials={wall:new THREE.MeshStandardMaterial({color:0xa4afb0,roughness:.88}),scaffold:new THREE.MeshStandardMaterial({color:0xb8a75a,metalness:.4,roughness:.6}),rubble:new THREE.MeshStandardMaterial({color:0x585252,roughness:1}),glass:new THREE.MeshBasicMaterial({color:0xedcc85,toneMapped:false})};
+ private materials={wall:new THREE.MeshStandardMaterial({color:0xa4afb0,roughness:.88}),scaffold:new THREE.MeshStandardMaterial({color:0xb8a75a,metalness:.4,roughness:.6}),rubble:new THREE.MeshStandardMaterial({color:0x585252,roughness:1}),glass:new THREE.MeshBasicMaterial({color:0xedcc85,toneMapped:false}),road:new THREE.MeshStandardMaterial({color:0x30373a,roughness:.97}),curb:new THREE.MeshStandardMaterial({color:0xb4b4a6,roughness:1}),paint:new THREE.MeshBasicMaterial({color:0xdacb92,toneMapped:false}),dirt:new THREE.MeshStandardMaterial({color:0x8a795e,roughness:1}),cone:new THREE.MeshBasicMaterial({color:0xe8a35c})};
  constructor(private root:THREE.Group){
   this.flames=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,5),new THREE.MeshBasicMaterial({color:0xff7c29,toneMapped:false,transparent:true,opacity:.9,depthWrite:false}),96);
   this.smoke=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshBasicMaterial({color:0x55545d,transparent:true,opacity:.36,depthWrite:false}),120);
@@ -28,6 +32,7 @@ export class UrbanWorldRenderer{
  }
  private box(g:THREE.Group,w:number,h:number,d:number,x:number,y:number,z:number,mat:THREE.Material){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);g.add(m);return m;}
  private newBuilding(b:UrbanBuildingRecord){
+  if(b.x>480&&b.z<470){const group=buildParisBuilding(b,2);this.root.add(group);this.dynamic.set(b.id,group);this.registerBuilding(b.id,group);return group;}
   const group=new THREE.Group();group.position.set(b.x,0,b.z);
   this.box(group,b.w,b.h,b.d,0,b.h/2,0,this.materials.wall.clone());
   this.box(group,b.w+.3,.4,b.d+.3,0,b.h,0,this.materials.scaffold);
@@ -36,7 +41,8 @@ export class UrbanWorldRenderer{
   this.root.add(group);this.dynamic.set(b.id,group);this.registerBuilding(b.id,group);return group;
  }
  sync(data:UrbanWorldSnapshot){
-  if(!data)return;this.state=data;applyUrbanGeometry({buildings:data.buildings||[],floods:data.floods||[]});
+  if(!data)return;this.state=data;applyUrbanGeometry({buildings:data.buildings||[],floods:data.floods||[],roads:(data.roads||[]).filter(r=>r.stage==='operational')});
+  this.syncRoads(data.roads||[]);
   const records=new Map((data.buildings||[]).map(b=>[b.id,b]));
   for(const b of data.buildings||[])if(b.id.startsWith('CIVIC-')&&!this.buildings.has(b.id))this.newBuilding(b);
   for(const [id,entry]of this.buildings){
@@ -74,6 +80,32 @@ export class UrbanWorldRenderer{
   for(const [id,g]of this.sites)if(!active.has(id)){this.root.remove(g);for(const child of g.children)if(child instanceof THREE.Mesh)child.geometry.dispose();this.sites.delete(id);}
   const floods=new Set<string>();for(const f of data.floods||[]){floods.add(f.id);let mesh=this.waters.get(f.id);if(!mesh){mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({color:0x628c99,transparent:true,opacity:.7,depthWrite:false}));mesh.rotation.x=-Math.PI/2;this.root.add(mesh);this.waters.set(f.id,mesh);}mesh.scale.set(f.w,f.d,1);mesh.position.set(f.x,.22+f.depth*.25,f.z);}
   for(const [id,m]of this.waters)if(!floods.has(id)){this.root.remove(m);m.geometry.dispose();(m.material as THREE.Material).dispose();this.waters.delete(id);}
+ }
+ private syncRoads(roads:UrbanRoad[]){
+  const active=new Set<string>();
+  for(const road of roads){
+   active.add(road.id);let group=this.roadMeshes.get(road.id);
+   if(!group){group=new THREE.Group();group.position.set(road.x,0,road.z);this.root.add(group);this.roadMeshes.set(road.id,group);}
+   const signature=`${road.stage}:${Math.floor(Number(road.progress||0)*8)}:${road.w}:${road.d}`;
+   if(group.userData.signature===signature)continue;group.userData.signature=signature;
+   for(const child of [...group.children]){group.remove(child);if(child instanceof THREE.Mesh)child.geometry.dispose();}
+   const horizontal=road.w>road.d;
+   if(road.stage==='operational'){
+    this.box(group,road.w+3,.08,road.d+3,0,.04,0,this.materials.curb);
+    this.box(group,road.w,.08,road.d,0,.10,0,this.materials.road);
+    this.box(group,horizontal?road.w:.12,.008,horizontal?.12:road.d,0,.151,0,this.materials.paint);
+    for(const bay of PARKING_SPACES.filter(p=>p.id.startsWith('CURB-ACCESS-')&&Math.abs(p.x-road.x)<road.w/2+6&&Math.abs(p.z-road.z)<road.d/2+6)){
+     this.box(group,bay.w+.4,.07,bay.d+.4,bay.x-road.x,.12,bay.z-road.z,this.materials.road);
+     for(const sign of [-1,1])this.box(group,horizontal?bay.w:.08,.015,horizontal?.08:bay.d,bay.x-road.x+(horizontal?0:sign*bay.w/2),.162,bay.z-road.z+(horizontal?sign*bay.d/2:0),this.materials.paint);
+    }
+   }else{
+    this.box(group,road.w,.08,road.d,0,.10,0,this.materials.dirt);
+    const length=horizontal?road.w:road.d,portion=Math.max(.05,Number(road.progress||0));
+    if(road.stage==='construction')this.box(group,horizontal?length*portion:road.w,.025,horizontal?road.d:length*portion,horizontal?-(length-length*portion)/2:0,.16,horizontal?0:-(length-length*portion)/2,this.materials.road);
+    for(const side of [-1,1]){const cone=new THREE.Mesh(new THREE.ConeGeometry(.3,.8,5),this.materials.cone);cone.position.set(horizontal?side*(road.w/2):0,.54,horizontal?0:side*(road.d/2));group.add(cone);}
+   }
+  }
+  for(const [id,group]of this.roadMeshes)if(!active.has(id)){this.root.remove(group);for(const child of group.children)if(child instanceof THREE.Mesh)child.geometry.dispose();this.roadMeshes.delete(id);}
  }
  update(dt:number,gameNow:number){
   this.phase+=Math.min(.1,dt);let flames=0,smoke=0,jets=0;const d=this.dummy,jet=this.jets.geometry.getAttribute('position') as THREE.BufferAttribute;

@@ -3,8 +3,8 @@ import {signalBarrier,createVehicleIndex} from '../worker/traffic.mjs';
 import * as THREE from 'three';
 import {PARKING_SPACES,clearSegment} from '../worker/city-map.mjs';
 
-type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;x:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;z:number;t:number}>};
-type Car={motion?:CityMotion;hasMotion?:boolean;signalPermit?:boolean;color:THREE.Color;x:number;z:number;heading:number;targetX:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;z:number}>};
+type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;x:number;y?:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;y?:number;z:number;t:number}>};
+type Car={motion?:CityMotion;hasMotion?:boolean;signalPermit?:boolean;color:THREE.Color;x:number;y:number;z:number;heading:number;pitch:number;targetX:number;targetY:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;y?:number;z:number}>};
 export type RoadIncident={id:string;x:number;z:number;repairAt:number};
 
 /** All personal vehicles share three draw calls, including their four wheels. */
@@ -37,14 +37,14 @@ export class PersonalCars{
    const driving=Boolean(f.traveling&&f.transitMode==='car'),p=driving?f:f.parkedCar;if(!p)continue;live.add(f.id);
    const heading=driving&&Math.abs(f.vx)+Math.abs(f.vz)>.01?Math.atan2(f.vx,f.vz):f.parkedCar?.heading||0;
    let car=this.cars.get(f.id);
-   if(!car){car={color:new THREE.Color().setHSL((Number(f.id.replace(/\D/g,''))*.61803398875)%1,.48,.43),x:p.x,z:p.z,heading,targetX:p.x,targetZ:p.z,targetHeading:heading,driving,lastTrace:-1,route:[]};this.cars.set(f.id,car);}
-   if(!driving||!car.driving){car.route=[];car.x=p.x;car.z=p.z;car.heading=heading;}
-   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route=[];car.x=q.x;car.z=q.z;}}
+   if(!car){car={color:new THREE.Color().setHSL((Number(f.id.replace(/\D/g,''))*.61803398875)%1,.48,.43),x:p.x,y:driving?(f.y??1.1):1.1,z:p.z,heading,pitch:0,targetX:p.x,targetY:driving?(f.y??1.1):1.1,targetZ:p.z,targetHeading:heading,driving,lastTrace:-1,route:[]};this.cars.set(f.id,car);}
+   if(!driving||!car.driving){car.route=[];car.x=p.x;car.y=driving?(f.y??1.1):1.1;car.z=p.z;car.heading=heading;car.pitch=0;}
+   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route=[];car.x=q.x;car.y=q.y??1.1;car.z=q.z;}}
    if(car.route.length>12)car.route=car.route.slice(-8);
    car.hasMotion=Boolean(driving&&f.motion);
    if(car.hasMotion){car.motion ||= new CityMotion();car.motion.accept(f,f.motion!);car.route=[];}
    car.signalPermit=Boolean(f.trafficSignalPermit);
-   car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;car.targetX=p.x;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
+   car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;car.targetX=p.x;car.targetY=driving?(f.y??1.1):1.1;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
   }
   for(const id of this.cars.keys())if(!live.has(id))this.cars.delete(id);
   let count=0;
@@ -53,21 +53,22 @@ export class PersonalCars{
  }
  update(dt:number,gameSeconds=0,timeScale=120){
   const signalSeconds=gameSeconds/timeScale;
-  const headway=createVehicleIndex(Array.from(this.cars,([id,c])=>({id,alive:true,traveling:c.driving,transitMode:'car',x:c.motion&&c.hasMotion?c.motion.x:c.x,z:c.motion&&c.hasMotion?c.motion.z:c.z,targetX:c.motion?.targetX??c.targetX,targetZ:c.motion?.targetZ??c.targetZ})));
+  const headway=createVehicleIndex(Array.from(this.cars,([id,c])=>({id,alive:true,traveling:c.driving,transitMode:'car',x:c.motion&&c.hasMotion?c.motion.x:c.x,y:c.motion&&c.hasMotion?c.motion.y:c.y,z:c.motion&&c.hasMotion?c.motion.z:c.z,targetX:c.motion?.targetX??c.targetX,targetZ:c.motion?.targetZ??c.targetZ})));
   let index=0;const d=this.dummy;d.scale.set(1,1,1);
   for(const [id,car]of this.cars){if(index>=this.capacity)break;
-   if(car.hasMotion&&car.motion){car.motion.advance(dt,gameSeconds,timeScale,(from,to)=>headway({...from,id},to));car.targetX=car.motion.x;car.targetZ=car.motion.z;car.route=[];}
-   const next=car.route[0]||{x:car.targetX,z:car.targetZ},blend=Math.min(1,dt*(car.route.length>3?10:6)),dx=next.x-car.x,dz=next.z-car.z;
+   if(car.hasMotion&&car.motion){car.motion.advance(dt,gameSeconds,timeScale,(from,to)=>headway({...from,id},to));car.targetX=car.motion.x;car.targetY=car.motion.y;car.targetZ=car.motion.z;car.route=[];}
+   const next=car.route[0]||{x:car.targetX,y:car.targetY,z:car.targetZ},blend=Math.min(1,dt*(car.route.length>3?10:6)),dx=next.x-car.x,dz=next.z-car.z;
    const barrier=car.driving&&!car.signalPermit?signalBarrier(car,{x:car.x+dx*blend,z:car.z+dz*blend},signalSeconds):null;
    const length=Math.hypot(dx,dz),fraction=barrier&&length>0?Math.min(blend,barrier.distance/length):blend;
-   car.x+=dx*fraction;car.z+=dz*fraction;
+   const dy=(next.y??car.targetY)-car.y;car.x+=dx*fraction;car.y+=dy*fraction;car.z+=dz*fraction;
+   if(car.driving&&Math.hypot(dx,dz)>.05)car.pitch=Math.atan2(dy,Math.hypot(dx,dz));else if(!car.driving)car.pitch=0;
    if(car.route.length&&Math.hypot(dx,dz)<.35)car.route.shift();
    if(car.driving&&Math.hypot(dx,dz)>.05)car.heading=Math.atan2(dx,dz);else if(!car.driving)car.heading=car.targetHeading;
-   d.rotation.set(0,car.heading,0);d.position.set(car.x,.79,car.z);d.updateMatrix();this.body.setMatrixAt(index,d.matrix);
+   d.rotation.set(-car.pitch,car.heading,0,'YXZ');d.position.set(car.x,car.y-.31,car.z);d.updateMatrix();this.body.setMatrixAt(index,d.matrix);
    this.body.setColorAt(index,car.color);
-   d.position.y=1.34;d.updateMatrix();this.cabin.setMatrixAt(index,d.matrix);
+   d.position.y=car.y+.24;d.updateMatrix();this.cabin.setMatrixAt(index,d.matrix);
    let wheel=0;const sin=Math.sin(car.heading),cos=Math.cos(car.heading);
-   for(const x of [-.9,.9])for(const z of [-1,1]){d.position.set(car.x+x*cos+z*sin,.49,car.z-x*sin+z*cos);d.updateMatrix();this.wheels.setMatrixAt(index*4+wheel++,d.matrix);}
+   for(const x of [-.9,.9])for(const z of [-1,1]){d.position.set(car.x+x*cos+z*sin,car.y-.61+z*Math.sin(car.pitch),car.z-x*sin+z*cos);d.updateMatrix();this.wheels.setMatrixAt(index*4+wheel++,d.matrix);}
    index++;
   }
   this.body.count=this.cabin.count=index;this.wheels.count=index*4;

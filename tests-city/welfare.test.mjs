@@ -53,12 +53,12 @@ test('restoring 13 survivors adds 487 residents once and preserves survivors and
  assert.ok(s.flies.filter(f=>f.alive).every(f=>f.housingUnitId));
  const count=s.flies.length;restoreState(s);assert.equal(s.flies.length,count);
 });
-test('population support replenishes below 450 at most daily and never revives the dead',()=>{
- const s=freshState(),archived=s.flies.slice(0,51);
- for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=51;
- assert.equal(maintainPopulation(),51);assert.equal(s.flies.filter(f=>f.alive).length,500);
+test('population support replenishes below 540 at most daily and never revives the dead',()=>{
+ const s=freshState(),archived=s.flies.slice(0,61);
+ for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=61;
+ assert.equal(maintainPopulation(),61);assert.equal(s.flies.filter(f=>f.alive).length,600);
  assert.ok(archived.every(f=>!f.alive));
- for(const f of s.flies.filter(f=>f.alive).slice(0,51))f.alive=false;
+ for(const f of s.flies.filter(f=>f.alive).slice(0,61))f.alive=false;
  assert.equal(maintainPopulation(),0);s.simulationAgeSeconds+=86400;
- assert.equal(maintainPopulation(),51);assert.equal(s.flies.filter(f=>f.alive).length,500);
+ assert.equal(maintainPopulation(),61);assert.equal(s.flies.filter(f=>f.alive).length,600);
 });

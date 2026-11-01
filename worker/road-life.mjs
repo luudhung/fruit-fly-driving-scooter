@@ -15,12 +15,13 @@ export function learnDrivingOutcome(f,reward,outcome){
  return d;
 }
 export function createRoadLife({world,random,remember,emit,neuralDrive,startJourney}){
- const spaceIds=new Set(PARKING_SPACES.map(p=>p.id));
+
  const data=()=>{const s=world();return s.roadLife||(s.roadLife={version:1,incidents:[],nextChaosAt:s.simulationAgeSeconds+600,chaosUntil:0,totalIncidents:0,totalFines:0,totalRepairs:0,vehiclePurchases:0});};
  function occupied(skip){const taken=new Set();for(const f of world().flies){if(!f.alive||f.id===skip)continue;if(f.parkedCar?.spaceId&&(!f.traveling||f.transitMode!=='car'))taken.add(f.parkedCar.spaceId);if(f.destinationParking?.spaceId)taken.add(f.destinationParking.spaceId);}return taken;}
  function park(f,p=f){const point=parkingPoint(p,occupied(f.id));if(point)f.parkedCar=point;return point;}
  function destination(f,p){const point=parkingPoint(p,occupied(f.id));f.destinationParking=point;return point;}
  function normalizeParking(){
+  const spaceIds=new Set(PARKING_SPACES.map(p=>p.id));
   const taken=new Set();for(const f of world().flies){if(!f.alive||!f.vehicle||f.traveling&&f.transitMode==='car')continue;
    const p=f.parkedCar;if(!p?.spaceId||!spaceIds.has(p.spaceId)||taken.has(p.spaceId))f.parkedCar=parkingPoint(p||f,taken);
    if(f.parkedCar)taken.add(f.parkedCar.spaceId);
@@ -77,7 +78,7 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
     if(f.traveling)continue;f.mobilityShopping=true;startJourney(f,{id:'vehicle-showroom',action:'shopping for a vehicle'});invited++;
    }
   }
-  const candidates=living.filter(f=>!f.civicDuty&&!f.cityService&&!f.urbanTask&&!f.privateFlight&&!f.sportsSession&&ownsCar(f)&&f.ageYears>=18&&f.health>40&&f.energy>35&&f.hunger<85&&!f.sleeping&&!f.illness&&!f.onTrain&&!f.onPlane&&!f.heliPassenger&&!f.islandHoliday&&!(f.arrestedUntil>now)&&(!f.traveling||f.transitMode==='walk')&&Number(f.traits?.thrift||0)<.76&&!onIsland(f));
+  const candidates=living.filter(f=>!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.cityService&&!f.urbanTask&&!f.privateFlight&&!f.sportsSession&&ownsCar(f)&&f.ageYears>=18&&f.health>40&&f.energy>35&&f.hunger<85&&!f.sleeping&&!f.illness&&!f.onTrain&&!f.onPlane&&!f.heliPassenger&&!f.islandHoliday&&!(f.arrestedUntil>now)&&(!f.traveling||f.transitMode==='walk')&&Number(f.traits?.thrift||0)<.76&&!onIsland(f));
   candidates.sort((a,b)=>(b.energy+Number(b.brain?.dynamic?.curiosity||0)*20-(b.thirst||0)*.2)-(a.energy+Number(a.brain?.dynamic?.curiosity||0)*20-(a.thirst||0)*.2));
   for(const f of candidates){if(!missing||started>=10)break;if(f.roadDuty||f.routeWaypoints?.slice(f.routeIndex).some(p=>p.mode==='car'))continue;
    const destinations=LOCATIONS.filter(p=>Math.abs(p.x)<300&&Math.abs(p.z)<300&&Math.hypot(p.x-f.x,p.z-f.z)>100&&Math.hypot(p.x-f.x,p.z-f.z)<500&&!['home','transit'].includes(p.type));if(!destinations.length)continue;

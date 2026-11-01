@@ -1,7 +1,7 @@
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute} from './city-map.mjs';
 const DAY=86400,MAX_ACTIVE=2,MAX_MEMBERS=12,MAX_HISTORY=20;
 const cap=(v,a=0,b=100)=>Math.max(a,Math.min(b,Number(v)||0));
-const ESSENTIAL=new Set(['doctor','school','police','power','power-evening','power-night','grid-dispatch']);
+const ESSENTIAL=new Set(['firefighter','paramedic','doctor','school','police','power','power-evening','power-night','grid-dispatch']);
 const actions={member:'joining a civic assembly',mediator:'mediating a civic assembly',police:'responding to civic unrest'};
 export const CIVIC_RULES={maxActive:MAX_ACTIVE,maxParticipants:MAX_MEMBERS,equipmentPrice:45,charges:4};
 /** Fictional civic unrest: durable decisions and outcomes, no server-side particle simulation. */
@@ -10,7 +10,7 @@ export function createCivicConflict({world,random,emit,remember,startJourney,mov
  const rand=f=>cap(random?.(f)??.5,0,1);
  const byId=id=>raw().flies.find(f=>f.id===id);
  const locate=id=>LOCATIONS.find(l=>l.id===id);
- const incompatible=f=>Boolean(f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.displacedFrom);
+ const incompatible=f=>Boolean(f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.displacedFrom);
  const eligible=(f,police=false)=>Boolean(f?.alive&&f.ageYears>=18&&f.ageYears<78&&f.health>45&&f.energy>35&&f.hunger<75&&!f.sleeping&&!incompatible(f)&&(police?f.jobId==='police':!ESSENTIAL.has(f.jobId)));
  function init(){
   const s=raw();s.businesses||={};s.businesses['civic-equipment']||={cash:0,inventory:80,sector:'civic-equipment'};

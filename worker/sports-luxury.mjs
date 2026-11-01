@@ -9,9 +9,23 @@ export const SPORTS_RULES={tennisPlayers:4,stadiumPlayers:12,spectators:40,tenni
 
 /** Ground bays share the airport terminal; rooftop pads have actual building/lift access. */
 export function privateHelipads(){
- const roofs=BUILDINGS.filter(b=>b.w>=18&&b.d>=18&&b.h>=24&&locate(b.id)&&b.kind!=='landmark').slice(0,5).map(b=>({id:`PAD-${b.id}`,locationId:b.id,name:`${locate(b.id).name} rooftop`,x:b.x,z:b.z,y:b.h+4,access:entrance(b),rooftop:true}));
+ const eligible=BUILDINGS.filter(b=>b.w>=18&&b.d>=18&&b.h>=24&&['destination','block','apartment'].includes(b.kind));
+ const selected=eligible.filter(b=>['riverside-hotel','riverside-office','riverside-clinic'].includes(b.id));
+ // Distribute actual rooftop pads across both districts, rather than filling airport bays.
+ while(selected.length<14){
+  const candidates=eligible.filter(b=>!selected.includes(b)).sort((a,b)=>{
+   const separation=p=>Math.min(...selected.map(v=>(p.x-v.x)**2+(p.z-v.z)**2));
+   return separation(b)-separation(a)||a.id.localeCompare(b.id);
+  });if(!candidates.length)break;selected.push(candidates[0]);
+ }
+ const allHomes=BUILDINGS.filter(b=>['apartment','house'].includes(b.kind));
+ const selectedAndHomes=[...selected,...allHomes.filter(b=>!selected.includes(b))];
+ const roofs=selectedAndHomes.map((b,index)=>{
+  if(selected.includes(b)&&!locate(b.id))LOCATIONS.push({id:b.id,type:'service',name:`${b.x>480?'Riverside':'City'} Sky ${b.kind==='apartment'?'Residence':'Tower'} ${String(index+1).padStart(2,'0')}`,x:b.x,z:b.z});
+  return {id:`PAD-${b.id}`,locationId:b.id,name:`${locate(b.id)?.name||b.id+' family home'} rooftop`,x:b.x,z:b.z,y:b.h+4,access:entrance(b),rooftop:true,radius:Math.min(6,(Math.min(b.w,b.d)-.6)/2)};
+ });
  const resort=BUILDINGS.find(b=>b.id==='island-resort');
- const airport=Array.from({length:10},(_,i)=>({id:`PAD-AIRPORT-${i+1}`,locationId:'airport',name:`Private aviation bay ${i+1}`,x:-280+(i%5)*23,z:-408-Math.floor(i/5)*20,y:.65,access:{x:-280+(i%5)*23,z:-408-Math.floor(i/5)*20},rooftop:false}));
+ const airport=Array.from({length:2},(_,i)=>({id:`PAD-AIRPORT-${i+1}`,locationId:'airport',name:`Private aviation bay ${i+1}`,x:-280+(i%5)*23,z:-408-Math.floor(i/5)*20,y:.65,access:{x:-280+(i%5)*23,z:-408-Math.floor(i/5)*20},rooftop:false}));
  return [...roofs,...airport,...(resort?[{id:'PAD-island-resort',locationId:resort.id,name:'Island resort rooftop',x:resort.x,z:resort.z,y:resort.h+4,access:entrance(resort),rooftop:true}]:[])];
 }
 /** Flight positions are derived locally from these persisted endpoints and times. */
@@ -30,7 +44,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  const get=()=>world().sportsLuxury||init();
  const alive=id=>world().flies.find(f=>f.id===id&&f.alive);
  const account=()=>world().businesses['sports-aviation'];
- const busy=f=>f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
+ const busy=f=>f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
  function transfer(f,cost,to=account()){
   if(!Number.isFinite(cost)||cost<0||money(f)+1e-7<cost)return false;
   const cash=Math.min(Math.max(0,Number(f.money)||0),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings)||0)-(cost-cash);to.cash=Number(to.cash||0)+cost;
@@ -44,14 +58,44 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    const top=s.flies.filter(f=>f.alive&&f.ageYears>=18).sort((a,b)=>helicopterNetWorth(b)-helicopterNetWorth(a)||a.id.localeCompare(b.id)).slice(0,10),occupied=new Set(d.helicopters.map(h=>h.padId));
    for(const f of top){
     if(d.helicopters.some(h=>h.ownerId===f.id))continue;
-    const available=pads.filter(p=>p.id!=='PAD-island-resort'&&!occupied.has(p.id)).sort((a,b)=>Math.hypot(a.x-(f.homeX??f.x),a.z-(f.homeZ??f.z))-Math.hypot(b.x-(f.homeX??f.x),b.z-(f.homeZ??f.z))),p=available[0];if(!p)break;
+    const home=pads.find(p=>p.locationId===f.housingUnitId);if(home)ensurePrivateAccess(home);
+    const available=pads.filter(p=>p.rooftop&&p.id!=='PAD-island-resort'&&locate(p.locationId)&&!occupied.has(p.id)).sort((a,b)=>Math.hypot(a.x-(f.homeX??f.x),a.z-(f.homeZ??f.z))-Math.hypot(b.x-(f.homeX??f.x),b.z-(f.homeZ??f.z))),p=available.find(p=>p.locationId===f.housingUnitId)||available[0];if(!p)break;
     occupied.add(p.id);const h={id:`PRIVATE-HELI-${d.helicopters.length+1}`,ownerId:f.id,padId:p.id,flight:null,fuel:100,condition:1,maintenanceDebt:0,grantedAt:s.simulationAgeSeconds,grantRank:d.helicopters.length+1,nextTripAt:s.simulationAgeSeconds+(3600+rng(f)*10800),trips:0};d.helicopters.push(h);f.privateHelicopterId=h.id;
     remember?.(f,'private_helicopter_grant',{helicopterId:h.id,rank:h.grantRank});emit?.('private_helicopter',`${f.id} received a private helicopter as one of the ten wealthiest founding owners.`,{flyId:f.id,helicopterId:h.id,rank:h.grantRank});
    }
    d.foundingGrant={at:s.simulationAgeSeconds,ownerIds:top.map(f=>f.id),selection:'cash+savings+equity+vehicle value minus liabilities'};
   }
+  bindFamilyHomes(d);
+  if(!d.familyParkingVersion){
+   for(const h of d.helicopters)if(h.padId!==h.homePadId)h.roofMigrationPending=true;
+   d.familyParkingVersion=1;
+  }
+  relocateLegacyParking(d);
   for(const h of d.helicopters){const f=alive(h.ownerId);if(f)f.privateHelicopterId=h.id;}
   return d;
+ }
+ function ensurePrivateAccess(pad){
+  if(!locate(pad.locationId))LOCATIONS.push({id:pad.locationId,type:'private-access',name:pad.name,x:pad.x,z:pad.z});
+ }
+ function bindFamilyHomes(d){
+  for(const h of d.helicopters){
+   const owner=alive(h.ownerId),home=owner&&padById.get(`PAD-${owner.housingUnitId}`);
+   if(home){ensurePrivateAccess(home);h.homePadId=home.id;h.familyHouseholdId=owner.householdId||null;}
+   else h.homePadId ||= pads.find(p=>p.rooftop&&p.id===h.padId)?.id||null;
+   const household=world().housing?.households?.[h.familyHouseholdId],familyOwner=owner||world().flies.find(f=>f.id===h.estateOwnerId);
+   h.familyIds=[...new Set([h.ownerId,...(household?.members||[]),...(familyOwner?.children||[])].filter(id=>id&&alive(id)))];
+  }
+ }
+ function relocateLegacyParking(d){
+  const taken=new Set(d.helicopters.flatMap(h=>[h.padId,h.flight?.to.id].filter(Boolean)));
+  for(const h of d.helicopters){
+   if(!h.roofMigrationPending||h.flight)continue;
+   const p=padById.get(h.homePadId)||pads.find(p=>p.rooftop&&p.id!=='PAD-island-resort'&&!taken.has(p.id));
+   if(!p||taken.has(p.id)&&h.padId!==p.id)continue;
+   const status=world().urbanWorld?.buildings?.[p.locationId];if(status&&status.stage!=='operational')continue;
+   const before=h.padId;taken.delete(before);taken.add(p.id);h.padId=p.id;delete h.roofMigrationPending;
+   if(before!==p.id)emit?.('private_rooftop_parking',`${h.id} now parks on its family's roof at ${p.locationId}.`,{helicopterId:h.id,ownerId:h.ownerId,householdId:h.familyHouseholdId,from:before,padId:p.id});
+  }
  }
  function padAvailable(padId,heliId){
   const p=padById.get(padId);if(!p)return false;
@@ -85,7 +129,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   }
  }
  function tick(gameSeconds,clock){
-  const d=get(),s=world(),now=s.simulationAgeSeconds;maintenance(d,Math.floor(now/86400));inherit(d,now);
+  const d=get(),s=world(),now=s.simulationAgeSeconds;bindFamilyHomes(d);relocateLegacyParking(d);maintenance(d,Math.floor(now/86400));inherit(d,now);
   for(const h of d.helicopters)if(!alive(h.ownerId)&&h.flight&&now>=h.flight.arrival){h.padId=h.flight.to.id;h.flight=null;}
   if(!d.match&&now>=d.nextMatchAt){d.nextMatchAt=nextAt(now);d.match={id:`MATCH-${Math.floor(now/86400)}`,startsAt:now+1800,endsAt:now+1800+SPORTS_RULES.matchSeconds,players:[],spectators:[],score:[0,0],lastGoalAt:now+2400,settled:false};emit?.('sports_fixture','Riverside Stadium opened registration for today’s city match.',{matchId:d.match.id,startsAt:d.match.startsAt});}
   const m=d.match;if(m){
@@ -129,8 +173,8 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   const d=get(),now=world().simulationAgeSeconds,h=d.helicopters.find(h=>h.ownerId===f.id);
   if(!h||h.flight||f.privateFlight||f.traveling||busy(f)||dangerous()||h.condition<.35||h.maintenanceDebt>30||f.health<55||f.energy<30)return false;
   const from=padById.get(h.padId);if(!from||!padAvailable(from.id,h.id)||f.currentLocationId!==from.locationId)return false;
-  const dests=pads.filter(p=>p.id!==from.id&&p.locationId!==from.locationId&&padAvailable(p.id,h.id));
-  const to=destinationPadId?dests.find(p=>p.id===destinationPadId):dests[Math.floor(rng(f)*dests.length)%dests.length];if(!to)return false;
+  const dests=pads.filter(p=>p.rooftop&&p.id!==from.id&&p.locationId!==from.locationId&&padAvailable(p.id,h.id));
+  const to=destinationPadId?dests.find(p=>p.id===destinationPadId):(dests.find(p=>p.id===h.homePadId)||dests[Math.floor(rng(f)*dests.length)%dests.length]);if(!to)return false;
   const travelDistance=Math.hypot(to.x-from.x,to.z-from.z),fuel=8+travelDistance*.018,cost=(12+fuel*.9)*clamp(world().centralBank?.priceLevel||1,.5,10);
   if(money(f)<cost+120)return false;
   // Reserve the landing pad before taking any payment; it remains exclusive until landing.
@@ -191,7 +235,9 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function snapshot(){
   const d=get(),now=world().simulationAgeSeconds;
-  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,goals:d.goals,pads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
+  const visiblePads=new Set(['PAD-riverside-hotel','PAD-riverside-office','PAD-riverside-clinic','PAD-island-resort','PAD-AIRPORT-1','PAD-AIRPORT-2',...d.helicopters.flatMap(h=>[h.padId,h.homePadId,h.flight?.from.id,h.flight?.to.id])]);
+  const shownPads=pads.filter(p=>visiblePads.has(p.id)).map(p=>({...p,householdIds:[...new Set(d.helicopters.filter(h=>h.homePadId===p.id).map(h=>h.familyHouseholdId).filter(Boolean))]}));
+  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,goals:d.goals,pads:shownPads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,homePadId:h.homePadId,familyHouseholdId:h.familyHouseholdId,familyIds:h.familyIds||[],condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
  }
  return {init,tick,handleResident,addChoices,snapshot,beginPrivate,beginSports,padAvailable};
 }

@@ -5,13 +5,13 @@ import {freshState,restoreState,getState,getNeuralAgents,getNeuralStatus,cityVis
 test('visitor brains join neural scheduling and selection without changing the resident census across restore',()=>{
  const s=freshState(),residentBrains=s.flies.map(f=>f.brain.id),before=liquidMoneySupply();
  const v=cityVisitors.spawnVisitor({budget:1000});assert.ok(v);const brainId=v.brain.id;
- assert.equal(s.flies.length,500);assert.equal(getNeuralAgents().length,501);assert.equal(getNeuralStatus().visitorBrains,1);
- assert.equal(new Set(getNeuralAgents().map(a=>a.brain_id)).size,501);
+ assert.equal(s.flies.length,600);assert.equal(getNeuralAgents().length,601);assert.equal(getNeuralStatus().visitorBrains,1);
+ assert.equal(new Set(getNeuralAgents().map(a=>a.brain_id)).size,601);
  assert.ok(Math.abs(liquidMoneySupply()-before-1000)<1e-6);
  let snapshot=getState({observer:true,selectedId:v.id});assert.equal(snapshot.selectedFly.id,v.id);assert.equal(snapshot.cityVisitors.visitors[0].brainId,brainId);
  const restored=restoreState(JSON.parse(JSON.stringify(s)));
  assert.deepEqual(restored.flies.map(f=>f.brain.id),residentBrains);assert.equal(restored.cityVisitors.visitors[0].brain.id,brainId);
- assert.equal(getNeuralAgents().length,501);assert.equal(getState().population,500);
+ assert.equal(getNeuralAgents().length,601);assert.equal(getState().population,600);
 });
 
 test('a resident taking disaster shelter still ages and reaches natural mortality',()=>{
@@ -64,4 +64,18 @@ test('Riverside market and cafe provide actual food and paid coffee without crea
  const before=liquidMoneySupply();needsAndActivities(f,gameClock());assert.ok(f.hunger<30);assert.ok(s.businesses['riverside-market'].cash>0);assert.ok(Math.abs(liquidMoneySupply()-before)<1e-6);
  Object.assign(f,{currentLocationId:'riverside-cafe',action:'drinking Hansdrex coffee',lastCoffeeAt:-99999,caffeine:0});
  const cash=s.businesses['riverside-cafe'].cash;needsAndActivities(f,gameClock());assert.ok(f.caffeine>50);assert.ok(s.businesses['riverside-cafe'].cash>cash);assert.ok(Math.abs(liquidMoneySupply()-before)<1e-6);
+});
+
+test('v19 migration adds exactly 100 permanent Riverside residents once while preserving the original residents',()=>{
+ const previous=freshState(),removed=new Set(previous.riversideSettlement.arrivalIds);
+ const removedHouseholds=new Set(previous.flies.filter(f=>removed.has(f.id)).map(f=>f.householdId));
+ previous.flies=previous.flies.filter(f=>!removed.has(f.id));for(const id of removedHouseholds)delete previous.housing.households[id];
+ for(const block of previous.housing.apartmentBlocks)block.occupants=block.occupants.filter(id=>!removedHouseholds.has(id));
+ delete previous.riversideSettlement;previous.mapVersion=19;
+ const identity=previous.flies.map(f=>[f.id,f.brain.id,f.brain.fullConnectome.neuralStepsTotal,f.housingUnitId,f.money,f.savings]);
+ const oldCount=previous.flies.length,oldDeaths=previous.deaths;
+ const migrated=restoreState(structuredClone(previous)),added=migrated.flies.slice(oldCount);
+ assert.equal(added.length,100);assert.ok(added.every(f=>f.homeDistrict==='riverside'&&f.homeX>480&&f.housingUnitId&&f.brain.id));
+ assert.deepEqual(migrated.flies.slice(0,oldCount).map(f=>[f.id,f.brain.id,f.brain.fullConnectome.neuralStepsTotal,f.housingUnitId,f.money,f.savings]),identity);assert.equal(migrated.deaths,oldDeaths);
+ const total=liquidMoneySupply(),count=migrated.flies.length;const again=restoreState(structuredClone(migrated));assert.equal(again.flies.length,count);assert.equal(again.riversideSettlement.added,100);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);
 });

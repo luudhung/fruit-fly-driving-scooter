@@ -6,8 +6,8 @@ import {createTourismSystem} from '../worker/tourism.mjs';
 import {nextFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
 function setup(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};s.simulationAgeSeconds=7*3600;return s;}
 function guest(s,i=0){const f=s.flies[i];Object.assign(f,{money:500,savings:2000,ageYears:30,health:90,energy:90,traveling:false,indoors:true,currentLocationId:'airport',x:AIRPORT.terminal.x,z:AIRPORT.terminal.z,action:'taking a holiday on Hansdrex Island'});return f;}
-test('expansion creates 500 residents and migrates a 100-person save once without changing old brains or assets',()=>{
- const s=setup();assert.equal(s.flies.filter(f=>f.alive).length,500);
+test('expansion creates 600 residents and migrates a 100-person save once without changing old brains or assets',()=>{
+ const s=setup();assert.equal(s.flies.filter(f=>f.alive).length,600);
  s.flies=s.flies.slice(0,100);delete s.airportExpansionVersion;s.mapVersion=13;
  const before=s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]);
  restoreState(s);assert.equal(s.flies.filter(f=>f.alive).length,500);

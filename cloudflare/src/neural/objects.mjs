@@ -2,7 +2,7 @@ import {DurableObject} from 'cloudflare:workers';
 import {parsePackedGraph,createNeuralState,runNeuralBatch,neuralSnapshotBytes} from './engine.mjs';
 
 const SOURCE_SHA='1891bf482f299e6acb9032c748c884688750e5bf231d4f2dbc4224996005b92d';
-const CACHE_CHUNK=1024*1024,SHARDS=16,MAX_AGENTS=600;
+const CACHE_CHUNK=1024*1024,SHARDS=16,MAX_AGENTS=640;
 // Read-only graph cache only. No request/response/pending I/O is shared across objects.
 let immutableGraph=null;
 const bytes=v=>v instanceof Uint8Array?v:new Uint8Array(v);
@@ -73,7 +73,7 @@ export class FlyWireBrainShard extends DurableObject{
  withLock(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
  async stepBatch(batch){return this.withLock(async()=>{
   await this.ready;
-  if(!Array.isArray(batch?.agents)||batch.agents.length>48||typeof batch.cycleId!=='string'||batch.cycleId.length>100)throw Error('Invalid neural batch');
+  if(!Array.isArray(batch?.agents)||batch.agents.length>64||typeof batch.cycleId!=='string'||batch.cycleId.length>100)throw Error('Invalid neural batch');
   const agents=batch.agents;
   if(agents.some(a=>!/^BRAIN-\d{6,}$/.test(a.brain_id)))throw Error('Invalid brain identifier');
   const sql=this.ctx.storage.sql,graph=await loadGraph(sql,this.ctx.storage,this.env.NEURAL_ASSET_ORIGIN),outputs=[];

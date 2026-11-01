@@ -102,3 +102,39 @@ test('people and vehicles reach the far bank through real bridges, including a m
  assert.equal(blocked({x:430,z:80}),true,'river away from bridges must block');
  assert.equal(blocked({x:430,z:0}),false);
 });
+
+test('the east-bank bridge approaches continue straight without park trees or building footprints',async()=>{
+ const {BRIDGES,SPORTS_VENUES,contains}=await import('../worker/city-map.mjs');
+ const park=SPORTS_VENUES.find(v=>v.id==='riverside-park');
+ for(const bridge of BRIDGES){
+  for(let x=500;x<=850;x+=2){
+   const point={x,z:bridge.z};assert.ok(ROADS.some(r=>contains(r,point,.01)),`missing road at ${x},${bridge.z}`);
+   assert.equal(contains(park,point,2),false);assert.equal(blocked(point),false,`obstruction at ${x},${bridge.z}`);
+  }
+ }
+});
+
+
+test('the river cuts both lands apart all the way to the map edges',async()=>{
+ const {RIVER,BRIDGES,WORLD_HALF}=await import('../worker/city-map.mjs');
+ assert.ok(RIVER.z-RIVER.d/2<=-WORLD_HALF&&RIVER.z+RIVER.d/2>=WORLD_HALF);
+ for(let z=-WORLD_HALF+5;z<WORLD_HALF-5;z+=2)if(!BRIDGES.some(b=>Math.abs(z-b.z)<=b.d/2))assert.equal(blocked({x:RIVER.x,z}),true,`land bypass at ${z}`);
+});
+test('all metro stairs run along clear sidewalks and every interchange stays above trains',async()=>{
+ const {metroTransferWaypoints,METRO_INTERCHANGES}=await import('../worker/metro-planner.mjs');
+ for(const line of METRO_LINES)for(let i=0;i<line.points.length;i++){
+  const g=metroStationGeometry(line,i);assert.equal(g.accessViolations,0,`${line.id} ${i} obstructs a street or building`);
+  assert.ok(g.stairs.length>=5);assert.ok(!ROADS.some(r=>Math.abs(g.access.x-r.x)<r.w/2&&Math.abs(g.access.z-r.z)<r.d/2));
+  const a=g.stairs[0],b=g.stairs[1];assert.ok(g.axis==='x'?Math.abs(a.z-b.z)<.01:Math.abs(a.x-b.x)<.01);
+ }
+ for(const station of METRO_INTERCHANGES){const a=METRO_LINES.find(l=>l.id===station.lineId);for(const id of station.lines.filter(id=>id!==a.id)){
+  const b=METRO_LINES.find(l=>l.id===id),bi=b.points.findIndex(p=>p[0]===station.x&&p[1]===station.z),points=metroTransferWaypoints(a,station.index,b,bi);
+  assert.ok(points?.length);assert.ok(points.slice(0,-1).every(p=>p.y>=Math.max(a.height,b.height)+4));
+ }}
+});
+test('bridge pedestrians use the separate sidewalk and bank underpasses have real headroom',async()=>{
+ const {BRIDGES,UNDERPASSES,roadTravelY}=await import('../worker/city-map.mjs');
+ const route=pedestrianRoute({x:310,z:20},{x:560,z:20});
+ let crossings=0;for(let i=1;i<route.length;i++){const a=route[i-1],b=route[i];if((a.x-430)*(b.x-430)<0){const z=a.z+(b.z-a.z)*(430-a.x)/(b.x-a.x);assert.ok(BRIDGES.some(bridge=>Math.abs(z-bridge.z)>=4.7&&Math.abs(z-bridge.z)<=7.2));crossings++;}}assert.ok(crossings,'must actually cross the river');
+ for(const t of UNDERPASSES){assert.equal(roadTravelY(t,'x'),1.1);assert.ok(roadTravelY(t,'z')<-5);assert.equal(roadTravelY({x:t.x,z:t.z+t.halfLength},'z'),1.1);}
+});

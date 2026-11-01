@@ -90,7 +90,7 @@ test('a taxi stops at the shared red line, exposes the hold to prediction, and r
 });
 
 test('unsafe hotels reject new bookings and an interrupted visitor physically returns to the airport',()=>{
- const h=setup(),closed=new Set(['hotel']);const system=createCityVisitors({world:()=>h.state,createVisitor:(name,index)=>({...person('seed-'+index),name,brain:{id:'SAFE-BRAIN-'+index,memory:{episodes:[]}}}),isUnavailable:id=>closed.has(id)});system.init();
+ const h=setup(),closed=new Set(['hotel','marina-bay']);const system=createCityVisitors({world:()=>h.state,createVisitor:(name,index)=>({...person('seed-'+index),name,brain:{id:'SAFE-BRAIN-'+index,memory:{episodes:[]}}}),isUnavailable:id=>closed.has(id)});system.init();
  const v=system.spawnVisitor({budget:1000});assert.ok(v);assert.equal(v.hotelId,'riverside-hotel');const hotel=loc(v.hotelId);Object.assign(v,{x:hotel.x,z:hotel.z,currentLocationId:v.hotelId,indoors:true});
  closed.add(v.hotelId);h.state.simulationAgeSeconds=120;system.tick(120,{hour:12});assert.equal(v.departAt,120);assert.equal(v.hotelEvacuatedAt,120);assert.equal(v.visitorPhase,'departing');assert.ok(v.traveling,'interrupted guest must take a physical departure route');assert.equal(system.spawnVisitor({budget:1000}),null);
 });
@@ -108,4 +108,17 @@ test('a stay ending cancels an unboarded outing taxi and routes the guest to the
  Object.assign(v,{x:-180,z:-378,visitorPhase:'staying',currentLocationId:'airport',nextVisitAt:1e9});
  const total=money(h.state),job=h.system.requestTaxi(v,'riverside-park');assert.ok(job);v.departAt=0;h.step();
  assert.equal(job.phase,'cancelled');assert.equal(v.taxiJobId,null);assert.equal(v.targetLocationId,'airport');assert.ok(Math.abs(money(h.state)-total)<1e-6);
+});
+
+
+test('a real camera purchase transfers funds once and requires an outdoor living photographer',()=>{
+ const h=setup(),p=person('CAMERA-OWNER');h.state.flies.push(p);const before=money(h.state),cash=p.money;p.indoors=true;assert.equal(h.system.takePhoto(p,'park'),null);assert.equal(p.cameraOwned,undefined);p.indoors=false;
+ const record=h.system.takePhoto(p,'park');assert.ok(record);assert.equal(p.cameraOwned.price,20);assert.equal(p.money,cash-20);assert.equal(h.state.businesses['city-media'].cash,20);assert.equal(money(h.state),before);assert.equal(record.camera.y,1.55);assert.equal(record.photographerName,p.name);assert.ok(Number.isFinite(record.target.y));
+ h.state.simulationAgeSeconds+=1801;h.system.takePhoto(p,'bridge-view');assert.equal(p.money,cash-20,'durable camera is not charged again');
+ const poor=person('NO-CAMERA');poor.money=10;poor.savings=0;assert.equal(h.system.takePhoto(poor,'park'),null);assert.equal(poor.cameraOwned,undefined);assert.equal(poor.money,10);
+});
+
+test('Marina Bay hotel joins existing saves and charges its real nightly rate',()=>{
+ const h=setup();assert.equal(h.state.cityVisitors.hotels['marina-bay'].capacity,24);delete h.state.cityVisitors.hotels['marina-bay'];h.system.init();assert.equal(h.state.cityVisitors.hotels['marina-bay'].pricePerNight,28);
+ const p=person('MARINA-GUEST'),cash=p.money;assert.ok(h.system.reserveRoom(p,'marina-bay',2));assert.equal(p.money,cash-56);assert.equal(h.state.businesses['marina-bay'].cash,56);
 });

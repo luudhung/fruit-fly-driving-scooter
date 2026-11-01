@@ -7,7 +7,7 @@ const money=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const location=id=>LOCATIONS.find(l=>l.id===id);
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
-function busy(f,now=0){return !f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
+function busy(f,now=0){return f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
 
 /** Persisted finite visitors, physical taxi trips and compact scene records. No pixel rendering on server. */
 export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false}){
@@ -34,6 +34,7 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
  }
  function init(){
   const s=data();business('city-taxi-escrow');business('city-tourism');business('city-media');
+  s.hotels||={};s.hotels['marina-bay']||={id:'marina-bay',capacity:24,pricePerNight:28,rooms:{}};
   for(const id of Object.keys(s.hotels)){business(id);s.hotels[id].rooms||={};}
   s.visitors||=[];s.departures||=[];s.taxiJobs||=[];s.photos||=[];
   for(const v of s.visitors){v.kind='visitor';v.taxiPassenger=Boolean(v.taxiPassenger);}
@@ -44,14 +45,14 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   const h=data().hotels[hotelId];if(!h||!location(hotelId)||isUnavailable(hotelId,v))return false;
   if(h.rooms[v.id])return true;
   if(Object.keys(h.rooms).length>=h.capacity)return false;
-  const cost=Math.round(18*level()*nights*100)/100;
+  const cost=Math.round(Number(h.pricePerNight||18)*level()*nights*100)/100;
   if(!transfer(v,cost,business(hotelId)))return false;
   h.rooms[v.id]={visitorId:v.id,bookedAt:now(),checkoutAt:v.departAt,nights,paid:cost,checkedIn:false};
   v.hotelId=hotelId;v.hotelPaid=cost;v.hotelReserved=true;
   return true;
  }
  function spawnVisitor(options={}){
-  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=584||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
+  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=640||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
   const available=Object.values(s.hotels).filter(h=>location(h.id)&&!isUnavailable(h.id)&&Object.keys(h.rooms).length<h.capacity);
   if(!available.length)return null;
   const index=s.nextVisitorId++,id=`VIS-${String(index).padStart(6,'0')}`,name=`Visitor ${index}`;
@@ -175,7 +176,7 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   data().taxiJobs=data().taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)||now()-j.completedAt<7200).slice(-24);
  }
  function depart(v){
-  if(v.departed)return;
+  if(v.departed||v.ambulanceDuty||v.onAmbulance)return;
   const s=data(),h=s.hotels[v.hotelId];if(h)delete h.rooms[v.id];
   if(v.taxiJobId){const j=s.taxiJobs.find(j=>j.id===v.taxiJobId);if(j)finishTaxi(j,true,'visitor departure');}
   s.externalOutflow+=money(v);s.totalDepartures++;
@@ -190,7 +191,7 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   startWalk(v,id,action);
  }
  function tickVisitor(v,clock,dt){
-  if(v.departed)return;
+  if(v.departed||v.ambulanceDuty||v.onAmbulance)return;
   if(v.health<=0)v.alive=false;
   if(!v.alive){
    const s=data(),h=s.hotels[v.hotelId];
@@ -253,13 +254,18 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   const id=places[Math.floor(rng()*places.length)];travelVisitor(v,id,'visiting a city attraction');v.nextVisitAt=now()+1800;
  }
  function takePhoto(f,subjectId){
-  const s=data(),subject=location(subjectId)||BUILDINGS.find(b=>b.id===subjectId);if(!subject||now()-Number(f.lastCityPhotoAt??-DAY)<1800)return null;
-  const number=s.nextPhotoId++,quality=cap(.35+Number(f.professionSkills?.photography||0)*.3+(1-Number(raw().weather?.precipitation||0))*.2+rng()*.15,0,1);
-  const p={id:`PHOTO-${number}`,photographerId:f.id,subjectId,at:now(),camera:{x:Math.round(f.x*100)/100,y:Math.round((f.y||1.1)*100)/100,z:Math.round(f.z*100)/100},weather:raw().weather?.condition||'clear',quality,kind:'scene-record',rendered:false};
+  const s=data(),subject=location(subjectId)||BUILDINGS.find(b=>b.id===subjectId);if(!subject||f.indoors||!f.alive||now()-Number(f.lastCityPhotoAt??-DAY)<1800)return null;
+  // A camera is an actual durable purchase, funded by the photographer and paid to city media.
+  if(!f.cameraOwned){const price=20*level();if(money(f)<price+35||!transfer(f,price,business('city-media')))return null;f.cameraOwned={model:'compact',purchasedAt:now(),price};remember(f,'camera_purchased',{model:'compact',price});}
+  const number=s.nextPhotoId++,quality=cap(.35+Number(f.professionSkills?.photography||0)*.3+(1-Number(raw().weather?.precipitation||0))*.2+rng()*.15,0,1),round=n=>Math.round(n*100)/100;
+  const camera={x:round(f.x),y:round(Number(f.y||1.1)+.45),z:round(f.z)};
+  let target={x:subject.x,y:Math.min(50,Number(subject.h||BUILDINGS.find(b=>b.id===subjectId)?.h||12)*.55),z:subject.z};
+  if(dist(camera,target)<6){const skyline=BUILDINGS.filter(b=>b.h>50&&dist(b,camera)>35).sort((a,b)=>dist(a,camera)-dist(b,camera))[0];if(skyline)target={x:skyline.x,y:Math.min(60,skyline.h*.55),z:skyline.z};else target={x:camera.x+35,y:8,z:camera.z+20};}
+  const p={id:`PHOTO-${number}`,photographerId:f.id,photographerName:f.name||f.id,subjectId,subjectName:subject.name||subjectId,at:now(),camera,target,daylightAt:(now()%DAY)/3600,weather:raw().weather?.condition||'clear',quality,kind:'scene-record',rendered:false};
   s.photos.push(p);s.photos=s.photos.slice(-64);s.photoCount++;f.lastCityPhotoAt=now();f.professionSkills||={};f.professionSkills.photography=cap(Number(f.professionSkills.photography||0)+.01,0,1);
   f.happiness=cap(Number(f.happiness||50)+2);remember(f,'photographed_city',{photoId:p.id,subjectId,quality});
   if(quality>.65&&scenery.includes(subjectId))s.reputation=cap(s.reputation+.05,10,95);
-  emit('city_photograph',`${f.id} recorded a photograph of ${subjectId}.`,{photoId:p.id,subjectId,photographerId:f.id,recordType:'camera metadata; no server-rendered pixels'});return p;
+  emit('city_photograph',`${f.id} recorded a photograph of ${subjectId}.`,{photoId:p.id,subjectId,photographerId:f.id,recordType:'resident camera pose; pixels rendered on device'});return p;
  }
  function tickClub(clock){
   const s=data(),club=s.club;if(!club)return;
@@ -294,8 +300,8 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
  function addChoices(f,clock,add){
   if(f.kind==='visitor'||!f.alive||f.ageYears<12||f.energy<30||f.hunger>75)return;
   if(clock.hour>=7&&clock.hour<21&&Number(raw().weather?.precipitation||0)<.5){
-   const nearest=scenery.filter(id=>location(id)&&!isUnavailable(id,f)).sort((a,b)=>dist(f,location(a))-dist(f,location(b)))[0];
-   if(nearest)add(nearest,'photographing the city',12+f.stress*.35+Number(f.traits?.ambition||.5)*15+Number(f.professionSkills?.photography||0)*25);
+   const nearest=scenery.filter(id=>location(id)&&!BUILDINGS.some(b=>b.id===id)&&id!=='rooftop'&&!isUnavailable(id,f)).sort((a,b)=>dist(f,location(a))-dist(f,location(b)))[0];
+   if(nearest&&money(f)>(f.cameraOwned?35:55)*level())add(nearest,'photographing the city',12+f.stress*.35+Number(f.traits?.ambition||.5)*15+Number(f.professionSkills?.photography||0)*25);
   }
   const event=data().club.event;
   if(event&&event.endsAt>now())add(event.locationId,'joining the riverbank photo club',32+f.loneliness*.5+Number(f.traits?.sociability||.5)*20);

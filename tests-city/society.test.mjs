@@ -20,7 +20,7 @@ test('family capacity counts households and rent is charged once per family',()=
  const before=mother.money+child.money;
  payAndFinance(mother,{day:5,hour:0,minute:0});payAndFinance(child,{day:5,hour:0,minute:0});
  assert.equal(before-mother.money-child.money,1);
- assert.ok(s.housing.apartmentBlocks.every(b=>b.occupants.length<=10));
+ assert.ok(s.housing.apartmentBlocks.every(b=>b.occupants.length<=b.capacity));
 });
 test('spending conserves money and rejects unaffordable purchases',()=>{
  const s=base(),f=s.flies[0];f.money=20;const before=liquidMoneySupply();

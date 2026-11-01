@@ -1,4 +1,4 @@
-import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
+import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
 export const PLAYER_EYE=1.7;
 const RADIUS=.32,HEIGHT=1.78,STEP=.29,EPS=.0001;
@@ -18,18 +18,39 @@ function refreshUrbanCollision(){
 refreshUrbanCollision();
 const nearby=(x:number,z:number)=>bins.get(`${Math.floor(x/cellSize)},${Math.floor(z/cellSize)}`)||empty;
 function terrain(x:number,z:number){
+ const tunnel=UNDERPASSES.find(t=>Math.abs(x-t.x)<t.w/2+2.6&&Math.abs(z-t.z)<t.halfLength);
+ if(tunnel){const d=Math.abs(z-tunnel.z),fraction=d<=tunnel.coveredHalf?1:(tunnel.halfLength-d)/(tunnel.halfLength-tunnel.coveredHalf);return .2-tunnel.depth*fraction;}
+
  if(URBAN_FLOODS.some(f=>contains(f,{x,z})))return -.15;
  if(onIsland({x,z}))return ((x-ISLAND.x)/(ISLAND.rx-18))**2+((z-ISLAND.z)/(ISLAND.rz-17))**2<1?.67:.55;
  if(atSea({x,z})||WATER.some(w=>contains(w,{x,z}))&&!BRIDGES.some(b=>contains(b,{x,z})))return -.65;
  return .2;
 }
+type SurfacePoint={x:number;y:number;z:number};
+const metroStations=METRO_LINES.flatMap(line=>line.points.map((_,i)=>metroStationGeometry(line,i)));
+const metroSurfaces=metroStations.flatMap(g=>g.stairs.slice(1).map((b,i)=>({a:g.stairs[i],b})));
+let rooftopPads:Array<{x:number;z:number;y:number;radius?:number}>=[];
+export function setPlayerHelipads(pads:typeof rooftopPads){rooftopPads=Array.isArray(pads)?pads:[];}
+function surfaceY(x:number,z:number,a:SurfacePoint,b:SurfacePoint,width:number,max:number){
+ const dx=b.x-a.x,dz=b.z-a.z,len=dx*dx+dz*dz;if(len<.001)return -Infinity;
+ const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/len)),height=a.y+(b.y-a.y)*t-.9;
+ return height<=max+EPS&&Math.hypot(x-a.x-dx*t,z-a.z-dz*t)<=width+RADIUS?height:-Infinity;
+}
 function support(x:number,z:number,max:number){
  let y=terrain(x,z);
+ for(const bridge of BRIDGES)if(contains(bridge,{x,z})){
+  const top=Math.abs(Math.abs(z-bridge.z)-6)<1.25?.34:.2;if(top<=max+EPS)y=Math.max(y,top);
+ }
+
+ for(const s of metroSurfaces)y=Math.max(y,surfaceY(x,z,s.a,s.b,.45,max));
+ for(const g of metroStations){const top=g.platform.y-.9;if(top<=max+EPS&&Math.abs(x-g.platform.x)<(g.axis==='x'?8:1.6)&&Math.abs(z-g.platform.z)<(g.axis==='x'?1.6:8))y=Math.max(y,top);}
+ for(const pad of rooftopPads)if(pad.y<=max+EPS&&Math.hypot(x-pad.x,z-pad.z)<(pad.radius||6))y=Math.max(y,pad.y);
  for(const f of mansionFloors)if(f.y<=max+EPS&&Math.abs(x-f.x)<=f.w/2+RADIUS-EPS&&Math.abs(z-f.z)<=f.d/2+RADIUS-EPS)y=Math.max(y,f.y);
  for(const b of nearby(x,z)){const top=b.y+b.h/2;if(top<=max+EPS&&Math.abs(x-b.x)<=b.w/2+RADIUS-EPS&&Math.abs(z-b.z)<=b.d/2+RADIUS-EPS)y=Math.max(y,top);}
  return y;
 }
 function collides(x:number,z:number,feet:number){
+ if(UNDERPASSES.some(t=>Math.abs(x-t.x)<t.w/2+2.6&&Math.abs(z-t.z)<t.coveredHalf&&feet<.2-EPS&&feet+HEIGHT>-.5+EPS))return true;
  return nearby(x,z).some(b=>Math.abs(x-b.x)<b.w/2+RADIUS&&Math.abs(z-b.z)<b.d/2+RADIUS&&feet<b.y+b.h/2-EPS&&feet+HEIGHT>b.y-b.h/2+EPS);
 }
 /** First-person walking, gravity, step-up collision and Minecraft-style creative flight. */

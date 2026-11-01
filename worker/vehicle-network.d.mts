@@ -1,0 +1,2 @@
+export type VehiclePoint={x:number;z:number;y?:number;mode?:string;stage?:string};
+export function createVehicleRouter(hooks:{roads:()=>Array<{x:number;z:number;w:number;d:number}>;clearSegment?:(a:VehiclePoint,b:VehiclePoint)=>boolean;underpasses?:()=>Array<{x:number;z:number;w:number;halfLength:number;coveredHalf?:number}>;roadTravelY?:(p:VehiclePoint,axis:'x'|'z')=>number}):{route(a:VehiclePoint,b:VehiclePoint,mode?:string):VehiclePoint[];stats():{nodes:number;segments:number;cachedRoutes:number}};

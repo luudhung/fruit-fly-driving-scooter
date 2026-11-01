@@ -8,23 +8,25 @@ const gold=new THREE.MeshStandardMaterial({color:0xd7b570,emissive:0xb88b35,emis
 const warm=new THREE.MeshBasicMaterial({color:0xffd898,toneMapped:false});
 const teal=new THREE.MeshBasicMaterial({color:0x72dfdc,toneMapped:false});
 const facadeMaterials:THREE.MeshStandardMaterial[]=[];
+const towerBlue=new THREE.MeshBasicMaterial({color:0x42b6ff,toneMapped:false,transparent:true,opacity:.22});
 function facade(source=glass,color=0xffbd61,strength=1.7){const m=source.clone();m.emissive.setHex(color);m.emissiveIntensity=0;m.userData.nightStrength=strength;facadeMaterials.push(m);return m;}
-export function updateLandmarkLighting(night:number){for(const m of facadeMaterials)m.emissiveIntensity=.04+night*m.userData.nightStrength;gold.emissiveIntensity=.2+night*1.4;}
+export function updateLandmarkLighting(night:number){for(const m of facadeMaterials)m.emissiveIntensity=.04+night*m.userData.nightStrength;gold.emissiveIntensity=.2+night*1.4;towerBlue.opacity=.18+night*.82;}
 function box(g:THREE.Group,w:number,h:number,d:number,x:number,y:number,z:number,m:THREE.Material){const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);g.add(b);return b;}
 function cylinder(g:THREE.Group,top:number,bottom:number,h:number,y:number,m:THREE.Material,segments=24){const b=new THREE.Mesh(new THREE.CylinderGeometry(top,bottom,h,segments),m);b.position.y=y;g.add(b);return b;}
 function ring(g:THREE.Group,r:number,y:number,m:THREE.Material,tube=.12){const b=new THREE.Mesh(new THREE.TorusGeometry(r,tube,6,40),m);b.rotation.x=Math.PI/2;b.position.y=y;g.add(b);}
 function sign(g:THREE.Group,make:Sign,text:string,x:number,y:number,z:number,w=30,h=1.4){const s=make(text,w,h);s.position.set(x,y,z);g.add(s);return s;}
 export function buildHansdrexTower(root:THREE.Group,make:Sign){
- const g=new THREE.Group();g.position.set(-11,0,43.5);const towerGlass=facade();
- cylinder(g,4.9,5.2,2,1,stone);cylinder(g,.72,2.7,192,97,facade(stone,0x336b9b,.7));
+ const g=new THREE.Group();g.position.set(-11,0,43.5);const towerGlass=facade(glass,0x249cff,3.2);
+ cylinder(g,4.9,5.2,2,1,stone);cylinder(g,.72,2.7,192,97,facade(stone,0x2379cd,1.35));
  // Three tapering buttresses, continuous elevator glazing and a deep observation pod.
  for(let i=0;i<3;i++){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.25,1.15,146,3),stone);leg.position.set(Math.cos(i*Math.PI*2/3)*1.4,75,Math.sin(i*Math.PI*2/3)*1.4);g.add(leg);}
- box(g,.3,144,.14,0,74,2.15,towerGlass);box(g,.10,144,.12,.35,74,2.15,teal);
+ box(g,.3,144,.14,0,74,2.15,towerGlass);box(g,.10,144,.12,.35,74,2.15,towerBlue);
+ for(let i=0;i<3;i++){const a=i*Math.PI*2/3;box(g,.18,130,.18,Math.cos(a)*1.35,79,Math.sin(a)*1.35,towerBlue);}
  cylinder(g,5.35,1.25,8,149,metal);cylinder(g,5.35,5.35,6,156,towerGlass);
  cylinder(g,4.6,5.35,3,160.5,metal);cylinder(g,1.4,4.6,4,164,stone);
- for(const y of [153,159,162])ring(g,y===162?4.5:5.37,y,y===159?teal:gold);
+ for(const y of [153,159,162])ring(g,y===162?4.5:5.37,y,towerBlue);
  for(let i=0;i<24;i++){const a=i*Math.PI/12;box(g,.12,6,.12,Math.cos(a)*5.36,156,Math.sin(a)*5.36,metal);}
- cylinder(g,.72,.8,8,196.5,stone);cylinder(g,2.7,1.1,3,201.5,metal);cylinder(g,2.7,2.7,3,204.5,towerGlass);ring(g,2.72,206,teal);
+ cylinder(g,.72,.8,8,196.5,stone);cylinder(g,2.7,1.1,3,201.5,metal);cylinder(g,2.7,2.7,3,204.5,towerGlass);ring(g,2.72,206,towerBlue);
  cylinder(g,.52,.9,8,211,metal);
  for(let i=0;i<8;i++)cylinder(g,.20-i*.02,.24-i*.02,4.3,217+i*4.3,i%2?stone:new THREE.MeshStandardMaterial({color:0xd55243,roughness:.6}),10);
  cylinder(g,.04,.13,3,248.5,metal);ring(g,.4,249, warm,.09);

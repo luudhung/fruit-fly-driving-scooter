@@ -22,15 +22,16 @@ export class SportsLuxuryRenderer{
  private padMarks:THREE.InstancedMesh;
  private padLegs:THREE.InstancedMesh;
  private padSignature='';
+ private padLabels:THREE.Sprite[]=[];
  private elapsed=0;
- constructor(scene:THREE.Object3D){
+ constructor(scene:THREE.Object3D,private makeSign?:(text:string,fontSize?:number,scale?:number)=>THREE.Sprite){
   scene.add(this.root);
   const paint=new THREE.MeshStandardMaterial({color:0xc5cbd0,metalness:.45,roughness:.35}),glass=new THREE.MeshStandardMaterial({color:0x83afba,metalness:.25,roughness:.3}),dark=new THREE.MeshStandardMaterial({color:0x242b31,metalness:.3,roughness:.55});
   const fleet=(geo:THREE.BufferGeometry,mat:THREE.Material,capacity=10)=>{const mesh=new THREE.InstancedMesh(geo,mat,capacity);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);this.root.add(mesh);return mesh;};
-  this.padDecks=fleet(new THREE.CylinderGeometry(1,1,1,20),new THREE.MeshStandardMaterial({color:0x465b59,roughness:.85}),24);
-  this.padRings=fleet(new THREE.RingGeometry(4.7,5,32),new THREE.MeshBasicMaterial({color:0xf0e6a9,side:THREE.DoubleSide}),24);
-  this.padMarks=fleet(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:0xf4efd2}),72);
-  this.padLegs=fleet(new THREE.CylinderGeometry(.2,.2,4,6),new THREE.MeshStandardMaterial({color:0x6b7376,metalness:.4,roughness:.6}),96);
+  this.padDecks=fleet(new THREE.CylinderGeometry(1,1,1,20),new THREE.MeshStandardMaterial({color:0x465b59,roughness:.85}),48);
+  this.padRings=fleet(new THREE.RingGeometry(4.7,5,32),new THREE.MeshBasicMaterial({color:0xf0e6a9,side:THREE.DoubleSide}),48);
+  this.padMarks=fleet(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:0xf4efd2}),144);
+  this.padLegs=fleet(new THREE.CylinderGeometry(.2,.2,4,6),new THREE.MeshStandardMaterial({color:0x6b7376,metalness:.4,roughness:.6}),192);
   this.body=fleet(new THREE.SphereGeometry(1,12,8),paint);
   this.cabin=fleet(new THREE.SphereGeometry(1,10,7),glass);
   this.tail=fleet(new THREE.BoxGeometry(.38,.38,4.4),dark);
@@ -43,14 +44,18 @@ export class SportsLuxuryRenderer{
  }
  sync(data:SportsLuxurySnapshot){
   this.data=data;this.fleet=data.helicopters||[];
-  const signature=(data.pads||[]).map(p=>`${p.id}:${p.x}:${p.y}:${p.z}`).join('|');
-  if(signature===this.padSignature)return;this.padSignature=signature;this.pads.clear();let pi=0,mi=0,li=0;
-  for(const pad of (data.pads||[]).slice(0,24)){
-   this.pads.set(pad.id,pad);this.place(this.padDecks,pi,pad.x,pad.y-.15,pad.z,0,[6,.3,6]);
-   this.dummy.position.set(pad.x,pad.y+.02,pad.z);this.dummy.rotation.set(-Math.PI/2,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.padRings.setMatrixAt(pi++,this.dummy.matrix);
-   for(const side of [-1,1])this.place(this.padMarks,mi++,pad.x+side,pad.y+.04,pad.z,0,[.34,.05,3]);
-   this.place(this.padMarks,mi++,pad.x,pad.y+.04,pad.z,0,[2,.05,.34]);
-   if(pad.rooftop)for(const x of [-3.5,3.5])for(const z of [-3.5,3.5])this.place(this.padLegs,li++,pad.x+x,pad.y-2,pad.z+z,0);
+  const signature=(data.pads||[]).map(p=>`${p.id}:${p.x}:${p.y}:${p.z}:${p.householdIds?.join(",")}`).join('|');
+  if(signature===this.padSignature)return;this.padSignature=signature;this.pads.clear();
+  for(const label of this.padLabels){label.removeFromParent();label.material.map?.dispose();label.material.dispose();}this.padLabels=[];
+  let pi=0,mi=0,li=0;
+  for(const pad of (data.pads||[]).slice(0,48)){
+   const radius=pad.radius??6,size=radius/6;
+   this.pads.set(pad.id,pad);this.place(this.padDecks,pi,pad.x,pad.y-.15,pad.z,0,[radius,.3,radius]);
+   this.dummy.position.set(pad.x,pad.y+.02,pad.z);this.dummy.rotation.set(-Math.PI/2,0,0);this.dummy.scale.set(size,size,1);this.dummy.updateMatrix();this.padRings.setMatrixAt(pi++,this.dummy.matrix);
+   for(const side of [-1,1])this.place(this.padMarks,mi++,pad.x+side*1.8*size,pad.y+.10,pad.z,0,[.65*size,.08,6.6*size]);
+   this.place(this.padMarks,mi++,pad.x,pad.y+.10,pad.z,0,[4.2*size,.08,.65*size]);
+   if(pad.rooftop&&this.makeSign){const label=this.makeSign('H · '+(pad.householdIds?.join(' / ')||pad.name.replace(' rooftop','').toUpperCase()),18,5);label.material.depthTest=true;label.position.set(pad.x,pad.y+7,pad.z);this.root.add(label);this.padLabels.push(label);}
+   if(pad.rooftop)for(const x of [-3.5,3.5])for(const z of [-3.5,3.5])this.place(this.padLegs,li++,pad.x+x*size,pad.y-2,pad.z+z*size,0);
   }
   this.padDecks.count=this.padRings.count=pi;this.padMarks.count=mi;this.padLegs.count=li;
   for(const mesh of [this.padDecks,this.padRings,this.padMarks,this.padLegs])mesh.instanceMatrix.needsUpdate=true;

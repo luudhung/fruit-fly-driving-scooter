@@ -51,10 +51,10 @@ export function createResidentDirectory(onSelect:(id:string)=>void){
   if(activeId)Array.from(rows.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.dataset.residentId===activeId)?.focus({preventScroll:true});
  }
  const open=()=>{if(!dialog.open)dialog.showModal();render();};
- document.getElementById('connection')!.addEventListener('click',open);
+
  document.getElementById('population-button')!.addEventListener('click',open);
  close.addEventListener('click',()=>dialog.close());
  dialog.addEventListener('click',event=>{if(event.target===dialog){const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)dialog.close();}});
  sort.addEventListener('change',render);query.addEventListener('input',render);
- return {update(flies:Resident[],dead:number,born:number,deathCauses?:Record<string,number>){causes=deathCauses;residents=flies.filter(f=>f.alive);deaths=dead;births=born;online=true;loaded=true;lastUpdated=new Date().toLocaleTimeString();render();},offline(){online=false;render();},get count(){return residents.length;}};
+ return {open,update(flies:Resident[],dead:number,born:number,deathCauses?:Record<string,number>){causes=deathCauses;residents=flies.filter(f=>f.alive);deaths=dead;births=born;online=true;loaded=true;lastUpdated=new Date().toLocaleTimeString();render();},offline(){online=false;render();},get count(){return residents.length;}};
 }

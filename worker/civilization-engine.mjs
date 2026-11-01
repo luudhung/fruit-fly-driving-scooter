@@ -14,11 +14,11 @@ const WORLD_ID = ENV.CIV_WORLD_ID || "WORLD-A";
 const EXPERIMENT_ID = ENV.CIV_EXPERIMENT_ID || "EXP-0001";
 const WORLD_SEED = Number(ENV.CIV_WORLD_SEED || 948291);
 const GAME_SECONDS_PER_REAL_SECOND = Number(ENV.CIV_TIME_SCALE || 120);
-const TARGET_POPULATION = 500;
+const TARGET_POPULATION = 600;
 const RECOVERY_POPULATION = 500;
 const WELFARE_VERSION = 3;
 const INITIAL_POPULATION = Math.min(TARGET_POPULATION, Math.max(12, Number(ENV.CIV_INITIAL_POPULATION || RECOVERY_POPULATION)));
-const MAX_POPULATION = Math.min(600, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 600)));
+const MAX_POPULATION = Math.min(620, Math.max(TARGET_POPULATION, Number(ENV.CIV_MAX_POPULATION || 620)));
 const FLYWIRE_BRAIN_URL = (ENV.FLYWIRE_BRAIN_URL || "https://flybrain-worker-production.up.railway.app").replace(/\/$/, "");
 const NEURAL_SYNC_INTERVAL_MS = Math.max(500, Number(ENV.NEURAL_SYNC_INTERVAL_MS || 1000));
 const DAYS_PER_YEAR = 12; // compressed life calendar; one simulated year = 12 simulated days
@@ -41,9 +41,14 @@ const planMetroRoute=planNetworkMetroRoute;
 
 
 const JOBS = [
+  {id:'firefighter',locationId:'firestation',title:'firefighter',wage:4.8,shiftStart:0,shiftEnd:24},
+  {id:'paramedic',locationId:'hospital-central',title:'paramedic',wage:5.2,shiftStart:0,shiftEnd:24},
   {id:'riverside-office',locationId:'riverside-office',title:'Riverside exchange clerk',wage:5.4,shiftStart:8,shiftEnd:17},
   {id:'riverside-market',locationId:'riverside-market',title:'Riverside market vendor',wage:4.8,shiftStart:7,shiftEnd:16},
   {id:'riverside-cafe',locationId:'riverside-cafe',title:'Riverside barista',wage:4.7,shiftStart:8,shiftEnd:17},
+  {id:'marina-bay-day',locationId:'marina-bay',title:'Marina Bay hotel concierge',wage:6.2,shiftStart:7,shiftEnd:15},
+  {id:'marina-bay-evening',locationId:'marina-bay',title:'Marina Bay hotel staff',wage:6.4,shiftStart:15,shiftEnd:23},
+  {id:'marina-bay-night',locationId:'marina-bay',title:'Marina Bay night reception',wage:6.7,shiftStart:23,shiftEnd:7},
   {id:'riverside-hotel',locationId:'riverside-hotel',title:'Riverside hotel worker',wage:5.1,shiftStart:9,shiftEnd:18},
   {id:'riverside-clinic',locationId:'riverside-clinic',title:'Riverside nurse',wage:6.1,shiftStart:7,shiftEnd:16},
   {id:'riverside-school',locationId:'riverside-school',title:'Riverside community teacher',wage:5.8,shiftStart:7,shiftEnd:15},
@@ -97,9 +102,11 @@ const JOBS = [
 ];
 
 const BUSINESSES = {
+  'marina-bay':{inventory:999,cash:0,price:28,sector:'hotel'},
   'riverside-market':{inventory:0,cash:0,price:5.2,sector:'food'},
   'riverside-cafe':{inventory:0,cash:0,price:5,sector:'leisure'},
   'riverside-clinic':{inventory:0,cash:0,price:12,sector:'health'},
+  firestation:{inventory:0,cash:0,price:0,sector:'emergency-service'},
   'riverside-school':{inventory:0,cash:0,price:0,sector:'education'},
   farm: { inventory: 900, cash: 3200, price: 1.4, sector: "food" },
   market: { inventory: 450, cash: 2600, price: 5.2, sector: "food" },
@@ -231,6 +238,24 @@ function migrateGroundHousesToSafeLots(previousMapVersion) {
 
 function migrateResidentNavigation(previousMapVersion, residents=state.flies) {
   if(previousMapVersion>=MAP_VERSION) return;
+  if(previousMapVersion>=19){
+    // The east-bank correction does not reset the entire city's cars, trains or flights.
+    for(const f of [...residents,...(state.cityVisitors?.visitors||[])]){
+      if(!f.alive||f.onTrain||f.onPlane||f.privateFlight||f.cityService||f.urbanTask)continue;
+      if(f.traveling&&['car','scooter'].includes(f.transitMode)){
+        // Keep the exact live position and committed destination; replace legacy center-line paths.
+        const dest={x:f.finalTargetX??f.targetX,z:f.finalTargetZ??f.targetZ},park=roadLife.destination(f,dest),mode=f.transitMode;
+        const planned=vehicleRoute(f,dest,mode,{x:f.x,z:f.z},park),firstDrive=planned.findIndex(p=>p.mode===mode),route=firstDrive>=0?planned.slice(firstDrive):[];
+        if(route.some(p=>p.mode===mode)){f.routeWaypoints=route;f.routeIndex=0;f.targetX=route[0].x;f.targetZ=route[0].z;f.transitMode=route[0].mode;f.signalEncounter=null;f.travelStuckTicks=0;}
+      }
+      if(f.targetLocationId==='riverside-park'||f.currentLocationId==='riverside-park'&&!f.traveling){
+        f.traveling=false;f.routeWaypoints=[];f.actionUntil=0;
+        startJourney(f,{id:'riverside-park',action:f.pendingAction||'visiting the relocated Riverside Gardens'});
+      }
+    }
+    return;
+  }
+
   for(const fly of residents){
     if(!fly.alive) continue;
     const base=fly.currentLocationId===fly.homeId
@@ -288,7 +313,7 @@ function availableApartmentBlock() {
 function assignApartment(fly, household = null) {
   ensureHousingState();
   const hh = household || state.housing.households[fly.householdId] || createHousehold(fly);
-  const block = availableApartmentBlock();
+  const block = fly.homeDistrict==='riverside'?riversideApartment():availableApartmentBlock();
   if (!block) return false;
   block.occupants = block.occupants || [];
   releaseHousingUnit(hh);
@@ -312,6 +337,7 @@ function assignApartment(fly, household = null) {
 }
 
 function assignGroundHouse(fly, tier = 1, household = null) {
+  if(fly.homeDistrict==='riverside')return false;
   ensureHousingState();
   const hh = household || state.housing.households[fly.householdId] || createHousehold(fly);
   const free = state.housing.houseLots.filter((lot) => !lot.ownerHouseholdId);
@@ -405,7 +431,7 @@ function inheritHousehold(child,mother) {
   const hh=state.housing?.households?.[mother?.householdId];
   if(!hh){createHousehold(child);assignApartment(child);return;}
   if(!hh.members.includes(child.id))hh.members.push(child.id);
-  Object.assign(child,{householdId:hh.id,housingType:hh.housingType,housingUnitId:hh.unitId,homeX:hh.homeX,homeZ:hh.homeZ,ownsHome:false,homeTier:mother.homeTier||0,homeEquity:0});
+  Object.assign(child,{householdId:hh.id,housingType:hh.housingType,housingUnitId:hh.unitId,homeX:hh.homeX,homeZ:hh.homeZ,ownsHome:false,homeTier:mother.homeTier||0,homeEquity:0,homeDistrict:mother.homeDistrict||null});
 }
 function releaseHousingUnit(hh) {
   for(const b of state.housing.apartmentBlocks)b.occupants=(b.occupants||[]).filter(id=>id!==hh.id);
@@ -426,8 +452,9 @@ const sportsLuxury=createSportsLuxury(cityServices);
 const cityVisitors=createCityVisitors({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
-function initCityServices(){urbanWorld.init();sportsLuxury.init();cityVisitors.init();civicConflict.init();}
+function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();sportsLuxury.init();cityVisitors.init();civicConflict.init();}
 function specialActivity(f,clock){
+  if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
   if(civicConflict.handleResident(f,clock))return true;
   if(cityVisitors.handleResident(f,clock))return true;
   return urbanWorld.handleResident(f,clock)||sportsLuxury.handleResident(f,clock);
@@ -616,6 +643,8 @@ function stopForSignal(fly,end){
  return signalBarrier(fly,end,state.simulationAgeSeconds/Math.max(1,GAME_SECONDS_PER_REAL_SECOND));
 }
 function trainedSkillsForJob(jobId,title=""){
+  if(jobId==='firefighter')return {fireSafety:.9,rescue:.85,driving:.8};
+  if(jobId==='paramedic')return {medicine:.9,emergencyCare:.95,driving:.8};
   if(jobId==="police") return {law:1,patrol:0.92,deescalation:0.88,arrestProcedure:0.95};
   if(jobId==="doctor"||title==="doctor") return {medicine:0.96,diagnosis:0.93,emergencyCare:0.91};
   if(String(title).includes("nurse")||String(jobId).includes("hospital")) return {medicine:0.76,emergencyCare:0.74};
@@ -1105,11 +1134,17 @@ function restoreState(persistedState) {
     }
   }
 
+  if(previousMapVersion<20&&state.urbanWorld){
+    for(const record of Object.values(state.urbanWorld.buildings||{})){
+      if(!record.id.startsWith('RIVERSIDE-'))continue;const base=BUILDINGS.find(b=>b.id===record.id);if(base)for(const key of ['x','z','w','d','h'])record[key]=base[key];
+    }
+    for(const project of state.urbanWorld.projects||[])if(project.buildingId?.startsWith('RIVERSIDE-')){const base=BUILDINGS.find(b=>b.id===project.buildingId);if(base)project.targetHeight=base.h;}
+  }
   migrateGroundHousesToSafeLots(previousMapVersion);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
   if(Number(state.airportExpansionVersion||0)<1){
-    replenishResidents(TARGET_POPULATION,"Hansdrex airport and island expansion");
+    replenishResidents(RECOVERY_POPULATION,"Hansdrex airport and island expansion");
     state.airportExpansionVersion=1;
     state.helicopterFlight=null;
     delete state.heliTrial;
@@ -1119,6 +1154,7 @@ function restoreState(persistedState) {
   ensurePoliticalSystem();
   ensureCentralBankBoard();
   applyWelfareRecovery();
+  settleRiversideResidents();
   initCityServices();
   return state;
 }
@@ -1184,8 +1220,27 @@ function freshState() {
   s.generation=1;
   ensureWelfare();
   state.welfare.recoveryVersion=WELFARE_VERSION;
+  settleRiversideResidents();
   initCityServices();
   return s;
+}
+
+function settleRiversideResidents(){
+ if(state.riversideSettlement?.version>=1)return 0;
+ const before=new Set(state.flies.map(f=>f.id)),living=state.flies.filter(f=>f.alive).length,capacity=state.housing.apartmentBlocks.filter(b=>b.x>480).reduce((n,b)=>n+Math.max(0,b.capacity-(b.occupants?.length||0)),0);
+ if(capacity<100||living+100>MAX_POPULATION)throw Error('Riverside needs housing and world capacity for its 100 new residents');
+ const moneyBefore=liquidMoneySupply();replenishResidents(living+100,'Riverside residential settlement');
+ const arrivals=state.flies.filter(f=>!before.has(f.id)&&f.alive);
+ for(const f of arrivals){
+  const block=riversideApartment(),hh=state.housing.households[f.householdId];if(!block||!hh)throw Error('Riverside settlement housing unavailable');
+  releaseHousingUnit(hh);block.occupants||=[];block.occupants.push(hh.id);
+  Object.assign(hh,{unitId:block.id,housingType:'apartment',homeX:block.x,homeZ:block.z,monthlyHousingCost:block.rent,propertyValue:f.ownsHome?f.homeEquity:0});
+  Object.assign(f,{homeDistrict:'riverside',housingType:'apartment',housingUnitId:block.id,homeX:block.x,homeZ:block.z,homeId:'riverside-homes',currentLocationId:'riverside-homes',targetLocationId:'riverside-homes',x:block.x,z:block.z,y:1.1,indoors:true,traveling:false,routeWaypoints:[],routeIndex:0,action:'settling into a Riverside apartment',actionUntil:state.simulationAgeSeconds+600});
+  f.targetX=f.x;f.targetZ=f.z;f.finalTargetX=f.x;f.finalTargetZ=f.z;f.parkedCar=f.vehicle?parkingPoint(f):null;
+ }
+ state.riversideSettlement={version:1,added:arrivals.length,at:state.simulationAgeSeconds,arrivalIds:arrivals.map(f=>f.id),externalCapital:liquidMoneySupply()-moneyBefore};
+ emit('riverside_settlement',`${arrivals.length} new residents settled permanently in Riverside homes; travel remains unrestricted.`,{added:arrivals.length});
+ return arrivals.length;
 }
 
 function ensureWelfare() {
@@ -2285,7 +2340,7 @@ function brainChooseAction(fly, clock) {
     const eligible = LOCATIONS.filter((loc) =>
       loc.id !== fly.currentLocationId &&
       loc.id !== fly.homeId &&
-      loc.type !== "home" &&
+      loc.type !== "home" &&loc.type !== "private-access" &&
       !(loc.type === "health" && !fly.illness && fly.health > 72) &&
       !(loc.type === "luxury" && fly.stress<55 && !["affluent","wealthy","elite"].includes(fly.socialClass) && fly.money+fly.savings<heliTourTicketPrice()*6)
     );
@@ -2400,7 +2455,7 @@ function startJourney(fly,chosen) {
   fly.actionUntil = 0;
 }
 
-function moveFly(fly) {
+function moveFly(fly,waypointHops=0) {
   if(!fly.traveling){fly.vx=fly.vz=0;return;}
   // A passenger occupies an actual scheduled train, including its station dwell.
   if(fly.onTrain){
@@ -2417,7 +2472,8 @@ function moveFly(fly) {
   }
   const dx = fly.targetX - fly.x;
   const dz = fly.targetZ - fly.z;
-  const dist = Math.hypot(dx, dz);
+  const routeTarget=fly.routeWaypoints?.[fly.routeIndex],dy=Number.isFinite(routeTarget?.y)?routeTarget.y-fly.y:0;
+  const dist = Math.hypot(dx, dz,fly.transitMode==='walk'?dy:0);
 
   if (dist <= 0.85) {
     const barrier=stopForSignal(fly,{x:fly.targetX,z:fly.targetZ});
@@ -2426,6 +2482,7 @@ function moveFly(fly) {
     fly.vz = 0;
     fly.x = fly.targetX;
     fly.z = fly.targetZ;
+    const reached=fly.routeWaypoints?.[fly.routeIndex];if(Number.isFinite(reached?.y))fly.y=reached.y;
 
     if (fly.routeWaypoints?.length && fly.routeIndex < fly.routeWaypoints.length - 1) {
       const currentWp=fly.routeWaypoints[fly.routeIndex];
@@ -2437,7 +2494,7 @@ function moveFly(fly) {
           fly.transitStage="platform-wait";
           return;
         }
-        const fare=0.5;
+        const fare=Number(fly.metroBoardingsThisTrip||0)>0?0:0.5;
         if(!fly.transitPass){
           if(fly.money<fare&&fly.money+fly.savings>=fare){const withdrawal=fare-fly.money;fly.savings-=withdrawal;fly.money+=withdrawal;}
           if(!spend(fly,fare,state.businesses.transit||state.treasury)){fly.traveling=false;fly.actionUntil=0;fly.pendingAction=null;return;}
@@ -2467,6 +2524,8 @@ function moveFly(fly) {
       fly.metroLineId = next.lineId || fly.metroLineId;
       fly.travelLastDistance = Math.hypot(fly.targetX - fly.x, fly.targetZ - fly.z);
       fly.travelStuckTicks = 0;
+      // Close curve samples are bookkeeping, not a whole extra simulation second per point.
+      if(waypointHops<12&&['car','scooter'].includes(next.mode)&&['road','underpass','parking'].includes(currentWp?.stage))moveFly(fly,waypointHops+1);
       return;
     }
 
@@ -2641,7 +2700,7 @@ function payAndFinance(fly, clock) {
       state.bank.reserves+=payment;
     }
 
-    if (!fly.ownsHome && fly.ageYears >= 21 && fly.creditScore >= 610 &&
+    if (fly.homeDistrict!=='riverside' && !fly.ownsHome && fly.ageYears >= 21 && fly.creditScore >= 610 &&
         fly.money + fly.savings > 2500 &&
         brainRand(fly) < 0.012 + fly.traits.ambition * 0.012 + neuralDrive(fly, "approachDrive") * 0.008) {
       const freeLots = state.housing?.houseLots?.filter((lot) => !lot.ownerHouseholdId) || [];
@@ -3499,7 +3558,7 @@ function maintainHouseholds(){
   const partner=state.flies.find(p=>p.id===f.partnerId&&p.alive);
   if(!partner||partner.traveling||partner.householdId===f.householdId||gameYears()-Number(f.relationshipSince??gameYears())<.03)continue;
   const home=state.housing.households[f.householdId],old=state.housing.households[partner.householdId];
-  if(!home||!old||old.members.length>1||partner.ownsHome)continue;
+  if(!home||!old||old.members.length>1||partner.ownsHome||partner.homeDistrict==='riverside'&&home.homeX<480)continue;
   old.members=old.members.filter(id=>id!==partner.id);releaseHousingUnit(old);delete state.housing.households[old.id];
   home.members.push(partner.id);partner.householdId=home.id;partner.housingUnitId=home.unitId;partner.housingType=home.housingType;partner.homeId=f.homeId;partner.homeX=home.homeX;partner.homeZ=home.homeZ;partner.actionUntil=0;
   emit("household",`${f.id} and ${partner.id} chose to share a home.`,{householdId:home.id});
@@ -3601,7 +3660,7 @@ function compactFly(f) {
     heliTourStartedAt:Number(f.heliTourStartedAt||0),
     onPlane:Boolean(f.onPlane),
     airTrip:f.airTrip?{phase:f.airTrip.phase,outbound:f.airTrip.outbound,inbound:f.airTrip.inbound,cost:f.airTrip.cost}:null,
-    kind:f.kind||"resident",taxiPassenger:Boolean(f.taxiPassenger),onPrivateHelicopter:Boolean(f.onPrivateHelicopter),privateHelicopterId:f.privateHelicopterId||null,sportsProfile:f.sportsProfile||null,urbanTask:f.urbanTask||null,displacedFrom:f.displacedFrom||null,
+    onFireEngine:Boolean(f.onFireEngine),onAmbulance:Boolean(f.onAmbulance),homeDistrict:f.homeDistrict||null,kind:f.kind||"resident",taxiPassenger:Boolean(f.taxiPassenger),onPrivateHelicopter:Boolean(f.onPrivateHelicopter),privateHelicopterId:f.privateHelicopterId||null,sportsProfile:f.sportsProfile||null,urbanTask:f.urbanTask||null,displacedFrom:f.displacedFrom||null,
     id: f.id,
     name: f.name,
     sex: f.sex,
@@ -3688,6 +3747,7 @@ function compactFly(f) {
     brainParentIds: f.brain?.lineage?.parentBrainIds || [],
     brainDecisionCount: Number(f.brain?.decisionCount || 0),
     brainMemoryCount: Number(f.brain?.memory?.episodes?.length || 0),
+    recentActions:(f.brain?.memory?.episodes||[]).slice(-12).map(e=>({at:e.t,kind:e.kind,action:e.action||e.locationId||e.choice||e.destination||e.subjectId||null})),
     fullConnectome: f.brain?.fullConnectome ? {
       connected: Boolean(f.brain.fullConnectome.connected && (!state.neuralBridge?.intervalMs || Date.now()-Number(f.brain.fullConnectome.lastSyncAt||0)<=state.neuralBridge.intervalMs*3)),
       fullConnectome: Boolean(f.brain.fullConnectome.fullConnectome),
@@ -3750,7 +3810,7 @@ function motionPlan(f){
  if(!f.traveling||f.onTrain||f.onPlane||f.heliPassenger||f.onPrivateHelicopter||f.taxiPassenger)return null;
  const current=f.routeWaypoints?.[f.routeIndex];
  const points=[{x:current?.x??f.targetX,y:current?.y??f.y,z:current?.z??f.targetZ}];
- for(const p of (f.routeWaypoints||[]).slice(Number(f.routeIndex||0)+1,Number(f.routeIndex||0)+9)){
+ for(const p of (f.routeWaypoints||[]).slice(Number(f.routeIndex||0)+1,Number(f.routeIndex||0)+16)){
   if(p.mode!==f.transitMode||p.stage==='station-entry'||p.stage==='parking')break;
   points.push({x:p.x,y:p.y??1.1,z:p.z});
  }
@@ -3759,11 +3819,11 @@ function motionPlan(f){
 function observerFly(f,selectedId){
  if(f.id===selectedId)return {...compactFly(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
  record.motion=motionPlan(f);
- record.trafficStatus=f.trafficStatus||null;record.trafficSignalPermit=Boolean(f.signalEncounter?.permit);
+ record.onFireEngine=Boolean(f.onFireEngine);record.onAmbulance=Boolean(f.onAmbulance);record.homeDistrict=f.homeDistrict||null;record.trafficStatus=f.trafficStatus||null;record.trafficSignalPermit=Boolean(f.signalEncounter?.permit);
  record.parkedCar=f.parkedCar?{x:f.parkedCar.x,z:f.parkedCar.z,heading:f.parkedCar.heading}:null;
  record.movementTrace=(f.movementTrace||[]).slice(-8).map(p=>({x:Math.round(p.x*100)/100,y:Math.round((p.y||1.1)*100)/100,z:Math.round(p.z*100)/100,t:p.t}));
  return record;
@@ -3831,7 +3891,7 @@ function getState(options={}) {
     utilities:{powerPlant:state.utilities?.powerPlant||null,disconnectedHouseholds:Number(state.utilities?.disconnectedHouseholds||0),householdAccounts:Object.keys(state.utilities?.householdAccounts||{}).length},
     justice:state.justice,
     mapVersion:MAP_VERSION,
-    urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),
+    districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     aviation:aviationSummary(),
@@ -3946,6 +4006,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  urbanWorld,sportsLuxury,cityVisitors,civicConflict,neuralActors,
+  urbanWorld,sportsLuxury,cityVisitors,civicConflict,neuralActors,settleRiversideResidents,
   roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

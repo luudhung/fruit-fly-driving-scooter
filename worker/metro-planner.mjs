@@ -7,6 +7,14 @@ const edges=nodes.map((a,i)=>nodes.flatMap((b,j)=>{
 }));
 export const METRO_INTERCHANGES=nodes.filter(a=>nodes.some(b=>b.line.id!==a.line.id&&a.x===b.x&&a.z===b.z)).map(a=>({lineId:a.line.id,index:a.index,x:a.x,z:a.z,lines:nodes.filter(b=>a.x===b.x&&a.z===b.z).map(b=>b.line.id)}));
 function stairs(a,b,lineId,down){return Array.from({length:7},(_,k)=>{const t=(k+1)/7;return{x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:a.y+(b.y-a.y)*t,mode:'walk',lineId,stage:down?'station-stairs-down':'station-stairs-up'};});}
+function stationStairs(geo,lineId,down){const points=down?[...geo.stairs].reverse():geo.stairs;return points.slice(1).flatMap((p,i)=>stairs(points[i],p,lineId,down));}
+export function metroTransferWaypoints(fromLine,fromIndex,toLine,toIndex){
+ const a=metroStationGeometry(fromLine,fromIndex),b=metroStationGeometry(toLine,toIndex),[x,z]=fromLine.points[fromIndex];
+ if(Math.hypot(x-toLine.points[toIndex][0],z-toLine.points[toIndex][1])>1)return null;
+ const height=Math.max(...METRO_LINES.filter(l=>l.points.some(p=>p[0]===x&&p[1]===z)).map(l=>l.height))+4.2;
+ const points=[{...a.platform,y:height},{x:b.platform.x,z:a.platform.z,y:height},{...b.platform,y:height},{...b.platform}];
+ return points.map(p=>({...p,mode:'walk',lineId:toLine.id,stage:'interchange-walk'}));
+}
 /** Multi-source station search; passengers can walk between real platforms at interchanges. */
 export function planNetworkMetroRoute(from,dest){
  if(onIsland(from)||onIsland(dest))return null;
@@ -27,15 +35,18 @@ export function planNetworkMetroRoute(from,dest){
  }
  if(!legs.length)return null;
  const first=legs[0],entry=metroStationGeometry(first.line,first.entry),access=pedestrianRoute(from,entry.access);if(!access.length)return null;
- const waypoints=[...access];let previousAccess=null;
- for(const leg of legs){
-  const a=metroStationGeometry(leg.line,leg.entry),b=metroStationGeometry(leg.line,leg.exit),direction=Math.sign(leg.exit-leg.entry);
-  if(previousAccess){const link=pedestrianRoute(previousAccess,a.access);if(!link.length)return null;waypoints.push(...link.map(p=>({...p,lineId:leg.line.id,stage:'interchange-walk'})));}
-  waypoints.push(...stairs(a.access,a.platform,leg.line.id,false));
+ const waypoints=[...access];let previousAccess=null,previousLeg=null;
+ for(let legIndex=0;legIndex<legs.length;legIndex++){
+  const leg=legs[legIndex],a=metroStationGeometry(leg.line,leg.entry),b=metroStationGeometry(leg.line,leg.exit),direction=Math.sign(leg.exit-leg.entry);
+  if(previousLeg){
+   const transfer=metroTransferWaypoints(previousLeg.line,previousLeg.exit,leg.line,leg.entry);if(!transfer)return null;waypoints.push(...transfer);
+  }else waypoints.push(...stationStairs(a,leg.line.id,false));
   waypoints.push({...a.platform,mode:'walk',lineId:leg.line.id,stage:'station-entry',stationIndex:leg.entry,exitIndex:leg.exit,direction});
   for(let i=leg.entry;i!==leg.exit+direction;i+=direction){const[x,z]=leg.line.points[i];waypoints.push({x,z,y:leg.line.height,mode:'metro',lineId:leg.line.id,stage:'on-train'});}
-  waypoints.push({...b.platform,mode:'walk',lineId:leg.line.id,stage:'station-exit'},...stairs(b.platform,b.access,leg.line.id,true));previousAccess=b.access;
+  waypoints.push({...b.platform,mode:'walk',lineId:leg.line.id,stage:'station-exit'});
+  if(legIndex===legs.length-1)waypoints.push(...stationStairs(b,leg.line.id,true));
+  previousAccess=b.access;previousLeg=leg;
  }
  const exit=pedestrianRoute(previousAccess,dest);if(!exit.length)return null;waypoints.push(...exit);
- return {lineId:first.line.id,waypoints,score,entryIndex:first.entry,exitIndex:legs.at(-1).exit,transfers:legs.length-1,fare:legs.length*.5,legs:legs.map(l=>({lineId:l.line.id,entryIndex:l.entry,exitIndex:l.exit}))};
+ return {lineId:first.line.id,waypoints,score,entryIndex:first.entry,exitIndex:legs.at(-1).exit,transfers:legs.length-1,fare:.5,legs:legs.map(l=>({lineId:l.line.id,entryIndex:l.entry,exitIndex:l.exit}))};
 }

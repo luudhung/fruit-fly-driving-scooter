@@ -64,8 +64,9 @@
     .mobile-pad{left:max(16px,env(safe-area-inset-left));grid-template-columns:repeat(3,var(--touch-size));grid-template-areas:". up ." "left down right"}
     .mobile-altitude{right:max(16px,env(safe-area-inset-right));grid-template-columns:var(--touch-size)}body.touch-controls-stacked .mobile-altitude{bottom:calc(max(22px,env(safe-area-inset-bottom)) + var(--touch-size)*2 + var(--touch-gap)*2)}
     .mobile-control{pointer-events:auto;width:var(--touch-size);height:var(--touch-size);border-radius:calc(var(--touch-size)*.27);border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 calc(var(--touch-size)*.38)/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
+    body.show-city-log .left{display:block!important}body.show-city-log .left .card:not(#events-card){display:none}body.show-city-log #events-card{display:block}body.show-city-log .events{max-height:55dvh}
     .mobile-control[data-key="KeyQ"]{visibility:hidden}body.player-flying .mobile-control[data-key="KeyQ"]{visibility:visible}
-    body.mansion-visit .left,body.mansion-visit .right,body.mansion-visit .bottom,body.mansion-visit .hint,body.mansion-visit #mobile-inspector-toggle{display:none}
+    body.scenic-view .left,body.scenic-view .right,body.scenic-view .hint,body.scenic-view #mobile-inspector-toggle,body.mansion-visit .left,body.mansion-visit .right,body.mansion-visit .bottom,body.mansion-visit .hint,body.mansion-visit #mobile-inspector-toggle{display:none}
     .mobile-control:active,.mobile-control.active{background:rgba(255,255,255,.20);color:#fff;transform:scale(.96)}
     .mobile-control[data-key="KeyW"]{grid-area:up}.mobile-control[data-key="KeyA"]{grid-area:left}.mobile-control[data-key="KeyS"]{grid-area:down}.mobile-control[data-key="KeyD"]{grid-area:right}
     .mobile-inspector-toggle{display:none;position:fixed;right:18px;top:74px;z-index:14;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.55);backdrop-filter:blur(5px);color:rgba(255,255,255,.82);border-radius:14px;padding:10px 12px;font:800 11px/1 system-ui;letter-spacing:.08em}
@@ -79,7 +80,6 @@
     @media(max-width:650px){.topbar{flex-wrap:wrap;gap:5px}.brand{padding:8px}.brand b{font-size:12px}.status{font-size:7px;max-width:42vw}.settings-button{height:30px;font-size:8px}.left{max-height:calc(100dvh - 230px)}.clock-pill{display:none}.brand small{display:none}.left{top:calc(var(--toolbar-bottom,60px) + 8px);max-width:min(78vw,310px)}.bottom{display:none}.mobile-inspector-toggle{right:14px;top:70px}}
     .status{pointer-events:auto;color:inherit;cursor:pointer;white-space:normal;text-align:left}.status:hover{border-color:var(--ok)}
     .population-button{border:0;color:inherit;text-align:left;cursor:pointer}.population-button:hover{background:#183228}.population-button:focus-visible,.status:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
-    #park-view{pointer-events:auto}
     #resident-directory{color:#eef6f2;background:#0c1916;border:1px solid #345148;border-radius:20px;width:min(920px,calc(100vw - 24px));max-height:85dvh;padding:20px;box-shadow:0 24px 80px #0008}
     #resident-directory::backdrop{background:#0009;backdrop-filter:blur(4px)}
     .resident-heading{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.resident-heading h2{font-size:22px;margin:0 0 8px}.resident-heading p{font-size:12px;color:#b0c8be;margin:0;line-height:1.6}
@@ -102,31 +102,25 @@
   <div class="topbar">
     <div class="brand"><b>Hansdrex City of Fruit Fly</b><small>persistent full-life city · 1 real second = 2 game minutes</small></div>
     <div class="clock-pill"><b id="game-clock">--:--</b><span id="game-day">DAY —</span></div><div class="clock-pill"><b id="weather-icon">☀️</b><span id="weather-label">CLEAR</span></div>
-    <button type="button" class="status" id="connection" data-state="connecting" aria-haspopup="dialog" aria-controls="resident-directory" title="Open living residents and rankings"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></button>
-    <button class="settings-button" id="park-view" type="button" title="View Central Park and the free Great Wheel">♧ CENTRAL PARK</button>
-    <button class="settings-button" id="skyline-view" type="button">♜ SKYLINE</button>
-      <button class="settings-button" id="riverside-view" type="button" title="View the arch bridge and Riverside district">▤ RIVERSIDE</button>
-    <button class="settings-button" id="airport-view" type="button">✈ AIRPORT</button>
-    <button class="settings-button" id="island-view" type="button">☀ ISLAND</button>
-    <button class="settings-button" id="mansion-view" type="button" title="Walk into your private island mansion">⌂ MY MANSION</button>
-    <button class="settings-button" id="photo-capture" type="button">📷 CHỤP ẢNH</button>
-    <button class="settings-button" id="photo-album" type="button">▧ ALBUM</button>
+    <div class="status" id="connection" data-state="connecting" title="City connection status"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></div>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button" aria-expanded="false" aria-controls="settings-menu">⚙ CÀI ĐẶT</button>
       <div class="settings-menu" id="settings-menu">
-        <label for="graphics-preset">Graphics quality</label>
+        <div style="display:grid;gap:8px;margin-bottom:16px"><button type="button" class="settings-button" id="settings-residents">Cư dân · tìm và xem</button><button type="button" class="settings-button" id="resident-photo-album">Album ảnh của cư dân</button><button type="button" class="settings-button" id="settings-events">Nhật ký thành phố</button></div>
+        <label for="graphics-preset">Chất lượng đồ họa</label>
         <select id="graphics-preset">
           <option value="low">Low · fastest</option>
           <option value="medium">Medium</option>
           <option value="high">High · detailed NYC-style metro</option>
           <option value="ultra">Ultra · full detail</option>
         </select>
+        <div class="touch-size-setting"><label for="visual-lighting">Ánh sáng khi ngắm thành phố</label><select id="visual-lighting"><option value="auto">Theo giờ thành phố</option><option value="6.5">Bình minh</option><option value="12">Ban ngày</option><option value="17.5">Hoàng hôn vàng</option><option value="19">Chiều hồng tím</option><option value="22">Ban đêm</option></select><div class="settings-note">Chỉ đổi ánh sáng trên máy bạn; giờ và sinh hoạt cư dân vẫn chạy bình thường.</div></div>
         <div class="touch-size-setting"><label for="touch-button-size">Kích thước nút <output id="touch-button-size-value" for="touch-button-size">72 px</output></label><input id="touch-button-size" type="range" min="48" max="104" step="4" value="72" /><div class="settings-note">Nút di chuyển và nhảy đổi cỡ ngay, tự lưu trên thiết bị. Chạm đúp ↟ để bật/tắt bay.</div></div>
         <div class="settings-note">Chất lượng đồ họa chỉ thay đổi hình ảnh; cư dân và thành phố vẫn tiếp tục chạy nền.</div>
       </div>
     </div>
   </div>
-  <div class="hint">WASD / ARROWS WALK · SPACE JUMP · DOUBLE-TAP SPACE / ↟ TO FLY · HOLD TO RISE · SHIFT / − TO DESCEND · DOUBLE-TAP W FOR 2× SPEED · CTRL SPRINT · DRAG LOOK · F FOLLOW · C CITY VIEW</div>
+  <div class="hint">WASD / ARROWS WALK · SPACE JUMP · DOUBLE-TAP SPACE / ↟ TO FLY · HOLD TO RISE · SHIFT / Q / − TO DESCEND · DOUBLE-TAP W FOR 2× SPEED · CTRL SPRINT · DRAG LOOK · F FOLLOW · C CITY VIEW</div>
 
   <aside class="left">
     <section class="card" id="aviation-card">
@@ -135,7 +129,7 @@
     </section>
     <section class="card" id="city-card">
       <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
-      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span><br><span id="urban-activity"></span><br><span id="visitor-activity"></span><br><span id="sports-activity"></span><br><span id="civic-activity"></span></div>
+      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span><br><span id="urban-activity"></span><br><span id="visitor-activity"></span><br><span id="sports-activity"></span><br><span id="civic-activity"></span><br><span id="private-family-activity"></span><br><span id="riverside-residents"></span></div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <button type="button" class="stat population-button" id="population-button" aria-haspopup="dialog" aria-controls="resident-directory"><span>Alive now · View residents ↗</span><b id="population">—</b></button>
@@ -197,6 +191,7 @@
         <div class="field"><span>Excitement</span><b id="fly-excite">—</b><div class="meter"><i id="excite-meter"></i></div></div>
         <div class="field"><span>Health</span><b id="fly-health">—</b><div class="meter"><i id="health-meter"></i></div></div>
       </div>
+    <div class="legend" id="resident-action-log" aria-live="polite" style="max-height:180px;overflow:auto"></div>
     </section>
     <section class="card" id="brain-card">
       <div class="head"><span id="brain-card-title">FlyWire activity</span><button class="panel-toggle" data-panel="brain-card" type="button">−</button></div>

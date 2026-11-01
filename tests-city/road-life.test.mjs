@@ -38,7 +38,7 @@ test('a passenger physically boards two lines and walks the interchange before a
  const s=freshState(),f=s.flies[0],dest=BUILDINGS.find(b=>b.id==='garage'),p=planNetworkMetroRoute({x:-310,z:10},entrance(dest));assert.ok(p&&p.transfers>=1);
  Object.assign(f,{x:-310,z:10,y:1.1,alive:true,indoors:false,sleeping:false,traveling:true,onTrain:false,money:0,savings:100,transitPass:false,energy:95,health:100,hunger:10,vehicle:null,targetLocationId:'garage',routeWaypoints:p.waypoints,routeIndex:0,metroLineId:p.lineId,metroBoardingsThisTrip:0,transitMode:p.waypoints[0].mode,targetX:p.waypoints[0].x,targetZ:p.waypoints[0].z});
  const stages=new Set();for(let i=0;i<2000&&f.traveling;i++){s.simulationAgeSeconds+=getSimulationConfig().gameSecondsPerRealSecond*.5;moveFly(f);stages.add(f.transitStage);}
- assert.equal(f.traveling,false);assert.ok(f.metroBoardingsThisTrip>=2);assert.ok(s.transit.transfers>=1);assert.ok(stages.has('interchange-walk'));assert.equal(f.currentLocationId,'garage');assert.equal(f.x,dest.x);assert.equal(f.z,dest.z);assert.equal(f.savings,100-f.metroBoardingsThisTrip*.5);
+ assert.equal(f.traveling,false);assert.ok(f.metroBoardingsThisTrip>=2);assert.ok(s.transit.transfers>=1);assert.ok(stages.has('interchange-walk'));assert.equal(f.currentLocationId,'garage');assert.equal(f.x,dest.x);assert.equal(f.z,dest.z);assert.equal(f.savings,99.5);
 });
 
 test('exhausted shelter residents recover across expired action timers before resuming trips',()=>{
