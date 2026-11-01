@@ -105,9 +105,12 @@
     <button type="button" class="status" id="connection" data-state="connecting" aria-haspopup="dialog" aria-controls="resident-directory" title="Open living residents and rankings"><span class="dot"></span><span id="connection-label">CONNECTING · CENSUS</span></button>
     <button class="settings-button" id="park-view" type="button" title="View Central Park and the free Great Wheel">♧ CENTRAL PARK</button>
     <button class="settings-button" id="skyline-view" type="button">♜ SKYLINE</button>
+      <button class="settings-button" id="riverside-view" type="button" title="View the arch bridge and Riverside district">▤ RIVERSIDE</button>
     <button class="settings-button" id="airport-view" type="button">✈ AIRPORT</button>
     <button class="settings-button" id="island-view" type="button">☀ ISLAND</button>
     <button class="settings-button" id="mansion-view" type="button" title="Walk into your private island mansion">⌂ MY MANSION</button>
+    <button class="settings-button" id="photo-capture" type="button">📷 CHỤP ẢNH</button>
+    <button class="settings-button" id="photo-album" type="button">▧ ALBUM</button>
     <div class="settings-wrap" id="settings-wrap">
       <button class="settings-button" id="settings-button" type="button" aria-expanded="false" aria-controls="settings-menu">⚙ CÀI ĐẶT</button>
       <div class="settings-menu" id="settings-menu">
@@ -132,7 +135,7 @@
     </section>
     <section class="card" id="city-card">
       <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
-      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span></div>
+      <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span><br><span id="urban-activity"></span><br><span id="visitor-activity"></span><br><span id="sports-activity"></span><br><span id="civic-activity"></span></div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
         <button type="button" class="stat population-button" id="population-button" aria-haspopup="dialog" aria-controls="resident-directory"><span>Alive now · View residents ↗</span><b id="population">—</b></button>

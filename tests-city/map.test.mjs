@@ -84,3 +84,21 @@ test('Central Park interior is a walkable free-roam district, not sidewalk-only'
  assert.deepEqual({x:route.at(-1).x,z:route.at(-1).z},end);
  for(let i=1;i<route.length;i++)assert.ok(clearSegment(route[i-1],route[i]));
 });
+
+test('Riverside has exactly one-third the urban core footprint and a long connected river',async()=>{
+ const {RIVERSIDE,RIVER,BRIDGES,SPORTS_VENUES,LOCATIONS}=await import('../worker/city-map.mjs');
+ assert.equal(RIVERSIDE.w*RIVERSIDE.d,720*720/3);assert.ok(RIVER.d>=1000&&RIVER.w>=90);assert.equal(BRIDGES.length,3);
+ assert.ok(BUILDINGS.filter(b=>b.x>480&&b.h>=50).length>=6);
+ for(const v of SPORTS_VENUES){assert.ok(LOCATIONS.some(l=>l.id===v.id));assert.ok(!BUILDINGS.some(b=>overlaps(b,v)));}
+});
+test('people and vehicles reach the far bank through real bridges, including a mid-bridge replan',async()=>{
+ const {LOCATIONS,vehicleRoute,parkingPoint,BRIDGES}=await import('../worker/city-map.mjs');
+ const origin={x:310,z:0},dest=LOCATIONS.find(l=>l.id==='riverside-office');
+ for(const route of [pedestrianRoute(origin,dest),pedestrianRoute(dest,origin),pedestrianRoute({x:430,z:0},dest),pedestrianRoute({x:450,z:0},origin),vehicleRoute(origin,dest)]){
+  assert.ok(route.length,'interdistrict route missing');
+  for(let i=1;i<route.length;i++)assert.ok(clearSegment(route[i-1],route[i]),'route enters water or solid');
+ }
+ assert.ok(parkingPoint(dest).x>480);
+ assert.equal(blocked({x:430,z:80}),true,'river away from bridges must block');
+ assert.equal(blocked({x:430,z:0}),false);
+});

@@ -1,6 +1,6 @@
 export type Point={x:number;z:number};
 export type Rect=Point&{w:number;d:number};
-export type Building=Rect&{id:string;h:number;kind:string;name?:string;type?:string;capacity?:number;rent?:number;purchaseValue?:number;baseValue?:number};
+export type Building=Rect&{urbanStage?:string;urbanProgress?:number;id:string;h:number;kind:string;name?:string;type?:string;capacity?:number;rent?:number;purchaseValue?:number;baseValue?:number};
 export type MetroLine={id:string;height:number;points:number[][]};
 export const MAP_VERSION:number, WORLD_HALF:number;
 export const AIRPORT:{terminal:Rect;gate:Point;runway:Rect;apron:Rect;helipad:Point&{y:number};heliAccess:Point};
@@ -33,3 +33,13 @@ export type ParkingSpace=Rect&{id:string;spaceId:string;heading:number;axis:"x"|
 export const PARKING_SPACES:ParkingSpace[];
 export function parkingPoint(p:Point,occupied?:Set<string>):ParkingSpace|null;
 export function vehicleRoute(a:Point,b:Point,mode?:string,parked?:Point|null,destinationParking?:Point|null):Array<Point&{mode:string;stage:string}>;
+
+export const RIVERSIDE:Rect&{id:string;name:string};
+export const SPORTS_VENUES:Array<Rect&{id:string;name:string}>;
+
+export type UrbanBuildingRecord=Rect&{id:string;h:number;stage:string;progress?:number;health?:number;kind?:string};
+export type UrbanFlood=Rect&{id:string;depth:number};
+export let urbanGeometryRevision:number;
+export let URBAN_FLOODS:UrbanFlood[];
+export function effectiveBuildingHeight(b:Building):number;
+export function applyUrbanGeometry(state?:{buildings?:UrbanBuildingRecord[];floods?:UrbanFlood[]}):boolean;

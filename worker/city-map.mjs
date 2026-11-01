@@ -1,5 +1,5 @@
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 18;
+export const MAP_VERSION = 19;
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -31,7 +31,14 @@ export const PARK_PATHS = [
 ];
 export const FERRIS_WHEEL={x:18,z:-218,y:33,radius:30,seats:20,period:7200};
 export function wheelCabin(seconds,seat){const a=seconds/FERRIS_WHEEL.period*Math.PI*2+seat/FERRIS_WHEEL.seats*Math.PI*2;return {x:FERRIS_WHEEL.x+Math.cos(a)*FERRIS_WHEEL.radius,y:FERRIS_WHEEL.y+Math.sin(a)*FERRIS_WHEEL.radius,z:FERRIS_WHEEL.z};}
-export const RIVER={id:"hansdrex-river",x:390,z:0,w:32,d:760};
+export const RIVER={id:"hansdrex-river",x:430,z:-80,w:96,d:1100};
+// Administrative footprint: 360×480 is exactly one third of the 720×720 original urban core.
+export const RIVERSIDE={id:'riverside',name:'Hansdrex Riverside',x:680,z:0,w:360,d:480};
+export const SPORTS_VENUES=[
+ {id:'stadium',name:'Hansdrex Riverside Stadium',x:770,z:200,w:44,d:62},
+ {id:'tennis',name:'Riverside Tennis Club',x:830,z:120,w:42,d:56},
+ {id:'riverside-park',name:'Riverside Gardens',x:530,z:200,w:42,d:58},
+];
 export const HARBOR={id:"hansdrex-harbor",x:120,z:420,w:560,d:90};
 export const WATER = [...PARK_PONDS,RIVER,HARBOR];
 export const AVENUES = [-310,-260,-210,-154,-102,-92,-50,-24,2,28,54,80,122,159,210,260,310];
@@ -57,12 +64,23 @@ for(const z of STREETS){
  }else road(0,z,GRID_HALF*2,9);
 }
 // Outer ring and bridge approaches keep the expanded city connected.
-for(const x of [-430,430])road(x,0,10,820);
-for(const z of [-400,400])road(0,z,860,10);
-for(const z of [-180,0,180])road(390,z,92,10);
-export const BRIDGES=[-180,0,180].map(z=>({x:390,z,w:76,d:16}));
+for(const x of [-430,372])road(x,0,8,820);
+for(const z of [-400,400])road(-30,z,800,10);
+for(const x of [500,560,620,680,740,800,860])road(x,0,9.5,480);
+for(const z of [-240,-160,-80,0,80,160,240])road(680,z,360,9);
+for(const z of [-180,0,180])road(430,z,160,10);
+export const BRIDGES=[-180,0,180].map(z=>({x:430,z,w:160,d:16,landmark:z===0}));
 
 export const LOCATIONS = [
+ {id:'riverside-homes',type:'home',name:'Riverside Residences',x:650,z:120},
+ {id:'riverside-market',type:'food',name:'Riverside Market',x:590,z:40},
+ {id:'riverside-cafe',type:'food',name:'Riverbank Cafe',x:590,z:-40},
+ {id:'riverside-hotel',type:'service',name:'Riverside Grand Hotel',x:530,z:-40},
+ {id:'riverside-office',type:'job',name:'Riverside Exchange Tower',x:530,z:40},
+ {id:'riverside-clinic',type:'health',name:'Riverside Clinic',x:710,z:40},
+ {id:'riverside-school',type:'service',name:'Riverside Community Academy',x:710,z:-40},
+ ...SPORTS_VENUES.map(v=>({id:v.id,type:'social',name:v.name,x:v.x,z:v.z})),
+ {id:'bridge-view',type:'social',name:'Harbour Arch Promenade',x:488,z:-25},
   { id: "apt-north", type: "home", name: "Hansdrex North Garden Homes", x: 15, z: -330 },
   { id: "apt-east", type: "home", name: "Hansdrex East River Homes", x: 245, z: 12 },
   { id: "apt-south", type: "home", name: "Hansdrex South Meadow Homes", x: 12, z: 190 },
@@ -125,7 +143,7 @@ export const LOCATIONS = [
 ];
 
 export const METRO_LINES = [
- {id:"M1",height:9,points:[[-310,0],[-210,0],[-102,0],[2,0],[122,0],[210,0],[310,0]]},
+ {id:"M1",height:9,points:[[-310,0],[-210,0],[-102,0],[2,0],[122,0],[210,0],[310,0],[500,0],[620,0],[740,0],[860,0]]},
  {id:"M2",height:11,points:[[-102,-340],[-102,-220],[-102,-116],[-102,0],[-102,87],[-102,145],[-102,260],[-102,340]]},
  {id:"M3",height:13,points:[[-310,87],[-210,87],[-102,87],[2,87],[122,87],[210,87],[310,87]]},
  {id:"M4",height:15,points:[[122,-340],[122,-220],[122,-116],[122,0],[122,87],[122,145],[122,260],[122,340]]},
@@ -135,7 +153,7 @@ export const METRO_LINES = [
 
 export const BUILDINGS=[];
 function place(b) {
- if(ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || overlaps(b,PARK,1) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
+ if(SPORTS_VENUES.some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || overlaps(b,PARK,1) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
  BUILDINGS.push(b);return true;
 }
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
@@ -149,7 +167,7 @@ for(const loc of LOCATIONS) {
  const outer=Math.abs(loc.x)>180;
  const w=outer?24:Math.abs(loc.x)>=125?18:10;
  const d=outer?20:14;
- place({...loc,w,d,h:loc.type==='job'?36:loc.type==='health'?24:loc.type==='nightlife'?20:12,kind:'destination'});
+ place({...loc,w,d,h:loc.id==='riverside-office'?96:loc.id==='riverside-hotel'?72:loc.type==='job'?36:loc.type==='health'?24:loc.type==='nightlife'?20:12,kind:'destination'});
 }
 // Existing signature skyline is preserved, then expanded with two new world landmarks.
 for(const [id,x,z,w,d,h] of [
@@ -232,6 +250,13 @@ for(const z of [-350,-330,330,350])for(const x of [-260,-220,-180,-140,-100,-60,
  if(place(b))HOUSE_LOTS.push(b);
 }
 
+// A compact mixed skyline rather than another full downtown. Append IDs to preserve old titles.
+for(const [x,z,h]of [[650,-200,84],[590,-120,62],[650,40,78],[710,120,58],[770,40,48],[830,-120,54]])addApartment(x,z,h,24,34);
+for(const x of [530,590,650,710,770,830])for(const z of [-200,-120,-40,40,120,200]){
+ const seed=Math.abs(x*7+z*13),height=x<620?32+seed%27:14+seed%25;
+ place({id:`RIVERSIDE-${x}-${z}`,x,z,w:30,d:42,h:height,kind:'block'});
+}
+
 export function entrance(p) {
  const b=BUILDINGS.find(b=>contains(b,p,0.2));
  if(b)return {x:b.x,z:b.z+b.d/2+1.2};
@@ -248,12 +273,47 @@ function indexRectangles(rects,margin=0){
 }
 const emptyGeometry=[];
 const nearbyGeometry=(bins,p)=>bins.get(`${Math.floor(p.x/SPATIAL_CELL)},${Math.floor(p.z/SPATIAL_CELL)}`)||emptyGeometry;
-const buildingBins=indexRectangles(BUILDINGS,.45),roadBins=indexRectangles(ROADS);
+let buildingBins=indexRectangles(BUILDINGS,.45);
+const roadBins=indexRectangles(ROADS);
+const BASE_URBAN_BUILDINGS=BUILDINGS.map(b=>({...b}));
+let urbanGeometryKey='',urbanNavigationKey='';
+export let urbanGeometryRevision=0;
+export let URBAN_FLOODS=[];
+export function effectiveBuildingHeight(b){
+ if(b.urbanStage==='cleared')return 0;
+ if(b.urbanStage==='collapsed')return 2.2;
+ if(b.urbanStage==='construction')return Math.max(.3,b.h*Math.max(.02,Number(b.urbanProgress||0)));
+ return b.h;
+}
+/** Apply durable world changes on both server and viewer; invalidate navigation only on geometry changes. */
+export function applyUrbanGeometry({buildings=[],floods=[]}={}){
+ const key=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.h,b.stage,Math.floor(Number(b.progress||0)*10)]),floods.map(f=>[f.id,f.x,f.z,f.w,f.d,Math.round(Number(f.depth||0)*10)])]);
+ if(key===urbanGeometryKey)return false;
+ urbanGeometryKey=key;urbanGeometryRevision++;
+ const existing=new Map(BUILDINGS.map(b=>[b.id,b]));
+ BUILDINGS.length=0;
+ for(const base of BASE_URBAN_BUILDINGS){const target=existing.get(base.id)||{};for(const k of Object.keys(target))delete target[k];Object.assign(target,base);BUILDINGS.push(target);}
+ for(const record of buildings){
+  let b=BUILDINGS.find(v=>v.id===record.id);
+  if(!b){
+   if(!record.id?.startsWith('CIVIC-')||![record.x,record.z,record.w,record.d,record.h].every(Number.isFinite)||record.w<=0||record.d<=0||record.h<=0||record.h>160)continue;
+   b={id:record.id,x:record.x,z:record.z,w:record.w,d:record.d,h:record.h,kind:'civic'};BUILDINGS.push(b);
+  }
+  if(Number.isFinite(record.h)&&record.h>0&&record.h<=160)b.h=record.h;
+  b.urbanStage=record.stage;b.urbanProgress=record.progress||0;
+ }
+ URBAN_FLOODS=floods.filter(f=>[f.x,f.z,f.w,f.d,f.depth].every(Number.isFinite)&&f.depth>.35).slice(0,4).map(f=>({...f}));
+ buildingBins=indexRectangles(BUILDINGS.filter(b=>effectiveBuildingHeight(b)>0),.45);
+ const navKey=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.stage==='cleared']),URBAN_FLOODS.map(f=>[f.id,f.x,f.z,f.w,f.d])]);
+ if(navKey!==urbanNavigationKey){urbanNavigationKey=navKey;costCache.clear();segmentCache.clear();routeCache.clear();}
+ return true;
+}
 export function blocked(p) {
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
  if(atSea(p))return true;
+ if(URBAN_FLOODS.some(f=>contains(f,p))&&!BRIDGES.some(b=>contains(b,p)))return true;
  if(WATER.some(w=>contains(w,p,.25))&&!BRIDGES.some(b=>contains(b,p)))return true;
- return nearbyGeometry(buildingBins,p).some(b=>contains(b,p,.45));
+ return nearbyGeometry(buildingBins,p).some(b=>effectiveBuildingHeight(b)>0&&contains(b,p,.45));
 }
 export function clearSegment(a,b) {
  const n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.6));
@@ -271,42 +331,48 @@ for(const r of PARK_PATHS)walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w
 export const WALKWAYS=walks;
 const walkBins=indexRectangles(walks.map(w=>({x:(w.a.x+w.b.x)/2,z:(w.a.z+w.b.z)/2,w:Math.abs(w.a.x-w.b.x),d:Math.abs(w.a.z-w.b.z),a:w.a,b:w.b})),1.8);
 // Small A* lattice: cached blocked cells, weighted sidewalks and exact segment validation.
-const STEP=2,MIN=-380,MAX=380,SIZE=(MAX-MIN)/STEP+1;
+const STEP=2;
+const NAV_REGIONS=[
+ {id:'city',minX:-440,maxX:380,minZ:-440,maxZ:410},
+ {id:'riverside',minX:480,maxX:880,minZ:-260,maxZ:260},
+].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
+const regionFor=p=>NAV_REGIONS[p.x>430?1:0];
 const costCache=new Map();
 const segmentCache=new Map();
-function costs(mode="walk") {
- if(costCache.has(mode))return costCache.get(mode);
- const walkCosts=new Float32Array(SIZE*SIZE);
- for(let iz=0;iz<SIZE;iz++)for(let ix=0;ix<SIZE;ix++) {
-  const p={x:MIN+ix*STEP,z:MIN+iz*STEP};
+function costs(mode="walk",region=NAV_REGIONS[0]) {
+ const key=`${region.id}:${mode}`;
+ if(costCache.has(key))return costCache.get(key);
+ const walkCosts=new Float32Array(region.nx*region.nz);
+ for(let iz=0;iz<region.nz;iz++)for(let ix=0;ix<region.nx;ix++) {
+  const p={x:region.minX+ix*STEP,z:region.minZ+iz*STEP};
   if(blocked(p))continue;
   // Walking is sidewalk-biased in the city, but Central Park is a genuine free-roam
   // pedestrian district. Grass/meadows are legal to cross; paths are only cheaper, not mandatory.
   let c=contains(PARK,p,0)?1.55:8;
-  if(mode!=="walk"){walkCosts[iz*SIZE+ix]=nearbyGeometry(roadBins,p).some(r=>contains(r,p))?1:0;continue;}
+  if(mode!=="walk"){walkCosts[iz*region.nx+ix]=nearbyGeometry(roadBins,p).some(r=>contains(r,p))?1:0;continue;}
   for(const w of nearbyGeometry(walkBins,p)) {
    const x=Math.max(Math.min(w.a.x,w.b.x),Math.min(Math.max(w.a.x,w.b.x),p.x));
    const z=Math.max(Math.min(w.a.z,w.b.z),Math.min(Math.max(w.a.z,w.b.z),p.z));
    if(Math.hypot(p.x-x,p.z-z)<1.8){c=contains(PARK,p,0)?0.72:1;break;}
   }
   if(c>1.6&&nearbyGeometry(roadBins,p).some(r=>contains(r,p)))c=18;
-  walkCosts[iz*SIZE+ix]=c;
+  walkCosts[iz*region.nx+ix]=c;
  }
- costCache.set(mode,walkCosts);return walkCosts;
+ costCache.set(key,walkCosts);return walkCosts;
 }
 class Heap {
  a=[];
  push(v){let i=this.a.length;this.a.push(v);while(i){const p=(i-1)>>1;if(this.a[p][0]<=v[0])break;this.a[i]=this.a[p];i=p;}this.a[i]=v;}
  pop(){const top=this.a[0],last=this.a.pop();if(this.a.length){let i=0;while(i*2+1<this.a.length){let j=i*2+1;if(j+1<this.a.length&&this.a[j+1][0]<this.a[j][0])j++;if(this.a[j][0]>=last[0])break;this.a[i]=this.a[j];i=j;}this.a[i]=last;}return top;}
 }
-const point = i=>({x:MIN+(i%SIZE)*STEP,z:MIN+Math.floor(i/SIZE)*STEP});
-function nearestCell(p,c) {
- const ix=Math.round((p.x-MIN)/STEP),iz=Math.round((p.z-MIN)/STEP);
+const point = (i,region)=>({x:region.minX+(i%region.nx)*STEP,z:region.minZ+Math.floor(i/region.nx)*STEP});
+function nearestCell(p,c,region) {
+ const ix=Math.round((p.x-region.minX)/STEP),iz=Math.round((p.z-region.minZ)/STEP);
  for(let radius=0;radius<10;radius++) {
   let best=-1,d=Infinity;
   for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
-   const x=ix+dx,z=iz+dz;if(x<0||z<0||x>=SIZE||z>=SIZE)continue;
-   const i=z*SIZE+x,q=point(i),dist=Math.hypot(p.x-q.x,p.z-q.z);
+   const x=ix+dx,z=iz+dz;if(x<0||z<0||x>=region.nx||z>=region.nz)continue;
+   const i=z*region.nx+x,q=point(i,region),dist=Math.hypot(p.x-q.x,p.z-q.z);
    if(c[i]&&dist<d&&clearSegment(p,q)){best=i;d=dist;}
   }
   if(best>=0)return best;
@@ -323,22 +389,39 @@ export function pedestrianRoute(start,dest,mode="walk") {
   if(path.some((p,i)=>i&&!clearSegment(path[i-1],p)))return [];
   return path.map(p=>({...p,mode:'walk',stage:'island-promenade'}));
  }
- const a=mode==="walk"?entrance(start):start,b=mode==="walk"?entrance(dest):dest,c=costs(mode);
- const from=nearestCell(a,c),to=nearestCell(b,c);
+ const from=regionFor(start),to=regionFor(dest);
+ // A route restarted on a bridge first reaches a bank before entering its local region lattice.
+ if(start.x>380&&start.x<480){
+  const bridge=BRIDGES.find(b=>contains(b,start));if(!bridge)return [];
+  const bank={x:to.id==='city'?350:510,z:bridge.z};
+  const tail=pedestrianRoute(bank,dest,mode);return clearSegment(start,bank)&&tail.length?[{...start,mode,stage:'bridge'},...tail]:[];
+ }
+ if(from!==to){
+  const bridge=BRIDGES.reduce((best,b)=>Math.abs(start.z-b.z)+Math.abs(dest.z-b.z)<Math.abs(start.z-best.z)+Math.abs(dest.z-best.z)?b:best,BRIDGES[1]);
+  const west={x:350,z:bridge.z},east={x:510,z:bridge.z},entry=from.id==='city'?west:east,exit=from.id==='city'?east:west;
+  const a=localRoute(start,entry,mode,from),b=localRoute(exit,dest,mode,to);
+  if(!a.length||!b.length||!clearSegment(entry,exit))return [];
+  return [...a,{...exit,mode,stage:'bridge'},...b];
+ }
+ return localRoute(start,dest,mode,from);
+}
+function localRoute(start,dest,mode,region){
+ const a=mode==="walk"?entrance(start):start,b=mode==="walk"?entrance(dest):dest,c=costs(mode,region);
+ const from=nearestCell(a,c,region),to=nearestCell(b,c,region);
  if(from<0||to<0)return [];
- const key=`${mode}:${from}:${to}`;
+ const key=`${region.id}:${mode}:${from}:${to}`;
  let path=routeCache.get(key);
  if(!path){
   const dist=new Map([[from,0]]),parent=new Map(),heap=new Heap();
   heap.push([0,from]);let found=false;
   while(heap.a.length){
    const [,i]=heap.pop();if(i===to){found=true;break;}
-   const p=point(i),g=dist.get(i);
-   for(const j of [i-1,i+1,i-SIZE,i+SIZE]) {
-    if(j<0||j>=c.length||!c[j]||Math.abs(j%SIZE-i%SIZE)>1)continue;
-    const q=point(j),ng=g+(c[i]+c[j])/2;
+   const p=point(i,region),g=dist.get(i);
+   for(const j of [i-1,i+1,i-region.nx,i+region.nx]) {
+    if(j<0||j>=c.length||!c[j]||Math.abs(j%region.nx-i%region.nx)>1)continue;
+    const q=point(j,region),ng=g+(c[i]+c[j])/2;
     if(ng>=(dist.get(j)??Infinity))continue;
-    const edge=i<j?`${i}:${j}`:`${j}:${i}`;
+    const edge=i<j?`${region.id}:${i}:${j}`:`${region.id}:${j}:${i}`;
     if(!segmentCache.has(edge))segmentCache.set(edge,clearSegment(p,q));
     if(!segmentCache.get(edge))continue;
     dist.set(j,ng);parent.set(j,i);
@@ -346,7 +429,7 @@ export function pedestrianRoute(start,dest,mode="walk") {
    }
   }
   if(!found)return [];
-  path=[];for(let i=to;i!==undefined;i=parent.get(i))path.push(point(i));path.reverse();
+  path=[];for(let i=to;i!==undefined;i=parent.get(i))path.push(point(i,region));path.reverse();
   // Only remove collinear vertices, never cut across a corner or building.
   path=path.filter((p,i,all)=>i===0||i===all.length-1||(p.x-all[i-1].x)*(all[i+1].z-p.z)!==(p.z-all[i-1].z)*(all[i+1].x-p.x));
   if(routeCache.size>1200)routeCache.clear();routeCache.set(key,path);
@@ -388,7 +471,7 @@ for(const r of ROADS){
  const horizontal=r.w>r.d,half=(horizontal?r.w:r.d)/2,center=horizontal?r.x:r.z;
  for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
   const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
-  if(Math.abs(p.x)>335||Math.abs(p.z)>335||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
+  if((!contains(RIVERSIDE,p,-8)&&(Math.abs(p.x)>335||Math.abs(p.z)>335))||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
   if(ROADS.some(o=>o!==r&&(o.w>o.d)!==horizontal&&contains(o,p,8)))continue;
   if(METRO_LINES.some(l=>l.points.some(([x,z])=>Math.hypot(p.x-x,p.z-z)<12)))continue;
   const key=`${p.x.toFixed(2)},${p.z.toFixed(2)}`;if(parkingKeys.has(key))continue;parkingKeys.add(key);

@@ -1,3 +1,11 @@
+import {CivicConflictRenderer} from "./civic-conflict-renderer.ts";
+import type {CivicSnapshot} from "../worker/civic-conflict.mjs";
+import {UrbanWorldRenderer,type UrbanWorldSnapshot} from "./urban-world-renderer.ts";
+import {SportsLuxuryRenderer} from "./sports-luxury-renderer.ts";
+import type {SportsLuxurySnapshot} from "../worker/sports-luxury.mjs";
+import {CityVisitorsRenderer} from "./city-visitors-renderer.ts";
+import {CityPhotoAlbum} from "./city-photo-album.ts";
+import {buildRiverBridges,buildSportsDistrict} from "./city-district.ts";
 import {CityMotion,type MotionPlan} from "./city-motion.ts";
 import {CitySky,skyLight} from "./city-sky.ts";
 import {INTERSECTIONS,signalState} from "../worker/traffic.mjs";
@@ -17,6 +25,7 @@ import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
+  kind?:"resident"|"visitor"; taxiPassenger?:boolean; onPrivateHelicopter?:boolean;
   motion?:MotionPlan|null;
   id: string;
   name: string;
@@ -154,6 +163,10 @@ type WeatherState = {
 };
 
 type CivilizationSnapshot = {
+  civicConflict?:CivicSnapshot;
+  urbanWorld?:UrbanWorldSnapshot;
+  sportsLuxury?:SportsLuxurySnapshot;
+  cityVisitors?:(Parameters<CityVisitorsRenderer["sync"]>[0]&{visitors:FlyState[];totalArrivals:number;totalDepartures:number;taxiCompleted:number;reputation:number;photoCount:number;hotelRooms:Array<{id:string;capacity:number;occupied:number}>});
   authoritative: boolean;
   mapVersion?:number;
   roadTraffic?:{drivingCars:number;targetDrivingCars:number;carOwners:number;parkedCars:number;recklessDrivers:number;chaosActive:boolean;incidents:RoadIncident[]};
@@ -197,7 +210,7 @@ type CivilizationSnapshot = {
     allBrainsReady?:boolean;livingBrains?:number;intervalMs?:number;stepsPerCycle?:number;minNeuralSteps?:number;lastCompleteCycleAt?:number;
     topologyShared?: boolean;
     independentDynamicState?: boolean;
-    registeredBrains?: number;
+    registeredBrains?: number;registeredResidentBrains?:number;registeredVisitorBrains?:number;
     steppedBrains?: number;
     schedulerCursor?: number;
     lastSyncAt?: number;
@@ -503,9 +516,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
   residentDirectory.update(living,s.deaths,s.births,s.mortality?.byCause);
   setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
   if(s.mapVersion!==MAP_VERSION)setConnection("connecting",`${living.length} ALIVE · WORKER UPDATE NEEDED ▾`);
-  connection.title=`Open ${living.length} living residents. ${s.neuralBridge?.registeredBrains||0}/${living.length} independent full-connectome brains have fresh measured checkpoints.`;
+  const residentBrains=s.neuralBridge?.registeredResidentBrains??s.neuralBridge?.registeredBrains??0;
+  connection.title=`Open ${living.length} living residents. ${residentBrains}/${living.length} resident brains and ${s.neuralBridge?.registeredVisitorBrains||0} visitor brains have fresh measured checkpoints.`;
   const neuralCensus=document.getElementById("neural-census"),neuralCadence=document.getElementById("neural-cadence");
-  if(neuralCensus)neuralCensus.textContent=`${s.neuralBridge?.registeredBrains||0} / ${living.length} · ${neuralLive?'FULL GRAPH':'WARMING'}`;
+  if(neuralCensus)neuralCensus.textContent=`${residentBrains} / ${living.length} · ${neuralLive?'FULL GRAPH':'WARMING'}`;
   if(neuralCadence)neuralCadence.textContent=s.neuralBridge?.intervalMs?`${s.neuralBridge.stepsPerCycle||0} steps / ${Math.round(s.neuralBridge.intervalMs/60000)} min · ${s.neuralBridge.error?'retrying':'CPU budgeted'}`:'Preparing full FlyWire…';
   if(!s.authoritative)residentDirectory.offline();
   const policy=document.getElementById("welfare-policy");
@@ -583,11 +597,17 @@ function renderSnapshot(s: CivilizationSnapshot) {
   }));
   if (!rows.length) events.textContent = "Civilization is running; no recent events.";
 
-  latestFlyStates = new Map((s.flies || []).map((fly) => [fly.id, fly]));
-  syncFlyMeshes(s.flies || []);
+  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[])];
+  latestFlyStates = new Map(actors.map((fly) => [fly.id, fly]));
+  syncFlyMeshes(actors);
   updateHeliTourState(s.flies || []);
   updateMetroStationOccupancy(s.flies || []);
   syncHomes(s.flies || []);
+  if(s.urbanWorld)urbanVisuals.sync(s.urbanWorld);
+  if(s.civicConflict)civicVisuals.sync(s.civicConflict);
+  if(s.sportsLuxury)sportsVisuals.sync(s.sportsLuxury);
+  if(s.cityVisitors)visitorVisuals.sync(s.cityVisitors,actors);
+  updateSocietyBoard(s);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
   updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
 
@@ -747,7 +767,20 @@ function seeded(n: number) {
 
 const windowMaterials: THREE.MeshBasicMaterial[] = [];
 const streetLights: THREE.PointLight[] = [];
+const photoAlbum=new CityPhotoAlbum(()=>({gameSeconds:presentationClock.read(performance.now()),worldId:snapshot?.worldId||"WORLD-A",camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z},direction:camera.getWorldDirection(new THREE.Vector3()).toArray()}),renderer.domElement);
+function updateSocietyBoard(s:CivilizationSnapshot){
+ const urban=document.getElementById("urban-activity"),visitors=document.getElementById("visitor-activity"),sports=document.getElementById("sports-activity");
+ if(urban)urban.textContent=s.urbanWorld?`🔥 ${s.urbanWorld.fires.length} đám cháy · ${s.urbanWorld.projects.length} công trình · ${s.urbanWorld.completedProjects||0} hoàn thành · ${s.urbanWorld.floods.length} vùng ngập`:"Đang kết nối cứu hỏa & xây dựng…";
+ if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length} khách · ${s.cityVisitors.totalDepartures} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
+ const civic=document.getElementById("civic-activity");if(civic)civic.textContent=s.civicConflict?`Xã hội: ${s.civicConflict.active.length} cuộc tập hợp · ${s.civicConflict.peacefulResolutions} hòa giải · niềm tin ${s.civicConflict.confidence}%`:"";
+ if(sports)sports.textContent=s.sportsLuxury?`Thể thao: ${s.sportsLuxury.matchesCompleted} trận · ${s.sportsLuxury.tennisSessions} lượt tennis · ${s.sportsLuxury.helicopters.length} trực thăng riêng · ${s.sportsLuxury.privateFlights} chuyến`:"Đang kết nối thể thao…";
+}
+
 const cityRoot = new THREE.Group();
+const urbanVisuals=new UrbanWorldRenderer(cityRoot);
+const sportsVisuals=new SportsLuxuryRenderer(scene);
+const visitorVisuals=new CityVisitorsRenderer(scene);
+const civicVisuals=new CivicConflictRenderer(scene);
 scene.add(cityRoot);
 
 
@@ -862,25 +895,8 @@ function updateTrafficSignals(seconds:number){
   }
 }
 
-// Sydney-style bridges over Hansdrex River.
-function addBridge(z: number, width = 13) {
-  const deck = new THREE.Mesh(
-    new THREE.BoxGeometry(riverWidth + 34, 0.75, width),
-    new THREE.MeshStandardMaterial({ color: 0x4e5357, roughness: 0.82, metalness: 0.18 }),
-  );
-  deck.position.set(riverX, 0.2, z);
-  cityRoot.add(deck);
-
-  for (const sx of [-1, 1]) {
-    const tower = new THREE.Mesh(
-      new THREE.BoxGeometry(2.1, 15, 3),
-      new THREE.MeshStandardMaterial({ color: 0x6f7375, roughness: 0.7, metalness: 0.25 }),
-    );
-    tower.position.set(riverX + sx * 14, 9.4, z);
-    cityRoot.add(tower);
-  }
-}
-BRIDGES.forEach((b) => addBridge(b.z, Math.max(12,b.d-3)));
+buildRiverBridges(cityRoot);
+buildSportsDistrict(cityRoot,makeCanvasSprite);
 
 // Central Park is a long protected Manhattan-style district with reservoirs, meadows and a highly visible wheel.
 const centralPark=new THREE.Mesh(new THREE.BoxGeometry(PARK.w,.10,PARK.d),parkMat);
@@ -1028,13 +1044,13 @@ function addBuilding(
 
 // Building topology is authoritative city data and MUST NOT change with graphics quality.
 const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment");
-for(const b of renderableCityBuildings)addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});
+for(const b of renderableCityBuildings){const g=addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});urbanVisuals.registerBuilding(b.id,g);}
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
 const landmarkCool=new THREE.MeshStandardMaterial({color:0x8db9d0,emissive:0x3c9fd4,emissiveIntensity:0.95,roughness:0.28});
 const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.38,metalness:0.58});
-buildHansdrexEmpire(cityRoot,makeCanvasSprite);
+const empireRoot=new THREE.Group();cityRoot.add(empireRoot);buildHansdrexEmpire(empireRoot,makeCanvasSprite);urbanVisuals.registerBuilding("empire",empireRoot);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 buildMansion(cityRoot,makeCanvasSprite);
@@ -1133,6 +1149,7 @@ addMarinaBaySandsStyle(340,320);
 for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  if(b.id==="power")continue;
  const g=addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>25,sign:b.name?.replace("Hansdrex ","").toUpperCase()});
+ urbanVisuals.registerBuilding(b.id,g);
  if(["food","social","shop","nightlife"].includes(b.type||"")){
   const color=b.type==="food"?0xb84a39:b.type==="shop"?0x467984:0xcca154;
   const awning=new THREE.Mesh(new THREE.BoxGeometry(b.w+.2,.3,1.3),new THREE.MeshStandardMaterial({color}));awning.position.set(0,3.1,b.d/2+.4);g.add(awning);
@@ -1448,7 +1465,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.lastTraceTime=trace.at(-1)?.t??visual.lastTraceTime;
     if(visual.route.length>12)visual.route=visual.route.slice(-8);
     if(visual.stationary){visual.route=[];visual.current.copy(visual.target);}
-    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onTrain&&!fly.indoors&&!(fly.traveling&&fly.transitMode==="car");
+    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onPrivateHelicopter&&!fly.taxiPassenger&&!fly.onTrain&&!fly.indoors&&!(fly.traveling&&fly.transitMode==="car");
     if(fly.currentLocationId==="rooftop"&&!fly.traveling)visual.group.visible=true;
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;
@@ -1479,7 +1496,7 @@ function syncHomes(flies:FlyState[]){
  for(const b of BUILDINGS.filter(b=>b.kind==="house")){
   if(!occupied.has(b.id)||homeVisuals.has(b.id))continue;
   const g=addBuilding(b.x,b.z,b.w-1,b.d-1,4.2,Math.abs(b.x+b.z),{residential:true});
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(5.2,2.6,4),new THREE.MeshStandardMaterial({color:0x775545,roughness:.9}));roof.rotation.y=Math.PI/4;roof.position.y=5.5;g.add(roof);homeVisuals.set(b.id,g);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(5.2,2.6,4),new THREE.MeshStandardMaterial({color:0x775545,roughness:.9}));roof.rotation.y=Math.PI/4;roof.position.y=5.5;g.add(roof);homeVisuals.set(b.id,g);urbanVisuals.registerBuilding(b.id,g);
  }
  for(const [id,g]of homeVisuals)g.visible=occupied.has(id);
  personalCars.sync(flies,snapshot?.roadTraffic?.incidents);
@@ -1560,6 +1577,7 @@ function cameraForward(out = new THREE.Vector3()) {
   ).normalize();
 }
 
+document.getElementById("riverside-view")?.addEventListener("click",()=>frameDestination(new THREE.Vector3(345,145,305),new THREE.Vector3(610,25,0)));
 document.getElementById("park-view")?.addEventListener("click",()=>{
  document.body.classList.remove("mansion-visit");
  followSelected=false;player.teleport(205,235,105,true);freePosition.set(205,235,105);
@@ -1626,7 +1644,7 @@ const movementKeys = new Set([
   "KeyQ","KeyE","Space","ShiftLeft","ShiftRight","ControlLeft","ControlRight",
 ]);
 addEventListener("keydown", (e) => {
-  if(document.querySelector<HTMLDialogElement>("#resident-directory")?.open||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
+  if(document.querySelector("dialog[open]")||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
   if (movementKeys.has(e.code)) {
     cameraSprint.down(e.code,performance.now(),e.repeat);
     if(e.code==="Space")player.jumpDown(performance.now(),e.repeat);
@@ -1731,11 +1749,17 @@ function animate(now = performance.now()) {
     visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
     visual.group.position.copy(visual.current);
+    visitorVisuals.updateActor(id,visual.current);
+    civicVisuals.updateActor(id,visual.current);
     residentBodies.add(id,visual.current.x,visual.current.y,visual.current.z,visual.group.scale.x,visual.group.visible);
   }
 
   residentBodies.finish();
   personalCars.update(dt,gameNow,Math.max(1,snapshot?.timeScale||120));
+  urbanVisuals.update(dt,gameNow);
+  sportsVisuals.update(dt,gameNow);
+  visitorVisuals.update(dt,gameNow);
+  civicVisuals.update();
   updateMetroTrains(now);
   updateParkWheel(now);
   const visualHour=(gameNow%86400)/3600;
@@ -1788,6 +1812,7 @@ function animate(now = performance.now()) {
   updateFreeCamera(dt);
   citySky.update(visualHour,camera.position,activeWeather.cloudCover||0);
   renderer.render(scene, camera);
+  photoAlbum.afterRender();
 }
 // Start census polling before the first animation frame. All Three.js globals are initialized by
 // this point, but a render-frame failure must never prevent the city census from connecting.

@@ -1,17 +1,24 @@
-import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF} from '../worker/city-map.mjs';
+import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
 export const PLAYER_EYE=1.7;
 const RADIUS=.32,HEIGHT=1.78,STEP=.29,EPS=.0001;
 export type PlayerInput={forward:number;strafe:number;yaw:number;sprint:number;ascend:boolean;descend:boolean};
-const citySolids:MansionBox[]=BUILDINGS.filter(b=>b.kind!=='mansion').map(b=>({...b,y:b.h/2,color:0,solid:true}));
-const solids=[...citySolids,...mansionBoxes.filter(b=>b.solid)];
-// Local collision queries avoid scanning every tower and room on each physics substep.
+// Rebuild only after an authoritative geometry revision (collapse, clearing, new construction).
 const cellSize=24,bins=new Map<string,MansionBox[]>(),empty:MansionBox[]=[];
-for(const b of solids)for(let x=Math.floor((b.x-b.w/2-RADIUS)/cellSize);x<=Math.floor((b.x+b.w/2+RADIUS)/cellSize);x++)for(let z=Math.floor((b.z-b.d/2-RADIUS)/cellSize);z<=Math.floor((b.z+b.d/2+RADIUS)/cellSize);z++){
- const key=`${x},${z}`;if(!bins.has(key))bins.set(key,[]);bins.get(key)!.push(b);
+let collisionRevision=-1;
+function refreshUrbanCollision(){
+ if(collisionRevision===urbanGeometryRevision)return;
+ collisionRevision=urbanGeometryRevision;bins.clear();
+ const citySolids:MansionBox[]=BUILDINGS.filter(b=>b.kind!=='mansion'&&effectiveBuildingHeight(b)>0).map(b=>({...b,h:effectiveBuildingHeight(b),y:effectiveBuildingHeight(b)/2,color:0,solid:true}));
+ const solids=[...citySolids,...mansionBoxes.filter(b=>b.solid)];
+ for(const b of solids)for(let x=Math.floor((b.x-b.w/2-RADIUS)/cellSize);x<=Math.floor((b.x+b.w/2+RADIUS)/cellSize);x++)for(let z=Math.floor((b.z-b.d/2-RADIUS)/cellSize);z<=Math.floor((b.z+b.d/2+RADIUS)/cellSize);z++){
+  const key=`${x},${z}`;if(!bins.has(key))bins.set(key,[]);bins.get(key)!.push(b);
+ }
 }
+refreshUrbanCollision();
 const nearby=(x:number,z:number)=>bins.get(`${Math.floor(x/cellSize)},${Math.floor(z/cellSize)}`)||empty;
 function terrain(x:number,z:number){
+ if(URBAN_FLOODS.some(f=>contains(f,{x,z})))return -.15;
  if(onIsland({x,z}))return ((x-ISLAND.x)/(ISLAND.rx-18))**2+((z-ISLAND.z)/(ISLAND.rz-17))**2<1?.67:.55;
  if(atSea({x,z})||WATER.some(w=>contains(w,{x,z}))&&!BRIDGES.some(b=>contains(b,{x,z})))return -.65;
  return .2;
@@ -40,6 +47,7 @@ export class PlayerController{
  jumpUp(){this.jumpHeld=false;}
  resetInput(){this.jumpHeld=false;this.lastJump=-Infinity;}
  update(dt:number,input:PlayerInput){
+  refreshUrbanCollision();
   const count=Math.max(1,Math.ceil(Math.min(.1,dt)/.008)),step=Math.min(.1,dt)/count;
   for(let i=0;i<count;i++)this.advance(step,input);
  }

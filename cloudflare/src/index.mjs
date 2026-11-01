@@ -10,7 +10,7 @@ import {
   snapshotLooksUsable,
   setNeuralSyncEnabled,
   getSimulationConfig,
-  getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,
+  getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,neuralActors,
 } from "../../worker/civilization-engine.mjs";
 
 const SNAPSHOT_META_KEY = "snapshot:meta";
@@ -198,7 +198,7 @@ export class CivilizationWorld extends DurableObject {
     if (!snapshotLooksUsable(raw)) freshState();
 
     // Preserve elapsed game time while bounding decision samples as the city grows.
-    const population = getRawState().flies.filter(fly=>fly.alive).length;
+    const population = neuralActors().length;
     const decisionBudget = Math.max(4, Math.min(24, Math.floor(6000/Math.max(1,population))));
     const maxSteps = reason === "alarm" ? Math.min(this.idleMaxSteps(),decisionBudget) : decisionBudget;
     const steps = Math.min(
@@ -264,9 +264,9 @@ export class CivilizationWorld extends DurableObject {
       // Observing checkpoints does not force additional city decision work.
       if(url.pathname==='/api/civilization/neural'){
         const status=getNeuralStatus(),freshFor=Math.max(120000,Number(status.intervalMs||1000)*3);
-        return json({...status,brains:getRawState().flies.filter(f=>f.alive).map(f=>{
+        return json({...status,brains:neuralActors().map(f=>{
           const fc=f.brain?.fullConnectome;
-          return {id:f.id,brainId:f.brain?.id,connected:Boolean(fc?.connected&&Date.now()-Number(fc.lastSyncAt||0)<=freshFor),neurons:fc?.neurons||0,edges:fc?.edges||0,steps:fc?.neuralStepsTotal||0,spikesThisBatch:fc?.spikesThisBatch||0,lastSyncAt:fc?.lastSyncAt||0};
+          return {id:f.id,kind:f.kind||'resident',brainId:f.brain?.id,connected:Boolean(fc?.connected&&fc.fullConnectome&&Date.now()-Number(fc.lastSyncAt||0)<=freshFor),neurons:fc?.neurons||0,edges:fc?.edges||0,steps:fc?.neuralStepsTotal||0,spikesThisBatch:fc?.spikesThisBatch||0,lastSyncAt:fc?.lastSyncAt||0};
         })});
       }
 

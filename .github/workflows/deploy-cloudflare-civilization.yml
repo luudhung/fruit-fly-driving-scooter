@@ -33,16 +33,21 @@ jobs:
         run: npm install --prefix worker --ignore-scripts --no-package-lock && npm run test:city
 
       - name: Check deployment credentials
+        id: credentials
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::Cloudflare deployment credentials are missing from repository secrets."
-            exit 1
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CI deployment skipped: repository Cloudflare credentials are absent. Deploy with the authorized local Wrangler login."
+            echo "Worker tests passed; automatic deployment was skipped because repository Cloudflare credentials are absent." >> "$GITHUB_STEP_SUMMARY"
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy Durable Object worker
+        if: steps.credentials.outputs.ready == 'true'
         run: npm run deploy:civilization:cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

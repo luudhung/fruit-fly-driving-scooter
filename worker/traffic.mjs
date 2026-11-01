@@ -5,7 +5,8 @@ export function signalState(seconds,axis){
  const phase=((seconds%60)+60)%60;
  return axis==='ns'?(phase<25?'green':phase<30?'yellow':'red'):(phase>=30&&phase<55?'green':phase>=55?'yellow':'red');
 }
-export const INTERSECTIONS=AVENUES.flatMap(x=>STREETS.map(z=>({id:`${x},${z}`,x,z}))).filter(p=>
+const roadXs=[...new Set(ROADS.filter(r=>r.d>r.w).map(r=>r.x))],roadZs=[...new Set(ROADS.filter(r=>r.w>r.d).map(r=>r.z))];
+export const INTERSECTIONS=roadXs.flatMap(x=>roadZs.map(z=>({id:`${x},${z}`,x,z}))).filter(p=>
  !contains(PARK,p,5)&&ROADS.some(r=>r.d>r.w&&contains(r,p))&&ROADS.some(r=>r.w>r.d&&contains(r,p)));
 const rows=new Map(),columns=new Map();
 for(const j of INTERSECTIONS){if(!rows.has(j.z))rows.set(j.z,[]);rows.get(j.z).push(j);if(!columns.has(j.x))columns.set(j.x,[]);columns.get(j.x).push(j);}

@@ -1,0 +1,10 @@
+export type LuxuryPad={id:string;locationId:string;name:string;x:number;y:number;z:number;access:{x:number;z:number};rooftop:boolean};
+export type LuxuryFlight={id?:string;from:LuxuryPad;to:LuxuryPad;departure:number;arrival:number};
+export type LuxuryHelicopter={id:string;ownerId:string|null;padId:string;condition:number;maintenanceDebt:number;trips:number;flight:LuxuryFlight|null};
+export type SportParticipant={id:string;kind:string;role:string;startsAt:number;until:number};
+export type SportsLuxurySnapshot={privateFlights:number;privateRevenue:number;maintenanceRevenue:number;sportsRevenue:number;matchesCompleted:number;tennisSessions:number;goals:number;pads:LuxuryPad[];match:null|{id:string;startsAt:number;endsAt:number;players:string[];spectators:string[];score:number[]};history:Array<{id:string;score:number[];players:number;spectators:number;endedAt:number}>;helicopters:LuxuryHelicopter[];participants:SportParticipant[];algorithmOnly:boolean};
+export const SPORTS_RULES:{tennisPlayers:number;stadiumPlayers:number;spectators:number;tennisFee:number;stadiumFee:number;playerSeconds:number;matchSeconds:number;flightSeconds:number};
+export function privateHelipads():LuxuryPad[];
+export function privateHelicopterPose(now:number,flight:LuxuryFlight):{x:number;y:number;z:number;heading:number;phase:string};
+export function helicopterNetWorth(f:Record<string,unknown>):number;
+export function createSportsLuxury(hooks:Record<string,unknown>):{init():unknown;tick(gameSeconds:number,clock:unknown):void;handleResident(f:unknown,clock:unknown):boolean;addChoices(f:unknown,clock:unknown,add:unknown):void;snapshot():SportsLuxurySnapshot;beginPrivate(f:unknown,destination?:string):boolean;beginSports(f:unknown,kind:string,role:string):boolean;padAvailable(id:string,skip?:string):boolean};
