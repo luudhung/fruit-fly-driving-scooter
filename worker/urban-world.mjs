@@ -5,7 +5,7 @@ import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,conta
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
 const live=f=>f.alive&&f.ageYears>=18&&f.ageYears<76&&f.health>35;
 const MAX_FIRES=3,MAX_PROJECTS=5,DAY=86400;
-const available=f=>live(f)&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
+const available=f=>live(f)&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance}){

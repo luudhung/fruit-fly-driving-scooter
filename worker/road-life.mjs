@@ -74,11 +74,11 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   const owners=living.filter(ownsCar).length,buyersOnTheWay=living.filter(f=>f.mobilityShopping&&f.traveling).length;
   if(owners+buyersOnTheWay<target*4){
    let invited=0;for(const f of living){if(invited>=5||owners+buyersOnTheWay+invited>=target*4)break;
-    if(f.civicDuty||f.cityService||f.urbanTask||f.privateFlight||f.sportsSession||f.vehicle||f.mobilityShopping||f.ageYears<18||f.sleeping||f.illness||f.health<50||f.energy<40||f.hunger>75||f.money+f.savings<20||f.traits.thrift>=.76||onIsland(f)||f.onPlane||f.onTrain||f.heliPassenger||f.arrestedUntil>now)continue;
+    if(f.socialTask||f.civicDuty||f.cityService||f.urbanTask||f.privateFlight||f.sportsSession||f.vehicle||f.mobilityShopping||f.ageYears<18||f.sleeping||f.illness||f.health<50||f.energy<40||f.hunger>75||f.money+f.savings<20||f.traits.thrift>=.76||onIsland(f)||f.onPlane||f.onTrain||f.heliPassenger||f.arrestedUntil>now)continue;
     if(f.traveling)continue;f.mobilityShopping=true;startJourney(f,{id:'vehicle-showroom',action:'shopping for a vehicle'});invited++;
    }
   }
-  const candidates=living.filter(f=>!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.cityService&&!f.urbanTask&&!f.privateFlight&&!f.sportsSession&&ownsCar(f)&&f.ageYears>=18&&f.health>40&&f.energy>35&&f.hunger<85&&!f.sleeping&&!f.illness&&!f.onTrain&&!f.onPlane&&!f.heliPassenger&&!f.islandHoliday&&!(f.arrestedUntil>now)&&(!f.traveling||f.transitMode==='walk')&&Number(f.traits?.thrift||0)<.76&&!onIsland(f));
+  const candidates=living.filter(f=>!f.socialTask&&!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.cityService&&!f.urbanTask&&!f.privateFlight&&!f.sportsSession&&ownsCar(f)&&f.ageYears>=18&&f.health>40&&f.energy>35&&f.hunger<85&&!f.sleeping&&!f.illness&&!f.onTrain&&!f.onPlane&&!f.heliPassenger&&!f.islandHoliday&&!(f.arrestedUntil>now)&&(!f.traveling||f.transitMode==='walk')&&Number(f.traits?.thrift||0)<.76&&!onIsland(f));
   candidates.sort((a,b)=>(b.energy+Number(b.brain?.dynamic?.curiosity||0)*20-(b.thirst||0)*.2)-(a.energy+Number(a.brain?.dynamic?.curiosity||0)*20-(a.thirst||0)*.2));
   for(const f of candidates){if(!missing||started>=10)break;if(f.roadDuty||f.routeWaypoints?.slice(f.routeIndex).some(p=>p.mode==='car'))continue;
    const destinations=LOCATIONS.filter(p=>Math.abs(p.x)<300&&Math.abs(p.z)<300&&Math.hypot(p.x-f.x,p.z-f.z)>100&&Math.hypot(p.x-f.x,p.z-f.z)<500&&!['home','transit'].includes(p.type));if(!destinations.length)continue;

@@ -1,3 +1,5 @@
+import type {SocialTie,SocialProfile} from '../worker/resident-relationships.mjs';
+import {batchStaticBoxes} from './static-box-batches.ts';
 import {TrafficSignals} from './traffic-signals.ts';
 import {FrameStats} from './frame-stats.ts';
 import {createRoadMaterial,updateRoadLighting} from './road-lighting.ts';
@@ -36,6 +38,7 @@ import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, metroStationGeometry, trainState, type Building } from "../worker/city-map.mjs";
 
 type FlyState = {
+  relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
   onFireEngine?:boolean;onAmbulance?:boolean;
   kind?:"resident"|"visitor"; taxiPassenger?:boolean; onPrivateHelicopter?:boolean;
   motion?:MotionPlan|null;
@@ -466,6 +469,7 @@ function renderInspector(fly: FlyState | null) {
     flyBrainHistoryEl.textContent = "—";
     flyConnectomeEl.textContent = "—";
     flyNeuralStepsEl.textContent = "—";
+    const social=document.getElementById('fly-social-life');if(social)social.textContent='—';
     flyAgeEl.textContent = flyActionEl.textContent = flyJobEl.textContent = flyPartnerEl.textContent =
       flyChildrenEl.textContent = flyMoneyEl.textContent = flyDebtEl.textContent = flyBrainEl.textContent = flyHomeEl.textContent =
       flySleepEl.textContent = flyNeedsEl.textContent = flyRelationshipEl.textContent = flyFamilyEl.textContent =
@@ -473,6 +477,8 @@ function renderInspector(fly: FlyState | null) {
     for (const el of [stressMeter, happyMeter, exciteMeter, healthMeter]) el.style.width = "0%";
     return;
   }
+  const social=document.getElementById('fly-social-life');
+  if(social){const r=fly.relationships;social.textContent=r?`${r.friends.length} bạn · ${r.friends.slice(0,3).join(', ')||'chưa thân'} · chăm sóc ${Math.round(r.profile.careMinutes)} phút${r.task?` · ${r.task.kind==='care'?'đang chăm':'đang thăm'} ${r.task.targetId}`:''}`:'—';}
   flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
   flyBrainIdEl.textContent = fly.brainId || "legacy brain pending";
   flyBrainHistoryEl.textContent = `${num(fly.brainDecisionCount || 0)} decisions · ${num(fly.brainMemoryCount || 0)} memories`;
@@ -728,10 +734,12 @@ const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 7
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
   logarithmicDepthBuffer: true,
-  powerPreference: coarseDevice || graphicsPreset === "low" ? "low-power" : "high-performance",
+  powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
   precision: "highp",
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, graphics.pixelRatio));
+// Limit oversized Retina framebuffers while keeping all Ultra geometry and materials.
+const renderPixelRatio=()=>Math.min(devicePixelRatio,graphics.pixelRatio,Math.sqrt(2_200_000/Math.max(1,innerWidth*innerHeight)));
+renderer.setPixelRatio(renderPixelRatio());
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1232,20 +1240,21 @@ function addMetroStation(line:typeof metroLines[number],index:number,lineIndex:n
   metroStationDisplays.push({lineId:line.id,index,x:geo.platform.x,z:geo.platform.z,label:waitingLabel});
 }
 
+const railInfrastructure=new THREE.Group();cityRoot.add(railInfrastructure);
 function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
  const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz),horizontal=Math.abs(dx)>=Math.abs(dz);
  const cx=(a.x+b.x)/2,cz=(a.z+b.z)/2,y=a.y;
  const bed=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:3.4,.24,horizontal?3.4:len),metroBeamMat);
- bed.position.set(cx,y-.48,cz);cityRoot.add(bed);
+ bed.position.set(cx,y-.48,cz);railInfrastructure.add(bed);
  for(const side of [-1,1]){
    const rail=new THREE.Mesh(new THREE.BoxGeometry(horizontal?len:.20,.22,horizontal ? .20 : len),metroTrackMat);
-   rail.position.set(cx+(horizontal?0:side*1.05),y-.20,cz+(horizontal?side*1.05:0));cityRoot.add(rail);
+   rail.position.set(cx+(horizontal?0:side*1.05),y-.20,cz+(horizontal?side*1.05:0));railInfrastructure.add(rail);
  }
  const sleeperCount=Math.max(2,Math.floor(len/4.5));
  for(let i=0;i<=sleeperCount;i++){
    const u=i/sleeperCount,x=a.x+dx*u,z=a.z+dz*u;
    const sleeper=new THREE.Mesh(new THREE.BoxGeometry(horizontal ? .30 : 3.05,.12,horizontal?3.05:.30),metroSleeperMat);
-   sleeper.position.set(x,y-.34,z);cityRoot.add(sleeper);
+   sleeper.position.set(x,y-.34,z);railInfrastructure.add(sleeper);
  }
  const supportEvery=26;
  for(let d=supportEvery/2;d<len;d+=supportEvery){
@@ -1257,9 +1266,9 @@ function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
    });
    if(offset===undefined)continue;
    const support=new THREE.Mesh(new THREE.BoxGeometry(.72,y-.55,.72),metroBeamMat);
-   support.position.set(x+(horizontal?0:offset),(y-.55)/2,z+(horizontal?offset:0));cityRoot.add(support);
+   support.position.set(x+(horizontal?0:offset),(y-.55)/2,z+(horizontal?offset:0));railInfrastructure.add(support);
    const cantilever=new THREE.Mesh(new THREE.BoxGeometry(horizontal?.8:Math.abs(offset)+.8,.45,horizontal?Math.abs(offset)+.8:.8),metroBeamMat);
-   cantilever.position.set(x+(horizontal?0:offset/2),y-.68,z+(horizontal?offset/2:0));cityRoot.add(cantilever);
+   cantilever.position.set(x+(horizontal?0:offset/2),y-.68,z+(horizontal?offset/2:0));railInfrastructure.add(cantilever);
  }
 }
 
@@ -1283,6 +1292,7 @@ function addElevatedMetroLine(line:typeof metroLines[number],lineIndex:number){
  cityRoot.add(train);metroTrains.push({group:train,curve,stationTs,offset:lineIndex*2300,lineIndex});
 }
 metroLines.forEach(addElevatedMetroLine);
+batchStaticBoxes(railInfrastructure);
 const metroStairs=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),metroStepMat,metroStairMatrices.length);metroStairMatrices.forEach((m,i)=>metroStairs.setMatrixAt(i,m));metroStairs.instanceMatrix.needsUpdate=true;cityRoot.add(metroStairs);
 buildMetroInterchanges(cityRoot);
 for(const t of metroTrains){t.label=makeCanvasSprite(METRO_LINES[t.lineIndex].id,20,1.1);t.label.position.y=4;t.group.add(t.label);}
@@ -1794,5 +1804,6 @@ try {
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(renderPixelRatio());
   renderer.setSize(innerWidth, innerHeight);
 });

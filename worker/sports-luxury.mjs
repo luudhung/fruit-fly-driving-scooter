@@ -44,7 +44,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  const get=()=>world().sportsLuxury||init();
  const alive=id=>world().flies.find(f=>f.id===id&&f.alive);
  const account=()=>world().businesses['sports-aviation'];
- const busy=f=>f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
+ const busy=f=>f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
  function transfer(f,cost,to=account()){
   if(!Number.isFinite(cost)||cost<0||money(f)+1e-7<cost)return false;
   const cash=Math.min(Math.max(0,Number(f.money)||0),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings)||0)-(cost-cash);to.cash=Number(to.cash||0)+cost;

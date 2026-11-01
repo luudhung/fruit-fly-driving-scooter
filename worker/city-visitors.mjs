@@ -7,7 +7,7 @@ const money=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const location=id=>LOCATIONS.find(l=>l.id===id);
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
-function busy(f,now=0){return f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
+function busy(f,now=0){return f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
 
 /** Persisted finite visitors, physical taxi trips and compact scene records. No pixel rendering on server. */
 export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false}){

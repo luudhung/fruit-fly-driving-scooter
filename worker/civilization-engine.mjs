@@ -1,3 +1,4 @@
+import {createResidentRelationships} from './resident-relationships.mjs';
 import {createCivicConflict} from './civic-conflict.mjs';
 import {createUrbanWorld} from './urban-world.mjs';
 import {createSportsLuxury} from './sports-luxury.mjs';
@@ -451,10 +452,12 @@ const urbanWorld=createUrbanWorld(cityServices);
 const sportsLuxury=createSportsLuxury(cityServices);
 const cityVisitors=createCityVisitors({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
+const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
-function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();sportsLuxury.init();cityVisitors.init();civicConflict.init();}
+function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
+  if(residentRelationships.handleResident(f,clock))return true;
   if(civicConflict.handleResident(f,clock))return true;
   if(cityVisitors.handleResident(f,clock))return true;
   return urbanWorld.handleResident(f,clock)||sportsLuxury.handleResident(f,clock);
@@ -1423,7 +1426,7 @@ function applyFullConnectomeBias(fly, action, utility) {
 function socialSignalFor(fly) {
   if (fly.partnerId) return 1;
   if (fly.flirtingWith) return 0.82;
-  return clamp(1 - fly.loneliness / 130 + fly.traits.sociability * 0.35, 0, 1);
+  return clamp(1 - fly.loneliness / 130 + fly.traits.sociability * 0.35 + residentRelationships.supportSignal(fly)*.15, 0, 1);
 }
 
 function getNeuralAgents() {
@@ -2221,7 +2224,7 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
-  urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);
+  urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);
   const circadianSleep = clock.hour >= 22 || clock.hour < 6;
   add(fly.homeId, "sleeping", (100 - fly.energy) * 0.88 + fly.sleepDebt * 0.72 + (circadianSleep ? 82 : -12) - fly.caffeine * 0.42);
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.42 + fly.stress * 0.20 + (circadianSleep ? 20 : 0));
@@ -3421,7 +3424,7 @@ function parkRoamTarget(fly){
 }
 
 function maybeRoamInsidePark(fly){
-  if(!fly.alive||fly.traveling||fly.currentLocationId!=="park"||fly.wheelRideUntil>state.simulationAgeSeconds)return false;
+  if(!fly.alive||fly.traveling||fly.socialTask||fly.currentLocationId!=="park"||fly.wheelRideUntil>state.simulationAgeSeconds)return false;
   if(state.simulationAgeSeconds-Number(fly.lastParkRoamAt||0)<480)return false;
   const target=parkRoamTarget(fly);
   const route=buildPedestrianRoute({x:fly.x,z:fly.z},target);
@@ -3851,7 +3854,7 @@ function motionPlan(f){
  return {at:state.simulationAgeSeconds,speed:Number(f.motionSpeed||Math.hypot(f.vx,f.vz)||2.5),mode:f.transitMode,points,blocked:Number(f.trafficHoldUntil||0)>state.simulationAgeSeconds,signalPermit:Boolean(f.signalEncounter?.permit)};
 }
 function observerFly(f,selectedId){
- if(f.id===selectedId)return {...compactFly(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
+ if(f.id===selectedId)return {...compactFly(f),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
  for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
@@ -3925,7 +3928,7 @@ function getState(options={}) {
     utilities:{powerPlant:state.utilities?.powerPlant||null,disconnectedHouseholds:Number(state.utilities?.disconnectedHouseholds||0),householdAccounts:Object.keys(state.utilities?.householdAccounts||{}).length},
     justice:state.justice,
     mapVersion:MAP_VERSION,
-    districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),
+    districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     aviation:aviationSummary(),
@@ -3990,7 +3993,7 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
-      urbanWorld.tick(gameSeconds,clock);sportsLuxury.tick(gameSeconds,clock);cityVisitors.tick(gameSeconds,clock);civicConflict.tick(gameSeconds,clock);
+      urbanWorld.tick(gameSeconds,clock);sportsLuxury.tick(gameSeconds,clock);cityVisitors.tick(gameSeconds,clock);civicConflict.tick(gameSeconds,clock);residentRelationships.tick(gameSeconds,clock);
       vehicleHeadway=createVehicleIndex(neuralActors());
       for(const fly of state.flies)tickFly(fly,clock);
       vehicleHeadway=null;
@@ -4040,6 +4043,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  urbanWorld,sportsLuxury,cityVisitors,civicConflict,neuralActors,settleRiversideResidents,
+  urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,
   roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };
