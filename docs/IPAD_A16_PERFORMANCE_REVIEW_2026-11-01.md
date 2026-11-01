@@ -127,3 +127,7 @@ Không khẳng định trước nhiệt độ, RAM được cấp cho tab hoặc
 4. Đọc `package.json`: Three.js ^0.184.0; đối chiếu tài liệu API với mã `node_modules/three/src/renderers/WebGLRenderer.js` đang cài. Không giả định ví dụ tài liệu mới hơn tự động có ở phiên bản hiện tại.
 
 Ưu tiên nghiên cứu tiếp: đo bản bỏ FPS cap/đèn và có bộ đếm → tích hợp traffic batching bốn nhóm đã viết → spatial chunks/LOD kiến trúc → thử iPad thật → điều chỉnh ratio chỉ khi được chấp nhận và có số đo. Không tự giảm chi tiết hay thêm lại FPS cap. Module traffic đã qua kiểm tra cấu trúc, vẫn cần ảnh so sánh từ camera thật và số đo runtime sau tích hợp. Các hướng này giữ được cảm giác thành phố phong phú trong khi giảm việc render không cần thiết.
+
+## Kiểm chứng trong phiên làm việc
+
+Đã chạy Chrome profile Lưu Đình Hưng trên MacBook Air M1 bằng giao diện máy thật. Đã bỏ trần FPS ở mọi preset; bộ đếm dùng các frame thực tế trong cửa sổ 5 giây. Sau batching đèn giao thông và ray metro, giới hạn khung vẽ Retina ở 2,2 triệu pixel (giữ toàn bộ geometry/material Ultra), các mẫu đi phố/bay đo được 49,2–57,8 FPS tại1932×1138. Góc toàn cảnh khi full suite mô phỏng đang chạy có mẫu35,3FPS; chưa thể kết luận mọi cảnh đạt45–60. Đây không phải thử nghiệm iPad hay phép so sánh A/B có kiểm soát. Số đo và bối cảnh lưu ở work/verification/uncapped-fps-measurements.json.
