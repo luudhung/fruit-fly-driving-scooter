@@ -22,9 +22,9 @@ export function buildRiverBridges(root:THREE.Group){
     add(x,arch(a),z,next,arch(b),z,main?.42:.28);
     add(x,arch(a)+2.1,z,next,arch(b)+2.1,z,main?.26:.18);
     add(x,arch(a),z,next,arch(b)+2.1,z,.14);
-    if(i%2===0){add(x,1.2,z,x,arch(a),z,.12);add(x,arch(a),bridge.z-side,x,arch(a),bridge.z+side,.18);}
+    if(i%2===0){add(x,1.2,z,x,arch(a),z,.12);if(arch(a)>=14.5)add(x,arch(a),bridge.z-side,x,arch(a),bridge.z+side,.18);}
    }
-   for(const x of [bridge.x-half+4,bridge.x+half-4])block(root,main?5:3,main?12:5,4,x,main?6:2.5,z+direction*3.5,concrete);
+   for(const x of [bridge.x-half-4,bridge.x+half+4])block(root,main?5:3,main?12:5,4,x,main?6:2.5,z+direction*3.5,concrete);
   }
   const mesh=new THREE.InstancedMesh(beam,steel,bars.length);
   bars.forEach(({a,b,r},i)=>{const delta=b.clone().sub(a);dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,delta.clone().normalize());dummy.scale.set(r,delta.length(),r);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});root.add(mesh);

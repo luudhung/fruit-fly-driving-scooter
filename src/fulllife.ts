@@ -1269,8 +1269,16 @@ function addRailSegment(a:THREE.Vector3,b:THREE.Vector3,lineIndex:number){
  const supportEvery=26;
  for(let d=supportEvery/2;d<len;d+=supportEvery){
    const u=d/len,x=a.x+dx*u,z=a.z+dz*u;
+   if(WATER.some(w=>contains(w,{x,z},4)))continue;
+   const offset=[6.4,-6.4].find(side=>{
+    const p={x:x+(horizontal?0:side),z:z+(horizontal?side:0)};
+    return !ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1);
+   });
+   if(offset===undefined)continue;
    const support=new THREE.Mesh(new THREE.BoxGeometry(.72,y-.55,.72),metroBeamMat);
-   support.position.set(x,(y-.55)/2,z);cityRoot.add(support);
+   support.position.set(x+(horizontal?0:offset),(y-.55)/2,z+(horizontal?offset:0));cityRoot.add(support);
+   const cantilever=new THREE.Mesh(new THREE.BoxGeometry(horizontal?.8:Math.abs(offset)+.8,.45,horizontal?Math.abs(offset)+.8:.8),metroBeamMat);
+   cantilever.position.set(x+(horizontal?0:offset/2),y-.68,z+(horizontal?offset/2:0));cityRoot.add(cantilever);
  }
 }
 
