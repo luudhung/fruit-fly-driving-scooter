@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {signalState} from '../worker/traffic.mjs';
+import {signalPolePose} from '../worker/street-furniture.mjs';
 
 type Junction={x:number;z:number};
 const bulbColors={red:[0x3a0808,0xff2b2b],yellow:[0x302707,0xffc928],green:[0x07351c,0x35ef87]} as const;
@@ -26,7 +27,7 @@ export class TrafficSignals{
   };
   for(const junction of selected){
    for(const axis of ['ns','ew'] as const){
-    const x=junction.x+(axis==='ns'?6.4:-6.4),z=junction.z+(axis==='ns'?6.2:-6.2);
+    const {x,z}=signalPolePose(junction,axis);
     place(this.poles,headIndex,x,1.6,z);
     place(this.heads,headIndex++,x,3.1,z,axis==='ew'?Math.PI/2:0);
     this.signalAxes.push(axis);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {ROADS,BRIDGES,UNDERPASSES,BUILDINGS,WORLD_HALF,contains,blocked,roadTravelY,effectiveBuildingHeight,urbanGeometryRevision} from '../worker/city-map.mjs';
 import {PLAYER_EYE} from './player-controller.ts';
+import {streetCollidersNear} from '../worker/street-furniture.mjs';
 
 export const CAR_HALF_WIDTH=.93,CAR_HALF_LENGTH=2.1;
 /** East-facing curb space on the main-city approach, before the west-bank underpass. */
@@ -17,9 +18,14 @@ function refreshSolids(){
 }
 /** Oriented rectangle against city solids; all corners must also stay on dry pavement. */
 export function cityCarClear(x:number,z:number,heading:number,ground=.2){
+ if(!sceneryClear(x,z,heading,ground))return false;
+ const sin=Math.sin(heading),cos=Math.cos(heading);
+ return footprint.every(([a,b])=>pavedAtLevel({x:x+a*CAR_HALF_WIDTH*cos+b*CAR_HALF_LENGTH*sin,z:z-a*CAR_HALF_WIDTH*sin+b*CAR_HALF_LENGTH*cos},ground,.02));
+}
+function sceneryClear(x:number,z:number,heading:number,ground:number){
  refreshSolids();const sin=Math.sin(heading),cos=Math.cos(heading),w=CAR_HALF_WIDTH,l=CAR_HALF_LENGTH;
  if(Math.abs(x)>WORLD_HALF-4-l||Math.abs(z)>WORLD_HALF-4-l)return false;
- for(const [a,b]of footprint){const p={x:x+a*w*cos+b*l*sin,z:z-a*w*sin+b*l*cos};if(blocked(p)||!pavedAtLevel(p,ground,.02))return false;}
+ for(const [a,b]of footprint){const p={x:x+a*w*cos+b*l*sin,z:z-a*w*sin+b*l*cos};if(blocked(p))return false;}
  return !(solids.get(`${Math.floor(x/size)},${Math.floor(z/size)}`)||[]).some(b=>{
   const dx=b.x-x,dz=b.z-z,bw=b.w/2+.12,bl=b.d/2+.12;
   return Math.abs(dx)<bw+w*Math.abs(cos)+l*Math.abs(sin)&&Math.abs(dz)<bl+w*Math.abs(sin)+l*Math.abs(cos)&&Math.abs(dx*cos-dz*sin)<w+bw*Math.abs(cos)+bl*Math.abs(sin)&&Math.abs(dx*sin+dz*cos)<l+bw*Math.abs(sin)+bl*Math.abs(cos);
@@ -36,6 +42,41 @@ function pavedAtLevel(p:{x:number;z:number},ground:number,margin=0){
  return ROADS.some(r=>contains(r,p,margin)&&!(ground<-.5&&r.w>r.d&&BRIDGES.some(b=>contains(b,p))));
 }
 const cityWorld:CarWorld={clear:cityCarClear,ground:cityCarGround};
+/** Player wheels may climb low pavement, while buildings, water and street furniture stay solid. */
+export function playerCarClear(x:number,z:number,heading:number,ground=.2){
+ if(!sceneryClear(x,z,heading,ground))return false;
+ const sin=Math.sin(heading),cos=Math.cos(heading),w=CAR_HALF_WIDTH,l=CAR_HALF_LENGTH;
+ for(const b of streetCollidersNear(x,z,Math.hypot(w,l))){
+  if(b.maxY<=ground+.02||b.minY>=ground+1.8)continue;
+  const dx=b.x-x,dz=b.z-z;
+  if(b.radius!==undefined){
+   const lateral=Math.max(0,Math.abs(dx*cos-dz*sin)-w),forward=Math.max(0,Math.abs(dx*sin+dz*cos)-l);
+   if(lateral*lateral+forward*forward<(b.radius+.015)**2)return false;
+  }else{
+   const bw=b.w!/2+.015,bl=b.d!/2+.015;
+   if(Math.abs(dx)<bw+w*Math.abs(cos)+l*Math.abs(sin)&&Math.abs(dz)<bl+w*Math.abs(sin)+l*Math.abs(cos)&&Math.abs(dx*cos-dz*sin)<w+bw*Math.abs(cos)+bl*Math.abs(sin)&&Math.abs(dx*sin+dz*cos)<l+bw*Math.abs(sin)+bl*Math.abs(cos))return false;
+  }
+ }
+ return true;
+}
+export function playerCarGround(x:number,z:number,previous:number){
+ const p={x,z},bridge=BRIDGES.find(b=>contains(b,p));
+ let floor=cityCarGround(x,z,previous);
+ if(floor===null){
+  const tunnel=UNDERPASSES.find(t=>Math.abs(x-t.x)<t.w/2+2.6&&Math.abs(z-t.z)<t.halfLength);
+  if(tunnel&&previous<-.5){const d=Math.abs(z-tunnel.z);floor=.2-tunnel.depth*(d<=tunnel.coveredHalf?1:(tunnel.halfLength-d)/(tunnel.halfLength-tunnel.coveredHalf));}
+  else floor=.2;
+ }
+ if(floor>-.1){
+  if(bridge&&Math.abs(z-bridge.z)>4.45)floor=Math.abs(Math.abs(z-bridge.z)-4.65)<.15?.66:.40;
+  else if(!ROADS.some(r=>contains(r,p))&&ROADS.some(r=>contains(r,p,3)))floor=.30;
+ }
+ return Math.max(previous-.08,Math.min(previous+.08,floor));
+}
+export const PLAYER_CAR_WORLD:CarWorld={
+ clear:playerCarClear,
+ ground:playerCarGround,
+};
 function approach(value:number,target:number,step:number){return value<target?Math.min(target,value+step):Math.max(target,value-step);}
 
 /** Local observer vehicle: independent of the city's resident and traffic simulation. */
@@ -60,9 +101,16 @@ export class PlayerCar{
   else this.speed=approach(this.speed,0,dt*(.65+Math.abs(this.speed)*.065));
   // Positive steering is right, consistent with D / the right mobile arrow.
   const turn=-this.speed/2.7*Math.tan(this.steering*.48)*dt/(1+Math.abs(this.speed)*.055);
-  const heading=this.heading+turn,x=this.x+Math.sin(heading)*this.speed*dt,z=this.z+Math.cos(heading)*this.speed*dt;
-  const ground=this.world.ground(x,z,this.ground);
-  if(ground===null||!this.world.clear(x,z,heading,ground)){this.speed=0;return;}
+  let heading=this.heading+turn,x=this.x+Math.sin(heading)*this.speed*dt,z=this.z+Math.cos(heading)*this.speed*dt,ground=this.world.ground(x,z,this.ground);
+  if(ground===null||!this.world.clear(x,z,heading,ground)){
+   // Keep the free component of motion at contact; a rejected turn must not lock reverse escape.
+   const travel=Math.abs(this.speed*dt),dx=Math.sin(this.heading)*this.speed*dt,dz=Math.cos(this.heading)*this.speed*dt;
+   const candidates=[{x:this.x+dx,z:this.z+dz},{x:this.x+dx,z:this.z},{x:this.x,z:this.z+dz}];
+   const free=candidates.find(p=>Math.hypot(p.x-this.x,p.z-this.z)>1e-7&&this.world.ground(p.x,p.z,this.ground)!==null&&this.world.clear(p.x,p.z,this.heading,this.world.ground(p.x,p.z,this.ground)!));
+   if(!free){this.speed=0;return;}
+   this.speed*=Math.min(1,Math.hypot(free.x-this.x,free.z-this.z)/Math.max(1e-7,travel));
+   x=free.x;z=free.z;heading=this.heading;ground=this.world.ground(x,z,this.ground)!;
+  }
   this.heading=heading;this.x=x;this.z=z;this.ground=ground;
   const ahead=this.world.ground(x+Math.sin(heading)*.7,z+Math.cos(heading)*.7,ground),behind=this.world.ground(x-Math.sin(heading)*.7,z-Math.cos(heading)*.7,ground);
   this.pitch=ahead===null||behind===null?0:Math.atan2(ahead-behind,1.4);

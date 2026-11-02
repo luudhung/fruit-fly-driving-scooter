@@ -33,8 +33,8 @@ import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
 import {buildMansion} from "./mansion-renderer.ts";
-import {PlayerCar,PlayerCarVisual} from "./player-car.ts";
-import {PlayerController,setPlayerHelipads} from "./player-controller.ts";
+import {PlayerCar,PlayerCarVisual,PLAYER_CAR_WORLD} from "./player-car.ts";
+import {PlayerController,PLAYER_EYE,setPlayerHelipads} from "./player-controller.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
@@ -1451,11 +1451,10 @@ const frameStats=new FrameStats();
 const cameraSprint=new CameraSprint();
 const pressed=cameraSprint.pressed;
 const player=new PlayerController();
-const playerCar=new PlayerCar(),playerCarVisual=new PlayerCarVisual(scene);
+const playerCar=new PlayerCar(PLAYER_CAR_WORLD),playerCarVisual=new PlayerCarVisual(scene);
 playerCarVisual.sync(playerCar);
 const playerCarButton=document.getElementById("player-car-button") as HTMLButtonElement|null;
 const playerCarReadout=document.getElementById("player-car-readout");
-let carExitHintUntil=0;
 function syncCarButton(){
  if(playerCarButton){playerCarButton.textContent=playerCar.active?"🚶 Rời xe":"🚗 Xe của tôi";playerCarButton.setAttribute("aria-pressed",String(playerCar.active));}
  document.body.classList.toggle("player-driving",playerCar.active);
@@ -1464,14 +1463,14 @@ function syncCarButton(){
  down?.setAttribute("aria-label",playerCar.active?"Phanh xe":"Fly downward");
 }
 function leavePlayerCar(){
- const exit=playerCar.exitPosition();
- if(!exit){playerCar.speed=0;carExitHintUntil=performance.now()+2600;return false;}
+ const sidewalk=playerCar.exitPosition();
+ const exit=sidewalk??{x:playerCar.x,y:playerCar.ground+PLAYER_EYE,z:playerCar.z};
  playerCar.stop();player.teleport(exit.x,exit.y,exit.z);freePosition.set(exit.x,exit.y,exit.z);
  cameraSprint.reset();player.resetInput();syncCarButton();return true;
 }
 playerCarButton?.addEventListener("click",()=>{
  if(playerCar.active){leavePlayerCar();return;}
- followSelected=false;cameraSprint.reset();player.resetInput();playerCar.enter();player.flying=false;carExitHintUntil=0;
+ followSelected=false;cameraSprint.reset();player.resetInput();playerCar.enter();player.flying=false;
  cameraYaw=playerCar.heading;cameraPitch=0;camera.fov=84;camera.updateProjectionMatrix();
  playerCarVisual.sync(playerCar);syncCarButton();renderer.domElement.focus({preventScroll:true});
 });
@@ -1612,7 +1611,7 @@ function updateFreeCamera(dt: number) {
     playerCar.update(dt,{throttle:forward,steer,brake:pressed.has("Space")||pressed.has("KeyQ")});
     cameraYaw+=playerCar.heading-heading;playerCarVisual.sync(playerCar);
     const seat=playerCar.driverPosition();freePosition.set(seat.x,seat.y,seat.z);
-    if(playerCarReadout){const speed=performance.now()<carExitHintUntil?"Hãy đỗ sát lề đường để rời xe":`${Math.round(Math.abs(playerCar.speed)*3.6)} km/h${playerCar.speed<-.1?" · R":""} · ▲/▼ ga, lùi · ◀/▶ lái · ↟ phanh · Kéo để nhìn`;if(playerCarReadout.textContent!==speed)playerCarReadout.textContent=speed;}
+    if(playerCarReadout){const speed=`${Math.round(Math.abs(playerCar.speed)*3.6)} km/h${playerCar.speed<-.1?" · R":""} · ▲/▼ ga, lùi · ◀/▶ lái · ↟ phanh · Kéo để nhìn`;if(playerCarReadout.textContent!==speed)playerCarReadout.textContent=speed;}
   } else if (followSelected && selectedFlyId) {
     const visual = flyVisuals.get(selectedFlyId);
     if (visual) {
