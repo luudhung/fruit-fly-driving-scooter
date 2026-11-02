@@ -68,8 +68,8 @@ export class PlayerCar{
   this.pitch=ahead===null||behind===null?0:Math.atan2(ahead-behind,1.4);
  }
  driverPosition(){
-  const side=.38,forward=-.15*Math.cos(this.pitch)-1.32*Math.sin(this.pitch);
-  return {x:this.x+side*Math.cos(this.heading)+forward*Math.sin(this.heading),y:this.ground+1.32*Math.cos(this.pitch)-.15*Math.sin(this.pitch),z:this.z-side*Math.sin(this.heading)+forward*Math.cos(this.heading)};
+  const side=.38,forward=-.30*Math.cos(this.pitch)-1.45*Math.sin(this.pitch);
+  return {x:this.x+side*Math.cos(this.heading)+forward*Math.sin(this.heading),y:this.ground+1.45*Math.cos(this.pitch)-.30*Math.sin(this.pitch),z:this.z-side*Math.sin(this.heading)+forward*Math.cos(this.heading)};
  }
  exitPosition(){return carExitPosition(this.x,this.z,this.ground);}
 }
@@ -98,7 +98,7 @@ export function carExitPosition(x:number,z:number,ground:number){
 }
 
 type CarBox=[number,number,number,number,number,number];
-/** Five static batches plus a steering wheel; no glass sheet or light obscures the windshield. */
+/** Open-top cabin with low doors, slim windshield posts and a small, low steering wheel. */
 export class PlayerCarVisual{
  readonly root=new THREE.Group();private readonly wheel=new THREE.Group();
  constructor(scene:THREE.Scene){
@@ -106,13 +106,13 @@ export class PlayerCarVisual{
    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color,roughness:.65,metalness}),entries.length),dummy=new THREE.Object3D();
    entries.forEach(([x,y,z,w,h,d],i)=>{dummy.position.set(x,y,z);dummy.scale.set(w,h,d);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});this.root.add(mesh);
   };
-  boxes(0x225a58,[[0,.49,0,1.78,.5,4.15],[0,.8,1.4,1.78,.14,1.35],[0,1.76,-.22,1.82,.07,2.2],[-.87,1.07,-.1,.09,.55,2.1],[.87,1.07,-.1,.09,.55,2.1],[-.87,1.43,.82,.055,.66,.055],[.87,1.43,.82,.055,.66,.055]],.35);
-  boxes(0x192225,[[0,1.01,.65,1.68,.2,.4],[0,.71,-1.15,1.55,.45,.7],[-.41,.89,-.54,.58,.6,.3],[.41,.89,-.54,.58,.6,.3],[0,.77,-.15,.2,.4,.8],[-.94,.3,-1.3,.18,.6,.65],[.94,.3,-1.3,.18,.6,.65],[-.94,.3,1.3,.18,.6,.65],[.94,.3,1.3,.18,.6,.65]]);
-  boxes(0x9ae4c8,[[.38,1.08,.431,.36,.075,.012],[-.25,1.065,.431,.28,.085,.012]]);
+  boxes(0x225a58,[[0,.49,0,1.78,.5,4.15],[0,.77,1.4,1.78,.10,1.35],[-.87,.78,-.1,.065,.26,2.1],[.87,.78,-.1,.065,.26,2.1],[-.87,1.18,.94,.018,.58,.018],[.87,1.18,.94,.018,.58,.018]],.35);
+  boxes(0x192225,[[0,.85,.70,1.68,.12,.32],[0,.71,-1.15,1.55,.45,.7],[-.41,.89,-.54,.58,.6,.3],[.41,.89,-.54,.58,.6,.3],[0,.70,-.15,.2,.26,.8],[-.94,.3,-1.3,.18,.6,.65],[.94,.3,-1.3,.18,.6,.65],[-.94,.3,1.3,.18,.6,.65],[.94,.3,1.3,.18,.6,.65]]);
+  boxes(0x9ae4c8,[[.38,.92,.535,.28,.045,.012],[-.25,.915,.535,.24,.045,.012]]);
   boxes(0xe8e3c5,[[-.65,.64,2.085,.37,.16,.025],[.65,.64,2.085,.37,.16,.025]]);
   boxes(0xc95143,[[-.65,.64,-2.085,.32,.16,.025],[.65,.64,-2.085,.32,.16,.025]]);
-  this.wheel.position.set(.38,1.13,.34);this.wheel.rotation.x=-.25;
-  const ring=new THREE.Mesh(new THREE.TorusGeometry(.18,.024,6,20),new THREE.MeshStandardMaterial({color:0x111719,roughness:.8}));
+  this.wheel.position.set(.38,.98,.40);this.wheel.rotation.x=-.35;
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(.12,.014,6,20),new THREE.MeshStandardMaterial({color:0x111719,roughness:.8}));
   this.wheel.add(ring);this.root.add(this.wheel);this.root.name='viewer-personal-car';scene.add(this.root);
  }
  sync(car:PlayerCar){this.root.position.set(car.x,car.ground,car.z);this.root.rotation.set(-car.pitch,car.heading,0,'YXZ');this.wheel.rotation.z=car.steering*.65;}

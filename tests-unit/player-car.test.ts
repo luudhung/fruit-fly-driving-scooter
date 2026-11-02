@@ -37,7 +37,7 @@ test('swept substeps stop at a thin obstacle without position or rotation tunnel
 });
 test('the first-person seat remains inside the car and follows heading rather than camera look',()=>{
  const car=new PlayerCar(open);car.enter();const a=car.driverPosition();
- assert.ok(Math.hypot(a.x-car.x,a.z-car.z)<.5);assert.ok(Math.abs(a.y-car.ground-1.32)<.001);
+ assert.ok(Math.hypot(a.x-car.x,a.z-car.z)<.5);assert.ok(Math.abs(a.y-car.ground-1.45)<.001);
  car.heading+=Math.PI;const b=car.driverPosition();assert.ok(Math.abs(a.x+b.x-2*car.x)<.001);assert.ok(Math.abs(a.z+b.z-2*car.z)<.001);
 });
 test('the car crosses the complete central bridge on its deck and never snaps into the underpasses',()=>{

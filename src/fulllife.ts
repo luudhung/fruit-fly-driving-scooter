@@ -1472,7 +1472,7 @@ function leavePlayerCar(){
 playerCarButton?.addEventListener("click",()=>{
  if(playerCar.active){leavePlayerCar();return;}
  followSelected=false;cameraSprint.reset();player.resetInput();playerCar.enter();player.flying=false;carExitHintUntil=0;
- cameraYaw=playerCar.heading;cameraPitch=-.045;camera.fov=74;camera.updateProjectionMatrix();
+ cameraYaw=playerCar.heading;cameraPitch=0;camera.fov=84;camera.updateProjectionMatrix();
  playerCarVisual.sync(playerCar);syncCarButton();renderer.domElement.focus({preventScroll:true});
 });
 const freePosition = new THREE.Vector3(player.x,player.y,player.z);
@@ -1551,7 +1551,7 @@ renderer.domElement.addEventListener("pointerup", (e) => {
 renderer.domElement.addEventListener("contextmenu",e=>e.preventDefault());
 renderer.domElement.addEventListener("wheel", (e) => {
   e.preventDefault();
-  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.018, 24, 78);
+  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.018, playerCar.active?68:24, playerCar.active?100:78);
   camera.updateProjectionMatrix();
 }, { passive: false });
 
