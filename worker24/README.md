@@ -1,35 +1,24 @@
-# FlyBrain 24/7 worker
+# Civilization CPU neural worker
 
-Always-on CPU port of the same full FlyWire LIF graph used by the browser experiment.
+Optional CPU adapter for the city's full FlyWire brains. The root `Dockerfile` and `railway.json` package this service. The production Cloudflare neural runtime is documented in [`cloudflare/NEURAL_RUNTIME.md`](../cloudflare/NEURAL_RUNTIME.md).
 
-## What is actually simulated
+The service loads every neuron and CSR edge from `brain.bin`, shares immutable topology, and maintains separate dynamic LIF state for each registered resident. Sensory inputs and behavioral drives use the city interface in `src/multi_brain.rs`. Neural states in this CPU adapter are in memory; the Cloudflare adapter supplies durable checkpoints.
 
-- Full `brain.bin` FlyWire connectome: every neuron and every CSR edge is stepped by the worker.
-- BTCUSDT public trade stream runs continuously.
-- Cash, margin, position, stress, drawdown discipline, smoke/break state, and trade history are kept server-side.
-- The browser can close or reload without resetting the worker state.
-- MANC/VNC is **not** part of this stock worker yet.
+Configuration:
 
-The worker deliberately throttles biological LIF steps with `BRAIN_STEPS_PER_CYCLE` / `SIM_INTERVAL_MS` so a full 15M-edge graph can run continuously without pretending server wall-clock equals biological real-time.
-
-## Railway
-
-Deploy from the repository root. The root `Dockerfile` builds this worker.
-
-Recommended environment:
-
-```
-STATE_PATH=/data/flybrain-state.json
+```text
 BRAIN_URL=https://fruit-fly-driving-scooter.vercel.app/brain.bin
-BRAIN_STEPS_PER_CYCLE=4
-SIM_INTERVAL_MS=1000
+BRAIN_CACHE_PATH=/data/brain.bin
+MULTI_BRAIN_STEPS_PER_SYNC=1
+MULTI_BRAIN_MAX_PER_SYNC=2
+PORT=3000
 ```
 
-Attach a persistent Railway volume mounted at `/data` so state survives service restarts/redeploys.
+`BRAIN_PATH` can select an existing local full-connectome file. A volume mounted at `/data` caches the immutable graph. The service also reconstructs the graph from its chunk manifest when the monolithic URL is unavailable.
 
 Endpoints:
 
-- `GET /health`
-- `GET /state`
+- `GET /` and `GET /health`: loaded graph dimensions and service status.
+- `POST /civilization/brains/sync`: step a bounded batch of independent resident brains.
 
-The service is paper trading only. It never sends real-money orders.
+Biological LIF time advances only through synchronization requests and is bounded by the per-sync budget; it does not equal wall-clock time.

@@ -33,6 +33,7 @@ import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
 import {buildMansion} from "./mansion-renderer.ts";
+import {PlayerCar,PlayerCarVisual} from "./player-car.ts";
 import {PlayerController,setPlayerHelipads} from "./player-controller.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
@@ -451,6 +452,7 @@ function focusResident(id:string,moveCamera=false){
  document.body.classList.remove('scenic-view','mansion-visit','show-city-log');
  selectedFlyId=id;followSelected=false;renderInspector(fly);void fetchSnapshot();
  if(moveCamera){
+  if(playerCar.active){playerCar.stop();syncCarButton();}
   const visual=flyVisuals.get(id),target=visual?.current.clone()||new THREE.Vector3(fly.x,Math.max(1,fly.y),fly.z);
   const position=target.clone().add(new THREE.Vector3(-14,11,17));
   for(const b of BUILDINGS)if(contains(b,{x:position.x,z:position.z},.6)&&position.y<b.h+3)position.y=b.h+5;
@@ -1449,6 +1451,30 @@ const frameStats=new FrameStats();
 const cameraSprint=new CameraSprint();
 const pressed=cameraSprint.pressed;
 const player=new PlayerController();
+const playerCar=new PlayerCar(),playerCarVisual=new PlayerCarVisual(scene);
+playerCarVisual.sync(playerCar);
+const playerCarButton=document.getElementById("player-car-button") as HTMLButtonElement|null;
+const playerCarReadout=document.getElementById("player-car-readout");
+let carExitHintUntil=0;
+function syncCarButton(){
+ if(playerCarButton){playerCarButton.textContent=playerCar.active?"🚶 Rời xe":"🚗 Xe của tôi";playerCarButton.setAttribute("aria-pressed",String(playerCar.active));}
+ document.body.classList.toggle("player-driving",playerCar.active);
+ const jump=document.querySelector<HTMLButtonElement>('.mobile-control[data-key="Space"]'),down=document.querySelector<HTMLButtonElement>('.mobile-control[data-key="KeyQ"]');
+ jump?.setAttribute("aria-label",playerCar.active?"Phanh xe":"Jump; double tap to toggle flying; hold to rise");
+ down?.setAttribute("aria-label",playerCar.active?"Phanh xe":"Fly downward");
+}
+function leavePlayerCar(){
+ const exit=playerCar.exitPosition();
+ if(!exit){playerCar.speed=0;carExitHintUntil=performance.now()+2600;return false;}
+ playerCar.stop();player.teleport(exit.x,exit.y,exit.z);freePosition.set(exit.x,exit.y,exit.z);
+ cameraSprint.reset();player.resetInput();syncCarButton();return true;
+}
+playerCarButton?.addEventListener("click",()=>{
+ if(playerCar.active){leavePlayerCar();return;}
+ followSelected=false;cameraSprint.reset();player.resetInput();playerCar.enter();player.flying=false;carExitHintUntil=0;
+ cameraYaw=playerCar.heading;cameraPitch=-.045;camera.fov=74;camera.updateProjectionMatrix();
+ playerCarVisual.sync(playerCar);syncCarButton();renderer.domElement.focus({preventScroll:true});
+});
 const freePosition = new THREE.Vector3(player.x,player.y,player.z);
 const lookDirection = new THREE.Vector3();
 const moveForward = new THREE.Vector3();
@@ -1456,6 +1482,7 @@ const moveRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 
 function setCameraOverview() {
+  if(playerCar.active&&!leavePlayerCar())return;
   document.body.classList.remove("mansion-visit");document.body.classList.add("scenic-view");
   followSelected = false;
   player.teleport(420,290,510,true);
@@ -1468,6 +1495,10 @@ function setCameraOverview() {
 
 function cameraForward(out = new THREE.Vector3()) {
   const cp = Math.cos(cameraPitch);
+  if(playerCar.active){
+    const localYaw=cameraYaw-playerCar.heading;
+    return out.set(Math.sin(localYaw)*cp,Math.sin(cameraPitch),Math.cos(localYaw)*cp).applyEuler(playerCarVisual.root.rotation).normalize();
+  }
   return out.set(
     Math.sin(cameraYaw) * cp,
     Math.sin(cameraPitch),
@@ -1513,7 +1544,7 @@ renderer.domElement.addEventListener("pointermove", (e) => {
   lastY = e.clientY;
 });
 renderer.domElement.addEventListener("pointerup", (e) => {
-  if(dragging&&!moved&&e.button===0)pickResidentAt(e.clientX,e.clientY);
+  if(!playerCar.active&&dragging&&!moved&&e.button===0)pickResidentAt(e.clientX,e.clientY);
   dragging = false;
   renderer.domElement.style.cursor = "grab";
 });
@@ -1533,11 +1564,11 @@ addEventListener("keydown", (e) => {
   if(document.querySelector("dialog[open]")||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
   if (movementKeys.has(e.code)) {
     cameraSprint.down(e.code,e.timeStamp,e.repeat);
-    if(e.code==="Space")player.jumpDown(e.timeStamp,e.repeat);
+    if(e.code==="Space"&&!playerCar.active)player.jumpDown(e.timeStamp,e.repeat);
     e.preventDefault();
     followSelected = false;
   }
-  if (e.code === "KeyF" && selectedFlyId) {
+  if (e.code === "KeyF" && selectedFlyId && !playerCar.active) {
     followSelected = !followSelected;
     if(!followSelected)player.teleport(freePosition.x,freePosition.y,freePosition.z,true);
     e.preventDefault();
@@ -1547,11 +1578,11 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 }, {capture:true});
-addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
+addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();if(playerCar.active)playerCar.speed=0;dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
 addEventListener("keyup", (e) => {cameraSprint.up(e.code);if(e.code==="Space")player.jumpUp(e.timeStamp);if (movementKeys.has(e.code)) e.preventDefault();});
 bindTouchControls(document.querySelectorAll<HTMLButtonElement>(".mobile-control"),{
- down(key,now){followSelected=false;cameraSprint.down(key,now);if(key==="Space")player.jumpDown(now);},
+ down(key,now){followSelected=false;cameraSprint.down(key,now);if(key==="Space"&&!playerCar.active)player.jumpDown(now);},
  up(key){cameraSprint.up(key);if(key==="Space")player.jumpUp(performance.now());},
 });
 
@@ -1574,7 +1605,15 @@ function pickResidentAt(clientX:number,clientY:number){
 }
 
 function updateFreeCamera(dt: number) {
-  if (followSelected && selectedFlyId) {
+  if(playerCar.active){
+    const forward=Number(pressed.has("KeyW")||pressed.has("ArrowUp"))-Number(pressed.has("KeyS")||pressed.has("ArrowDown"));
+    const steer=Number(pressed.has("KeyD")||pressed.has("ArrowRight"))-Number(pressed.has("KeyA")||pressed.has("ArrowLeft"));
+    const heading=playerCar.heading;
+    playerCar.update(dt,{throttle:forward,steer,brake:pressed.has("Space")||pressed.has("KeyQ")});
+    cameraYaw+=playerCar.heading-heading;playerCarVisual.sync(playerCar);
+    const seat=playerCar.driverPosition();freePosition.set(seat.x,seat.y,seat.z);
+    if(playerCarReadout){const speed=performance.now()<carExitHintUntil?"Hãy đỗ sát lề đường để rời xe":`${Math.round(Math.abs(playerCar.speed)*3.6)} km/h${playerCar.speed<-.1?" · R":""} · ▲/▼ ga, lùi · ◀/▶ lái · ↟ phanh · Kéo để nhìn`;if(playerCarReadout.textContent!==speed)playerCarReadout.textContent=speed;}
+  } else if (followSelected && selectedFlyId) {
     const visual = flyVisuals.get(selectedFlyId);
     if (visual) {
       const desired = visual.current.clone().add(new THREE.Vector3(-7, 4.8, 8));
@@ -1595,13 +1634,13 @@ function updateFreeCamera(dt: number) {
     freePosition.set(player.x,player.y,player.z);
   }
 
-  const mode=followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
+  const mode=playerCar.active?"DRIVING":followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
   if(renderer.domElement.dataset.playerMode!==mode){
     renderer.domElement.dataset.playerMode=mode;
-    const status=document.getElementById('player-movement-mode');if(status)status.textContent=player.flying?'Đang bay · Space/E lên · Shift/Q xuống':'Đang đi bộ · Space ×2 để bay';
+    const status=document.getElementById('player-movement-mode');if(status)status.textContent=playerCar.active?'Đang lái xe · W/S ga, lùi · A/D lái · Space phanh':player.flying?'Đang bay · Space/E lên · Shift/Q xuống':'Đang đi bộ · Space ×2 để bay';
   }
   renderer.domElement.dataset.playerPosition=`${freePosition.x.toFixed(2)},${freePosition.y.toFixed(2)},${freePosition.z.toFixed(2)}`;
-  document.body.classList.toggle("player-flying",player.flying);
+  document.body.classList.toggle("player-flying",!playerCar.active&&player.flying);
   camera.position.copy(freePosition);
   cameraForward(lookDirection);
   camera.lookAt(freePosition.clone().add(lookDirection));

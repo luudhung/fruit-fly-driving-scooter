@@ -88,9 +88,9 @@ physics advances a fixed number of substeps per animation frame, so it depends
 on display refresh rate. Daily-challenge mode uses the same target seed for
 everyone on the same UTC day.
 
-The landing page at [`/`](https://webgpu-fly.pages.dev) explains the project in
-plain language; the playable simulator is served from `/play.html`. The legacy
-Science Mode entry has been removed from this fork.
+The root `/` opens the persistent city observer at `/fulllife.html`. The retained
+playable brain simulator is served from `/play.html`. The legacy Science Mode
+entry has been removed from this fork.
 
 ---
 
@@ -210,7 +210,7 @@ for the remaining browser-facing game checks, including replay and daily-challen
 ## 🚀 Deploy
 
 [`DEPLOY.md`](./DEPLOY.md) covers the full Cloudflare Pages + R2 path. The root
-`/` is a lightweight landing page; the playable simulator is at `/play.html`. Heavy assets
+`/` opens the persistent city observer; the playable simulator is at `/play.html`. Heavy assets
 (`brain.bin`, `vnc.bin`, flybody, `walking-policy.bin`) live in R2 because
 Cloudflare Pages caps individual files at 25 MB; Pages serves the ~9 MB JS+WASM
 bundle. `npm run deploy` builds slim and pushes to Pages; `npm run deploy:r2`
@@ -233,7 +233,6 @@ src/
   room.ts              three.js scene, retinal render, camera
   evolution.ts         WebGPU ARS gait evolver
   game.ts              game mode + deterministic replay URLs
-  stock.ts             market-decision experiment adapter
   fulllife.ts          long-running civilization/life observer
 
 tools/

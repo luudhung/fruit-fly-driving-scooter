@@ -1,4 +1,4 @@
-name: Worker24 CI
+name: Civilization CPU Brain CI
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: worker24
-      - run: cargo check
-      - name: Build worker24 Docker image
+      - run: cargo check --locked
+      - name: Build civilization CPU brain Docker image
         working-directory: .
         run: docker build --progress=plain -t flybrain-worker24 .

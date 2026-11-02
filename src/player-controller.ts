@@ -71,7 +71,7 @@ export class PlayerController{
  private metroLift:{x:number;z:number;target:number}|null=null;
  private liftCooldown=0;
  get feet(){return this.y-PLAYER_EYE;}
- get swimming(){return terrain(this.x,this.z)<0&&this.feet<.1&&!this.flying;}
+ get swimming(){const p={x:this.x,z:this.z};return !this.flying&&this.feet<.1&&terrain(this.x,this.z)<0&&(atSea(p)||WATER.some(w=>contains(w,p))||URBAN_FLOODS.some(f=>contains(f,p)))&&!BRIDGES.some(b=>contains(b,p));}
  teleport(x:number,y:number,z:number,flying=false){this.x=x;this.y=y;this.z=z;this.flying=flying;this.grounded=false;this.verticalVelocity=0;this.jumpTap.reset();this.metroLift=null;this.liftCooldown=0;}
  jumpDown(now:number,repeat=false){
   const tap=this.jumpTap.down(now,repeat);if(tap==='ignored')return;

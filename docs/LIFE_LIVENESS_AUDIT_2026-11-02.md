@@ -129,3 +129,13 @@ Các phân bố phản ánh phục hồi ở đa số dân nhưng còn ngoại l
 - FLY-01036 ở nguyên khách sạn cứu trợ trong cả ngày, nhưng năng lượng tăng tới99,96 và đói còn3,19 trong khi nhà vẫn chưa an toàn. Đây là chờ nơi ở được bảo trợ có lý do, khác với hai trường hợp bị kẹt và suy kiệt ở trên.
 
 Không dùng kết quả “không fault/NaN” để kết luận không còn lỗi đời sống: hai trường hợp mới đều có số hữu hạn và không ném exception, nhưng một ngày quan sát đã bộc lộ việc không đi tiếp được. Cần chạy lại mẫu ngày sau khi root sửa các nguyên nhân đó, giữ bản kết quả này làm đối chiếu.
+
+### Final natural-day replay and production verification
+
+The same immutable pre-hotfix checkpoint was replayed for all 720 two-minute steps (24 game hours), with neural synchronization disabled and no forced tasks or teleports. `work/life-day-audit-2026-11-02-final-recovery.json` records 639 completed metro trips, 661 boardings, five taxi fares, 2,059 transactions and 471 residents crossing payday. No new simulation faults, nonfinite coordinates, changed brain IDs, orphan taxi/private-flight flags or overdue social/sports/civic tasks were detected. FLY-01583 physically recovered from the legacy wet wheel exit and earned 52 work minutes; FLY-00287 resumed normal travel and meals. One stationary resident remained safely in temporary disaster shelter with full health and energy. This replay does not demonstrate every rare activity: no private flight or birth completed during this particular day.
+
+Worker version `400eb2ac-733f-4a5d-9251-2f99fe6ffbab` was deployed with immediate Durable Object code updates. A fresh production export reports metro access version 3, all 1,609 previous resident records and unchanged brain IDs. The clock and transit counters advanced. The renderer's restored river was verified visually on the public frontend.
+
+Directional services now remain on their own track: A always serves the forward direction and B the reverse. They operate concurrently. Each terminal unloads before a brief inactive depot turnover; passengers are never retained through the next dispatch. Access geometry has 110 physically tested up/down paths, separate ground stair footprints, and clear corner platforms.
+
+The first optimization reduces 1,336 facade source draws to 86 spatial batches and 405 road source draws to three. It does not establish the requested 80 FPS: measured M1 Ultra samples remain variable and below that target. Chrome reports the built-in display at 60.0024 Hz. More GPU/CPU profiling is required before claiming stable Ultra performance or iPad A16 parity.

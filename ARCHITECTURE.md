@@ -44,7 +44,6 @@ The brain binary format is defined by `tools/build_csr.py`; MANC mirrors the sam
 The legacy Science Mode and motorcycle preview have been removed from this fork.
 
 Current browser-facing experiments:
-- `stock.html` — market-decision sandbox;
 - `fulllife.html` — long-running civilization / life observer;
 - `play.html` — the retained interactive fly-brain game.
 
