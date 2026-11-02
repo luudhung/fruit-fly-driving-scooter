@@ -85,3 +85,27 @@ test('a family rooftop belongs to the real home, includes children and follows a
  const before=supply(t.s),restoredParent=t.s.flies.find(f=>f.id===parent.id),restoredChild=t.s.flies.find(f=>f.id===child.id);restoredParent.alive=false;t.system.tick(120,t.at(120));assert.equal(h.ownerId,null);assert.ok(h.familyIds.includes(child.id));
  restoredChild.ageYears=18;t.system.tick(120,t.at(4000));t.system.tick(120,t.at(4120));assert.equal(h.ownerId,child.id);assert.equal(h.homePadId,`PAD-${child.housingUnitId}`);assert.equal(supply(t.s),before);
 });
+
+test('a flight to a previously unregistered family roof survives restore and completes disembarking',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),to=privateHelipads().find(p=>p.rooftop&&!LOCATIONS.some(l=>l.id===p.locationId));assert.ok(to,'fixture needs a real roof without a destination record');
+ const before=supply(t.s);assert.ok(t.system.beginPrivate(f,to.id));const departure=h.flight.departure,arrival=h.flight.arrival;t.system.handleResident(f,t.at(departure));t.restore();const restored=t.s.flies.find(o=>o.id===f.id);
+ assert.doesNotThrow(()=>t.system.handleResident(restored,t.at(arrival)));assert.equal(restored.privateFlight.phase,'disembarking');assert.doesNotThrow(()=>t.system.handleResident(restored,t.at(restored.privateFlight.until+1)));assert.equal(restored.privateFlight,null);assert.equal(restored.currentLocationId,to.locationId);assert.ok(Number.isFinite(restored.x)&&Number.isFinite(restored.z));assert.equal(t.s.sportsLuxury.privateFlights,1);assert.ok(Math.abs(supply(t.s)-before)<1e-6);
+});
+
+test('an inherited helicopter completes its deceased former owner’s paid flight instead of reserving the roof forever',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),heir=t.s.flies[0],to=privateHelipads().find(p=>p.id==='PAD-island-resort');assert.ok(t.system.beginPrivate(f,to.id));const departure=h.flight.departure,arrival=h.flight.arrival;t.system.handleResident(f,t.at(departure));f.alive=false;f.children=[heir.id];heir.ageYears=25;
+ t.system.tick(120,t.at(departure+120));assert.equal(h.ownerId,heir.id);t.restore();const restored=t.s.sportsLuxury.helicopters.find(o=>o.id===h.id);t.system.tick(120,t.at(arrival+2000));assert.equal(restored.flight,null);assert.equal(restored.padId,to.id);assert.ok(t.system.padAvailable(to.id,restored.id));
+});
+
+test('a tennis session interrupted by ambulance care releases its slot without a false sports reward',()=>{
+ const t=setup(),f=t.s.flies[0];f.currentLocationId='tennis';assert.ok(t.system.beginSports(f,'tennis','player'));const route=[{x:0,z:40,mode:'walk'}];Object.assign(f,{ambulanceDuty:{id:'CARE-1'},action:'receiving ambulance care',routeWaypoints:route,traveling:true,targetLocationId:'hospital-central'});
+ t.system.tick(120,t.at(f.sportsSession.until+1));assert.equal(f.sportsSession,null);assert.equal(f.sportsProfile?.attended||0,0);assert.equal(f.action,'receiving ambulance care');assert.equal(f.routeWaypoints,route);assert.equal(f.traveling,true);
+});
+
+test('an estate settles a previously counted landing without counting the same private flight twice',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),to=privateHelipads().find(p=>p.id==='PAD-island-resort');assert.ok(t.system.beginPrivate(f,to.id));const departure=h.flight.departure,arrival=h.flight.arrival;t.system.handleResident(f,t.at(departure));t.system.handleResident(f,t.at(arrival));assert.equal(t.s.sportsLuxury.privateFlights,1);assert.equal(f.privateFlight.phase,'disembarking');f.alive=false;t.restore();t.system.tick(120,t.at(arrival+2000));assert.equal(t.s.sportsLuxury.privateFlights,1);assert.equal(t.s.sportsLuxury.helicopters.find(o=>o.id===h.id).flight,null);
+});
+
+test('a durable airborne flight reconstructs its missing passenger task then finishes safely once',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),to=privateHelipads().find(p=>p.id==='PAD-island-resort');assert.ok(t.system.beginPrivate(f,to.id));const departure=h.flight.departure,arrival=h.flight.arrival;t.system.handleResident(f,t.at(departure));f.privateFlight=null;t.restore();const restored=t.s.flies.find(p=>p.id===f.id);t.system.tick(120,t.at(departure+120));assert.ok(restored.privateFlight);assert.equal(restored.onPrivateHelicopter,true);t.system.handleResident(restored,t.at(arrival));t.system.handleResident(restored,t.at(restored.privateFlight.until+1));assert.equal(restored.privateFlight,null);assert.equal(restored.onPrivateHelicopter,false);assert.equal(t.s.sportsLuxury.privateFlights,1);
+});

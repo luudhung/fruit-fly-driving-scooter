@@ -66,3 +66,9 @@ test('real engine preserves a timed friend visit, independent brain identity and
  const selected=engine.getState({observer:true,selectedId:a.id}).flies.find(f=>f.id===a.id);assert.ok(selected.relationships.friends.includes(b.id));assert.equal(selected.relationships.profile.completedVisits,1);
  engine.restoreState(structuredClone(s));const restored=engine.getRawState().flies.find(f=>f.id===a.id);assert.equal(restored.brain.id,brainId);assert.equal(restored.socialProfile.completedVisits,1);assert.equal(engine.residentRelationships.snapshot().completedVisits,1);engine.tickFly(restored,engine.gameClock());assert.equal(engine.residentRelationships.snapshot().completedVisits,1,'restore cannot award the same visit twice');
 });
+
+test('an owned friend-visit journey may finish its train leg and still complete the real appointment',()=>{
+ const h=setup();formFriends(h);const [a,b]=h.s.flies;a.x=-154;a.z=-29;a.currentLocationId='metro-industrial';const choice=h.choose(a).find(c=>c.action.includes('friend'));assert.ok(choice);h.hooks.startJourney(a,choice);h.handle(a);assert.ok(a.socialTask);
+ a.onTrain=true;const taskId=a.socialTask.id;assert.equal(h.handle(a),true);assert.equal(a.socialTask?.id,taskId,'boarding an owned journey must not abandon its social task');
+ a.onTrain=false;for(let n=0;n<300&&a.traveling;n++){h.tick(10);h.handle(a);}for(let n=0;n<5&&a.socialTask;n++){h.tick(300);h.handle(a);}assert.equal(h.c.snapshot().completedVisits,1);assert.equal(a.socialTask,null);assert.equal(b.traveling,false);
+});

@@ -10,7 +10,7 @@ export function createCivicConflict({world,random,emit,remember,startJourney,mov
  const rand=f=>cap(random?.(f)??.5,0,1);
  const byId=id=>raw().flies.find(f=>f.id===id);
  const locate=id=>LOCATIONS.find(l=>l.id===id);
- const incompatible=f=>Boolean(f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.displacedFrom);
+ const incompatible=f=>Boolean(f.socialTask||f.emergencyTask||f.urbanFloodEscape||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain&&!(f.civicDuty&&f.traveling&&data().active.some(i=>i.id===f.civicDuty.incidentId&&i.locationId===f.targetLocationId))||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.displacedFrom);
  const eligible=(f,police=false)=>Boolean(f?.alive&&f.ageYears>=18&&f.ageYears<78&&f.health>45&&f.energy>35&&f.hunger<75&&!f.sleeping&&!incompatible(f)&&(police?f.jobId==='police':!ESSENTIAL.has(f.jobId)));
  function init(){
   const s=raw();s.businesses||={};s.businesses['civic-equipment']||={cash:0,inventory:80,sector:'civic-equipment'};
@@ -24,7 +24,7 @@ export function createCivicConflict({world,random,emit,remember,startJourney,mov
  function grievance(f){return cap(Number(f.stress||0)*.45+(f.displacedFrom?30:0)+(f.illness?10:0)+Math.max(0,20-Number(f.money||0))*.5+(f.powerOn===false?16:0)+Number(f.politicalInterest||0)*22);}
  function faction(f){return f.partyId||((f.ideology?.welfare||0)>(f.ideology?.growth||0)?'public-welfare':'city-growth');}
  function present(f,i){const l=locate(i.locationId);return Boolean(f?.alive&&f.civicDuty?.incidentId===i.id&&!f.traveling&&l&&Math.hypot(f.x-l.x,f.z-l.z)<18);}
- function release(f){if(!f?.civicDuty)return;f.civicDuty=null;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;f.actionUntil=0;f.indoors=false;}
+ function release(f){if(!f?.civicDuty)return;const preserve=incompatible(f)||f.onTrain||f.onPlane;f.civicDuty=null;if(preserve)return;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;f.actionUntil=0;f.indoors=false;}
  function join(f,i,role='member'){
   i=i&&data().active.find(active=>active.id===i.id);
   if(!i||i.resolvedAt!==undefined||f.civicDuty||!eligible(f,role==='police')||i.members.length>=MAX_MEMBERS||!Object.keys(actions).includes(role))return false;
@@ -109,7 +109,7 @@ export function createCivicConflict({world,random,emit,remember,startJourney,mov
    const i=data().active.find(i=>i.locationId===(f.traveling?f.targetLocationId:f.currentLocationId));if(i)join(f,i,f.action===actions.mediator?'mediator':'member');
   }
   if(!f.civicDuty)return false;const i=data().active.find(i=>i.id===f.civicDuty.incidentId);
-  if(!i||!eligible(f,f.civicDuty.role==='police')||f.health<40||f.energy<18){release(f);return false;}
+  if(!i||urbanWorld?.isUnavailable?.(i.locationId,f)||!eligible(f,f.civicDuty.role==='police')||f.health<40||f.energy<18){release(f);return false;}
   moveFly?.(f);needsAndActivities?.(f,clock);payAndFinance?.(f,clock);
   if(present(f,i)){
    f.indoors=false;f.sleeping=false;f.action=f.civicDuty.role==='police'?'keeping a civic truce':f.civicDuty.role==='mediator'?'mediating a civic assembly':i.phase==='unrest'?'withdrawing from civic unrest':'debating civic priorities';f.actionUntil=now()+600;

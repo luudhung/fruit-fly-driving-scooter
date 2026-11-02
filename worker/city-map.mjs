@@ -468,42 +468,76 @@ function localRoute(start,dest,mode,region){
  }
  return [a,...path,b].filter((p,i,all)=>!i||Math.hypot(p.x-all[i-1].x,p.z-all[i-1].z)>.05).map(p=>({...p,mode,stage:ROADS.some(r=>contains(r,p))?'crosswalk':'sidewalk'}));
 }
-export function metroStationGeometry(line,index) {
+// Both travel directions use the same deterministic offset polylines, in physics and rendering.
+const metroTracks=new WeakMap(),metroStations=new WeakMap(),metroSchedules=new WeakMap();
+export function metroTrackPoints(line,direction=1){
+ const sign=direction<0?-1:1;let cache=metroTracks.get(line);if(!cache){cache={};metroTracks.set(line,cache);}if(cache[sign])return cache[sign];
+ const points=line.points,offset=2.2*sign;
+ return cache[sign]=points.map((p,i)=>{
+  const before=points[Math.max(0,i-1)],after=points[Math.min(points.length-1,i+1)];
+  const segment=(a,b)=>{const dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz)||1;return{x:-dz/length,z:dx/length};};
+  const n1=i?segment(before,p):segment(p,after),n2=i<points.length-1?segment(p,after):n1;
+  let nx=n1.x+n2.x,nz=n1.z+n2.z,length=Math.hypot(nx,nz);if(length<.01){nx=n1.x;nz=n1.z;length=1;}nx/=length;nz/=length;
+  const scale=offset/Math.max(.35,nx*n1.x+nz*n1.z);
+  return{x:p[0]+nx*scale,z:p[1]+nz*scale,y:line.height};
+ });
+}
+export function metroStationGeometry(line,index,direction=1) {
+ const sign=direction<0?-1:1;let cache=metroStations.get(line);if(!cache){cache={};metroStations.set(line,cache);}const key=`${index}:${sign}`;if(cache[key])return cache[key];
  const p=line.points[index],prev=line.points[Math.max(0,index-1)],next=line.points[Math.min(line.points.length-1,index+1)];
  const dx=next[0]-prev[0],dz=next[1]-prev[1],axis=Math.abs(dx)>=Math.abs(dz)?'x':'z';
  const along=axis==='x'?{x:1,z:0}:{x:0,z:1},perp=axis==='x'?{x:0,z:1}:{x:1,z:0};
  const width=Math.max(6,...ROADS.filter(r=>(r.w>r.d)===(axis==='x')&&contains(r,{x:p[0],z:p[1]},.2)).map(r=>Math.min(r.w,r.d)));
  const offset=width/2+1.22,candidates=[];
- for(const side of [index%2===0?1:-1,index%2===0?-1:1])for(const direction of [-1,1]){
+ for(const side of [index%2===0?1:-1,index%2===0?-1:1])for(const approach of [-1,1]){
   const point=(u,v,y)=>({x:p[0]+along.x*u+perp.x*v,z:p[1]+along.z*u+perp.z*v,y});
-  const access=point(direction*21,side*offset,1.1);
-  // Two narrow flights share a landing. Both run parallel to the sidewalk, outside traffic lanes.
-  const stairs=[point(direction*21,side*offset-.5,1.1),point(direction*7,side*offset-.5,line.height/2+1.125),point(direction*7,side*offset+.5,line.height/2+1.125),point(direction*21,side*offset+.5,line.height+1.15)];
+  const stairs=[point(approach*21,side*offset-.5,1.1),point(approach*7,side*offset-.5,line.height/2+1.125),point(approach*7,side*offset+.5,line.height/2+1.125),point(approach*21,side*offset+.5,line.height+1.15)];
   let violations=0;for(let u=7;u<=21;u+=1)for(const v of [-.98,0,.98]){
-   const q=point(direction*u,side*offset+v,1.1);
-   if(ROADS.some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q))violations++;
-  }
-  candidates.push({side,access,stairs,violations});
+   const q=point(approach*u,side*offset+v,1.1);if(ROADS.some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q))violations++;
+  }candidates.push({side,stairs,violations});
  }
- candidates.sort((a,b)=>a.violations-b.violations);const best=candidates[0],side=best.side;
- const platform={x:p[0]+perp.x*3.4*side,z:p[1]+perp.z*3.4*side,y:line.height+1.15};
- // The elevated approach can cross a lane safely; its ground staircase cannot.
- const top=best.stairs.at(-1),landing={x:top.x,z:top.z,y:top.y};
- return {track:{x:p[0],z:p[1],y:line.height},platform,access:best.stairs[0],axis,side,stairs:[...best.stairs,landing,platform],accessViolations:best.violations};
+ candidates.sort((a,b)=>a.violations-b.violations);const best=candidates[0];
+ const platformFor=dir=>{const track=metroTrackPoints(line,dir)[index],projection=(track.x-p[0])*perp.x+(track.z-p[1])*perp.z,side=projection>=0?1:-1;return{x:track.x+perp.x*3.4*side,z:track.z+perp.z*3.4*side,y:line.height+1.15};};
+ const forward=metroTrackPoints(line,1)[index],forwardSide=((forward.x-p[0])*perp.x+(forward.z-p[1])*perp.z)>=0?1:-1;
+ const baseDirection=best.side===forwardSide?1:-1,basePlatform=platformFor(baseDirection),platform=platformFor(sign);
+ const sharedStairs=[...best.stairs,basePlatform],height=line.height+4.5;
+ const crossover=sign===baseDirection?[]:[basePlatform,{...basePlatform,y:height},{x:platform.x,z:basePlatform.z,y:height},{...platform,y:height},platform].filter((q,i,list)=>!i||Math.hypot(q.x-list[i-1].x,q.z-list[i-1].z,q.y-list[i-1].y)>.01);
+ return cache[key]={track:metroTrackPoints(line,sign)[index],platform,access:sharedStairs[0],axis,side:sign===baseDirection?best.side:-best.side,direction:sign,baseDirection,sharedStairs,crossover,stairs:[...sharedStairs,...crossover.slice(1)],accessViolations:best.violations};
 }
-
-export function trainState(line,seconds) {
- const stops=line.points,legs=[];
- for(let i=0;i<stops.length-1;i++)legs.push([i,i+1]);
- for(let i=stops.length-1;i>0;i--)legs.push([i,i-1]);
- const dwell=4,speed=16;
- const durations=legs.map(([a,b])=>dwell+Math.hypot(stops[b][0]-stops[a][0],stops[b][1]-stops[a][1])/speed);
- const cycle=durations.reduce((a,b)=>a+b,0);
- let t=((seconds+Number(line.id.slice(1))*3)%cycle+cycle)%cycle;
- let i=0;while(i<durations.length-1&&t>=durations[i])t-=durations[i++];
- const [from,to]=legs[i],u=Math.max(0,(t-dwell)/(durations[i]-dwell));
- return {x:stops[from][0]+(stops[to][0]-stops[from][0])*u,z:stops[from][1]+(stops[to][1]-stops[from][1])*u,y:line.height,from,to,direction:Math.sign(to-from),dwelling:t<dwell};
+function metroSchedule(line){
+ let schedule=metroSchedules.get(line);if(schedule)return schedule;const stops=line.points,legs=[];let at=0;
+ for(const direction of [1,-1])for(let i=direction===1?0:stops.length-1;direction===1?i<stops.length-1:i>0;i+=direction){
+  const to=i+direction,terminal=i===0||i===stops.length-1,dwell=terminal?10:8,travel=Math.hypot(stops[to][0]-stops[i][0],stops[to][1]-stops[i][1])/16;
+  legs.push({from:i,to,direction,terminal,dwell,travel,start:at,duration:dwell+travel});at+=dwell+travel;
+ }
+ schedule={legs,cycle:at,half:at/2,offset:Number(line.id.slice(1))*3};metroSchedules.set(line,schedule);return schedule;
 }
+function physicalTrain(line,seconds,slot){
+ const schedule=metroSchedule(line),offset=schedule.offset+(slot===1?schedule.half:0),phase=((seconds+offset)%schedule.cycle+schedule.cycle)%schedule.cycle;
+ const leg=schedule.legs.find(l=>phase<l.start+l.duration)||schedule.legs.at(-1),t=phase-leg.start,points=metroTrackPoints(line,leg.direction),a=points[leg.from],b=points[leg.to];
+ const u=Math.max(0,Math.min(1,(t-leg.dwell)/leg.travel));let x=a.x+(b.x-a.x)*u,z=a.z+(b.z-a.z)*u,platformDirection=leg.direction;
+ if(leg.terminal&&t<4){const incoming=metroTrackPoints(line,-leg.direction)[leg.from],cross=Math.max(0,t-3);x=incoming.x+(a.x-incoming.x)*cross;z=incoming.z+(a.z-incoming.z)*cross;platformDirection=t<3?-leg.direction:leg.direction;}
+ const dwelling=t<leg.dwell&&(!leg.terminal||t>=4),alighting=t<leg.dwell&&(!leg.terminal||t<3||t>=4);
+ return{id:`${line.id}-${slot===0?'A':'B'}`,active:true,runDirection:leg.direction,platformDirection,x,z,y:line.height,from:leg.from,to:leg.to,direction:leg.direction,dwelling,alighting,cycleSeconds:schedule.cycle};
+}
+export function trainStates(line,seconds){return[physicalTrain(line,seconds,0),physicalTrain(line,seconds,1)];}
+export function trainById(line,seconds,id){const slot=id===`${line.id}-A`?0:id===`${line.id}-B`?1:-1;return slot<0?null:physicalTrain(line,seconds,slot);}
+export function trainState(line,seconds,direction=1){return trainStates(line,seconds).find(t=>t.direction===(direction<0?-1:1));}
+/** Analytic periodic-window query: catches a station visit skipped by a coarse background tick. */
+export function metroServiceBetween(line,fromSeconds,toSeconds,query){
+ if(!Number.isFinite(fromSeconds)||!Number.isFinite(toSeconds)||toSeconds<fromSeconds)return null;
+ const s=metroSchedule(line);let best=null;
+ for(const slot of [0,1]){const id=`${line.id}-${slot===0?'A':'B'}`;if(query.trainId&&query.trainId!==id)continue;const offset=s.offset+(slot?s.half:0);
+  for(const leg of s.legs){if(leg.from!==query.stationIndex||query.direction&&leg.direction!==query.direction)continue;
+   const windows=query.alighting&&leg.terminal?[[0,3,-leg.direction],[4,leg.dwell,leg.direction]]:[[query.alighting?0:leg.terminal?4:0,leg.dwell,leg.direction]];
+   for(const [lo,hi,platformDirection]of windows){let cycle=Math.floor((fromSeconds+offset-leg.start-lo)/s.cycle),start=cycle*s.cycle+leg.start+lo-offset,end=cycle*s.cycle+leg.start+hi-offset;if(end<=fromSeconds){start+=s.cycle;end+=s.cycle;}
+    const at=Math.max(start,fromSeconds+1e-7);if(at>=end||at>toSeconds)continue;if(!best||at<best.at)best={...physicalTrain(line,at,slot),at,platformDirection};
+   }
+  }
+ }return best;
+}
+// Freeze access choices against the immutable initial city, independent of snapshot/load order.
+for(const line of METRO_LINES)for(let i=0;i<line.points.length;i++)for(const direction of [1,-1])metroStationGeometry(line,i,direction);
 
 // Marked parallel bays stay inside the curb, clear of intersections, bridges and stations.
 export const PARKING_SPACES=[];

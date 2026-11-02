@@ -44,3 +44,15 @@ test('metro sidewalk stairs can actually be climbed on foot without flight',asyn
  const length=Math.hypot(b.x-a.x,b.z-a.z),yaw=Math.atan2(b.x-a.x,b.z-a.z);run(p,(length-.4)/4.4,{forward:1,yaw});
  assert.equal(p.flying,false);assert.ok(p.feet>b.y-.9-.6,`did not climb: ${p.feet}`);assert.ok(Math.hypot(p.x-b.x,p.z-b.z)<1);
 });
+
+test('both directional metro platforms support the player, including the opposite service',async()=>{
+ const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs');
+ for(const direction of [1,-1]){const geo=metroStationGeometry(METRO_LINES[0],0,direction),p=new PlayerController();p.teleport(geo.platform.x,geo.platform.y-.9+PLAYER_EYE+.15,geo.platform.z);run(p,.6);assert.equal(p.flying,false);assert.equal(p.grounded,true);assert.ok(Math.abs(p.feet-(geo.platform.y-.9))<.015,`unsupported platform ${direction}: ${p.feet}`);}
+});
+
+test('the crossover lift carries a walking player to the opposite-track concourse without flight',async()=>{
+ const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs');const line=METRO_LINES[0],base=metroStationGeometry(line,0),geo=metroStationGeometry(line,0,-base.baseDirection),points=geo.crossover;
+ const index=points.findIndex((b,i)=>i>0&&Math.hypot(b.x-points[i-1].x,b.z-points[i-1].z)<.01&&b.y>points[i-1].y+.1);assert.ok(index>0);const a=points[index-1],b=points[index],p=new PlayerController();
+ p.teleport(a.x,a.y-.9+PLAYER_EYE,a.z);run(p,.1);run(p,(b.y-a.y)/3.2,{forward:1,yaw:Math.PI/2});
+ assert.equal(p.flying,false);assert.ok(Math.abs(p.feet-(b.y-.9))<.08,`lift feet=${p.feet}, target=${b.y-.9}`);
+});

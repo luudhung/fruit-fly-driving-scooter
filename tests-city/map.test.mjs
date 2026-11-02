@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,blocked} from '../worker/city-map.mjs';
+import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
 test('all building footprints clear roads, water, park and each other',()=>{
  for(let i=0;i<BUILDINGS.length;i++){
   const b=BUILDINGS[i];
@@ -18,7 +18,7 @@ test('routes reach real entrances without crossing solids or water',()=>{
  }
 });
 test('every metro station receives a train with a usable dwell',()=>{
- for(const line of METRO_LINES){const seen=new Set();for(let s=0;s<240;s++){const t=trainState(line,s);if(t.dwelling)seen.add(t.from);}assert.equal(seen.size,line.points.length);}
+ for(const line of METRO_LINES){const seen=new Set();for(let s=0;s<800;s++)for(const t of trainStates(line,s)){if(t.dwelling||t.alighting)seen.add(t.from);}assert.equal(seen.size,line.points.length);}
 });
 test('large park is free of streets, buildings and elevated metro; wheel queue is reachable',async()=>{
  const {LOCATIONS,PARK_PATHS}=await import('../worker/city-map.mjs');

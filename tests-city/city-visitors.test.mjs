@@ -76,7 +76,7 @@ test('taxi work never steals a committed firefighter, athlete or helicopter owne
 
 test('resident taxi commitments continue need and finance processing while preserving exclusive movement',()=>{
  const h=setup();let care=0,finance=0;const system=createCityVisitors({world:()=>h.state,needsAndActivities:f=>{f.hunger++;care++;},payAndFinance:()=>finance++});system.init();
- const driver=person('DRIVER');driver.cityService='TAXI-1';const hunger=driver.hunger;
+ const driver=person('DRIVER');driver.cityService='TAXI-1';h.state.flies.push(driver);h.state.cityVisitors.taxiJobs.push({id:'TAXI-1',driverId:driver.id,passengerId:'RIDING-PASSENGER',phase:'pickup'});const hunger=driver.hunger;
  assert.equal(system.handleResident(driver,{hour:12}),true);assert.equal(driver.hunger,hunger+1);assert.equal(care,1);assert.equal(finance,1);
  driver.kind='visitor';system.handleResident(driver,{hour:12});assert.equal(care,1,'visitor needs are handled by the finite visitor lifecycle');
 });
@@ -121,4 +121,21 @@ test('a real camera purchase transfers funds once and requires an outdoor living
 test('Marina Bay hotel joins existing saves and charges its real nightly rate',()=>{
  const h=setup();assert.equal(h.state.cityVisitors.hotels['marina-bay'].capacity,24);delete h.state.cityVisitors.hotels['marina-bay'];h.system.init();assert.equal(h.state.cityVisitors.hotels['marina-bay'].pricePerNight,28);
  const p=person('MARINA-GUEST'),cash=p.money;assert.ok(h.system.reserveRoom(p,'marina-bay',2));assert.equal(p.money,cash-56);assert.equal(h.state.businesses['marina-bay'].cash,56);
+});
+
+test('orphan taxi service flags release a resident back to ordinary life instead of owning every tick forever',()=>{
+ const h=setup(),f=person('ORPHAN');h.state.flies.push(f);Object.assign(f,{cityService:'TAXI-OLD',taxiJobId:'TAXI-OLD',taxiPassenger:true,traveling:false,action:'riding in a taxi'});
+ assert.equal(h.system.handleResident(f,{hour:12}),false);assert.equal(f.cityService,null);assert.equal(f.taxiJobId,null);assert.equal(f.taxiPassenger,false);assert.equal(f.actionUntil,0);
+});
+
+test('taxi cancellation yields to a real emergency commitment without erasing its route or moving the patient',()=>{
+ for(const role of ['driver','passenger']){
+  const h=setup(),d=person('DRIVER'),p=person('PASSENGER',-180,-378);d.vehicle='compact car';d.parkedCar=parkingPoint(d);d.x=d.parkedCar.x;d.z=d.parkedCar.z;h.state.flies.push(d,p);const before=money(h.state),job=h.system.requestTaxi(p,'hotel');assert.ok(job);
+  const affected=role==='driver'?d:p,route=[{x:0,z:40,mode:'walk'}];affected[role==='driver'?'fireEngineDuty':'ambulanceDuty']={id:'URGENT'};affected.action='responding to emergency';affected.routeWaypoints=route;affected.targetLocationId='hospital-central';affected.traveling=true;const pos={x:affected.x,z:affected.z};h.step(120);
+  assert.equal(job.phase,'cancelled');assert.equal(affected.action,'responding to emergency');assert.equal(affected.routeWaypoints,route);assert.equal(affected.targetLocationId,'hospital-central');assert.equal(affected.x,pos.x);assert.equal(affected.z,pos.z);assert.ok(Math.abs(money(h.state)-before)<1e-6);
+ }
+});
+
+test('a pre-restore taxi reference cannot settle the same fare twice against restored escrow',()=>{
+ const h=setup(),d=person('DRIVER'),p=person('PASSENGER');d.vehicle='compact car';d.parkedCar=parkingPoint(d);d.x=d.parkedCar.x;d.z=d.parkedCar.z;h.state.flies.push(d,p);const before=money(h.state),job=h.system.requestTaxi(p,'hotel');assert.ok(job);h.restore();h.system.finishTaxi(job,true,'restored cancellation');assert.equal(h.state.cityVisitors.taxiJobs.find(j=>j.id===job.id).phase,'cancelled');const once=money(h.state);h.system.finishTaxi(job,true,'duplicate stale callback');assert.equal(money(h.state),once);assert.equal(h.state.cityVisitors.taxiCancelled,1);assert.ok(Math.abs(once-before)<1e-6);
 });

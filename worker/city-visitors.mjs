@@ -133,9 +133,10 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   }
   if(f.routeIndex>=f.routeWaypoints.length){f.traveling=false;f.vx=f.vz=0;f.routeWaypoints=[];f.routeIndex=0;return true;}return false;
  }
+ function divertedTaxiActor(f){return Boolean(f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||f.arrestedUntil>now());}
  function finishTaxi(job,cancel=false,reason=''){
-  if(['complete','cancelled'].includes(job.phase))return;
-  const s=data(),driver=actor(job.driverId),passenger=actor(job.passengerId),escrow=business('city-taxi-escrow');
+  const s=data();job=job&&s.taxiJobs.find(current=>current.id===job.id);if(!job||['complete','cancelled'].includes(job.phase))return;
+  const driver=actor(job.driverId),passenger=actor(job.passengerId),escrow=business('city-taxi-escrow');
   if(!job.paid){
    escrow.cash-=job.fare;
    if(cancel&&passenger)passenger.money=Number(passenger.money||0)+job.fare;
@@ -144,12 +145,18 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
    job.paid=true;
    if(!cancel){s.taxiRevenue+=job.fare;raw().totalTransactions=Number(raw().totalTransactions||0)+1;}
   }
-  if(driver){driver.cityService=null;driver.taxiDriver=false;driver.traveling=false;driver.routeWaypoints=[];driver.action='finished a taxi job';driver.actionUntil=now()+1200;driver.parkedCar=job.phase==='riding'?job.drop:(parkingPoint(driver)||driver.parkedCar);}
+  if(driver){
+   if(driver.cityService===job.id)driver.cityService=null;driver.taxiDriver=false;
+   if(driver.alive&&!divertedTaxiActor(driver)){driver.traveling=false;driver.routeWaypoints=[];driver.action='finished a taxi job';driver.actionUntil=now()+1200;driver.carPosition=null;driver.parkedCar=job.phase==='riding'?job.drop:(parkingPoint(driver)||driver.parkedCar);}
+  }
   if(passenger){
-   passenger.cityService=null;passenger.taxiJobId=null;passenger.taxiPassenger=false;passenger.traveling=false;passenger.routeWaypoints=[];passenger.transitMode='walk';passenger.indoors=false;
-   // On cancellation the passenger stays at the actual current curb, then walks onward.
-   startWalk(passenger,job.destinationId,cancel?'continuing after a cancelled taxi':'walking from taxi drop-off');
-   if(passenger.kind==='visitor')passenger.visitorTransitDestination=job.destinationId;
+   if(passenger.cityService===job.id)passenger.cityService=null;if(passenger.taxiJobId===job.id)passenger.taxiJobId=null;passenger.taxiPassenger=false;
+   if(passenger.alive&&!divertedTaxiActor(passenger)){
+    passenger.traveling=false;passenger.routeWaypoints=[];passenger.transitMode='walk';passenger.indoors=false;
+    // Continue from the actual curb; a rescue/evacuation owns its own route and position.
+    startWalk(passenger,job.destinationId,cancel?'continuing after a cancelled taxi':'walking from taxi drop-off');
+    if(passenger.kind==='visitor')passenger.visitorTransitDestination=job.destinationId;
+   }
   }
   job.phase=cancel?'cancelled':'complete';job.completedAt=now();
   if(cancel)s.taxiCancelled++;else s.taxiCompleted++;
@@ -160,7 +167,7 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   const index=createVehicleIndex(residents());
   for(const j of active){
    const d=actor(j.driverId),p=actor(j.passengerId);
-   if(!d||!p||!d.alive||!p.alive||now()>j.deadline){finishTaxi(j,true,!d?'driver unavailable':!p?'passenger unavailable':'pickup or trip timed out');continue;}
+   if(!d||!p||!d.alive||!p.alive||divertedTaxiActor(d)||divertedTaxiActor(p)||now()>j.deadline){finishTaxi(j,true,!d?'driver unavailable':!p?'passenger unavailable':'pickup or trip timed out');continue;}
    d.cityService=p.cityService=j.id;
    if(j.phase==='pickup'){
     localMotion(d,dt,index);localMotion(p,dt);if(!d.traveling&&dist(d,j.pickup)<1.5)d.parkedCar={...j.pickup};
@@ -281,7 +288,10 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   s.lastCommunityEvent={...e,attendees:e.attendees.slice()};club.event=null;club.completed++;
  }
  function handleResident(f,clock){
-  if(f.cityService&&String(f.cityService).startsWith('TAXI-')){if(f.kind!=='visitor'){needsAndActivities?.(f,clock);payAndFinance?.(f,clock);}return true;}
+  if(f.cityService&&String(f.cityService).startsWith('TAXI-')){
+   const id=f.cityService,job=data().taxiJobs.find(j=>j.id===id&&!['complete','cancelled'].includes(j.phase)&&(j.driverId===f.id||j.passengerId===f.id));
+   if(!job){f.cityService=null;if(f.taxiJobId===id)f.taxiJobId=null;f.taxiPassenger=false;f.taxiDriver=false;if(!divertedTaxiActor(f)){f.traveling=false;f.routeWaypoints=[];f.action='orphan taxi commitment released';f.actionUntil=0;}return false;}
+   if(f.kind!=='visitor'){needsAndActivities?.(f,clock);payAndFinance?.(f,clock);}return true;}
   if(!f.alive||f.kind==='visitor'||f.traveling)return false;
   if(f.action==='calling a city taxi'){
    if(!f.requestedTaxiDestination){const destinations=scenery.filter(id=>location(id)&&dist(f,location(id))>140);f.requestedTaxiDestination=destinations[Math.floor(random(f)*destinations.length)];}

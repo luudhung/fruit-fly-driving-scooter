@@ -51,3 +51,14 @@ test('property damage requires a physically gathered violent group and ignites a
  const i=h.c.startAssembly(h.s.flies[0]);for(const f of h.s.flies.slice(1))assert.ok(h.c.join(f,i));i.tension=99;h.step(1900);assert.equal(i.phase,'unrest');assert.equal(h.fires.length,1);assert.equal(h.s.civicConflict.propertyIncidents,1);assert.ok(h.fires[0].reason.includes('civic unrest'));
  for(let n=0;n<4;n++)h.step(600);assert.equal(h.fires.length,1);h.restore();h.step(600);assert.equal(h.fires.length,1);
 });
+
+test('an assembly participant keeps its owned train journey, then attends and leaves after the finite assembly',()=>{
+ const h=setup(),f=h.state?.flies?.[0]||h.s.flies[0],i=h.c.startAssembly(f);assert.ok(i);Object.assign(f,{onTrain:true,traveling:true,targetLocationId:i.locationId});const duty=f.civicDuty;
+ assert.equal(h.c.handleResident(f,{hour:12}),true);assert.equal(f.civicDuty,duty,'the train belongs to the assembly journey');f.onTrain=false;h.step(120);h.step(15000);assert.equal(h.s.civicConflict.active.length,0);assert.equal(f.civicDuty,null);
+});
+
+test('an interrupted assembly never erases a new emergency route, including after checkpoint init',()=>{
+ const h=setup(),f=h.s.flies[0],i=h.c.startAssembly(f);assert.ok(i);const route=[{x:0,z:40,mode:'walk'}];Object.assign(f,{emergencyTask:{id:'RESCUE'},action:'responding to an emergency',routeWaypoints:route,targetLocationId:'hospital-central',traveling:true});
+ h.step(120,false);assert.equal(f.civicDuty,null);assert.equal(f.routeWaypoints,route);assert.equal(f.traveling,true);assert.equal(f.action,'responding to an emergency');
+ f.civicDuty={incidentId:'EXPIRED-ASSEMBLY',role:'member'};h.restore();const restored=h.s.flies.find(p=>p.id===f.id);assert.equal(restored.civicDuty,null);assert.deepEqual(restored.routeWaypoints,route);assert.equal(restored.traveling,true);
+});

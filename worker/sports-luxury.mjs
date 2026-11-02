@@ -44,7 +44,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  const get=()=>world().sportsLuxury||init();
  const alive=id=>world().flies.find(f=>f.id===id&&f.alive);
  const account=()=>world().businesses['sports-aviation'];
- const busy=f=>f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
+ const busy=f=>f.socialTask||f.urbanFloodEscape||f.emergencyTask||f.arrested||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
  function transfer(f,cost,to=account()){
   if(!Number.isFinite(cost)||cost<0||money(f)+1e-7<cost)return false;
   const cash=Math.min(Math.max(0,Number(f.money)||0),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings)||0)-(cost-cash);to.cash=Number(to.cash||0)+cost;
@@ -71,7 +71,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    d.familyParkingVersion=1;
   }
   relocateLegacyParking(d);
-  for(const h of d.helicopters){const f=alive(h.ownerId);if(f)f.privateHelicopterId=h.id;}
+  for(const h of d.helicopters){const f=alive(h.ownerId);if(f)f.privateHelicopterId=h.id;for(const p of [h.flight?.from,h.flight?.to])if(p)ensurePrivateAccess(p);}
   return d;
  }
  function ensurePrivateAccess(pad){
@@ -125,12 +125,36 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    if(alive(h.ownerId))continue;const formerId=h.ownerId||h.estateOwnerId,former=world().flies.find(f=>f.id===formerId),candidates=[...(former?.children||[]),former?.partnerId].map(id=>alive(id)).filter(f=>f&&f.ageYears>=18&&!d.helicopters.some(o=>o.ownerId===f.id));
    const heir=candidates[0];if(heir){const before=formerId;h.ownerId=heir.id;delete h.estateOwnerId;h.nextTripAt=now+7200;heir.privateHelicopterId=h.id;remember?.(heir,'helicopter_inheritance',{from:before,helicopterId:h.id});emit?.('inheritance',`${heir.id} inherited ${h.id}.`,{flyId:heir.id,helicopterId:h.id,from:before});}
    else if(h.ownerId){h.estateOwnerId=h.ownerId;h.ownerId=null;h.nextTripAt=Infinity;emit?.('estate',`${h.id} remains in its owner's estate pending an eligible heir.`,{helicopterId:h.id});}
-   if(h.flight&&now>=h.flight.arrival){h.padId=h.flight.to.id;h.flight=null;}
   }
  }
+ function settleUnattendedFlight(h,now){
+  const flight=h.flight;if(!flight)return;const owner=alive(flight.ownerId||h.ownerId),task=owner?.privateFlight;
+  if(owner&&task?.id===flight.id&&task.helicopterId===h.id){
+   if(!['boarding','flying','disembarking'].includes(task.phase)){task.phase=now<flight.departure?'boarding':now<flight.arrival?'flying':'disembarking';task.until=task.phase==='disembarking'?flight.arrival+300+Math.max(120,flight.to.y*5):flight.departure;}
+   return;
+  }
+  if(owner?.onPrivateHelicopter&&!task){owner.privateFlight={id:flight.id,helicopterId:h.id,phase:now<flight.arrival?'flying':'disembarking',lastAt:now,until:flight.arrival+300+Math.max(120,flight.to.y*5)};return;}
+  // Inheritance must not strand a flight owned by the former, now deceased owner.
+  if(!flight.paid){h.flight=null;h.nextTripAt=now+7200;return;}
+  if(now<flight.arrival)return;
+  if(!padAvailable(flight.to.id,h.id)){
+   const safe=pads.filter(p=>padAvailable(p.id,h.id)).sort((a,b)=>Number(b.locationId==='airport')-Number(a.locationId==='airport'))[0];if(!safe)return;
+   const pose=privateHelicopterPose(now,flight);flight.from={...flight.from,x:pose.x,y:pose.y-2,z:pose.z};flight.to={...safe};ensurePrivateAccess(safe);flight.departure=now;flight.arrival=now+1200;return;
+  }
+  const former=world().flies.find(f=>f.id===(flight.ownerId||h.ownerId)),alreadyLanded=flight.landedAt!=null||former?.privateFlight?.id===flight.id&&former.privateFlight.phase==='disembarking';
+  h.padId=flight.to.id;h.flight=null;h.nextTripAt=now+7200;if(!alreadyLanded){h.trips++;get().privateFlights++;}
+  emit?.('private_flight_recovered',`${h.id} completed its previously committed landing after its owner became unavailable.`,{helicopterId:h.id,flightId:flight.id,padId:h.padId});
+ }
+ function cancelSports(f,reason){
+  const session=f.sportsSession;if(!session)return;const m=get().match;if(m?.id===session.id){m.players=m.players.filter(id=>id!==f.id);m.spectators=m.spectators.filter(id=>id!==f.id);}
+  f.sportsSession=null;if(!busy(f)){f.action=`sports session interrupted: ${reason}`;f.actionUntil=world().simulationAgeSeconds;}
+  remember?.(f,'sports_interrupted',{activity:session.kind,reason});
+ }
+ function interruptedSports(f){return !f.alive||busy(f)||f.traveling||f.currentLocationId!==(f.sportsSession?.kind==='tennis'?'tennis':'stadium')||f.health<30||f.energy<15||f.hunger>90;}
  function tick(gameSeconds,clock){
   const d=get(),s=world(),now=s.simulationAgeSeconds;bindFamilyHomes(d);relocateLegacyParking(d);maintenance(d,Math.floor(now/86400));inherit(d,now);
-  for(const h of d.helicopters)if(!alive(h.ownerId)&&h.flight&&now>=h.flight.arrival){h.padId=h.flight.to.id;h.flight=null;}
+  for(const h of d.helicopters)settleUnattendedFlight(h,now);
+  for(const f of s.flies)if(f.sportsSession&&interruptedSports(f))cancelSports(f,'resident or venue unavailable');
   if(!d.match&&now>=d.nextMatchAt){d.nextMatchAt=nextAt(now);d.match={id:`MATCH-${Math.floor(now/86400)}`,startsAt:now+1800,endsAt:now+1800+SPORTS_RULES.matchSeconds,players:[],spectators:[],score:[0,0],lastGoalAt:now+2400,settled:false};emit?.('sports_fixture','Riverside Stadium opened registration for today’s city match.',{matchId:d.match.id,startsAt:d.match.startsAt});}
   const m=d.match;if(m){
    if(now>=m.startsAt&&now<m.endsAt&&now>=m.lastGoalAt){m.lastGoalAt=now+1200;const players=m.players.map(id=>alive(id)).filter(f=>f?.sportsSession?.id===m.id&&f.currentLocationId==='stadium'&&!f.traveling);if(players.length>=2){const side=m.score[0]<=m.score[1]?0:1;m.score[side]++;d.goals++;}}
@@ -175,6 +199,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   const from=padById.get(h.padId);if(!from||!padAvailable(from.id,h.id)||f.currentLocationId!==from.locationId)return false;
   const dests=pads.filter(p=>p.rooftop&&p.id!==from.id&&p.locationId!==from.locationId&&padAvailable(p.id,h.id));
   const to=destinationPadId?dests.find(p=>p.id===destinationPadId):(dests.find(p=>p.id===h.homePadId)||dests[Math.floor(rng(f)*dests.length)%dests.length]);if(!to)return false;
+  ensurePrivateAccess(from);ensurePrivateAccess(to);
   const travelDistance=Math.hypot(to.x-from.x,to.z-from.z),fuel=8+travelDistance*.018,cost=(12+fuel*.9)*clamp(world().centralBank?.priceLevel||1,.5,10);
   if(money(f)<cost+120)return false;
   // Reserve the landing pad before taking any payment; it remains exclusive until landing.
@@ -209,15 +234,15 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
     const alternatives=pads.filter(p=>padAvailable(p.id,h.id)).sort((a,b)=>Number(b.locationId==='airport')-Number(a.locationId==='airport'));
     if(!alternatives.length){flight.arrival=Math.max(flight.arrival,now+600);f.action='holding above the city · waiting for a safe landing pad';return true;}
     const current=privateHelicopterPose(now,flight),old=flight.to.id;
-    flight.from={id:`AIRBORNE-${flight.id}`,name:'diversion position',locationId:'airport',x:current.x,y:current.y-2,z:current.z,access:{x:current.x,z:current.z},rooftop:false};flight.to={...alternatives[0]};flight.departure=now;flight.arrival=now+1200;
+    flight.from={id:`AIRBORNE-${flight.id}`,name:'diversion position',locationId:'airport',x:current.x,y:current.y-2,z:current.z,access:{x:current.x,z:current.z},rooftop:false};flight.to={...alternatives[0]};ensurePrivateAccess(flight.to);flight.departure=now;flight.arrival=now+1200;
     d.diversions=Number(d.diversions||0)+1;emit?.('private_diversion',`${f.id}'s helicopter diverted to ${flight.to.name} because its original landing pad became unsafe.`,{flyId:f.id,flightId:flight.id,fromPad:old,toPad:flight.to.id});
    }
    const p=privateHelicopterPose(now,flight);Object.assign(f,{x:p.x,y:p.y,z:p.z,vx:0,vz:0,traveling:false,transitMode:'private-helicopter',onPrivateHelicopter:true});f.action='flying in a personally owned helicopter';
    if(now<flight.arrival)return true;
-   t.phase='disembarking';t.until=flight.arrival+300+Math.max(120,flight.to.y*5);h.padId=flight.to.id;h.trips++;d.privateFlights++;f.onPrivateHelicopter=false;remember?.(f,'private_helicopter_trip',{flightId:flight.id,from:flight.from.id,to:flight.to.id,cost:flight.cost});
+   t.phase='disembarking';t.until=flight.arrival+300+Math.max(120,flight.to.y*5);h.padId=flight.to.id;if(flight.landedAt==null){h.trips++;d.privateFlights++;flight.landedAt=now;}f.onPrivateHelicopter=false;remember?.(f,'private_helicopter_trip',{flightId:flight.id,from:flight.from.id,to:flight.to.id,cost:flight.cost});
   }
   if(t.phase==='disembarking'){
-   const to=flight.to,u=clamp((now-flight.arrival)/Math.max(1,t.until-flight.arrival),0,1),ground=entrance(locate(to.locationId));if(to.rooftop){f.x=to.x;f.z=to.z;f.y=to.y+(1.1-to.y)*u;}else{const p=walkPose([...airportAccess(to)].reverse(),u);f.x=p.x;f.z=p.z;f.y=1.1;}f.indoors=to.rooftop;f.action=to.rooftop?'leaving the rooftop by elevator':'walking from the private aviation bay';
+   const to=flight.to,u=clamp((now-flight.arrival)/Math.max(1,t.until-flight.arrival),0,1),ground=entrance(locate(to.locationId)||{x:to.x,z:to.z});if(to.rooftop){f.x=to.x;f.z=to.z;f.y=to.y+(1.1-to.y)*u;}else{const p=walkPose([...airportAccess(to)].reverse(),u);f.x=p.x;f.z=p.z;f.y=1.1;}f.indoors=to.rooftop;f.action=to.rooftop?'leaving the rooftop by elevator':'walking from the private aviation bay';
    if(now<t.until)return true;
    h.flight=null;h.nextTripAt=now+10800+rng(f)*18000;f.privateFlight=null;f.onPrivateHelicopter=false;f.x=ground.x;f.z=ground.z;f.y=1.1;f.currentLocationId=to.locationId;f.targetLocationId=to.locationId;f.transitMode='walk';f.traveling=false;f.indoors=false;f.action='arrived by private helicopter';f.actionUntil=now+1800;f.energy=clamp(f.energy-4);f.happiness=clamp(f.happiness+4);f.targetX=f.x;f.targetZ=f.z;
    emit?.('private_arrival',`${f.id} landed at ${to.name} and completed the ground transfer.`,{flyId:f.id,helicopterId:h.id,flightId:flight.id,padId:to.id});return true;
@@ -226,7 +251,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function handleResident(f,clock){
   if(!f.alive)return false;if(f.privateFlight)return handlePrivate(f,clock);
-  if(f.sportsSession){care(f,clock);if(world().simulationAgeSeconds>=f.sportsSession.until)finishSports(f,world().simulationAgeSeconds);return true;}
+  if(f.sportsSession){if(interruptedSports(f)){cancelSports(f,'resident or venue unavailable');return false;}care(f,clock);if(world().simulationAgeSeconds>=f.sportsSession.until)finishSports(f,world().simulationAgeSeconds);return true;}
   if(f.traveling||busy(f))return false;
   if(f.currentLocationId==='tennis'&&f.action==='playing tennis'){if(beginSports(f,'tennis','player'))return true;f.action='tennis courts full · waiting';f.actionUntil=world().simulationAgeSeconds+1200;return false;}
   if(f.currentLocationId==='stadium'&&['playing a stadium match','watching a stadium match'].includes(f.action)){if(beginSports(f,'stadium',f.action.startsWith('playing')?'player':'spectator'))return true;f.action='stadium registration closed';f.actionUntil=world().simulationAgeSeconds+1200;return false;}
