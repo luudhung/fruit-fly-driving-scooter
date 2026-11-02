@@ -2539,6 +2539,7 @@ function moveFly(fly,waypointHops=0) {
     if (fly.routeWaypoints?.length && fly.routeIndex < fly.routeWaypoints.length - 1) {
       const currentWp=fly.routeWaypoints[fly.routeIndex];
       if(currentWp?.stage==="station-entry"){
+        fly.metroTrainDirection=currentWp.direction;
         if(!validBoardingPlatform(currentWp,fly.metroLineId)||Math.hypot(fly.x-currentWp.x,fly.z-currentWp.z,fly.y-currentWp.y)>.85){repairResidentMetroAccess(fly);return;}
         const line=METRO_LINES.find(l=>l.id===fly.metroLineId),seconds=state.simulationAgeSeconds/GAME_SECONDS_PER_REAL_SECOND,currentTrain=trainState(line,seconds,currentWp.direction);
         const t=currentTrain.active&&currentTrain.dwelling&&currentTrain.from===currentWp.stationIndex?currentTrain:metroServiceBetween(line,Number.isFinite(fly.metroPlatformCheckedAt)?fly.metroPlatformCheckedAt:seconds,seconds,{stationIndex:currentWp.stationIndex,direction:currentWp.direction});
@@ -3884,7 +3885,7 @@ function motionPlan(f){
 function observerFly(f,selectedId){
  if(f.id===selectedId)return {...compactFly(f),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
  record.motion=motionPlan(f);
