@@ -85,7 +85,8 @@ export class PlayerCar{
  speed=0;steering=0;pitch=0;active=false;
  private readonly world:CarWorld;
  constructor(world:CarWorld=cityWorld){this.world=world;}
- enter(){Object.assign(this,PLAYER_CAR_PARKING);this.speed=this.steering=this.pitch=0;this.active=true;}
+ // A fresh page constructs the car by the bridge; re-entry keeps its parked pose.
+ enter(){this.speed=this.steering=0;this.active=true;}
  stop(){this.speed=this.steering=0;this.active=false;}
  update(dt:number,input:CarInput){
   if(!this.active||!Number.isFinite(dt)||dt<=0)return;

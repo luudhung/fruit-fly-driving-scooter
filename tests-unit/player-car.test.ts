@@ -6,14 +6,23 @@ import {BRIDGES,ROADS,contains,blocked,roadTravelY,WORLD_HALF,BUILDINGS,effectiv
 const open:CarWorld={clear:()=>true,ground:()=>.2};
 function run(car:PlayerCar,seconds:number,input:CarInput){for(let i=0;i<Math.round(seconds*120);i++)car.update(1/120,input);}
 
-test('each entry anchors the car at a dry, legal main-city curb near the central bridge',()=>{
+test('a fresh page starts by the bridge, while re-entry keeps the parked location',()=>{
  const car=new PlayerCar();car.enter();
  assert.equal(cityCarClear(car.x,car.z,car.heading),true);
  assert.ok(car.x<BRIDGES[1].x-BRIDGES[1].w/2);
  assert.ok(BRIDGES[1].x-BRIDGES[1].w/2-car.x<12);
  assert.equal(car.heading,Math.PI/2);assert.equal(car.active,true);
  run(car,5,{throttle:1,steer:0});assert.ok(car.x>380);
- car.stop();car.enter();assert.equal(car.x,PLAYER_CAR_PARKING.x);assert.equal(car.z,PLAYER_CAR_PARKING.z);assert.equal(car.speed,0);
+ const parked={x:car.x,z:car.z,heading:car.heading,ground:car.ground,pitch:car.pitch};
+ car.stop();run(car,3,{throttle:1,steer:1});car.enter();
+ assert.deepEqual({x:car.x,z:car.z,heading:car.heading,ground:car.ground,pitch:car.pitch},parked);assert.equal(car.speed,0);
+ const reloaded=new PlayerCar();reloaded.enter();assert.equal(reloaded.x,PLAYER_CAR_PARKING.x);assert.equal(reloaded.z,PLAYER_CAR_PARKING.z);
+});
+test('exiting and re-entering on an underpass ramp preserves height, slope and direction',()=>{
+ const car=new PlayerCar(PLAYER_CAR_WORLD);car.enter();car.x=372;car.z=50;car.heading=Math.PI;
+ run(car,3,{throttle:1,steer:0});assert.ok(car.ground<-.5);assert.ok(Math.abs(car.pitch)>.05);
+ const parked={x:car.x,z:car.z,heading:car.heading,ground:car.ground,pitch:car.pitch};
+ car.stop();car.enter();assert.deepEqual({x:car.x,z:car.z,heading:car.heading,ground:car.ground,pitch:car.pitch},parked);
 });
 test('throttle accelerates smoothly, reverse first brakes forward movement, and the brake stops',()=>{
  const car=new PlayerCar(open);car.enter();run(car,1,{throttle:1,steer:0});
@@ -27,7 +36,7 @@ test('right steering turns right, reverse steering reverses, and turning while s
  const car=new PlayerCar(open);car.enter();const start=car.heading;
  run(car,.5,{throttle:0,steer:1});assert.equal(car.heading,start);
  run(car,1.5,{throttle:1,steer:1});assert.ok(car.heading<start);assert.ok(car.z>PLAYER_CAR_PARKING.z);
- car.enter();run(car,1.5,{throttle:-1,steer:1});assert.ok(car.heading>start);
+ const reverse=new PlayerCar(open);reverse.enter();run(reverse,1.5,{throttle:-1,steer:1});assert.ok(reverse.heading>start);
 });
 test('swept substeps stop at a thin obstacle without position or rotation tunneling',()=>{
  const wall=348,car=new PlayerCar({clear:x=>x+CAR_HALF_LENGTH<wall,ground:()=>.2});car.enter();
