@@ -92,6 +92,13 @@ export class PlayerCar{
   if(!this.active||!Number.isFinite(dt)||dt<=0)return;
   const duration=Math.min(.1,dt),steps=Math.ceil(duration/.008);
   for(let i=0;i<steps;i++)this.advance(duration/steps,input);
+  // Suspension is visual: sample it once per rendered frame, while collision and
+  // wheel height still use every swept substep. Exponential damping avoids a
+  // sudden seat/camera tilt at curb edges without changing physical clearance.
+  const sin=Math.sin(this.heading),cos=Math.cos(this.heading);
+  const ahead=this.world.ground(this.x+sin*.7,this.z+cos*.7,this.ground),behind=this.world.ground(this.x-sin*.7,this.z-cos*.7,this.ground);
+  const pitch=ahead===null||behind===null?0:Math.atan2(ahead-behind,1.4);
+  this.pitch+=(pitch-this.pitch)*-Math.expm1(-12*duration);
  }
  private advance(dt:number,input:CarInput){
   const throttle=Math.max(-1,Math.min(1,input.throttle||0)),steer=Math.max(-1,Math.min(1,input.steer||0));
@@ -107,14 +114,17 @@ export class PlayerCar{
    // Keep the free component of motion at contact; a rejected turn must not lock reverse escape.
    const travel=Math.abs(this.speed*dt),dx=Math.sin(this.heading)*this.speed*dt,dz=Math.cos(this.heading)*this.speed*dt;
    const candidates=[{x:this.x+dx,z:this.z+dz},{x:this.x+dx,z:this.z},{x:this.x,z:this.z+dz}];
-   const free=candidates.find(p=>Math.hypot(p.x-this.x,p.z-this.z)>1e-7&&this.world.ground(p.x,p.z,this.ground)!==null&&this.world.clear(p.x,p.z,this.heading,this.world.ground(p.x,p.z,this.ground)!));
+   let free:{x:number;z:number;ground:number}|undefined;
+   for(const p of candidates){
+    if(Math.hypot(p.x-this.x,p.z-this.z)<=1e-7)continue;
+    const candidateGround=this.world.ground(p.x,p.z,this.ground);
+    if(candidateGround!==null&&this.world.clear(p.x,p.z,this.heading,candidateGround)){free={...p,ground:candidateGround};break;}
+   }
    if(!free){this.speed=0;return;}
    this.speed*=Math.min(1,Math.hypot(free.x-this.x,free.z-this.z)/Math.max(1e-7,travel));
-   x=free.x;z=free.z;heading=this.heading;ground=this.world.ground(x,z,this.ground)!;
+   x=free.x;z=free.z;heading=this.heading;ground=free.ground;
   }
   this.heading=heading;this.x=x;this.z=z;this.ground=ground;
-  const ahead=this.world.ground(x+Math.sin(heading)*.7,z+Math.cos(heading)*.7,ground),behind=this.world.ground(x-Math.sin(heading)*.7,z-Math.cos(heading)*.7,ground);
-  this.pitch=ahead===null||behind===null?0:Math.atan2(ahead-behind,1.4);
  }
  driverPosition(){
   const side=.38,forward=-.30*Math.cos(this.pitch)-1.45*Math.sin(this.pitch);

@@ -49,6 +49,38 @@ test('the first-person seat remains inside the car and follows heading rather th
  assert.ok(Math.hypot(a.x-car.x,a.z-car.z)<.5);assert.ok(Math.abs(a.y-car.ground-1.45)<.001);
  car.heading+=Math.PI;const b=car.driverPosition();assert.ok(Math.abs(a.x+b.x-2*car.x)<.001);assert.ok(Math.abs(a.z+b.z-2*car.z)<.001);
 });
+test('one second of driving agrees at 30, 60 and 120 frames per second, including curbs, ramps and poles',()=>{
+ const scenarios=[
+  {world:open,x:342,z:3.25,heading:Math.PI/2,ground:.2,steer:.6},
+  {world:PLAYER_CAR_WORLD,x:342,z:3.25,heading:0,ground:.2,steer:0},
+  {world:PLAYER_CAR_WORLD,x:372,z:40,heading:Math.PI,ground:.2-6.2*2/32,steer:0},
+  {world:PLAYER_CAR_WORLD,x:346,z:7.35,heading:Math.PI/2,ground:.3,steer:0},
+ ];
+ for(const scenario of scenarios){
+  const cars=[30,60,120].map(fps=>{
+   const car=new PlayerCar(scenario.world);car.enter();Object.assign(car,{x:scenario.x,z:scenario.z,heading:scenario.heading,ground:scenario.ground});
+   for(let i=0;i<fps;i++)car.update(1/fps,{throttle:1,steer:scenario.steer});
+   return car;
+  });
+  const reference=cars[2];
+  for(const car of cars.slice(0,2)){
+   assert.ok(Math.hypot(car.x-reference.x,car.z-reference.z)<.03);
+   assert.ok(Math.abs(car.heading-reference.heading)<.003);
+   assert.ok(Math.abs(car.speed-reference.speed)<.03);
+   assert.ok(Math.abs(car.ground-reference.ground)<.01);
+   assert.ok(Math.abs(car.pitch-reference.pitch)<.006);
+  }
+ }
+});
+test('a curb eases the seat pitch while wheels immediately retain their physical height',()=>{
+ const car=new PlayerCar({clear:()=>true,ground:x=>x>342.4?.3:.2});car.enter();
+ car.update(1/60,{throttle:0,steer:0});
+ const target=Math.atan2(.1,1.4),initialPitch=car.pitch;
+ assert.equal(car.ground,.2);assert.ok(initialPitch>0&&initialPitch<target/3,'avoid an instant camera tilt at a curb');
+ for(let i=0;i<59;i++)car.update(1/60,{throttle:0,steer:0});
+ assert.ok(Math.abs(car.pitch-target)<.00001,'suspension settles to the measured slope');
+ const before=car.driverPosition();car.stop();car.enter();assert.deepEqual(car.driverPosition(),before,'re-entry retains suspension and eye height');
+});
 test('the car crosses the complete central bridge on its deck and never snaps into the underpasses',()=>{
  const car=new PlayerCar();car.enter();for(let i=0;i<13*120;i++){car.update(1/120,{throttle:1,steer:0});assert.ok(Math.abs(car.ground-.2)<.001);}
  assert.ok(car.x>505,`bridge not crossed: ${car.x}`);

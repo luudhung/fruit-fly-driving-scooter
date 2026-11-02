@@ -1,6 +1,7 @@
 import type {SocialTie,SocialProfile} from '../worker/resident-relationships.mjs';
 import {TrafficSignals} from './traffic-signals.ts';
 import {FrameStats} from './frame-stats.ts';
+import {IdleSnapshotCache} from './idle-snapshot-cache.ts';
 import {CityBoxBatches} from './city-box-batches.ts';
 import {RenderTimings} from './render-timings.ts';
 import {batchStaticBoxes} from './static-box-batches.ts';
@@ -413,6 +414,11 @@ window.addEventListener("unhandledrejection",(event)=>{
 
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
 const SNAPSHOT_CACHE_KEY = "fulllife:last-good-civilization-snapshot:v1";
+const recoveryCache=new IdleSnapshotCache<CivilizationSnapshot>({
+ write:value=>localStorage.setItem(SNAPSHOT_CACHE_KEY,JSON.stringify(value)),
+ canWrite:()=>!document.hidden&&!playerCar.active,
+ schedule:job=>{if(typeof requestIdleCallback==='function')requestIdleCallback(()=>job(),{timeout:1000});else window.setTimeout(job,0);},
+});
 const presentationClock=new CityClock();
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
@@ -443,7 +449,7 @@ function loadCachedSnapshot(): CivilizationSnapshot | null {
 
 function saveCachedSnapshot(value: CivilizationSnapshot) {
   if (!usableSnapshot(value)) return;
-  try { localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(value)); } catch {}
+  recoveryCache.offer(value);
 }
 
 const residentDirectory=createResidentDirectory(id=>focusResident(id,true));
@@ -820,7 +826,7 @@ const residentCamera=new ResidentCamera(renderer,scene,camera,(record,origin,pho
  cityWater.update(record.at/120,visualPalette.daylight,photoWeather.cloudCover,visualPalette.zenith,visualPalette.horizon,sunDirection(at),visualPalette.sunColor);
  return()=>{visualLighting=previousLighting;const hour=presentationClock.read(performance.now())%86400/3600;updateDayNight(Math.floor(hour),(hour%1)*60,previousWeather);citySky.update(renderedHour(hour),camera.position,previousWeather.cloudCover||0,Math.floor(presentationClock.read(performance.now())/86400));};
 });
-const photoAlbum=new ResidentPhotoAlbum(residentCamera.capture);
+const photoAlbum=new ResidentPhotoAlbum(residentCamera.capture,()=>!document.hidden&&!playerCar.active);
 document.getElementById('resident-photo-album')?.addEventListener('click',closeSettings);
 
 function updateSocietyBoard(s:CivilizationSnapshot){
