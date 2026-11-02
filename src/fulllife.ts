@@ -1460,13 +1460,15 @@ const player=new PlayerController();
 const playerCar=new PlayerCar(PLAYER_CAR_WORLD),playerCarVisual=new PlayerCarVisual(scene);
 playerCarVisual.sync(playerCar);
 const playerCarButton=document.getElementById("player-car-button") as HTMLButtonElement|null;
-const playerCarReadout=document.getElementById("player-car-readout");
 function syncCarButton(){
+ mobileInput.releaseAll();
  if(playerCarButton){playerCarButton.textContent=playerCar.active?"🚶 Rời xe":"🚗 Xe của tôi";playerCarButton.setAttribute("aria-pressed",String(playerCar.active));}
  document.body.classList.toggle("player-driving",playerCar.active);
  const jump=document.querySelector<HTMLButtonElement>('.mobile-control[data-key="Space"]'),down=document.querySelector<HTMLButtonElement>('.mobile-control[data-key="KeyQ"]');
  jump?.setAttribute("aria-label",playerCar.active?"Phanh xe":"Jump; double tap to toggle flying; hold to rise");
  down?.setAttribute("aria-label",playerCar.active?"Phanh xe":"Fly downward");
+ const labels:Record<string,[string,string]>={KeyW:['Đạp ga','Đi tới; chạm đúp để chạy nhanh'],KeyS:['Phanh và lùi','Đi lùi'],KeyA:['Rẽ trái','Đi sang trái'],KeyD:['Rẽ phải','Đi sang phải']};
+ for(const [key,names]of Object.entries(labels))document.querySelector<HTMLButtonElement>(`.mobile-control[data-key="${key}"]`)?.setAttribute('aria-label',names[playerCar.active?0:1]);
 }
 function leavePlayerCar(){
  const sidewalk=playerCar.exitPosition();
@@ -1586,7 +1588,7 @@ addEventListener("keydown", (e) => {
 addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();if(playerCar.active)playerCar.speed=0;dragging=false;document.querySelectorAll(".mobile-control.active").forEach(b=>b.classList.remove("active"));});
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
 addEventListener("keyup", (e) => {cameraSprint.up(e.code);if(e.code==="Space")player.jumpUp(e.timeStamp);if (movementKeys.has(e.code)) e.preventDefault();});
-bindTouchControls(document.querySelectorAll<HTMLButtonElement>(".mobile-control"),{
+const mobileInput=bindTouchControls(document.querySelectorAll<HTMLButtonElement>(".mobile-control"),{
  down(key,now){followSelected=false;cameraSprint.down(key,now);if(key==="Space"&&!playerCar.active)player.jumpDown(now);},
  up(key){cameraSprint.up(key);if(key==="Space")player.jumpUp(performance.now());},
 });
@@ -1617,7 +1619,6 @@ function updateFreeCamera(dt: number) {
     playerCar.update(dt,{throttle:forward,steer,brake:pressed.has("Space")||pressed.has("KeyQ")});
     cameraYaw+=playerCar.heading-heading;playerCarVisual.sync(playerCar);
     const seat=playerCar.driverPosition();freePosition.set(seat.x,seat.y,seat.z);
-    if(playerCarReadout){const speed=`${Math.round(Math.abs(playerCar.speed)*3.6)} km/h${playerCar.speed<-.1?" · R":""} · ▲/▼ ga, lùi · ◀/▶ lái · ↟ phanh · Kéo để nhìn`;if(playerCarReadout.textContent!==speed)playerCarReadout.textContent=speed;}
   } else if (followSelected && selectedFlyId) {
     const visual = flyVisuals.get(selectedFlyId);
     if (visual) {
