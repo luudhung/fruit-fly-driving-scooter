@@ -10,7 +10,7 @@ const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','r
 function busy(f,now=0){return f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
 
 /** Persisted finite visitors, physical taxi trips and compact scene records. No pixel rendering on server. */
-export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false}){
+export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false,isWorkCommitted=()=>false}){
  const raw=()=>world();
  const now=()=>Number(raw().simulationAgeSeconds||0);
  const level=()=>cap(Number(raw().centralBank?.priceLevel||1),.6,8);
@@ -86,7 +86,7 @@ export function createCityVisitors({world,random=()=>.5,emit=()=>{},remember=()=
   f.travelStartedAt=now();f.travelLastDistance=dist(f,{x:f.targetX,z:f.targetZ});f.travelStuckTicks=0;f.actionUntil=0;
  }
  function taxiCandidates(){
-  return residents().filter(f=>!busy(f,now())&&f.ageYears>=18&&f.ageYears<76&&String(f.vehicle||'').includes('car')&&f.energy>40&&f.hunger<80&&f.health>50&&!f.traveling&&!f.airTrip)
+  return residents().filter(f=>!busy(f,now())&&!isWorkCommitted(f)&&f.ageYears>=18&&f.ageYears<76&&String(f.vehicle||'').includes('car')&&f.energy>40&&f.hunger<80&&f.health>50&&!f.traveling&&!f.airTrip)
    .sort((a,b)=>(Number(a.traits?.thrift||0)-Number(b.traits?.thrift||0))||a.id.localeCompare(b.id)).slice(0,MAX_TAXIS);
  }
  function requestTaxi(passenger,destinationId){

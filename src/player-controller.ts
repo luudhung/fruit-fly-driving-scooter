@@ -37,7 +37,7 @@ function metroIndex<T>(entries:readonly T[],bounds:(entry:T)=>{x:number;z:number
  const index=new Map<string,T[]>();for(const entry of entries){const b=bounds(entry);for(let x=Math.floor((b.x-b.w/2-RADIUS)/cellSize);x<=Math.floor((b.x+b.w/2+RADIUS)/cellSize);x++)for(let z=Math.floor((b.z-b.d/2-RADIUS)/cellSize);z<=Math.floor((b.z+b.d/2+RADIUS)/cellSize);z++){const key=`${x},${z}`;if(!index.has(key))index.set(key,[]);index.get(key)!.push(entry);}}return index;
 }
 const metroSurfaceBins=metroIndex(metroSurfaces,s=>({x:(s.a.x+s.b.x)/2,z:(s.a.z+s.b.z)/2,w:Math.abs(s.a.x-s.b.x)+s.width*2,d:Math.abs(s.a.z-s.b.z)+s.width*2}));
-const metroPlatformBins=metroIndex(metroStations,g=>({x:g.platform.x,z:g.platform.z,w:g.axis==='x'?16:3.2,d:g.axis==='x'?3.2:16}));
+const metroPlatformBins=metroIndex(metroStations,g=>({x:g.platform.x,z:g.platform.z,w:g.axis==='x'?g.platformLength:3.2,d:g.axis==='x'?3.2:g.platformLength}));
 const metroLiftBins=metroIndex(metroLifts,s=>({x:s.a.x,z:s.a.z,w:1.6,d:1.6}));
 const metroCell=(x:number,z:number)=>`${Math.floor(x/cellSize)},${Math.floor(z/cellSize)}`;
 let rooftopPads:Array<{x:number;z:number;y:number;radius?:number}>=[];
@@ -54,7 +54,7 @@ function support(x:number,z:number,max:number){
  }
 
  for(const s of metroSurfaceBins.get(metroCell(x,z))||[])y=Math.max(y,surfaceY(x,z,s.a,s.b,s.width,max));
- for(const g of metroPlatformBins.get(metroCell(x,z))||[]){const top=g.platform.y-.9;if(top<=max+EPS&&Math.abs(x-g.platform.x)<(g.axis==='x'?8:1.6)&&Math.abs(z-g.platform.z)<(g.axis==='x'?1.6:8))y=Math.max(y,top);}
+ for(const g of metroPlatformBins.get(metroCell(x,z))||[]){const top=g.platform.y-.9;if(top<=max+EPS&&Math.abs(x-g.platform.x)<(g.axis==='x'?g.platformLength/2:1.6)&&Math.abs(z-g.platform.z)<(g.axis==='x'?1.6:g.platformLength/2))y=Math.max(y,top);}
  for(const pad of rooftopPads)if(pad.y<=max+EPS&&Math.hypot(x-pad.x,z-pad.z)<(pad.radius||6))y=Math.max(y,pad.y);
  for(const f of mansionFloors)if(f.y<=max+EPS&&Math.abs(x-f.x)<=f.w/2+RADIUS-EPS&&Math.abs(z-f.z)<=f.d/2+RADIUS-EPS)y=Math.max(y,f.y);
  for(const b of nearby(x,z)){const top=b.y+b.h/2;if(top<=max+EPS&&Math.abs(x-b.x)<=b.w/2+RADIUS-EPS&&Math.abs(z-b.z)<=b.d/2+RADIUS-EPS)y=Math.max(y,top);}
@@ -88,10 +88,12 @@ export class PlayerController{
  private advance(dt:number,input:PlayerInput){
   this.liftCooldown=Math.max(0,this.liftCooldown-dt);
   if(this.flying)this.metroLift=null;
-  if(!this.flying&&!this.metroLift&&!this.liftCooldown&&Math.abs(input.forward)+Math.abs(input.strafe)>.05){
+  if(!this.flying&&!this.metroLift&&!this.liftCooldown&&(input.ascend||input.descend)){
    const nearbyLifts=metroLiftBins.get(metroCell(this.x,this.z))||[];
    for(const lift of nearbyLifts){
-    if(Math.hypot(this.x-lift.a.x,this.z-lift.a.z)>.62)continue;
+    const distance=Math.hypot(this.x-lift.a.x,this.z-lift.a.z);if(distance>.62)continue;
+    // Lift doors share platform centers. Walking to or away from the platform
+    // must not silently start a trip; the existing up/down controls select it.
     const levels=[...new Set(nearbyLifts.filter(s=>Math.hypot(s.a.x-lift.a.x,s.a.z-lift.a.z)<.05).flatMap(s=>[s.a.y-.9,s.b.y-.9]))].sort((a,b)=>a-b);
     if(!levels.some(y=>Math.abs(this.feet-y)<.25))continue;
     const above=levels.find(y=>y>this.feet+.25),below=[...levels].reverse().find(y=>y<this.feet-.25);

@@ -1,6 +1,9 @@
 import type {SocialTie,SocialProfile} from '../worker/resident-relationships.mjs';
 import {TrafficSignals} from './traffic-signals.ts';
 import {FrameStats} from './frame-stats.ts';
+import {CityBoxBatches} from './city-box-batches.ts';
+import {RenderTimings} from './render-timings.ts';
+import {batchStaticBoxes} from './static-box-batches.ts';
 import {createRoadMaterial,updateRoadLighting} from './road-lighting.ts';
 import {buildMarinaBay} from './marina-bay.ts';
 import {MetroRenderer} from './metro-renderer.ts';
@@ -36,6 +39,7 @@ import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
 
+const viewerBootStarted=performance.now();
 type FlyState = {
   relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
   onFireEngine?:boolean;onAmbulance?:boolean;
@@ -639,7 +643,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   updateHeliTourState(s.flies || []);
   updateMetroStationOccupancy(actors);
   syncHomes(s.flies || []);
-  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);newYorkVisuals.sync(s.urbanWorld.buildings);}
+  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
   if(s.sportsLuxury){sportsVisuals.sync(s.sportsLuxury);setPlayerHelipads(s.sportsLuxury.pads);}
@@ -735,6 +739,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
   precision: "highp",
 });
+const renderTimings=new RenderTimings(renderer.getContext());
 // Limit oversized Retina framebuffers while keeping all Ultra geometry and materials.
 const renderPixelRatio=()=>Math.min(devicePixelRatio,graphics.pixelRatio,Math.sqrt(2_200_000/Math.max(1,innerWidth*innerHeight)));
 renderer.setPixelRatio(renderPixelRatio());
@@ -872,16 +877,17 @@ const plazaMat = new THREE.MeshStandardMaterial({ color: 0xc7c3b8, roughness: 1 
 
 const avenueXs = AVENUES;
 const streetZs = STREETS;
+const roadSurfaceRoot=new THREE.Group();cityRoot.add(roadSurfaceRoot);
 
 function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false,clipped=false) {
   // Keep each road layer physically separated in Y. This prevents distant-camera z-fighting.
   const base = new THREE.Mesh(new THREE.BoxGeometry(w + (clipped&& !avenue?0:6), 0.06, d + (clipped&&avenue?0:6)), sidewalkMat);
   base.position.set(x, 0.03, z);
-  cityRoot.add(base);
+  roadSurfaceRoot.add(base);
 
   const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, d), roadMat);
   road.position.set(x, 0.10, z);
-  cityRoot.add(road);
+  roadSurfaceRoot.add(road);
 
   const sidewalkOffset = (avenue ? w : d) / 2 + 1.55;
   for (const side of [-1, 1]) {
@@ -890,7 +896,7 @@ function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false
       sidewalkMat,
     );
     walk.position.set(avenue ? x + side * sidewalkOffset : x, 0.15, avenue ? z : z + side * sidewalkOffset);
-    cityRoot.add(walk);
+    roadSurfaceRoot.add(walk);
   }
 
   const marker = new THREE.Mesh(
@@ -898,10 +904,12 @@ function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false
     laneMat,
   );
   marker.position.set(x, 0.151, z);
-  cityRoot.add(marker);
+  roadSurfaceRoot.add(marker);
 }
 
 for(const road of ROADS)for(const piece of surfaceRoadPieces(road))addRoadStrip(piece.x,piece.z,piece.w,piece.d,piece.d>piece.w,piece!==road);
+const roadSurfaceDrawsBefore=roadSurfaceRoot.children.length;
+batchStaticBoxes(roadSurfaceRoot);
 buildUnderpasses(cityRoot);
 
 // The full set of signals and crossings shares four instanced draw batches.
@@ -986,7 +994,7 @@ function buildTrees(){
 
 function addBuilding(
   x: number, z: number, w: number, d: number, h: number, seed: number,
-  options: { glass?: boolean; sign?: string; residential?: boolean } = {},
+  options: { glass?: boolean; sign?: string; residential?: boolean; batchWindows?:boolean } = {},
 ) {
   const group = new THREE.Group();
   const wallPalette = options.glass
@@ -996,7 +1004,7 @@ function addBuilding(
       : h<50?[0x90675a,0x77534b,0xa57d62,0x92796a,0xb09d80]:[0xa5aaa6, 0xb9b3a7, 0x909b97, 0xb7a59d];
   const wallColor = wallPalette[Math.floor(seeded(seed) * wallPalette.length)];
   const body = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
+    new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({
       color: wallColor,
       roughness: options.glass ? 0.35 : 0.82,
@@ -1004,8 +1012,11 @@ function addBuilding(
     }),
   );
   const wallMaterial=body.material as THREE.MeshStandardMaterial;
-  wallMaterial.onBeforeCompile=shader=>{shader.uniforms.uFacadeHeight={value:h};shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nuniform float uFacadeHeight;varying float vFacadeHeight;').replace('#include <begin_vertex>','#include <begin_vertex>\nvFacadeHeight=position.y/uFacadeHeight+.5;');shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vFacadeHeight;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb*=mix(.72,1.,smoothstep(0.,.45,vFacadeHeight));');};
-  wallMaterial.customProgramCacheKey=()=>'city-facade-v1';
+  wallMaterial.userData.cityFacade=true;
+  wallMaterial.userData.normalizedFacade=true;
+  wallMaterial.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying float vFacadeHeight;').replace('#include <begin_vertex>','#include <begin_vertex>\nvFacadeHeight=position.y+.5;');shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vFacadeHeight;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb*=mix(.72,1.,smoothstep(0.,.45,vFacadeHeight));');};
+  wallMaterial.customProgramCacheKey=()=>'city-facade-normalized-v2';
+  body.scale.set(w,h,d);
   body.position.y = h / 2;
   group.add(body);
 
@@ -1030,7 +1041,8 @@ function addBuilding(
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
   });
-  windowMaterials.push(windowMat);
+  windowMat.userData.cityWindow=true;
+  if(!options.batchWindows)windowMaterials.push(windowMat);
   const floors=Math.max(2,Math.floor(h/3.1)), colsX=Math.max(2,Math.floor(w/2.7)), colsZ=Math.max(2,Math.floor(d/2.7));
   const matrices:THREE.Matrix4[]=[]; const dummy=new THREE.Object3D();
   for(let floor=0;floor<floors;floor+=graphics.windowStride){
@@ -1061,7 +1073,14 @@ function addBuilding(
 
 // Building topology is authoritative city data and MUST NOT change with graphics quality.
 const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment");
-for(const b of renderableCityBuildings){const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment"});if(paris)cityRoot.add(g);urbanVisuals.registerBuilding(b.id,g);}
+const batchableFacades:THREE.Group[]=[];
+for(const b of renderableCityBuildings){const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment",batchWindows:true});if(paris)cityRoot.add(g);else batchableFacades.push(g);urbanVisuals.registerBuilding(b.id,g);}
+const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,192,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
+renderer.domElement.dataset.facadeSourceDraws=String(cityFacadeBatches.stats.sourceDraws);
+renderer.domElement.dataset.facadeBatchDraws=String(cityFacadeBatches.stats.batchDraws);
+renderer.domElement.dataset.facadeBoxInstances=String(cityFacadeBatches.stats.instances);
+renderer.domElement.dataset.roadSourceDraws=String(roadSurfaceDrawsBefore);
+renderer.domElement.dataset.roadBatchDraws=String(roadSurfaceRoot.children.length);
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
@@ -1458,6 +1477,14 @@ function cameraForward(out = new THREE.Vector3()) {
 
 document.body.classList.add("scenic-view");
 player.teleport(8,1.9,-35.4);freePosition.set(player.x,player.y,player.z);cameraYaw=-.07;cameraPitch=0;camera.fov=68;camera.updateProjectionMatrix();
+// Read-only, reproducible viewer cameras for native GPU comparisons. No simulation state changes.
+const perfPose=new URLSearchParams(location.search).get('perf');
+const perfPoses:Record<string,[number,number,number,number,number,number]>={
+ 'nyc-street':[-102,7,-108,0,-.04,68],
+ 'nyc-overview':[420,290,510,-2.47,-.40,52],
+ 'paris':[740,9,110,.35,-.05,68],
+};
+if(perfPose&&perfPoses[perfPose]){const[x,y,z,yaw,pitch,fov]=perfPoses[perfPose];player.teleport(x,y,z,true);freePosition.set(x,y,z);cameraYaw=yaw;cameraPitch=pitch;camera.fov=fov;camera.updateProjectionMatrix();renderer.domElement.dataset.perfPose=perfPose;}
 camera.position.copy(freePosition);
 
 renderer.domElement.tabIndex = 0;
@@ -1584,6 +1611,7 @@ let lastSkyMinute=-1;
 let lastSignalSecond=-1;
 function animate(now = performance.now()) {
   requestAnimationFrame(animate);
+  const frameWorkStarted=performance.now();
   if(document.hidden){frameStats.reset();return;}
   const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
   lastFrameAt = now;
@@ -1662,13 +1690,18 @@ function animate(now = performance.now()) {
   updateFreeCamera(dt);
   citySky.update(renderedHour(visualHour),camera.position,activeWeather.cloudCover||0,Math.floor(gameNow/86400));
   cityWater.update(now/1000,visualPalette.daylight,activeWeather.cloudCover||0,visualPalette.zenith,visualPalette.horizon,sunDirection(renderedHour(visualHour)),visualPalette.sunColor);
+  renderTimings.begin(now);
   renderer.render(scene, camera);
+  renderTimings.end(performance.now()-frameWorkStarted);
+  if(!renderer.domElement.dataset.initializationMs){renderer.domElement.dataset.initializationMs=(frameWorkStarted-viewerBootStarted).toFixed(1);renderer.domElement.dataset.firstFrameCpuMs=(performance.now()-frameWorkStarted).toFixed(2);renderer.domElement.dataset.firstFrameDrawCalls=String(renderer.info.render.calls);}
   const stats=frameStats.sample(now);
   if(stats){
-    const info=`${stats.fps.toFixed(1)} FPS · p95 ${stats.p95FrameMs.toFixed(1)} ms · ${renderer.info.render.calls} lượt vẽ · ${renderer.domElement.width}×${renderer.domElement.height}`;
+    const cpuMs=renderTimings.sampleCPU(),gpuMs=renderTimings.gpuMs;
+    const info=`${stats.fps.toFixed(1)} FPS · p95 ${stats.p95FrameMs.toFixed(1)} ms · CPU ${cpuMs.toFixed(1)} ms · GPU ${gpuMs===null?'n/a':gpuMs.toFixed(1)+' ms'} · ${renderer.info.render.calls} lượt vẽ · ${renderer.info.render.triangles.toLocaleString()} tam giác · ${renderer.domElement.width}×${renderer.domElement.height}`;
     const output=document.getElementById('viewer-performance');if(output)output.textContent=info;
     renderer.domElement.dataset.fps=stats.fps.toFixed(1);renderer.domElement.dataset.frameP95=stats.p95FrameMs.toFixed(1);
     renderer.domElement.dataset.drawCalls=String(renderer.info.render.calls);
+    renderer.domElement.dataset.frameCpuMs=cpuMs.toFixed(2);renderer.domElement.dataset.frameGpuMs=gpuMs===null?'unavailable':gpuMs.toFixed(2);renderer.domElement.dataset.triangles=String(renderer.info.render.triangles);
   }
 }
 // Start census polling before the first animation frame. All Three.js globals are initialized by

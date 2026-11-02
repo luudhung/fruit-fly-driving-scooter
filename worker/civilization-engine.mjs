@@ -6,7 +6,7 @@ import {createCityVisitors} from './city-visitors.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
-import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -447,8 +447,8 @@ let vehicleHeadway=null;
 let activeGameStepSeconds=GAME_SECONDS_PER_REAL_SECOND;
 const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance});
 const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
-const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney});
-const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance};
+const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney,isWorkCommitted});
+const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted};
 const urbanWorld=createUrbanWorld(cityServices);
 const sportsLuxury=createSportsLuxury(cityServices);
 const cityVisitors=createCityVisitors({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
@@ -707,10 +707,27 @@ function utilityAccount(id){
  ensureUtilityState();
  return state.utilities.householdAccounts[id] ||= {balance:0,powerOn:true,overdueDays:0,lastBilledDay:0,lastPaymentDay:0,illegalConnectionUntil:0,usage:0};
 }
+const GRID_JOB_IDS=new Set(['power','power-evening','power-night','grid-dispatch']);
 function ensurePowerPlantStaff(){
-  const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId));if(staff.length>=5)return staff;
-  const slots=["power","power-evening","power-night","grid-dispatch","power-evening"],candidates=state.flies.filter((f)=>f.alive&&f.ageYears>=20&&f.ageYears<=68&&!f.businessId&&!f.businessEmployeeOf&&!ids.has(f.jobId)).sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition));
-  while(staff.length<5&&candidates.length){const fly=candidates.shift(),job=JOBS.find((j)=>j.id===slots[staff.length]);if(!fly||!job)break;fly.jobId=job.id;fly.jobTitle=job.title;fly.wage=job.wage;fly.preferredWorkStart=job.shiftStart;fly.preferredWorkHours=(job.shiftEnd-job.shiftStart+24)%24||8;fly.professionSkills=trainedSkillsForJob(job.id,job.title);fly.brainDecision="accepted critical grid job";brainRemember(fly,"critical_infrastructure_job",{jobId:job.id});staff.push(fly);}
+  const staff=state.flies.filter(f=>f.alive&&f.ageYears>=18&&f.ageYears<=75&&GRID_JOB_IDS.has(f.jobId));
+  // Cover three crews from existing grid employees first. Never recruit over another profession.
+  const candidates=staff.length<18?state.flies.filter(f=>f.alive&&f.ageYears>=20&&f.ageYears<=68&&!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&!f.urbanTask&&!f.cityService&&!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty)
+    .sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition)):[];
+  while(staff.length<18&&candidates.length){
+    const f=candidates.shift(),job=JOBS.find(j=>j.id===['power','power-evening','power-night'][staff.length%3]);
+    f.jobId=job.id;f.jobTitle=job.title;f.wage=job.wage;f.professionSkills={...f.professionSkills,...trainedSkillsForJob(job.id,job.title)};
+    brainRemember(f,'critical_infrastructure_job',{jobId:job.id});staff.push(f);
+  }
+  const shifts=[6,14,22],counts=new Map(shifts.map(start=>[start,0])),quotas=new Map(shifts.map((start,i)=>[start,Math.floor(staff.length/3)+(i<staff.length%3?1:0)]));
+  for(const f of staff)if(f.gridRosterVersion===1&&shifts.includes(f.gridShiftStart))counts.set(f.gridShiftStart,counts.get(f.gridShiftStart)+1);
+  const pending=staff.filter(f=>f.gridRosterVersion!==1||!shifts.includes(f.gridShiftStart)).sort((a,b)=>a.id.localeCompare(b.id));
+  for(const f of pending){
+    const preferred=f.jobId==='power-night'?22:f.jobId==='power-evening'?14:6;
+    const start=counts.get(preferred)<quotas.get(preferred)?preferred:[...shifts].sort((a,b)=>counts.get(a)-counts.get(b))[0];
+    f.gridPreviousSchedule||={start:f.preferredWorkStart,hours:f.preferredWorkHours};
+    f.gridShiftStart=start;f.gridRosterVersion=1;f.preferredWorkStart=start;f.preferredWorkHours=8;
+    counts.set(start,counts.get(start)+1);brainRemember(f,'grid_shift_rota',{start,hours:8,jobId:f.jobId});
+  }
   return staff;
 }
 function householdMembers(hhId){const hh=state.housing?.households?.[hhId];if(!hh)return[];return(hh.members||[]).map((id)=>state.flies.find((f)=>f.id===id&&f.alive)).filter(Boolean);}
@@ -722,10 +739,41 @@ function billElectricity(clock){
   state.utilities.disconnectedHouseholds=Object.values(state.utilities.householdAccounts).filter((a)=>a.powerOn===false).length;
 }
 function simulatePowerGrid(clock){
-  ensureUtilityState();ensurePowerPlantStaff();const plant=state.utilities.powerPlant,hourKey=clock.day*24+clock.hour;if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;const ids=new Set(["power","power-evening","power-night","grid-dispatch"]),staff=state.flies.filter((f)=>f.alive&&ids.has(f.jobId)),onDuty=staff.filter((f)=>!f.traveling&&f.currentLocationId==="power"&&(String(f.action||"").startsWith("working")||personalWorkWindow(f,JOBS.find((j)=>j.id===f.jobId),clock.hour))),connected=new Set(state.flies.filter(f=>f.alive&&f.householdId&&utilityAccount(f.householdId).powerOn!==false).map(f=>f.householdId)).size;
-  plant.maintenance=clamp(Number(plant.maintenance||0.9)-weatherDanger()*0.004+onDuty.length*0.0015,0.38,1);plant.capacity=90+onDuty.length*62+plant.maintenance*95;plant.demand=45+connected*1.35+Object.keys(state.businesses||{}).length*4.2;
-  if(plant.fuelReserve<1200&&plant.cash>900){plant.cash-=650;state.externalTrade=state.externalTrade||{exports:0,imports:0};state.externalTrade.imports+=650;plant.fuelReserve+=6500;emit("power_fuel","Hansdrex Power purchased fuel reserves.",{fuelReserve:plant.fuelReserve});}
-  plant.fuelReserve=Math.max(0,plant.fuelReserve-Math.max(12,plant.demand*0.055));const fuelFactor=plant.fuelReserve>0?1:0.25;plant.generation=Math.min(plant.capacity*plant.maintenance*fuelFactor,plant.demand*1.08);const online=plant.generation>=plant.demand*0.72;if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit("grid_restored","Hansdrex electrical grid returned to stable operation.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit("grid_outage","Hansdrex grid entered a blackout.",{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}billElectricity(clock);
+  ensureUtilityState();const staff=ensurePowerPlantStaff(),plant=state.utilities.powerPlant,hourKey=clock.day*24+clock.hour;
+  if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;
+  const onDuty=staff.filter(f=>!f.traveling&&!f.sleeping&&f.currentLocationId==='power'&&String(f.action||'').startsWith('working')&&f.health>30);
+  const activeHouseholds=new Set(state.flies.filter(f=>f.alive&&f.householdId).map(f=>f.householdId));
+  const connected=[...activeHouseholds].filter(id=>utilityAccount(id).powerOn!==false).length;
+  plant.demand=45+connected*1.35+Object.keys(state.businesses||{}).length*4.2;
+  plant.onDuty=onDuty.length;plant.roster=Object.fromEntries([6,14,22].map(start=>[start,staff.filter(f=>f.gridShiftStart===start).length]));
+  // Existing turbine equipment retains its original 185-unit nameplate. Further modules are paid assets.
+  plant.installedCapacity=Number(plant.installedCapacity||185);
+  plant.assetLedger||=[];plant.maintenance=clamp(Number(plant.maintenance??.9)-.001-weatherDanger()*.004,.38,1);
+  const contractor=state.businesses['grid-engineering']||=( {cash:0,inventory:0,price:0,sector:'domestic-grid-engineering'});
+  const transfer=amount=>{plant.cash-=amount;contractor.cash+=amount;state.totalTransactions++;plant.serviceSpending=Number(plant.serviceSpending||0)+amount;};
+  if(onDuty.length&&plant.maintenance<.97){
+    const restored=Math.min(.12,onDuty.length*.03,.98-plant.maintenance),cost=Math.ceil(restored*800+onDuty.length*2);
+    if(plant.cash>=cost){transfer(cost);plant.maintenance+=restored;plant.maintenanceWorkHours=Number(plant.maintenanceWorkHours||0)+onDuty.length;
+      plant.assetLedger.push({type:'overhaul',at:state.simulationAgeSeconds,workers:onDuty.map(f=>f.id),restored,cost});}
+  }
+  const target=Math.min(2400,Math.ceil(plant.demand*1.25/100)*100);
+  if(onDuty.length>=2&&plant.installedCapacity<target){
+    const added=Math.min(100,target-plant.installedCapacity),cost=added*9+onDuty.length*2;
+    if(plant.cash>=cost){transfer(cost);plant.installedCapacity+=added;plant.installationWorkHours=Number(plant.installationWorkHours||0)+onDuty.length;
+      plant.assetLedger.push({type:'turbine-module',at:state.simulationAgeSeconds,workers:onDuty.map(f=>f.id),capacity:added,cost});
+      emit('grid_capacity',`Grid crews commissioned ${added} units of paid generating capacity.`,{capacity:plant.installedCapacity,cost,workers:onDuty.length});}
+  }
+  plant.assetLedger=plant.assetLedger.slice(-48);
+  if(plant.fuelReserve<1200&&plant.cash>900){plant.cash-=650;state.externalTrade||={exports:0,imports:0};state.externalTrade.imports+=650;plant.fuelReserve+=6500;emit('power_fuel','Hansdrex Power purchased fuel reserves.',{fuelReserve:plant.fuelReserve});}
+  plant.fuelReserve=Math.max(0,plant.fuelReserve-Math.max(12,plant.demand*.055));
+  plant.capacity=plant.installedCapacity;
+  // Commissioned turbine modules include controls: two operators cover full dispatch; one can run a reduced load.
+  const fuelFactor=plant.fuelReserve>0?1:.25,staffFactor=.3+.7*Math.min(1,onDuty.length/2);
+  plant.generation=Math.min(plant.capacity*plant.maintenance*fuelFactor*staffFactor,plant.demand*1.08);
+  const online=plant.generation>=plant.demand*.72;
+  if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit('grid_restored','Hansdrex electrical grid returned to stable operation.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit('grid_outage','Hansdrex grid entered a blackout.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}
+  billElectricity(clock);
+  state.utilities.disconnectedHouseholds=[...activeHouseholds].filter(id=>utilityAccount(id).powerOn===false).length;
 }
 function applyPowerEffects(fly,clock){if(!fly.alive||fly.traveling||!fly.indoors||fly.currentLocationId!==fly.homeId)return;const powered=householdHasPower(fly);fly.powerOn=powered;if(powered)return;const night=clock.hour>=19||clock.hour<6;fly.stress=clamp(fly.stress+(night?0.08:0.035));fly.happiness=clamp(fly.happiness-(night?0.035:0.012));if(fly.sleeping){fly.energy=clamp(fly.energy-0.04);fly.sleepDebt=clamp(fly.sleepDebt+0.025);}}
 function simulateCrime(fly){
@@ -1611,14 +1659,28 @@ function ensureCognitiveProfile(fly){
   fly.workMinutesToday=Number(fly.workMinutesToday||0);
   fly.lastEducationDay=Number.isFinite(fly.lastEducationDay)?fly.lastEducationDay:-1;
 }
-function personalWorkWindow(fly,baseJob,hour){
+function residentWorkSchedule(fly,baseJob){
   ensureCognitiveProfile(fly);
-  const essential=["police","doctor","hospital-central","hospital-east","transit","power"].includes(fly.jobId);
-  const baseStart=Number(baseJob?.shiftStart ?? fly.preferredWorkStart);
-  const brainStart=Number(fly.preferredWorkStart);
-  const start=essential ? Math.round(baseStart*0.72+brainStart*0.28)%24 : brainStart;
-  const hours=essential ? Math.max(7,Number(fly.preferredWorkHours||8)) : Number(fly.preferredWorkHours||8);
-  return circularHourInWindow(hour,start,hours);
+  if(GRID_JOB_IDS.has(fly.jobId))return {start:Number(fly.gridShiftStart??baseJob?.shiftStart??6),hours:8};
+  const essential=['police','doctor','hospital-central','hospital-east','transit','firefighter','paramedic'].includes(fly.jobId);
+  const baseStart=Number(baseJob?.shiftStart??fly.preferredWorkStart),brainStart=Number(fly.preferredWorkStart);
+  return {start:essential?Math.round(baseStart*.72+brainStart*.28)%24:brainStart,hours:essential?Math.max(7,Number(fly.preferredWorkHours||8)):Number(fly.preferredWorkHours||8)};
+}
+function personalWorkWindow(fly,baseJob,hour){
+  const schedule=residentWorkSchedule(fly,baseJob);return circularHourInWindow(hour,schedule.start,schedule.hours);
+}
+function workCommitment(fly,clock){
+  const job=JOBS.find(j=>j.id===fly.jobId);if(!job||fly.ageYears<18||fly.ageYears>75||fly.businessEmployeeOf)return null;
+  const essential=GRID_JOB_IDS.has(job.id)||['doctor','hospital-central','hospital-east','police','transit','firefighter','paramedic','school'].includes(job.id);
+  const nowHour=clock.hour+clock.minute/60,onShift=personalWorkWindow(fly,job,nowHour);
+  const {start,hours}=residentWorkSchedule(fly,job),until=(start-nowHour+24)%24;
+  const distance=Math.hypot(location(job.locationId).x-fly.x,location(job.locationId).z-fly.z);
+  const commuteHours=Math.min(4,Math.max(.5,distance/85+.5));
+  return {job,onShift,essential,soon:essential&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
+}
+function isWorkCommitted(f){
+  const duty=workCommitment(f,gameClock());
+  return Boolean(duty?.essential&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
 }
 function academyTeacher(){
   const id=state.education?.teacherId;
@@ -2389,8 +2451,26 @@ function brainChooseAction(fly, clock) {
 }
 
 function chooseDestination(fly, clock) {
+  if(!fly.alive)return;
+  const work=workCommitment(fly,clock),healthy=fly.energy>=25&&fly.health>=45&&!fly.illness&&!fly.recoveringEnergy&&!fly.sleeping&&fly.hunger<75&&fly.thirst<80;
+  if(work&&healthy&&!urbanWorld.isUnavailable(work.job.locationId,fly)){
+    const action=`working as ${fly.jobTitle||work.job.title}`;
+    const handover=GRID_JOB_IDS.has(fly.jobId)&&!work.onShift&&work.hoursAfterEnd<2&&fly.energy>=30&&state.flies.filter(f=>f.alive&&GRID_JOB_IDS.has(f.jobId)&&!f.traveling&&!f.sleeping&&f.currentLocationId==='power'&&personalWorkWindow(f,null,clock.hour+clock.minute/60)).length<2;
+    if(!fly.traveling&&fly.currentLocationId===work.job.locationId&&(work.onShift||handover)){
+      fly.action=action;fly.pendingAction=null;fly.sleeping=false;fly.recoveringEnergy=false;fly.roadDuty=false;
+      if(work.job.locationId==='power')fly.indoors=true; // The custom plant renderer has a control building even without a generic map block.
+      fly.actionUntil=state.simulationAgeSeconds+Math.max(60,handover?(2-work.hoursAfterEnd)*3600:work.shiftEndIn);fly.gridHandover=Boolean(handover);return;
+    }
+    if(fly.gridHandover&&!handover&&!work.onShift){fly.gridHandover=false;fly.actionUntil=0;}
+    if(work.essential&&(work.onShift||work.soon)&&!fly.onTrain&&!fly.socialTask&&!fly.civicDuty&&!fly.cityService&&!fly.urbanTask&&!fly.privateFlight&&!fly.onPlane&&!fly.heliPassenger&&!fly.fireEngineDuty&&!fly.ambulanceDuty){
+      if(fly.traveling&&fly.targetLocationId===work.job.locationId){fly.pendingAction=action;return;}
+      if(!fly.traveling&&fly.currentLocationId===work.job.locationId){fly.action='waiting for scheduled shift';fly.actionUntil=state.simulationAgeSeconds+Math.max(60,((Number(fly.gridShiftStart??fly.preferredWorkStart)-clock.hour-clock.minute/60+24)%24)*3600);return;}
+      // A physical reroute replaces an obsolete personal errand, never the resident's position.
+      fly.roadDuty=false;fly.mobilityShopping=false;fly.actionUntil=0;
+      startJourney(fly,{id:work.job.locationId,action});return;
+    }
+  }
   if((fly.roadDuty||fly.mobilityShopping)&&fly.traveling&&fly.hunger<92&&fly.energy>20)return;
-  if (!fly.alive) return;
   // Keep a real recovery episode across short action timers; exhausted shelter occupants
   // can nap indoors instead of entering an endless exhausted commute.
   if(!fly.traveling&&fly.indoors&&(fly.energy<15||fly.recoveringEnergy&&fly.energy<65||fly.sleeping&&fly.energy<75)){
@@ -2464,9 +2544,10 @@ function startJourney(fly,chosen) {
 function pinResidentMetroTrain(fly){
   const line=METRO_LINES.find(l=>l.id===fly.metroLineId);if(!line)return;
   const seconds=state.simulationAgeSeconds/GAME_SECONDS_PER_REAL_SECOND,trains=trainStates(line,seconds);
-  const pinned=trains.find(t=>t.id===fly.metroTrainId)||trains.reduce((a,b)=>Math.hypot(b.x-fly.x,b.z-fly.z)<Math.hypot(a.x-fly.x,a.z-fly.z)?b:a);
   const entry=(fly.routeWaypoints||[]).slice(0,(fly.routeIndex||0)+1).reverse().find(p=>p.stage==='station-entry');
-  fly.metroTrainId=pinned.id;fly.metroTrainCheckedAt=seconds;fly.metroTrainDirection=fly.metroTrainDirection||entry?.direction||pinned.runDirection;
+  const direction=fly.metroTrainDirection||entry?.direction;
+  const pinned=trains.find(t=>t.id===fly.metroTrainId&&(!direction||t.direction===direction))||trains.find(t=>t.direction===direction)||trains.reduce((a,b)=>Math.hypot(b.x-fly.x,b.z-fly.z)<Math.hypot(a.x-fly.x,a.z-fly.z)?b:a);
+  fly.metroTrainId=pinned.id;fly.metroTrainCheckedAt=seconds;fly.metroTrainDirection=pinned.direction;
 }
 function repairResidentMetroAccess(fly){
   const destination=Number.isFinite(fly.finalTargetX)&&Number.isFinite(fly.finalTargetZ)?{x:fly.finalTargetX,z:fly.finalTargetZ}:legalDestinationPoint(fly.targetLocationId===fly.homeId?{...location(fly.homeId),x:fly.homeX,z:fly.homeZ}:location(fly.targetLocationId));
@@ -2850,9 +2931,27 @@ function ensureHeliTourStaff(){
 
 function simulateParkWheel(fly){
  const now=state.simulationAgeSeconds;
+ // Legacy saves placed disembarking riders inside the reservoir at (15,-80).
+ // Let only those stranded wheel visitors wade to the nearest dry bank at walking speed.
+ const pond=!fly.wheelRideUntil&&fly.currentLocationId==='ferris-wheel'&&PARK_PONDS.find(p=>contains(p,fly,.25));
+ if(fly.wheelExitRecovery||pond){
+  if(!fly.wheelExitRecovery){
+   const candidates=[{x:pond.x+pond.w/2+1,z:fly.z},{x:pond.x-pond.w/2-1,z:fly.z},{x:fly.x,z:pond.z+pond.d/2+1},{x:fly.x,z:pond.z-pond.d/2-1}].filter(p=>!blocked(p));
+   fly.wheelExitRecovery=candidates.sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+   if(!fly.wheelExitRecovery)return false;
+   fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.pendingAction=null;fly.indoors=false;fly.sleeping=false;
+   brainRemember(fly,'wheel_exit_recovery',{from:{x:fly.x,z:fly.z},bank:fly.wheelExitRecovery});
+  }
+  const p=fly.wheelExitRecovery,dx=p.x-fly.x,dz=p.z-fly.z,distance=Math.hypot(dx,dz),step=Math.min(distance,2*activeGameStepSeconds/GAME_SECONDS_PER_REAL_SECOND);
+  if(distance>0){fly.x+=dx/distance*step;fly.z+=dz/distance*step;}fly.y=1.1;fly.targetX=p.x;fly.targetZ=p.z;
+  fly.action='wading to the park bank';fly.actionUntil=now+600;
+  if(distance<=step+.01){fly.wheelExitRecovery=null;fly.currentLocationId='park';fly.action='leaving the park wheel';fly.actionUntil=now;}
+  return true;
+ }
  if(fly.wheelRideUntil){
   if(now>=fly.wheelRideUntil){
-   fly.wheelRideUntil=0;fly.wheelSeat=null;fly.x=15;fly.y=1.1;fly.z=-80;fly.targetX=fly.x;fly.targetZ=fly.z;
+   const exit=location('ferris-wheel');
+   fly.wheelRideUntil=0;fly.wheelSeat=null;fly.x=exit.x;fly.y=1.1;fly.z=exit.z;fly.targetX=fly.x;fly.targetZ=fly.z;
    fly.action="relaxing after the free park wheel";fly.actionUntil=now+1800;
    fly.stress=clamp(fly.stress-24);fly.happiness=clamp(fly.happiness+12);fly.loneliness=clamp(fly.loneliness-8);
    state.parkLeisure.completedRides++;
@@ -3498,8 +3597,10 @@ function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
     if(fly.currentLocationId==="tea-house")fly.action="drinking tea and water";
   }
   const foodPlaces = ["market","grocery","bakery","restaurant","night-market","riverside-market"];
+  const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
+  const workplaceMeal=String(fly.action||'').startsWith('working as')&&fly.currentLocationId===workLocation&&!urbanWorld.isUnavailable(workLocation,fly)&&(fly.indoors||workLocation==='power');
   // Deliver essentials to homes/shelters as well: children, poor and rain-bound residents can eat.
-  if ((foodPlaces.includes(fly.currentLocationId)||atHome||fly.action==="sheltering from bad weather"||fly.action==="temporary disaster shelter") && fly.hunger > 45) {
+  if ((foodPlaces.includes(fly.currentLocationId)||atHome||fly.action==="sheltering from bad weather"||fly.action==="temporary disaster shelter"||workplaceMeal) && fly.hunger > 45) {
     restockEssentials();
     const business=state.businesses[foodPlaces.includes(fly.currentLocationId)?fly.currentLocationId:"market"];
     const price=0.1,paid=Math.min(price,Math.max(0,fly.money)),subsidy=4-paid;
@@ -3687,7 +3788,7 @@ function tickFly(fly, clock) {
   // A committed station approach, staircase or transfer already leads to sheltered transit.
   // Replacing it with a ground route while elevated sends passengers back down on every shower.
   const committedMetro=fly.traveling&&fly.metroLineId&&(fly.routeWaypoints||[]).slice(fly.routeIndex||0).some(p=>p.mode==='metro'||p.stage?.startsWith('station-')||p.stage==='interchange-walk');
-  if(!committedMetro&&!fly.roadDuty&&!fly.mobilityShopping&&fly.transitMode!=="car"&&!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
+  if(!committedMetro&&!String(fly.pendingAction||'').startsWith('working as')&&!fly.roadDuty&&!fly.mobilityShopping&&fly.transitMode!=="car"&&!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
     const shelter=LOCATIONS.filter(l=>BUILDINGS.some(b=>b.id===l.id)&&!urbanWorld.isUnavailable(l.id,fly)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
     const route=shelter?buildPedestrianRoute(fly,shelter):[];
     if(route.length){fly.targetLocationId=shelter.id;fly.pendingAction="sheltering from bad weather";fly.action="walking to shelter";fly.routeWaypoints=route;fly.routeIndex=0;fly.targetX=route[0].x;fly.targetZ=route[0].z;fly.traveling=true;fly.transitMode="walk";fly.metroLineId=null;}
@@ -4086,5 +4187,5 @@ export {
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
   urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,
-  roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
+  ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

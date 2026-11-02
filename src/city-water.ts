@@ -6,10 +6,22 @@ export class CityWater {
  constructor(){
   this.material=new THREE.ShaderMaterial({
    uniforms:{uTime:{value:0},uDay:{value:1},uCloud:{value:0},uSky:{value:new THREE.Color(0x9cbdd6)},uHorizon:{value:new THREE.Color(0xc8d8df)},uSun:{value:new THREE.Vector3(-.7,.5,-.2)},uSunColor:{value:new THREE.Color(0xffd49f)}},
-   vertexShader:`varying vec3 vWorld;void main(){vec4 world=modelMatrix*vec4(position,1.);vWorld=world.xyz;gl_Position=projectionMatrix*viewMatrix*world;}`,
+   // The city renderer uses logarithmic depth. A custom shader must write the
+   // same depth encoding as the ground, otherwise the ground hides the river.
+   vertexShader:`
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    varying vec3 vWorld;
+    void main(){
+     vec4 world=modelMatrix*vec4(position,1.);vWorld=world.xyz;
+     gl_Position=projectionMatrix*viewMatrix*world;
+     #include <logdepthbuf_vertex>
+    }`,
    fragmentShader:`
+    #include <logdepthbuf_pars_fragment>
     uniform float uTime,uDay,uCloud;uniform vec3 uSky,uHorizon,uSun,uSunColor;varying vec3 vWorld;
     void main(){
+     #include <logdepthbuf_fragment>
      vec2 p=vWorld.xz;
      float a=p.x*.13+p.y*.071+uTime*.48,b=p.x*.047-p.y*.19-uTime*.37,c=p.x*.31+p.y*.23+uTime*.23;
      vec3 normal=normalize(vec3(-.035*cos(a)-.017*cos(c),1.,-.043*cos(b)-.013*cos(c)));

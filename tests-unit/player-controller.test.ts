@@ -53,6 +53,29 @@ test('both directional metro platforms support the player, including the opposit
 test('the crossover lift carries a walking player to the opposite-track concourse without flight',async()=>{
  const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs');const line=METRO_LINES[0],base=metroStationGeometry(line,0),geo=metroStationGeometry(line,0,-base.baseDirection),points=geo.crossover;
  const index=points.findIndex((b,i)=>i>0&&Math.hypot(b.x-points[i-1].x,b.z-points[i-1].z)<.01&&b.y>points[i-1].y+.1);assert.ok(index>0);const a=points[index-1],b=points[index],p=new PlayerController();
- p.teleport(a.x,a.y-.9+PLAYER_EYE,a.z);run(p,.1);run(p,(b.y-a.y)/3.2,{forward:1,yaw:Math.PI/2});
+ p.teleport(a.x,a.y-.9+PLAYER_EYE,a.z);run(p,.1);run(p,(b.y-a.y)/3.2,{forward:1,yaw:Math.PI/2,ascend:true});
  assert.equal(p.flying,false);assert.ok(Math.abs(p.feet-(b.y-.9))<.08,`lift feet=${p.feet}, target=${b.y-.9}`);
+});
+
+test('every directional metro access can be walked to its platform and back without following another lines ramp',async()=>{
+ const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs');let completed=0;
+ for(const line of METRO_LINES)for(let index=0;index<line.points.length;index++)for(const direction of [1,-1]){
+  const geo=metroStationGeometry(line,index,direction),p=new PlayerController(),start=geo.stairs[0];p.teleport(start.x,start.y-.9+PLAYER_EYE,start.z);
+  for(const [leg,points]of [['up',geo.stairs],['down',[...geo.stairs].reverse()]] as const)for(let k=1;k<points.length;k++){
+   const target=points[k];let steps=0;
+   while(steps++<2400&&Math.hypot(p.x-target.x,p.z-target.z,p.feet-(target.y-.9))>.2){
+    const dx=target.x-p.x,dz=target.z-p.z,distance=Math.hypot(dx,dz),vertical=Math.abs(p.feet-(target.y-.9));
+    p.update(1/120,{...idle,forward:distance>.05||vertical>.2?1:0,yaw:Math.atan2(dx,dz),ascend:distance<.2&&p.feet<target.y-.9-.2,descend:distance<.2&&p.feet>target.y-.9+.2});
+   }
+   assert.ok(Math.hypot(p.x-target.x,p.z-target.z,p.feet-(target.y-.9))<.3,`${line.id}/${index}/${direction} ${leg}:${k} feet=${p.feet} target=${target.y-.9}`);assert.equal(p.flying,false);
+  }
+  completed++;
+ }
+ assert.equal(completed,110);
+});
+
+test('walking onto or away from a metro platform does not automatically ride its lift',async()=>{
+ const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs'),geo=metroStationGeometry(METRO_LINES[0],0),platform=geo.platform,p=new PlayerController();
+ p.teleport(platform.x,platform.y-.9+PLAYER_EYE,platform.z);run(p,.15);const feet=p.feet;
+ run(p,.25,{forward:1,yaw:Math.PI/2});assert.ok(Math.abs(p.feet-feet)<.02);assert.equal(p.flying,false);
 });

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {blocked,pedestrianRoute,LOCATIONS} from '../worker/city-map.mjs';
 import {freshState,applyWelfareRecovery,payBirthGrant,needsAndActivities,mortalityReport,liquidMoneySupply,completePregnancy,maintainPopulation,restoreState} from '../worker/civilization-engine.mjs';
 test('extinction recovery adds exactly 500 with homes and independent brains, preserving dead history, once',()=>{
  const s=freshState();for(const f of s.flies){f.alive=false;f.causeOfDeath='natural causes';f.thirst=100;}
@@ -39,6 +40,18 @@ test('park wheel admits a penniless resident and reduces stress after a real rou
  assert.equal(simulateParkWheel(f),true);assert.ok(f.wheelRideUntil);const end=f.wheelRideUntil;
  s.simulationAgeSeconds+=1800;simulateParkWheel(f);assert.ok(f.y>2);
  s.simulationAgeSeconds=end;simulateParkWheel(f);assert.equal(f.wheelRideUntil,0);assert.equal(f.money,0);assert.ok(f.stress<70);assert.equal(s.parkLeisure.completedRides,1);
+ assert.equal(blocked(f),false);assert.ok(pedestrianRoute(f,LOCATIONS.find(l=>l.id==='market')).length>0,'wheel exit must connect to normal pedestrian routes');
+});
+
+test('legacy wheel visitor stranded in the reservoir walks to dry land without resetting identity or wealth',async()=>{
+ const {simulateParkWheel}=await import('../worker/civilization-server.mjs'),s=freshState(),f=s.flies[0];
+ Object.assign(f,{x:15,z:-80,y:1.1,wheelRideUntil:0,traveling:false,currentLocationId:'ferris-wheel',action:'waiting for a reachable route'});
+ const before={id:f.id,brain:f.brain.id,money:f.money,savings:f.savings,hunger:f.hunger,energy:f.energy};
+ assert.ok(blocked(f));let moved=0;
+ for(let i=0;i<100&&f.currentLocationId==='ferris-wheel';i++){const x=f.x,z=f.z;assert.equal(simulateParkWheel(f),true);const step=Math.hypot(f.x-x,f.z-z);assert.ok(step>0&&step<=2.001,'recovery must walk rather than teleport');moved+=step;}
+ assert.equal(blocked(f),false);assert.equal(f.currentLocationId,'park');assert.ok(moved>=13);assert.equal(f.wheelExitRecovery,null);
+ assert.deepEqual({id:f.id,brain:f.brain.id,money:f.money,savings:f.savings,hunger:f.hunger,energy:f.energy},before);
+ assert.equal(simulateParkWheel(f),false);assert.ok(pedestrianRoute(f,LOCATIONS.find(l=>l.id==='market')).length>0);
 });
 
 test('restoring 13 survivors adds 487 residents once and preserves survivors and death history',()=>{

@@ -470,6 +470,11 @@ function localRoute(start,dest,mode,region){
 }
 // Both travel directions use the same deterministic offset polylines, in physics and rendering.
 const metroTracks=new WeakMap(),metroStations=new WeakMap(),metroSchedules=new WeakMap();
+// Ground switchbacks at different heights cannot occupy the same footprint: the
+// player would climb the higher line's ramp while its resident route uses the lower.
+const metroStairReservations=[];
+function metroStairFootprint(stairs){const xs=stairs.map(p=>p.x),zs=stairs.map(p=>p.z),minX=Math.min(...xs)-.77,maxX=Math.max(...xs)+.77,minZ=Math.min(...zs)-.77,maxZ=Math.max(...zs)+.77;return {minX,maxX,minZ,maxZ};}
+function metroStairOverlap(a,b){return a.minX<b.maxX&&a.maxX>b.minX&&a.minZ<b.maxZ&&a.maxZ>b.minZ;}
 export function metroTrackPoints(line,direction=1){
  const sign=direction<0?-1:1;let cache=metroTracks.get(line);if(!cache){cache={};metroTracks.set(line,cache);}if(cache[sign])return cache[sign];
  const points=line.points,offset=2.2*sign;
@@ -494,31 +499,79 @@ export function metroStationGeometry(line,index,direction=1) {
   const stairs=[point(approach*21,side*offset-.5,1.1),point(approach*7,side*offset-.5,line.height/2+1.125),point(approach*7,side*offset+.5,line.height/2+1.125),point(approach*21,side*offset+.5,line.height+1.15)];
   let violations=0;for(let u=7;u<=21;u+=1)for(const v of [-.98,0,.98]){
    const q=point(approach*u,side*offset+v,1.1);if(ROADS.some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q))violations++;
-  }candidates.push({side,stairs,violations});
+  }
+  const footprint=metroStairFootprint(stairs),conflicts=metroStairReservations.filter(r=>r.line!==line&&metroStairOverlap(footprint,r.footprint)).length;
+  candidates.push({side,stairs,violations,footprint,conflicts});
  }
- candidates.sort((a,b)=>a.violations-b.violations);const best=candidates[0];
- const platformFor=dir=>{const track=metroTrackPoints(line,dir)[index],projection=(track.x-p[0])*perp.x+(track.z-p[1])*perp.z,side=projection>=0?1:-1;return{x:track.x+perp.x*3.4*side,z:track.z+perp.z*3.4*side,y:line.height+1.15};};
+ const corner=index>0&&index<line.points.length-1&&Math.abs((p[0]-prev[0])*(next[1]-p[1])-(p[1]-prev[1])*(next[0]-p[0]))>.01;
+ const platformFor=dir=>{
+  const track=metroTrackPoints(line,dir)[index];
+  if(corner){
+   // Put a corner platform beside a straight part of its service's outgoing
+   // track, rather than laying its deck across the intersecting incoming rail.
+   const toward=dir>0?next:prev,tx=toward[0]-p[0],tz=toward[1]-p[1],length=Math.hypot(tx,tz),ux=tx/length,uz=tz/length,nx=-uz,nz=ux;
+   const side=((track.x-p[0])*nx+(track.z-p[1])*nz)>=0?1:-1,axis=Math.abs(ux)>=Math.abs(uz)?'x':'z';
+   for(const [distance,platformLength]of [[12,16],[10,12],[8,8],[6,4]]){
+    const point={x:track.x+ux*distance+nx*3.4*side,z:track.z+uz*distance+nz*3.4*side,y:line.height+1.15},w=axis==='x'?platformLength:3.2,d=axis==='x'?3.2:platformLength;
+    if(BUILDINGS.some(b=>point.y-.9<b.h&&Math.abs(point.x-b.x)<(w+b.w)/2+.1&&Math.abs(point.z-b.z)<(d+b.d)/2+.1))continue;
+    let obstructsRail=false;
+    for(const serviceDirection of [1,-1]){
+     const points=metroTrackPoints(line,serviceDirection);
+     for(let k=1;k<points.length&&!obstructsRail;k++){
+      const a=points[k-1],b=points[k],steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.5));
+      for(let j=0;j<=steps;j++){const t=j/steps,x=a.x+(b.x-a.x)*t,z=a.z+(b.z-a.z)*t;if(Math.hypot(Math.max(0,Math.abs(x-point.x)-w/2),Math.max(0,Math.abs(z-point.z)-d/2))<1.63){obstructsRail=true;break;}}
+     }
+    }
+    if(!obstructsRail)return{point,platformLength,axis};
+   }
+   throw new Error(`No clear corner metro platform for ${line.id}/${index}/${dir}`);
+  }
+  const projection=(track.x-p[0])*perp.x+(track.z-p[1])*perp.z,side=projection>=0?1:-1;
+  return{point:{x:track.x+perp.x*3.4*side,z:track.z+perp.z*3.4*side,y:line.height+1.15},platformLength:16,axis};
+ };
+ const accessKey=`access:${index}`;
+ let best=cache[accessKey];
+ if(!best){
+  // Preserve road/building clearance first, then choose another clear sidewalk
+  // approach when an earlier line already reserved this staircase footprint.
+  if(corner){
+   const platformFootprints=[1,-1].map(dir=>{const g=platformFor(dir),w=g.axis==='x'?g.platformLength:3.2,d=g.axis==='x'?3.2:g.platformLength;return{minX:g.point.x-w/2,maxX:g.point.x+w/2,minZ:g.point.z-d/2,maxZ:g.point.z+d/2};});
+   for(const candidate of candidates)candidate.conflicts+=platformFootprints.filter(r=>metroStairOverlap(candidate.footprint,r)).length;
+  }
+  candidates.sort((a,b)=>a.violations-b.violations||a.conflicts-b.conflicts);best=cache[accessKey]=candidates[0];
+  if(METRO_LINES.includes(line))metroStairReservations.push({line,index,footprint:best.footprint});
+ }
  const forward=metroTrackPoints(line,1)[index],forwardSide=((forward.x-p[0])*perp.x+(forward.z-p[1])*perp.z)>=0?1:-1;
- const baseDirection=best.side===forwardSide?1:-1,basePlatform=platformFor(baseDirection),platform=platformFor(sign);
- const sharedStairs=[...best.stairs,basePlatform],height=line.height+4.5;
+ const baseDirection=best.side===forwardSide?1:-1,basePlatform=platformFor(baseDirection).point,platformData=platformFor(sign),platform=platformData.point;
+ // Keep the upper approach on the track-facing side of the two stair flights. A diagonal directly
+ // back over them forms a ceiling/floor that traps a descending player on top.
+ const stairTop=best.stairs.at(-1),topAlong=(stairTop.x-p[0])*along.x+(stairTop.z-p[1])*along.z;
+ const corridor=best.side*(offset-1.35),outerTop={x:p[0]+along.x*topAlong+perp.x*corridor,z:p[1]+along.z*topAlong+perp.z*corridor,y:stairTop.y};
+ const outerLanding={x:p[0]+perp.x*corridor,z:p[1]+perp.z*corridor,y:stairTop.y};
+ const height=line.height+4.5;
+ const sharedStairs=corner?[...best.stairs,{...stairTop,y:height},{x:basePlatform.x,z:stairTop.z,y:height},{...basePlatform,y:height},basePlatform]:[...best.stairs,outerTop,outerLanding,basePlatform];
  const crossover=sign===baseDirection?[]:[basePlatform,{...basePlatform,y:height},{x:platform.x,z:basePlatform.z,y:height},{...platform,y:height},platform].filter((q,i,list)=>!i||Math.hypot(q.x-list[i-1].x,q.z-list[i-1].z,q.y-list[i-1].y)>.01);
- return cache[key]={track:metroTrackPoints(line,sign)[index],platform,access:sharedStairs[0],axis,side:sign===baseDirection?best.side:-best.side,direction:sign,baseDirection,sharedStairs,crossover,stairs:[...sharedStairs,...crossover.slice(1)],accessViolations:best.violations};
+ return cache[key]={track:metroTrackPoints(line,sign)[index],platform,platformLength:platformData.platformLength,access:sharedStairs[0],axis:platformData.axis,side:sign===baseDirection?best.side:-best.side,direction:sign,baseDirection,sharedStairs,crossover,stairs:[...sharedStairs,...crossover.slice(1)],accessViolations:best.violations};
 }
 function metroSchedule(line){
- let schedule=metroSchedules.get(line);if(schedule)return schedule;const stops=line.points,legs=[];let at=0;
- for(const direction of [1,-1])for(let i=direction===1?0:stops.length-1;direction===1?i<stops.length-1:i>0;i+=direction){
-  const to=i+direction,terminal=i===0||i===stops.length-1,dwell=terminal?10:8,travel=Math.hypot(stops[to][0]-stops[i][0],stops[to][1]-stops[i][1])/16;
-  legs.push({from:i,to,direction,terminal,dwell,travel,start:at,duration:dwell+travel});at+=dwell+travel;
- }
- schedule={legs,cycle:at,half:at/2,offset:Number(line.id.slice(1))*3};metroSchedules.set(line,schedule);return schedule;
+ let schedule=metroSchedules.get(line);if(schedule)return schedule;
+ // A and B are independent directional services. Neither crosses onto the other track.
+ // An arriving service unloads at its terminus, leaves service, then a new departure is dispatched.
+ const services=[1,-1].map(direction=>{const legs=[];let at=0;
+  for(let i=direction===1?0:line.points.length-1;direction===1?i<line.points.length:i>=0;i+=direction){
+   const terminal=i===(direction===1?line.points.length-1:0),to=terminal?i:i+direction,dwell=terminal?10:i===0||i===line.points.length-1?10:8;
+   const travel=terminal?0:Math.hypot(line.points[to][0]-line.points[i][0],line.points[to][1]-line.points[i][1])/16;
+   legs.push({from:i,to,direction,terminal,dwell,travel,start:at,duration:dwell+travel});at+=dwell+travel;
+  }
+  return{legs,cycle:at+4,offset:Number(line.id.slice(1))*3};
+ });
+ schedule={services};metroSchedules.set(line,schedule);return schedule;
 }
 function physicalTrain(line,seconds,slot){
- const schedule=metroSchedule(line),offset=schedule.offset+(slot===1?schedule.half:0),phase=((seconds+offset)%schedule.cycle+schedule.cycle)%schedule.cycle;
- const leg=schedule.legs.find(l=>phase<l.start+l.duration)||schedule.legs.at(-1),t=phase-leg.start,points=metroTrackPoints(line,leg.direction),a=points[leg.from],b=points[leg.to];
- const u=Math.max(0,Math.min(1,(t-leg.dwell)/leg.travel));let x=a.x+(b.x-a.x)*u,z=a.z+(b.z-a.z)*u,platformDirection=leg.direction;
- if(leg.terminal&&t<4){const incoming=metroTrackPoints(line,-leg.direction)[leg.from],cross=Math.max(0,t-3);x=incoming.x+(a.x-incoming.x)*cross;z=incoming.z+(a.z-incoming.z)*cross;platformDirection=t<3?-leg.direction:leg.direction;}
- const dwelling=t<leg.dwell&&(!leg.terminal||t>=4),alighting=t<leg.dwell&&(!leg.terminal||t<3||t>=4);
- return{id:`${line.id}-${slot===0?'A':'B'}`,active:true,runDirection:leg.direction,platformDirection,x,z,y:line.height,from:leg.from,to:leg.to,direction:leg.direction,dwelling,alighting,cycleSeconds:schedule.cycle};
+ const service=metroSchedule(line).services[slot],phase=((seconds+service.offset)%service.cycle+service.cycle)%service.cycle;
+ const leg=service.legs.find(l=>phase<l.start+l.duration)||service.legs.at(-1),t=phase-leg.start,points=metroTrackPoints(line,leg.direction),a=points[leg.from],b=points[leg.to];
+ const active=phase<service.cycle-4,u=leg.travel?Math.max(0,Math.min(1,(t-leg.dwell)/leg.travel)):0;
+ return{id:`${line.id}-${slot===0?'A':'B'}`,active,runDirection:leg.direction,platformDirection:leg.direction,x:a.x+(b.x-a.x)*u,z:a.z+(b.z-a.z)*u,y:line.height,from:leg.from,to:leg.to,direction:leg.direction,dwelling:active&&!leg.terminal&&t<leg.dwell,alighting:active&&t<leg.dwell,cycleSeconds:service.cycle};
 }
 export function trainStates(line,seconds){return[physicalTrain(line,seconds,0),physicalTrain(line,seconds,1)];}
 export function trainById(line,seconds,id){const slot=id===`${line.id}-A`?0:id===`${line.id}-B`?1:-1;return slot<0?null:physicalTrain(line,seconds,slot);}
@@ -526,10 +579,10 @@ export function trainState(line,seconds,direction=1){return trainStates(line,sec
 /** Analytic periodic-window query: catches a station visit skipped by a coarse background tick. */
 export function metroServiceBetween(line,fromSeconds,toSeconds,query){
  if(!Number.isFinite(fromSeconds)||!Number.isFinite(toSeconds)||toSeconds<fromSeconds)return null;
- const s=metroSchedule(line);let best=null;
- for(const slot of [0,1]){const id=`${line.id}-${slot===0?'A':'B'}`;if(query.trainId&&query.trainId!==id)continue;const offset=s.offset+(slot?s.half:0);
-  for(const leg of s.legs){if(leg.from!==query.stationIndex||query.direction&&leg.direction!==query.direction)continue;
-   const windows=query.alighting&&leg.terminal?[[0,3,-leg.direction],[4,leg.dwell,leg.direction]]:[[query.alighting?0:leg.terminal?4:0,leg.dwell,leg.direction]];
+ let best=null;
+ for(const slot of [0,1]){const id=`${line.id}-${slot===0?'A':'B'}`;if(query.trainId&&query.trainId!==id)continue;const s=metroSchedule(line).services[slot],offset=s.offset;
+  for(const leg of s.legs){if(leg.from!==query.stationIndex||query.direction&&leg.direction!==query.direction||leg.terminal&&!query.alighting)continue;
+   const windows=[[0,leg.dwell,leg.direction]];
    for(const [lo,hi,platformDirection]of windows){let cycle=Math.floor((fromSeconds+offset-leg.start-lo)/s.cycle),start=cycle*s.cycle+leg.start+lo-offset,end=cycle*s.cycle+leg.start+hi-offset;if(end<=fromSeconds){start+=s.cycle;end+=s.cycle;}
     const at=Math.max(start,fromSeconds+1e-7);if(at>=end||at>toSeconds)continue;if(!best||at<best.at)best={...physicalTrain(line,at,slot),at,platformDirection};
    }

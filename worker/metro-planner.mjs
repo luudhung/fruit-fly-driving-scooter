@@ -1,5 +1,5 @@
 import {METRO_LINES,metroStationGeometry,pedestrianRoute,onIsland} from './city-map.mjs';
-export const METRO_ACCESS_VERSION=2;
+export const METRO_ACCESS_VERSION=3;
 const nodes=METRO_LINES.flatMap(line=>line.points.map((p,index)=>({line,index,x:p[0],z:p[1],geo:metroStationGeometry(line,index)})));
 const edges=nodes.map((a,i)=>nodes.flatMap((b,j)=>{
  if(a.line.id===b.line.id&&Math.abs(a.index-b.index)===1)return[{to:j,cost:Math.hypot(a.x-b.x,a.z-b.z)*.18+2,rail:true}];

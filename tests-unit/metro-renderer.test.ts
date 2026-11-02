@@ -14,8 +14,19 @@ test('seven metro lines retain fourteen physical trains and two separately label
  for(const train of m.trains)assert.equal(train.group.children.filter(o=>o instanceof THREE.InstancedMesh).length,3,'carriages/body/windows keep three batches per train');
 });
 
-test('renderer follows the actual A/B train poses and outgoing direction after terminal crossovers',()=>{
+test('renderer follows both fixed directional services and hides the depot turnover',()=>{
  const m=setup();for(const seconds of [0,3,4,10,25,90,180,350,600]){m.update(seconds);for(const line of METRO_LINES)for(const pose of trainStates(line,seconds)){const visual=m.trains.find(t=>t.id===pose.id)!;assert.ok(visual.group.position.distanceTo(new THREE.Vector3(pose.x,pose.y,pose.z))<1e-8);assert.equal(visual.direction,pose.direction);assert.equal(visual.group.visible,pose.active);assert.ok(visual.label.userData.text.startsWith(metroDirectionLabel(line,pose.direction)));}}
+});
+
+test('a terminal arrival retains its incoming rail heading instead of rotating a stopped train',()=>{
+ const m=setup();let seen=0;
+ for(const line of METRO_LINES)for(const direction of [1,-1]){
+  let terminal;
+  for(let seconds=0;seconds<600;seconds+=.5){const pose=trainStates(line,seconds).find(t=>t.direction===direction)!;if(pose.active&&pose.from===pose.to){terminal={pose,seconds};break;}}
+  assert.ok(terminal);m.update(terminal.seconds);const a=line.points[terminal.pose.from-direction],b=line.points[terminal.pose.to],visual=m.trains.find(t=>t.id===terminal.pose.id)!;
+  assert.ok(Math.abs(visual.group.rotation.y-Math.atan2(b[0]-a[0],b[1]-a[1]))<1e-8);seen++;
+ }
+ assert.equal(seen,14);
 });
 
 test('ridership is counted by physical train and waiting is counted by direction and platform',()=>{

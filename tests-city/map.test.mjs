@@ -125,7 +125,7 @@ test('all metro stairs run along clear sidewalks and every interchange stays abo
  for(const line of METRO_LINES)for(let i=0;i<line.points.length;i++){
   const g=metroStationGeometry(line,i);assert.equal(g.accessViolations,0,`${line.id} ${i} obstructs a street or building`);
   assert.ok(g.stairs.length>=5);assert.ok(!ROADS.some(r=>Math.abs(g.access.x-r.x)<r.w/2&&Math.abs(g.access.z-r.z)<r.d/2));
-  const a=g.stairs[0],b=g.stairs[1];assert.ok(g.axis==='x'?Math.abs(a.z-b.z)<.01:Math.abs(a.x-b.x)<.01);
+  const a=g.stairs[0],b=g.stairs[1];assert.ok(Math.abs(a.z-b.z)<.01||Math.abs(a.x-b.x)<.01,'ground stairs follow a city axis even when the corner platform faces another axis');
  }
  for(const station of METRO_INTERCHANGES){const a=METRO_LINES.find(l=>l.id===station.lineId);for(const id of station.lines.filter(id=>id!==a.id)){
   const b=METRO_LINES.find(l=>l.id===id),bi=b.points.findIndex(p=>p[0]===station.x&&p[1]===station.z),points=metroTransferWaypoints(a,station.index,b,bi);

@@ -37,7 +37,10 @@ export class MetroRenderer{
    for(let index=0;index<line.points.length;index++){
     const geos=[metroStationGeometry(line,index,1),metroStationGeometry(line,index,-1)];
     const shared=geos[0].sharedStairs;
-    for(let i=1;i<shared.length;i++)this.addStaircase(shared[i-1],shared[i]);
+    for(let i=1;i<shared.length;i++){
+     if(Math.hypot(shared[i].x-shared[i-1].x,shared[i].z-shared[i-1].z)<.05&&Math.abs(shared[i].y-shared[i-1].y)>.1)crossovers.push([shared[i-1],shared[i]]);
+     else this.addStaircase(shared[i-1],shared[i]);
+    }
     for(const geo of geos){
      if(geo.crossover.length>1)crossovers.push(geo.crossover);
      this.addStation(line,index,lineIndex,geo.direction,makeSign,detail);
@@ -68,15 +71,16 @@ export class MetroRenderer{
   }
  }
  private addStation(line:MetroLine,index:number,lineIndex:number,direction:number,makeSign:Sign,detail:number){
-  const geo=metroStationGeometry(line,index,direction),horizontal=geo.axis==='x',root=this.infrastructure;
-  this.box(horizontal?16:3.2,.55,horizontal?3.2:16,geo.platform.x,geo.platform.y-1.175,geo.platform.z,this.platform);
-  const towardTrack=new THREE.Vector3(geo.track.x-geo.platform.x,0,geo.track.z-geo.platform.z).normalize();
-  this.box(horizontal?15.4:.16,.08,horizontal?.16:15.4,geo.platform.x+towardTrack.x*1.45,geo.platform.y-.87,geo.platform.z+towardTrack.z*1.45,this.edgeMaterials[lineIndex]);
+  const geo=metroStationGeometry(line,index,direction),horizontal=geo.axis==='x',root=this.infrastructure,length=geo.platformLength;
+  this.box(horizontal?length:3.2,.55,horizontal?3.2:length,geo.platform.x,geo.platform.y-1.175,geo.platform.z,this.platform);
+  const towardTrack=new THREE.Vector3(horizontal?0:geo.track.x-geo.platform.x,0,horizontal?geo.track.z-geo.platform.z:0).normalize();
+  this.box(horizontal?length-.6:.16,.08,horizontal?.16:length-.6,geo.platform.x+towardTrack.x*1.45,geo.platform.y-.87,geo.platform.z+towardTrack.z*1.45,this.edgeMaterials[lineIndex]);
   if(detail>=1){
    // Leave the middle clear for the crossover lift, instead of sealing it with a canopy.
    for(const side of [-1,1]){
-    this.box(horizontal?5.1:3.2,.28,horizontal?3.2:5.1,geo.platform.x+(horizontal?side*3.45:0),geo.platform.y+1.65,geo.platform.z+(horizontal?0:side*3.45),this.canopy);
-    this.box(.16,2.7,.16,geo.platform.x+(horizontal?side*5:0),geo.platform.y+.35,geo.platform.z+(horizontal?0:side*5),this.beam);
+    const canopyLength=(length-1.8)/2,canopyOffset=(length+1.8)/4;
+    this.box(horizontal?canopyLength:3.2,.28,horizontal?3.2:canopyLength,geo.platform.x+(horizontal?side*canopyOffset:0),geo.platform.y+1.65,geo.platform.z+(horizontal?0:side*canopyOffset),this.canopy);
+    this.box(.16,2.7,.16,geo.platform.x+(horizontal?side*(length/2-1):0),geo.platform.y+.35,geo.platform.z+(horizontal?0:side*(length/2-1)),this.beam);
    }
   }
   const title=metroDirectionLabel(line,direction),label=makeSign(`${title} · 0 CHỜ`,16,1.15);
@@ -124,7 +128,7 @@ export class MetroRenderer{
   for(const [lineIndex,line]of METRO_LINES.entries())for(const pose of trainStates(line,seconds)){
    const train=this.trains.find(t=>t.lineIndex===lineIndex&&t.id===pose.id);if(!train)continue;
    train.group.visible=pose.active;train.group.position.set(pose.x,pose.y,pose.z);
-   const a=line.points[pose.from],b=line.points[pose.to];train.group.rotation.y=Math.atan2(b[0]-a[0],b[1]-a[1]);
+   const a=line.points[pose.from===pose.to?pose.from-pose.direction:pose.from],b=line.points[pose.to];train.group.rotation.y=Math.atan2(b[0]-a[0],b[1]-a[1]);
    if(train.direction!==pose.direction){train.direction=pose.direction;this.trainLabel(train);}
   }
  }

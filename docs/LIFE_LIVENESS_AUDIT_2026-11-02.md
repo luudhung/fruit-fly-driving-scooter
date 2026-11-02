@@ -86,3 +86,46 @@ Giới hạn kiểm chứng:
 - Không fuzz mọi dạng checkpoint hỏng tùy ý. Kiểm tra tập trung checkpoint thực, nhiệm vụ mồ côi/đổi chủ/callback cũ và các mốc đã từng gây kẹt.
 - Bảo toàn ID não không đồng nghĩa neuron đã được tính thêm trong phép thử tắt neural sync; độ trễ/cadence não được kiểm tra ở luồng neural riêng.
 - Chưa kiểm tra FPS, hiệu ứng hay thao tác điện thoại trong lượt audit logic này.
+
+## Bổ sung: chạy tự nhiên một ngày từ bản lưu production mới nhất
+
+Nguồn: `work/backups/pre-metro-observer-hotfix.json` (bản sao đọc từ production trước hotfix observer). Script: `work/life-day-audit-2026-11-02.mjs`; kết quả: `work/life-day-audit-2026-11-02.json`. Bốn checkpoint đầy đủ tại bước 180/360/540/720 nằm trong `work/life-day-checkpoint-2026-11-02-*.json` trên SSD. Chúng là dữ liệu kiểm thử cục bộ; không được nhập/ghi trở lại production.
+
+Chạy 720 bước × 120 giây game, đủ **86.400 giây = một ngày game**, mất khoảng 33,92 giây trên máy trong lượt này. Không gán nhiệm vụ, không dịch chuyển cư dân, không chỉnh thời tiết/nhu cầu. Chỉ tắt đồng bộ não qua mạng để phép thử bản sao không gọi ra dịch vụ neural.
+
+Kết quả hoạt động tự nhiên:
+
+| Chỉ số | Thay đổi trong một ngày |
+| --- | ---: |
+| Chuyến metro hoàn tất | +676 |
+| Lượt lên metro | +665 (một số hành khách đã ở trên tàu từ đầu ngày) |
+| Chuyến taxi hoàn tất | +9 |
+| Lượt tennis / trận sân vận động | +6 / +1 |
+| Công trình hoàn thành | +1 |
+| Giao dịch | +1.779 |
+| Thu nhập lương tích lũy của nhóm sống tại mốc đo | +1.211,07 H$ |
+| Cư dân đi qua ngày trả lương / hộ đi qua ngày thu phí nhà | 475 / 385 |
+| Khách du lịch đến / rời thành phố | +2 / +1 |
+| Cư dân sinh / tử | 0 / 1 (một người 91 tuổi, nguyên nhân đã ghi: natural causes) |
+| Chuyến trực thăng / thăm bạn / chăm hộ hoàn tất | 0 / 0 / 0 trong mẫu này |
+
+Đếm được 4.950 lần đổi loại hoạt động. Không có exception ghi log, lỗi mô phỏng mới, ID não cũ bị đổi, chỉ số vị trí/nhu cầu không hữu hạn, taxi mồ côi, chuyến taxi quá hạn, chuyến xuống trực thăng quá hạn, hoặc social/sports/civic task quá hạn tại bốn checkpoint và cuối ngày. Một ngày không phát sinh một hoạt động không chứng minh hoạt động đó đã được kiểm tra tự nhiên; trực thăng/thăm bạn/chăm hộ vẫn dựa trên các kiểm thử có tình huống đã nêu ở trên.
+
+Các phân bố phản ánh phục hồi ở đa số dân nhưng còn ngoại lệ cần sửa:
+
+| Nhu cầu | Đầu ngày | Cuối ngày |
+| --- | ---: | ---: |
+| Trung vị năng lượng | 34,07 | 52,37 |
+| Cư dân năng lượng <15 | 110 | 27 |
+| Trung vị đói | 44,53 | 36,46 |
+| Cư dân đói >85 | 16 | 10 |
+| Cư dân khát >85 | 19 | 8 |
+| Cư dân sống | 598 | 597 |
+
+**Phát hiện mới phải theo dõi:**
+
+- FLY-01583 không đổi vị trí suốt ngày tại x=15,z=-80, action chờ đường đi, năng lượng từ 16,98 xuống 0 và đói từ 61,01 lên 100. Điểm thoát bánh xe hiện hardcode tại vị trí này nằm trong hình chữ nhật hồ chứa (tâm15,-112; kích thước58×88). Đây là trạng thái kẹt nghiêm trọng, không thể coi là đã chữa chỉ vì toàn thành phố có nhiều chuyến tàu hoàn tất. Đã chuyển root xử lý map/điểm xuống bánh xe và di trú cư dân đang kẹt.
+- FLY-00287 giữ nguyên nguồn x=15,z=-6.3, action đi việc riêng bằng ô tô, routeIndex=0 dù mục tiêu đổi. Code `road-life` có thể đề xuất lại việc riêng cho người đang đi bộ, rồi khi không lập được chặng car lại nhả `roadDuty`; điều này có thể đặt lại bước đầu hành trình mỗi tick. Đã chuyển root tái hiện/sửa phần road scheduler; module của audit này không tự sửa file ngoài phạm vi.
+- FLY-01036 ở nguyên khách sạn cứu trợ trong cả ngày, nhưng năng lượng tăng tới99,96 và đói còn3,19 trong khi nhà vẫn chưa an toàn. Đây là chờ nơi ở được bảo trợ có lý do, khác với hai trường hợp bị kẹt và suy kiệt ở trên.
+
+Không dùng kết quả “không fault/NaN” để kết luận không còn lỗi đời sống: hai trường hợp mới đều có số hữu hạn và không ném exception, nhưng một ngày quan sát đã bộc lộ việc không đi tiếp được. Cần chạy lại mẫu ngày sau khi root sửa các nguyên nhân đó, giữ bản kết quả này làm đối chiếu.
