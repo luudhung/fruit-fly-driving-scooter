@@ -8,17 +8,22 @@ export class CityMotion{
  accept(position:MotionPoint,plan:MotionPlan){
   if(!Number.isFinite(plan.at)||!Number.isFinite(position.x)||!Number.isFinite(position.z)||this.plan&&plan.at<=this.plan.at)return;
   plan={...plan,speed:Number.isFinite(plan.speed)?Math.max(0,Math.min(40,plan.speed)):0,points:plan.points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,16)};
-  const path=[position,...plan.points];let closest=Infinity,segment=0;
+  const path=[position,...plan.points];let closest=Infinity,segment=0,ahead=0,travelled=0;
   if(this.plan)for(let i=0;i<path.length-1;i++){
    const a=path[i],b=path[i+1],dx=b.x-a.x,dy=(b.y??a.y??1.1)-(a.y??1.1),dz=b.z-a.z,len=dx*dx+dy*dy+dz*dz;
    const t=len?Math.max(0,Math.min(1,((this.x-a.x)*dx+(this.y-(a.y??1.1))*dy+(this.z-a.z)*dz)/len)):0;
    const distance=Math.hypot(this.x-a.x-dx*t,this.y-(a.y??1.1)-dy*t,this.z-a.z-dz*t);
-   if(distance<closest){closest=distance;segment=i;}
+   if(distance<closest){closest=distance;segment=i;ahead=travelled+Math.sqrt(len)*t;}
+   travelled+=Math.sqrt(len);
   }
-  if(!this.plan||closest>(plan.mode==='car'?4:2)||Math.abs(this.y-(position.y??1.1))>2.5){
-   this.x=position.x;this.y=position.y??1.1;this.z=position.z;segment=0;
+  // Compare against the complete 3D route: being higher on the same staircase
+  // is valid prediction, not a teleport that should return to street height.
+  if(!this.plan||this.plan.mode!==plan.mode||closest>(plan.mode==='car'?4:2)){
+   this.x=position.x;this.y=position.y??1.1;this.z=position.z;segment=0;ahead=0;
   }
-  this.plan={...plan,points:plan.points.slice(segment)};this.index=0;this.remaining=8;
+  // A refresh must not renew eight seconds of lead on top of existing lead.
+  // Only actual server progress releases more of the prediction budget.
+  this.plan={...plan,points:plan.points.slice(segment)};this.index=0;this.remaining=plan.speed>0?Math.max(0,8-ahead/plan.speed):0;
  }
  get targetX(){return this.plan?.points[this.index]?.x??this.x;}
  get targetZ(){return this.plan?.points[this.index]?.z??this.z;}

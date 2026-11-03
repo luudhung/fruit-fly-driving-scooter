@@ -342,6 +342,18 @@ export function clearSegment(a,b) {
  for(let i=0;i<=n;i++)if(blocked({x:a.x+(b.x-a.x)*i/n,z:a.z+(b.z-a.z)*i/n}))return false;
  return true;
 }
+// Only for an encoded station deck/stair route. Ground navigation remains 2D;
+// an upper concourse can pass over a low roof without passing through a building.
+export function clearMetroAccessSegment(a,b) {
+ const n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z,(b.y??1.1)-(a.y??1.1))/.6));
+ for(let i=0;i<=n;i++){
+  const t=i/n,p={x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:(a.y??1.1)+((b.y??1.1)-(a.y??1.1))*t};
+  if(p.y<=2){if(blocked(p))return false;continue;}
+  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return false;
+  if(nearbyGeometry(buildingBins,p).some(building=>effectiveBuildingHeight(building)>p.y-1.25&&contains(building,p,.45)))return false;
+ }
+ return true;
+}
 // A graph of actual sidewalks, park paths and bridge walks, never imaginary infinite streets.
 const walks=[];
 export const WALKWAYS=walks;

@@ -6,7 +6,7 @@ import {createCityVisitors} from './city-visitors.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
-import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -2735,11 +2735,14 @@ function moveFly(fly,waypointHops=0) {
   fly.vx = ux * step;
   fly.vz = uz * step;
   const nextPosition={x:fly.x+fly.vx,z:fly.z+fly.vz};
-  if(!clearSegment(fly,nextPosition)){if(fly.transitMode==="car"){roadLife.park(fly);fly.carPosition=null;roadLife.arrived(fly);}fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
   const activeWp=fly.routeWaypoints?.[fly.routeIndex];
   const targetY=Number.isFinite(activeWp?.y)?activeWp.y:1.1;
   const yBlend=dist>0?Math.min(1,step/dist):1;
-  fly.x=nextPosition.x;fly.z=nextPosition.z;fly.y=fly.y+(targetY-fly.y)*yBlend;
+  const nextY=fly.y+(targetY-fly.y)*yBlend;
+  const stationAccess=fly.transitMode==='walk'&&(activeWp?.stage?.startsWith('station-')||activeWp?.stage==='interchange-walk');
+  const clear=stationAccess?clearMetroAccessSegment(fly,{...nextPosition,y:nextY}):clearSegment(fly,nextPosition);
+  if(!clear){if(fly.transitMode==="car"){roadLife.park(fly);fly.carPosition=null;roadLife.arrived(fly);}fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
+  fly.x=nextPosition.x;fly.z=nextPosition.z;fly.y=nextY;
   if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
   const remaining = Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z,fly.transitMode==='walk'?(routeTarget?.y??1.1)-fly.y:0);
