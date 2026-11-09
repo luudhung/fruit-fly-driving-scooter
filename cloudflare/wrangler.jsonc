@@ -3,6 +3,7 @@
   "name": "fruit-fly-civilization-free",
   "main": "src/index.mjs",
   "compatibility_date": "2026-10-03",
+  "triggers": { "crons": ["*/2 * * * *"] },
   "durable_objects": {
     "bindings": [
       {

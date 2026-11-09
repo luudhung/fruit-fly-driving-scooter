@@ -1,5 +1,6 @@
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
+import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
 import {
   freshState,
   restoreState,
@@ -13,13 +14,11 @@ import {
   getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,neuralActors,
 } from "../../worker/civilization-engine.mjs";
 
-const SNAPSHOT_META_KEY = "snapshot:meta";
-const CHUNK_PREFIX = "snapshot:chunk:";
-const CHUNK_SIZE = 1_500_000;
 const DEFAULT_WORLD_ID = "WORLD-A";
 const DEFAULT_ALARM_INTERVAL_MS = 5_000;
 const DEFAULT_IDLE_MAX_STEPS = 90;
 const ACTIVE_PERSIST_INTERVAL_MS = 60_000;
+const MAX_RECOVERY_SECONDS = 15;
 
 setNeuralSyncEnabled(false);
 
@@ -43,96 +42,6 @@ function json(body, status = 200, extraHeaders = {}) {
   });
 }
 
-async function gzipJson(value) {
-  const source = new Blob([JSON.stringify(value)]).stream();
-  const compressed = source.pipeThrough(new CompressionStream("gzip"));
-  return new Uint8Array(await new Response(compressed).arrayBuffer());
-}
-
-async function gunzipJson(bytes) {
-  const source = new Blob([bytes]).stream();
-  const decompressed = source.pipeThrough(new DecompressionStream("gzip"));
-  const text = await new Response(decompressed).text();
-  return JSON.parse(text);
-}
-
-async function loadSnapshot(storage) {
-  const meta = await storage.get(SNAPSHOT_META_KEY);
-  if (!meta?.chunks) return null;
-  const count = Number(meta.chunks);
-  if (!Number.isInteger(count) || count < 1 || count > 128) return null;
-
-  const keys = Array.from({ length: count }, (_, index) => `${CHUNK_PREFIX}${index}`);
-  const parts = await storage.get(keys);
-  let total = 0;
-  const ordered = [];
-  for (const key of keys) {
-    const part = parts.get(key);
-    if (!(part instanceof ArrayBuffer) && !ArrayBuffer.isView(part)) return null;
-    const bytes = part instanceof ArrayBuffer
-      ? new Uint8Array(part)
-      : new Uint8Array(part.buffer, part.byteOffset, part.byteLength);
-    ordered.push(bytes);
-    total += bytes.byteLength;
-  }
-
-  const combined = new Uint8Array(total);
-  let offset = 0;
-  for (const part of ordered) {
-    combined.set(part, offset);
-    offset += part.byteLength;
-  }
-
-  const state = await gunzipJson(combined);
-  return snapshotLooksUsable(state)
-    ? {
-        state,
-        lastWallClockMs: Number(meta.lastWallClockMs || Date.now()),
-        savedAtMs: Number(meta.savedAtMs || 0),
-      }
-    : null;
-}
-
-async function saveSnapshot(storage, state, lastWallClockMs) {
-  const compressed = await gzipJson(state);
-  const chunkCount = Math.max(1, Math.ceil(compressed.byteLength / CHUNK_SIZE));
-  if (chunkCount > 128) {
-    throw new Error(`compressed civilization snapshot needs ${chunkCount} chunks; maximum supported is 128`);
-  }
-
-  const oldMeta = await storage.get(SNAPSHOT_META_KEY);
-  for (let index = 0; index < chunkCount; index += 1) {
-    const start = index * CHUNK_SIZE;
-    const end = Math.min(compressed.byteLength, start + CHUNK_SIZE);
-    const chunk = compressed.slice(start, end);
-    await storage.put(`${CHUNK_PREFIX}${index}`, chunk.buffer);
-  }
-
-  const oldCount = Number(oldMeta?.chunks || 0);
-  if (oldCount > chunkCount) {
-    const stale = Array.from(
-      { length: oldCount - chunkCount },
-      (_, index) => `${CHUNK_PREFIX}${chunkCount + index}`,
-    );
-    if (stale.length) await storage.delete(stale);
-  }
-
-  await storage.put(SNAPSHOT_META_KEY, {
-    version: 1,
-    codec: "gzip-json",
-    chunks: chunkCount,
-    compressedBytes: compressed.byteLength,
-    simulationAgeSeconds: Number(state.simulationAgeSeconds || 0),
-    lastWallClockMs,
-    savedAtMs: Date.now(),
-  });
-
-  return {
-    chunks: chunkCount,
-    compressedBytes: compressed.byteLength,
-  };
-}
-
 export class CivilizationWorld extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -146,7 +55,9 @@ export class CivilizationWorld extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const saved = await loadSnapshot(this.ctx.storage);
       if (saved) {
+        if (!snapshotLooksUsable(saved.state)) throw new Error("Invalid saved civilization state");
         restoreState(saved.state);
+        this.storageStats = saved.stats;
         this.lastWallClockMs = saved.lastWallClockMs;
         this.lastPersistMs = saved.savedAtMs;
       } else {
@@ -184,9 +95,14 @@ export class CivilizationWorld extends DurableObject {
 
   async ensureAlarm() {
     const current = await this.ctx.storage.getAlarm();
-    if (current == null || current > Date.now()+this.alarmIntervalMs()+1000) {
-      await this.ctx.storage.setAlarm(Date.now() + this.alarmIntervalMs());
+    const now = Date.now();
+    const interval = this.alarmIntervalMs();
+    if (current == null || current < now - 2 * interval || current > now + interval + 1000) {
+      const next = now + interval;
+      await this.ctx.storage.setAlarm(next);
+      return next;
     }
+    return current;
   }
 
   async advanceTo(nowMs, reason = "request") {
@@ -195,18 +111,21 @@ export class CivilizationWorld extends DurableObject {
     if (elapsedRealSeconds < 0.75) return { elapsedRealSeconds, steps: 0 };
 
     const raw = getRawState();
-    if (!snapshotLooksUsable(raw)) freshState();
+    if (!snapshotLooksUsable(raw)) throw new Error("Invalid civilization state before tick");
 
-    // Preserve elapsed game time while bounding decision samples as the city grows.
+    // A long outage resumes from the checkpoint. Compressing days into one
+    // alarm would jump over daily events and age residents before they can act.
+    const sampledSeconds = Math.min(elapsedRealSeconds, Math.max(MAX_RECOVERY_SECONDS, this.alarmIntervalMs() / 1000 * 2));
+    const skippedRealSeconds = elapsedRealSeconds - sampledSeconds;
     const population = neuralActors().length;
     const decisionBudget = Math.max(4, Math.min(24, Math.floor(6000/Math.max(1,population))));
     const maxSteps = reason === "alarm" ? Math.min(this.idleMaxSteps(),decisionBudget) : decisionBudget;
     const steps = Math.min(
       maxSteps,
-      Math.max(1, Math.floor(elapsedRealSeconds)),
+      Math.max(1, Math.floor(sampledSeconds)),
     );
     const timeScale = Number(getRawState()?.timeScale || getSimulationConfig().gameSecondsPerRealSecond || 120);
-    const totalGameSeconds = elapsedRealSeconds * timeScale;
+    const totalGameSeconds = sampledSeconds * timeScale;
     const gameSecondsPerStep = Math.max(1, totalGameSeconds / steps);
 
     const ageBefore=Number(getRawState().simulationAgeSeconds||0);
@@ -216,7 +135,11 @@ export class CivilizationWorld extends DurableObject {
 
     this.lastWallClockMs = nowMs;
     getRawState().updatedAt = new Date(nowMs).toISOString();
-    return this.lastAdvance={ elapsedRealSeconds, steps, gameSecondsPerStep,advancedGameSeconds:Number(getRawState().simulationAgeSeconds||0)-ageBefore };
+    if (skippedRealSeconds > 0) console.warn(JSON.stringify({event: "city_clock_resumed", skippedRealSeconds}));
+    return this.lastAdvance = {
+      elapsedRealSeconds, skippedRealSeconds, steps, gameSecondsPerStep,
+      advancedGameSeconds: Number(getRawState().simulationAgeSeconds || 0) - ageBefore,
+    };
   }
 
   async persistIfDue(force = false) {
@@ -233,9 +156,21 @@ export class CivilizationWorld extends DurableObject {
 
   async alarm() {
     return this.withLock(async () => {
-      await this.advanceTo(Date.now(), "alarm");
-      await this.persistIfDue(false);
+      await this.ready;
       await this.ctx.storage.setAlarm(Date.now() + this.alarmIntervalMs());
+      try {
+        await this.advanceTo(Date.now(), "alarm");
+        await this.persistIfDue(false);
+      } catch (error) {
+        console.error(JSON.stringify({event: "city_alarm_failed", error: String(error)}));
+      }
+    });
+  }
+
+  async watchdog() {
+    return this.withLock(async () => {
+      await this.ready;
+      await this.ensureAlarm();
     });
   }
 
@@ -273,7 +208,7 @@ export class CivilizationWorld extends DurableObject {
       // Observers read the world; the background alarm owns its cadence, independent of viewers.
       const observing=request.method==="GET";
       const advance=observing?{...(this.lastAdvance||{}),snapshotAgeSeconds:Math.max(0,(Date.now()-this.lastWallClockMs)/1000)}:await this.advanceTo(Date.now(),"request");
-      await this.ensureAlarm();
+      const nextAlarmAtMs = await this.ensureAlarm();
 
       if (url.pathname === "/health") {
         await this.persistIfDue(false);
@@ -288,6 +223,7 @@ export class CivilizationWorld extends DurableObject {
           simulationAgeSeconds: Number(state?.simulationAgeSeconds || 0),
           persistence: "DURABLE_OBJECT_SQLITE",
           alarmIntervalMs: this.alarmIntervalMs(),
+          nextAlarmAtMs,
           sampledCatchup: advance,
           storage: this.storageStats,
           neural:getNeuralStatus(),
@@ -301,6 +237,7 @@ export class CivilizationWorld extends DurableObject {
           platform: "cloudflare-durable-object",
           persistence: "sqlite-gzip-chunks",
           alarmIntervalMs: this.alarmIntervalMs(),
+          nextAlarmAtMs,
           sampledCatchup: advance,
         };
         if(url.searchParams.get('view')==='observer'){
@@ -341,10 +278,9 @@ export class CivilizationWorld extends DurableObject {
 
       if (url.pathname === "/api/civilization/export") {
         await this.persistIfDue(true);
-        return json({
-          exportedAt: new Date().toISOString(),
-          worldId: this.env.CIV_WORLD_ID || DEFAULT_WORLD_ID,
-          state: getRawState(),
+        const body = await exportSnapshot(this.ctx.storage, this.env.CIV_WORLD_ID || DEFAULT_WORLD_ID);
+        return new Response(body, {
+          headers: corsHeaders({"content-type": "application/json; charset=utf-8"}),
         });
       }
 
@@ -383,6 +319,9 @@ export class CivilizationWorld extends DurableObject {
 }
 
 export default {
+  scheduled(_event, env, ctx) {
+    ctx.waitUntil(env.CIVILIZATION.getByName(env.CIV_WORLD_ID || DEFAULT_WORLD_ID).watchdog());
+  },
   fetch(request, env) {
     const worldId = env.CIV_WORLD_ID || DEFAULT_WORLD_ID;
     const id = env.CIVILIZATION.idFromName(worldId);
