@@ -43,7 +43,7 @@ import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandm
 import {buildPetronasTowers,updatePetronasLighting} from "./petronas-towers";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
 
 const viewerBootStarted=performance.now();
 type FlyState = {
@@ -508,7 +508,10 @@ function renderInspector(fly: FlyState | null) {
   flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
   flyBrainEl.textContent = `${fly.brainDecision || fly.action} · ${Math.round((fly.brainConfidence ?? 0) * 100)}%`;
   flyJobEl.textContent = fly.jobTitle || (fly.ageYears < 18 ? "child" : fly.ageYears > 75 ? "retired" : "unemployed");
-  flyHomeEl.textContent = fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
+  const homeBuilding=BUILDINGS.find(building=>building.id===fly.housingUnitId);
+  flyHomeEl.textContent=homeBuilding?.luxury
+    ? `${homeBuilding.id} · ${fly.ownsHome?'sở hữu':'cư trú'} · giá căn hộ ${num(homeBuilding.purchaseValue||0)} H$`
+    : fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
@@ -1156,12 +1159,9 @@ heliTourGroup.position.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));cityR
 const heliTarget=heliTourGroup.position.clone();
 let heliGuestCount=0;
 
-const petronasPlot=BUILDINGS.find(b=>b.id==="petronas");
-if(petronasPlot){
-  const twinTowers=buildPetronasTowers(petronasPlot,makeCanvasSprite);
-  cityRoot.add(twinTowers);
-  urbanVisuals.registerBuilding("petronas",twinTowers);
-}
+const twinTowers=buildPetronasTowers(PETRONAS_TOWERS,makeCanvasSprite);
+cityRoot.add(twinTowers);
+urbanVisuals.registerBuilding("petronas",twinTowers);
 
 function addBurjKhalifaStyle(x:number,z:number){
  const g=new THREE.Group(),

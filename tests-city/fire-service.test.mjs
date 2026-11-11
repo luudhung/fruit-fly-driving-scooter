@@ -52,3 +52,21 @@ test('fatal patients are never revived and their ambulance reservation is releas
 test('a service-disabled miniature world does not recruit or replace volunteer firefighting',()=>{
  const t=setup();t.s.emergencyServicesEnabled=false;const count=t.s.flies.filter(f=>f.jobId==='firefighter').length;t.service.init();assert.equal(t.service.enabled(),false);assert.equal(t.s.flies.filter(f=>f.jobId==='firefighter').length,count);
 });
+
+test('fire engines leave with ready firefighters instead of waiting hours for distant shifts',()=>{
+ const t=setup(),fire=t.fire(),crew=t.s.flies.filter(f=>f.jobId==='firefighter');
+ for(const f of crew)Object.assign(f,{x:590,z:0,indoors:false,currentLocationId:'riverside-market',preferredWorkStart:0});
+ for(const f of crew.slice(-2))Object.assign(f,{x:830,z:-200,currentLocationId:'firestation',indoors:true,preferredWorkStart:8});
+ const e=t.service.dispatchFire(fire,t.clock());assert.ok(e);assert.deepEqual(e.crewIds,crew.slice(-2).map(f=>f.id));
+ t.step();assert.equal(e.phase,'pullout');assert.equal(t.s.urbanWorld.fireService.operatingCosts,6);
+});
+
+test('an active fire abandoned by its first crew is reassigned to another fire engine',()=>{
+ const t=setup(),fire=t.fire(),first=t.service.dispatchFire(fire,t.clock());
+ for(let i=0;i<10&&first.phase!=='enroute';i++)t.step();
+ assert.equal(first.phase,'enroute');
+ for(const f of t.s.flies.filter(f=>first.crewIds.includes(f.id)))f.alive=false;
+ for(let i=0;i<12&&(!fire.engineId||fire.engineId===first.id);i++)t.step();
+ assert.ok(fire.engineId&&fire.engineId!==first.id);
+ assert.ok(fire.teamIds.length);
+});

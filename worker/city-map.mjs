@@ -1,12 +1,23 @@
 import {createVehicleRouter} from './vehicle-network.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 21;
+export const MAP_VERSION = 22;
 export const SKYLINE_PLOTS = {
- toronto: {x:-11,z:-356},
- empire: {x:-238,z:282},
- 'burj-khalifa': {x:275,z:200},
+ toronto: {x:-11,z:43.5},
+ empire: {x:106,z:-14.5},
+ 'burj-khalifa': {x:101,z:-320},
 };
 export const SKY_LOUNGE = {...SKYLINE_PLOTS.empire,y:99};
+export const PETRONAS_TOWERS = {
+ west:{x:-118,z:-43.5}, east:{x:-71,z:-43.5}, w:11,d:12,h:190,bridgeY:71,
+};
+export const LUXURY_RESIDENCES = [
+ {id:'toronto',name:'Tower Residences',capacity:8,purchaseValue:650000},
+ {id:'empire',name:'Empire Residences',capacity:16,purchaseValue:950000},
+ {id:'burj-khalifa',name:'Khalifa Sky Residences',capacity:20,purchaseValue:1500000},
+ {id:'petronas',name:'Petronas West Residences',capacity:12,purchaseValue:600000},
+ {id:'petronas-east',name:'Petronas East Residences',capacity:12,purchaseValue:300000},
+];
+export const SKYLINE_REDEVELOPMENTS = {'APT-34':'petronas','APT-49':'burj-khalifa'};
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -296,15 +307,41 @@ for(const x of [530,590,650,710,770,830])for(const z of [-200,-120,-40,40,120,20
  if(place(b)&&[590,710].includes(x)&&Math.abs(z)===200){b.kind='apartment';b.capacity=30;b.rent=24;b.purchaseValue=5040;APARTMENTS.push(b);}
 }
 
-// Relocate the landmarks after the city lots have been assigned. The three
-// destination parcels are open ground, so homes keep their IDs and footprints.
+// Redevelop these existing park-edge parcels. The housing migration retains
+// their households while the landmark models replace the former facades.
+const redevelopedIds=new Set(Object.keys(SKYLINE_REDEVELOPMENTS));
+for(let index=BUILDINGS.length-1;index>=0;index--){
+ if(redevelopedIds.has(BUILDINGS[index].id))BUILDINGS.splice(index,1);
+}
+for(let index=APARTMENTS.length-1;index>=0;index--){
+ if(redevelopedIds.has(APARTMENTS[index].id))APARTMENTS.splice(index,1);
+}
 for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
  const building=BUILDINGS.find(b=>b.id===id);
- const moved={...building,...plot};
- if(ROADS.some(r=>overlaps(moved,r,2.6))||[...WATER,PARK,...SPORTS_VENUES,...BUILDINGS.filter(b=>b!==building)].some(b=>overlaps(moved,b,1))){
-  throw new Error(`Skyline parcel overlaps existing city geometry: ${id}`);
- }
  Object.assign(building,plot);
+}
+const twinWest=BUILDINGS.find(building=>building.id==='petronas');
+Object.assign(twinWest,PETRONAS_TOWERS.west,{w:PETRONAS_TOWERS.w,d:PETRONAS_TOWERS.d,h:PETRONAS_TOWERS.h});
+BUILDINGS.push({...twinWest,...PETRONAS_TOWERS.east,id:'petronas-east'});
+for(const residence of LUXURY_RESIDENCES){
+ const building=BUILDINGS.find(item=>item.id===residence.id);
+ Object.assign(building,{capacity:residence.capacity,purchaseValue:residence.purchaseValue,luxury:true,rent:0});
+ APARTMENTS.push(building);
+ LOCATIONS.push({id:residence.id,name:residence.name,type:'home',x:building.x,z:building.z});
+ if(ROADS.some(road=>overlaps(building,road,2.6))||
+    [...WATER,PARK,...SPORTS_VENUES,...BUILDINGS.filter(other=>other!==building)].some(other=>overlaps(building,other,1))){
+  throw new Error(`Landmark overlaps existing city geometry: ${building.id}`);
+ }
+}
+
+const landmarkParcels=BUILDINGS.filter(building=>LUXURY_RESIDENCES.some(residence=>residence.id===building.id));
+for(const building of BUILDINGS){
+ if(building.kind==='landmark'||building.kind==='house')continue;
+ const distance=Math.min(...landmarkParcels.map(plot=>Math.hypot(building.x-plot.x,building.z-plot.z)));
+ if(distance<55){
+  building.skylineHeightLimit=24+distance*.25;
+  building.h=Math.min(building.h,building.skylineHeightLimit);
+ }
 }
 
 export function entrance(p) {
@@ -328,7 +365,8 @@ let roadBins=indexRectangles(ROADS);
 const BASE_ROADS=ROADS.map(r=>({...r}));
 export let URBAN_ROADS=[];
 const BASE_URBAN_BUILDINGS=BUILDINGS.map(b=>({...b}));
-let urbanGeometryKey='',urbanNavigationKey='';
+const baseUrbanIds=new Set(BASE_URBAN_BUILDINGS.map(b=>b.id));
+let urbanGeometryKey='',urbanNavigationKey='',urbanNavigationRevision=0;
 export let urbanGeometryRevision=0;
 export let URBAN_FLOODS=[];
 export function effectiveBuildingHeight(b){
@@ -355,13 +393,17 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
    b={id:record.id,x:record.x,z:record.z,w:record.w,d:record.d,h:record.h,kind:'civic'};BUILDINGS.push(b);
   }
   if(Number.isFinite(record.h)&&record.h>0&&record.h<=160)b.h=record.h;
+  if(Number.isFinite(b.skylineHeightLimit))b.h=Math.min(b.h,b.skylineHeightLimit);
   b.urbanStage=record.stage;b.urbanProgress=record.progress||0;
  }
  URBAN_FLOODS=floods.filter(f=>[f.x,f.z,f.w,f.d,f.depth].every(Number.isFinite)&&f.depth>.35).slice(0,4).map(f=>({...f}));
  buildingBins=indexRectangles(BUILDINGS.filter(b=>effectiveBuildingHeight(b)>0),.45);
  rebuildParkingSpaces();
- const navKey=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.stage==='cleared']),URBAN_FLOODS.map(f=>[f.id,f.x,f.z,f.w,f.d]),URBAN_ROADS.map(r=>[r.id,r.x,r.z,r.w,r.d])]);
- if(navKey!==urbanNavigationKey){urbanNavigationKey=navKey;costCache.clear();segmentCache.clear();routeCache.clear();}
+ // Only additions/removals of actual obstacles affect road passability. A
+ // change in height, progress, or condition alone does not invalidate routing.
+ const obstacles=buildings.filter(b=>baseUrbanIds.has(b.id)?b.stage==='cleared':b.id?.startsWith('CIVIC-')&&b.stage!=='cleared');
+ const navKey=JSON.stringify([obstacles.map(b=>[b.id,b.x,b.z,b.w,b.d]),URBAN_FLOODS.map(f=>[f.id,f.x,f.z,f.w,f.d]),URBAN_ROADS.map(r=>[r.id,r.x,r.z,r.w,r.d])]);
+ if(navKey!==urbanNavigationKey){urbanNavigationKey=navKey;urbanNavigationRevision++;costCache.clear();segmentCache.clear();routeCache.clear();}
  return true;
 }
 export function blocked(p) {
@@ -454,7 +496,7 @@ function nearestCell(p,c,region) {
  return -1;
 }
 const routeCache=new Map();
-const vehicleRouter=createVehicleRouter({roads:()=>ROADS,clearSegment,underpasses:()=>UNDERPASSES,roadTravelY});
+const vehicleRouter=createVehicleRouter({roads:()=>ROADS,clearSegment,underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:()=>urbanNavigationRevision});
 export function pedestrianRoute(start,dest,mode="walk") {
  if(mode==='car'||mode==='scooter')return vehicleRouter.route(start,dest,mode);
  // The island is a separate pedestrian district. Never join it to the city lattice over water.

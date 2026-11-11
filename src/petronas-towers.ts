@@ -1,17 +1,24 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-const TOWER_HEIGHT = 115;
-const BRIDGE_HEIGHT = 43.2;
-const TOWER_OFFSET = 3.03;
+const REFERENCE_HEIGHT = 115;
+const SHAFT_WIDTH_SCALE = 1.95;
+export type PetronasLayout = {
+  west: {x: number; z: number};
+  east: {x: number; z: number};
+  w: number;
+  d: number;
+  h: number;
+  bridgeY: number;
+};
 const OUTLINE = Array.from({ length: 32 }, (_, index) => {
   const angle = index * Math.PI / 16;
   const radius = [1, 0.79, 0.86, 0.79][index % 4];
   return new THREE.Vector2(Math.cos(angle) * radius, Math.sin(angle) * radius);
 });
 
-// The city uses a compressed parcel width. Keep the height proportions and
-// double-deck bridge level of the reference while fitting the existing lot.
+// The two shafts occupy separate city blocks. Floor ribs follow the stepped
+// reference profile, with a double-deck bridge above the avenue between them.
 const SETBACKS = [
   [4.8, 2.40], [30, 2.40], [52, 2.22], [66, 1.99],
   [77, 1.74], [85, 1.47], [91, 1.22], [96, 1.00], [99, 0.76],
@@ -28,7 +35,7 @@ function uplightTexture() {
   const color = new THREE.Color();
   let band = 0;
   for (let index = 0; index < 256; index++) {
-    const height = index / 255 * TOWER_HEIGHT;
+    const height = index / 255 * REFERENCE_HEIGHT;
     while (band + 1 < stops.length - 1 && height > stops[band + 1].height) band++;
     const low = stops[band], high = stops[band + 1];
     color.copy(low.color).lerp(high.color, (height - low.height) / (high.height - low.height));
@@ -60,7 +67,7 @@ updatePetronasLighting(0);
 
 function starShell(x: number, z: number, bottom: number, top: number, radius: number, topRadius = radius, capped = true) {
   const vertices: number[] = [];
-  const point = (p: THREE.Vector2, y: number, r: number) => [x + p.x * r, y, z + p.y * r];
+  const point = (p: THREE.Vector2, y: number, r: number) => [x + p.x * r * SHAFT_WIDTH_SCALE, y, z + p.y * r * SHAFT_WIDTH_SCALE];
   for (let index = 0; index < OUTLINE.length; index++) {
     const a = OUTLINE[index], b = OUTLINE[(index + 1) % OUTLINE.length];
     const lowerA = point(a, bottom, radius), lowerB = point(b, bottom, radius);
@@ -86,37 +93,42 @@ function addBrace(parts: THREE.BufferGeometry[], start: THREE.Vector3, end: THRE
   parts.push(geometry);
 }
 
-function addBatch(root: THREE.Group, parts: THREE.BufferGeometry[], material: THREE.Material) {
+function addBatch(root: THREE.Group, parts: THREE.BufferGeometry[], material: THREE.Material, heightScale: number) {
   const triangles = parts.map(part => part.index ? part.toNonIndexed() : part);
   for (const part of triangles) {
     const positions = part.getAttribute("position");
     const uv = new Float32Array(positions.count * 2);
     for (let index = 0; index < positions.count; index++) {
       uv[index * 2] = 0.5;
-      uv[index * 2 + 1] = positions.getY(index) / TOWER_HEIGHT;
+      uv[index * 2 + 1] = positions.getY(index) / REFERENCE_HEIGHT;
     }
     part.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   }
   const geometry = mergeGeometries(triangles);
   if (!geometry) throw new Error("Unable to batch Petronas tower geometry");
+  geometry.scale(1, heightScale, 1);
   root.add(new THREE.Mesh(geometry, material));
   for (const part of new Set([...parts, ...triangles])) part.dispose();
 }
 
 export function buildPetronasTowers(
-  plot: { x: number; z: number },
+  layout: PetronasLayout,
   makeSign: (text: string, width: number, height: number) => THREE.Sprite,
 ) {
   const group = new THREE.Group();
-  group.position.set(plot.x, 0, plot.z);
+  const centerX = (layout.west.x + layout.east.x) / 2;
+  const centerZ = (layout.west.z + layout.east.z) / 2;
+  const offset = (layout.east.x - layout.west.x) / 2;
+  const heightScale = layout.h / REFERENCE_HEIGHT;
+  const bridgeY = layout.bridgeY / heightScale;
+  group.position.set(centerX, 0, centerZ);
   const panes: THREE.BufferGeometry[] = [], steel: THREE.BufferGeometry[] = [], base: THREE.BufferGeometry[] = [];
-  addBox(base, 0, 0.35, 0, 11, 0.7, 11.8);
-  addBox(base, 0, 2.75, 0.65, 10.8, 4.1, 7.6);
-  addBox(panes, 0, 2.6, -3.2, 4.2, 3.2, 0.24);
-  addBox(steel, 0, 4.72, 0.65, 10.9, 0.24, 7.8);
-
   for (const side of [-1, 1]) {
-    const x = side * TOWER_OFFSET;
+    const x = side * offset;
+    addBox(base, x, 0.35, 0, layout.w, 0.7, layout.d - 0.2);
+    addBox(base, x, 2.75, 0.65, layout.w - 0.2, 4.1, 8.4);
+    addBox(panes, x, 2.6, -3.6, layout.w * 0.65, 3.2, 0.24);
+    addBox(steel, x, 4.72, 0.65, layout.w - 0.1, 0.24, 8.6);
     for (let index = 1; index < SETBACKS.length; index++) {
       const bottom = SETBACKS[index - 1][0];
       const [top, radius] = SETBACKS[index];
@@ -128,40 +140,41 @@ export function buildPetronasTowers(
       }
       for (let corner = 0; corner < OUTLINE.length; corner += 4) {
         const p = OUTLINE[corner];
-        addBox(steel, x + p.x * radius, (bottom + top) / 2, p.y * radius, 0.075, top - bottom, 0.075);
+        addBox(steel, x + p.x * radius * SHAFT_WIDTH_SCALE, (bottom + top) / 2, p.y * radius * SHAFT_WIDTH_SCALE, 0.105, top - bottom, 0.075);
       }
     }
     // The lower annex steps down behind each main shaft.
     for (const [y, h, r] of [[4.8, 24, 0.99], [28.8, 11, 0.82], [39.8, 5.2, 0.64]]) {
-      panes.push(starShell(x, 2.4, y, y + h, r));
+      panes.push(starShell(x, 3.55, y, y + h, r));
       for (let floor = Math.ceil(y); floor < y + h; floor++) {
-        steel.push(starShell(x, 2.4, floor, floor + 0.09, r + 0.03, r, false));
+        steel.push(starShell(x, 3.55, floor, floor + 0.09, r + 0.03, r, false));
       }
     }
     steel.push(starShell(x, 0, 99, 103, 0.76, 0.28));
     for (const [height, radius] of [[99.6, 0.73], [100.8, 0.60], [102, 0.45]]) {
       steel.push(starShell(x, 0, height, height + 0.14, radius, radius - 0.03, false));
     }
-    steel.push(new THREE.CylinderGeometry(0.05, 0.24, 12, 8).translate(x, 109, 0));
-    steel.push(new THREE.SphereGeometry(0.20, 8, 5).translate(x, 107.4, 0));
-    for (const z of [-0.64, 0.64]) {
-      addBrace(steel, new THREE.Vector3(side * 2.45, 34.0, z), new THREE.Vector3(side * 0.28, BRIDGE_HEIGHT, z));
+    steel.push(new THREE.CylinderGeometry(0.075, 0.39, 12, 8).translate(x, 109, 0));
+    steel.push(new THREE.SphereGeometry(0.31, 8, 5).translate(x, 107.4, 0));
+    for (const z of [-1.0, 1.0]) {
+      addBrace(steel, new THREE.Vector3(x - side * 1.3, bridgeY - 10.4, z), new THREE.Vector3(side * 2.1, bridgeY, z));
     }
   }
 
-  addBox(panes, 0, BRIDGE_HEIGHT + 0.78, 0, 6.1, 1.5, 1.42);
+  const bridgeWidth = offset * 2 - 6.0;
+  addBox(panes, 0, bridgeY + 0.78, 0, bridgeWidth, 1.5, 2.1);
   for (const height of [0, 0.78, 1.56]) {
-    addBox(steel, 0, BRIDGE_HEIGHT + height, 0, 6.2, 0.09, 1.55);
+    addBox(steel, 0, bridgeY + height, 0, bridgeWidth + 0.15, 0.09, 2.3);
   }
-  for (const z of [-0.74, 0.74]) for (let x = -1.35; x <= 1.36; x += 0.27) {
-    addBox(steel, x, BRIDGE_HEIGHT + 0.8, z, 0.045, 1.58, 0.05);
+  for (const z of [-1.1, 1.1]) for (let x = -bridgeWidth / 2; x <= bridgeWidth / 2; x += 1.1) {
+    addBox(steel, x, bridgeY + 0.8, z, 0.065, 1.58, 0.07);
   }
-  addBatch(group, base, stone);
-  addBatch(group, panes, glazing);
-  addBatch(group, steel, stainless);
+  addBatch(group, base, stone, heightScale);
+  addBatch(group, panes, glazing, heightScale);
+  addBatch(group, steel, stainless, heightScale);
 
   const sign = makeSign("HANSDREX PETRONAS", 22, 1.15);
-  sign.position.y = 119;
+  sign.position.y = layout.h + 5;
   group.add(sign);
   return group;
 }

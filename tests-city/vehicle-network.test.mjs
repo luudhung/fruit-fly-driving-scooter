@@ -41,3 +41,17 @@ test('a driver already at the pickup has a valid stationary road waypoint',()=>{
  const r=router([road(0,0,100,9.5)]),p=r.route({x:20,z:3.5},{x:20,z:3.5});
  assert.equal(p.length,1);assert.equal(p[0].mode,'car');assert.equal(p[0].x,20);
 });
+
+test('a flood invalidates cached city driving routes without changing the roads',async()=>{
+ const {applyUrbanGeometry,clearSegment,pedestrianRoute}=await import('../worker/city-map.mjs');
+ applyUrbanGeometry();
+ const start={x:110,z:1.5},goal={x:150,z:1.5},first=pedestrianRoute(start,goal,'car');
+ assert.ok(first.length);
+ try{
+  applyUrbanGeometry({floods:[{id:'route-test-flood',x:130,z:0,w:8,d:10,depth:.6}]});
+  assert.ok(edges(first).some(([a,b])=>!clearSegment(a,b)),'the original lane is now flooded');
+  const changed=pedestrianRoute(start,goal,'car');
+  assert.ok(edges(changed).every(([a,b])=>clearSegment(a,b)),'cached route may not return a flooded segment');
+ }finally{applyUrbanGeometry();}
+ assert.ok(pedestrianRoute(start,goal,'car').length,'receded water opens the original approach');
+});

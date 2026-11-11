@@ -6,7 +6,7 @@ import {createCityVisitors} from './city-visitors.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
-import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -306,7 +306,7 @@ function createHousehold(fly, inherited = null) {
 function availableApartmentBlock() {
   ensureHousingState();
   const available = state.housing.apartmentBlocks
-    .filter((b) => (b.occupants?.length || 0) < b.capacity)
+    .filter((b) => !b.luxury && (b.occupants?.length || 0) < b.capacity)
     .sort((a, b) => (a.occupants?.length || 0) - (b.occupants?.length || 0));
   return available.length ? available[Math.floor(rand() * Math.min(8, available.length))] : null;
 }
@@ -334,6 +334,43 @@ function assignApartment(fly, household = null) {
   fly.ownsHome = false;
   fly.homeTier = 0;
   fly.homeEquity = 0;
+  return true;
+}
+
+function purchaseLuxuryApartment(fly,buildingId){
+  const block=state.housing?.apartmentBlocks?.find(item=>item.id===buildingId&&item.luxury);
+  const household=state.housing?.households?.[fly.householdId];
+  if(!fly.alive||fly.ageYears<21||fly.ownsHome||!block||!household||
+     household.members[0]!==fly.id||fly.traveling||fly.currentLocationId!==buildingId||
+     urbanWorld.isUnavailable(buildingId,fly))return false;
+  if(household.unitId!==buildingId&&(block.occupants?.length||0)>=block.capacity)return false;
+  const price=block.purchaseValue;
+  if(fly.money+fly.savings<price+5000)return false;
+  const cash=Math.min(Math.max(0,fly.money),price);
+  fly.money-=cash;
+  fly.savings-=price-cash;
+  state.treasury.cash+=price;
+  state.totalTransactions++;
+  releaseHousingUnit(household);
+  block.occupants||=[];
+  block.occupants.push(household.id);
+  Object.assign(household,{unitId:block.id,housingType:'apartment',homeX:block.x,homeZ:block.z,
+    propertyValue:price,monthlyHousingCost:Math.round(price*.0004),luxuryPurchaseAt:state.simulationAgeSeconds});
+  for(const member of householdMembers(household.id)){
+    const wasHome=!member.traveling&&member.indoors&&member.currentLocationId===member.homeId;
+    Object.assign(member,{homeId:block.id,homeX:block.x,homeZ:block.z,housingUnitId:block.id,
+      housingType:'apartment',homeDistrict:'central',actionUntil:0});
+    if(wasHome){
+      const door=entrance(member);
+      Object.assign(member,door,{y:1.1,indoors:false,movementTrace:[],currentLocationId:null});
+    }
+  }
+  Object.assign(fly,{ownsHome:true,homeEquity:price,homeTier:4,currentLocationId:block.id,
+    x:block.x,y:1.1,z:block.z,indoors:true,action:'moving into a luxury residence',
+    pendingAction:null,actionUntil:state.simulationAgeSeconds+1800});
+  brainRemember(fly,'luxury_home_purchase',{buildingId,price});
+  emit('home_purchase',`${fly.id} purchased an apartment at ${buildingId} for ${price.toLocaleString('en-US')} H$.`,
+    {flyId:fly.id,buildingId,price,householdId:household.id});
   return true;
 }
 
@@ -1192,6 +1229,56 @@ function restoreState(persistedState) {
     }
     for(const project of state.urbanWorld.projects||[])if(project.buildingId?.startsWith('RIVERSIDE-')){const base=BUILDINGS.find(b=>b.id===project.buildingId);if(base)project.targetHeight=base.h;}
   }
+  if(previousMapVersion<22){
+    for(const [oldId,newId] of Object.entries(SKYLINE_REDEVELOPMENTS)){
+      const oldBlock=state.housing.apartmentBlocks.find(block=>block.id===oldId);
+      const base=APARTMENTS.find(block=>block.id===newId);
+      if(oldBlock)Object.assign(oldBlock,base,{occupants:oldBlock.occupants||[]});
+      for(const household of Object.values(state.housing.households)){
+        if(household.unitId===oldId)household.unitId=newId;
+      }
+      for(const fly of state.flies){
+        if(fly.housingUnitId===oldId)fly.housingUnitId=newId;
+      }
+      const record=state.urbanWorld?.buildings?.[oldId];
+      if(record){
+        delete state.urbanWorld.buildings[oldId];
+        state.urbanWorld.buildings[newId]={...record,...base,id:newId};
+      }
+      for(const project of state.urbanWorld?.projects||[]){
+        if(project.buildingId===oldId){project.buildingId=newId;project.targetHeight=base.h;}
+      }
+      for(const helicopter of state.sportsLuxury?.helicopters||[]){
+        for(const key of ['padId','homePadId']){
+          if(helicopter[key]===`PAD-${oldId}`)helicopter[key]=`PAD-${newId}`;
+        }
+        for(const endpoint of [helicopter.flight?.from,helicopter.flight?.to]){
+          if(endpoint?.locationId===oldId)Object.assign(endpoint,{
+            id:`PAD-${newId}`,locationId:newId,x:base.x,z:base.z,y:base.h+4,access:entrance(base),
+          });
+        }
+      }
+    }
+    for(const helicopter of state.sportsLuxury?.helicopters||[]){
+      for(const endpoint of [helicopter.flight?.from,helicopter.flight?.to]){
+        const roof=endpoint?.rooftop&&BUILDINGS.find(building=>building.id===endpoint.locationId);
+        if(roof)Object.assign(endpoint,{x:roof.x,z:roof.z,y:roof.h+4,access:entrance(roof)});
+      }
+    }
+    for(const block of state.housing.apartmentBlocks){
+      const base=APARTMENTS.find(item=>item.id===block.id);
+      if(base)Object.assign(block,{h:base.h,luxury:Boolean(base.luxury),purchaseValue:base.purchaseValue});
+    }
+    for(const record of Object.values(state.urbanWorld?.buildings||{})){
+      const base=BUILDINGS.find(item=>item.id===record.id);
+      if(base){
+        Object.assign(record,{x:base.x,z:base.z,w:base.w,d:base.d,h:base.h});
+        for(const project of state.urbanWorld.projects||[]){
+          if(project.buildingId===base.id)project.targetHeight=base.h;
+        }
+      }
+    }
+  }
   migrateGroundHousesToSafeLots(previousMapVersion);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
@@ -1209,7 +1296,7 @@ function restoreState(persistedState) {
   settleRiversideResidents();
   initCityServices();
   migrateMetroAccess();
-  if(previousMapVersion<21){
+  if(previousMapVersion<22){
     const movedLandmarks=BUILDINGS.filter(b=>Object.hasOwn(SKYLINE_PLOTS,b.id));
     for(const fly of neuralActors()){
       if(!fly.traveling&&fly.currentLocationId==='rooftop'){
@@ -1218,7 +1305,9 @@ function restoreState(persistedState) {
       }
       if(fly.onTrain||fly.onPlane||fly.onPrivateHelicopter||fly.heliPassenger)continue;
       const building=movedLandmarks.find(b=>fly.y<b.h&&contains(b,fly,.45));
-      if(building)Object.assign(fly,entrance(building),{y:1.1,movementTrace:[]});
+      if(building&&!(fly.indoors&&fly.housingUnitId===building.id)){
+        Object.assign(fly,entrance(building),{y:1.1,movementTrace:[]});
+      }
     }
   }
   return state;
@@ -2311,6 +2400,12 @@ function brainChooseAction(fly, clock) {
     add('riverside-clinic','seeking care',(100-fly.health)*1.28+(fly.illness?72:0));
   }
   const movingHousehold=state.housing?.households?.[fly.householdId];
+  if(age>=21&&!fly.ownsHome&&movingHousehold?.members[0]===fly.id){
+    const affordable=state.housing.apartmentBlocks.filter(block=>block.luxury&&
+      (block.occupants?.length||0)<block.capacity&&fly.money+fly.savings>=block.purchaseValue+5000);
+    const block=affordable.sort((a,b)=>b.purchaseValue-a.purchaseValue)[0];
+    if(block)add(block.id,'viewing a luxury apartment',85+fly.traits.ambition*25);
+  }
   if(age>=18&&!fly.ownsHome&&!fly.displacedFrom&&fly.homeX<480&&movingHousehold?.housingType==='apartment'&&movingHousehold.members[0]===fly.id&&riversideApartment()){
     add('riverside-homes','viewing a Riverside apartment',38+brain.dynamic.curiosity*45+neuralDrive(fly,'exploreDrive')*20+(String(fly.jobId||'').startsWith('riverside-')?45:0));
   }
@@ -3764,7 +3859,7 @@ function maintainHouseholds(){
 }
 
 function riversideApartment(){
-  return state.housing?.apartmentBlocks?.filter(b=>b.x>480&&(b.occupants?.length||0)<b.capacity&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>(a.occupants?.length||0)-(b.occupants?.length||0))[0]||null;
+  return state.housing?.apartmentBlocks?.filter(b=>!b.luxury&&b.x>480&&(b.occupants?.length||0)<b.capacity&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>(a.occupants?.length||0)-(b.occupants?.length||0))[0]||null;
 }
 function completeRiversideMove(f){
   if(f.traveling||f.action!=='viewing a Riverside apartment'||f.currentLocationId!=='riverside-homes')return false;
@@ -3829,6 +3924,9 @@ function tickFly(fly, clock) {
     if(route.length){fly.targetLocationId=shelter.id;fly.pendingAction="sheltering from bad weather";fly.action="walking to shelter";fly.routeWaypoints=route;fly.routeIndex=0;fly.targetX=route[0].x;fly.targetZ=route[0].z;fly.traveling=true;fly.transitMode="walk";fly.metroLineId=null;}
   }
   if(fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.action==="sheltering from bad weather")fly.actionUntil=state.simulationAgeSeconds+600;
+  if(!fly.traveling&&fly.action==='viewing a luxury apartment'){
+    purchaseLuxuryApartment(fly,fly.currentLocationId);
+  }
   if(completeRiversideMove(fly)){needsAndActivities(fly,clock);payAndFinance(fly,clock);finishSpecialActivity(fly,clock);return;}
   chooseDestination(fly, clock);
   moveFly(fly);
@@ -4108,6 +4206,7 @@ function getState(options={}) {
         capacity: b.capacity,
         occupants: (b.occupants || []).length,
         rent: b.rent,
+        luxury: Boolean(b.luxury),
         purchaseValue: b.purchaseValue,
       })) || [],
       occupiedGroundHouses: state.housing?.houseLots?.filter((x) => x.ownerHouseholdId).length || 0,
@@ -4222,5 +4321,5 @@ export {
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
   urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,
-  ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
+  purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

@@ -52,7 +52,9 @@ test('park-edge housing and iconic skyline survive the v11 downtown expansion',(
 
 test('the three skyline landmarks occupy separate districts with pedestrian access',()=>{
  const {toronto,empire,'burj-khalifa':khalifa}=SKYLINE_PLOTS;
- assert.ok(toronto.z < -300 && empire.x < -200 && empire.z > 200 && khalifa.x > 250);
+ assert.deepEqual(toronto,{x:-11,z:43.5});
+ assert.ok(empire.x>PARK.x+PARK.w/2&&empire.z>PARK.z+PARK.d/2);
+ assert.ok(khalifa.x>PARK.x+PARK.w/2&&khalifa.z<PARK.z-PARK.d/2);
  for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
   const building=BUILDINGS.find(item=>item.id===id);
   assert.deepEqual({x:building.x,z:building.z},plot);

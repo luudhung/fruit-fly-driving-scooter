@@ -1,10 +1,13 @@
 export type Point={x:number;z:number};
 export type Rect=Point&{w:number;d:number};
-export type Building=Rect&{urbanStage?:string;urbanProgress?:number;id:string;h:number;kind:string;name?:string;type?:string;capacity?:number;rent?:number;purchaseValue?:number;baseValue?:number};
+export type Building=Rect&{urbanStage?:string;urbanProgress?:number;id:string;h:number;kind:string;luxury?:boolean;skylineHeightLimit?:number;name?:string;type?:string;capacity?:number;rent?:number;purchaseValue?:number;baseValue?:number};
 export type MetroLine={id:string;height:number;points:number[][]};
 export const MAP_VERSION:number, WORLD_HALF:number;
 export const SKYLINE_PLOTS:Record<'toronto'|'empire'|'burj-khalifa',Point>;
 export const SKY_LOUNGE:Point&{y:number};
+export const PETRONAS_TOWERS:{west:Point;east:Point;w:number;d:number;h:number;bridgeY:number};
+export const LUXURY_RESIDENCES:Array<{id:string;name:string;capacity:number;purchaseValue:number}>;
+export const SKYLINE_REDEVELOPMENTS:Record<string,string>;
 export const AIRPORT:{terminal:Rect;gate:Point;runway:Rect;apron:Rect;helipad:Point&{y:number};heliAccess:Point};
 export const ISLAND:{x:number;z:number;rx:number;rz:number;runway:Rect;terminal:Rect;gate:Point;resort:Rect;beach:Point};
 export const SEA:Rect;

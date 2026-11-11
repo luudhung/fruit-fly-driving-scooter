@@ -18,7 +18,7 @@ export function privateHelipads(){
    return separation(b)-separation(a)||a.id.localeCompare(b.id);
   });if(!candidates.length)break;selected.push(candidates[0]);
  }
- const allHomes=BUILDINGS.filter(b=>['apartment','house'].includes(b.kind));
+ const allHomes=BUILDINGS.filter(b=>b.luxury||['apartment','house'].includes(b.kind));
  const selectedAndHomes=[...selected,...allHomes.filter(b=>!selected.includes(b))];
  const roofs=selectedAndHomes.map((b,index)=>{
   if(selected.includes(b)&&!locate(b.id))LOCATIONS.push({id:b.id,type:'service',name:`${b.x>480?'Riverside':'City'} Sky ${b.kind==='apartment'?'Residence':'Tower'} ${String(index+1).padStart(2,'0')}`,x:b.x,z:b.z});

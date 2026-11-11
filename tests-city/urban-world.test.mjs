@@ -67,3 +67,32 @@ test('active visitors evacuate burning buildings and flood closures preserve com
  t.s.weather.precipitation=.95;t.s.urbanWorld.nextFireAt=1e12;t.s.urbanWorld.nextGrowthAt=1e12;
  for(let i=0;i<20;i++)t.step(600);assert.equal(t.s.urbanWorld.floods.length,2);assert.equal(taxi.traveling,true);assert.equal(taxi.routeWaypoints.length,1);assert.equal(airborne.health,airborneHealth);
 });
+
+test('confirmed sidewalk arrival counts even when it is offset from the staging pin',()=>{
+ const t=setup(),id=t.target.id;t.s.urbanWorld.buildings[id]={...t.target,stage:'damaged',health:35,progress:1};
+ const p=t.urban.submitProject(id);t.step();t.onsite(p);
+ const site=LOCATIONS.find(l=>l.id===t.s.flies.find(f=>f.id===p.workerIds[0]).urbanTask.targetId);
+ for(const f of t.s.flies.filter(f=>p.workerIds.includes(f.id))){f.x=site.x+25;f.z=site.z;}
+ t.step();assert.ok(p.materialsOrdered>0,'reported arrival must unlock the construction supply order');
+});
+
+test('a burned home is rebuilt on its lot using one shared household payment that survives restart',()=>{
+ const t=setup(),b=t.target,[a,c]=t.s.flies,now=t.s.urbanWorld;
+ now.nextFireAt=now.nextGrowthAt=1e12;
+ now.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0};
+ t.s.housing.households.hh={id:'hh',unitId:b.id,members:[a.id,c.id],homeX:b.x,homeZ:b.z};
+ for(const f of [a,c])Object.assign(f,{householdId:'hh',housingUnitId:b.id,money:20,savings:0,displacedFrom:{buildingId:b.id}});
+ const before=t.s.treasury.cash;
+ t.step();assert.equal(t.s.urbanWorld.projects.length,0);assert.equal(t.s.urbanWorld.buildings[b.id].recovery.status,'awaiting household funds');
+ assert.equal(a.money,20);assert.equal(c.money,20);assert.equal(t.s.treasury.cash,before);
+ a.savings=c.savings=500;const funds=supply(t.s),balances=a.money+c.money+a.savings+c.savings;
+ t.step(3600);let p=t.s.urbanWorld.projects[0];assert.equal(p.kind,'rebuild');assert.equal(p.stage,'clearance');assert.equal(p.funding.type,'household');
+ assert.equal(p.funding.contributions.length,2);assert.equal(a.money+c.money+a.savings+c.savings,balances-p.budget);assert.equal(t.s.treasury.cash,before);
+ const id=p.id;t.restore();p=t.s.urbanWorld.projects.find(v=>v.id===id);
+ t.step();t.onsite(p);for(let i=0;i<60&&p.stage==='clearance';i++)t.step(1200);
+ assert.equal(p.stage,'delivery');
+ for(let i=0;i<150&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(1800);}
+ assert.equal(p.stage,'complete');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'operational');assert.equal(t.s.housing.households.hh.unitId,b.id);assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);
+ assert.ok(p.refunded>0);assert.equal(t.s.flies.filter(f=>f.housingUnitId===b.id).every(f=>!f.displacedFrom),true);
+ assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);assert.equal(t.s.treasury.cash,before);assert.ok(Math.abs(supply(t.s)-funds)<1e-6);
+});

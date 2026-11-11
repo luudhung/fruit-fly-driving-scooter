@@ -8,10 +8,10 @@ class Heap{
  pop(){const result=this.a[0],last=this.a.pop();if(this.a.length){let i=0;while(i*2+1<this.a.length){let j=i*2+1;if(j+1<this.a.length&&this.a[j+1][0]<this.a[j][0])j++;if(this.a[j][0]>=last[0])break;this.a[i]=this.a[j];i=j;}this.a[i]=last;}return result;}
 }
 /** Directed asphalt graph. Geometry is shared; cached routes contain no resident state. */
-export function createVehicleRouter({roads,clearSegment=()=>true,underpasses=()=>[],roadTravelY=()=>1.1}){
+export function createVehicleRouter({roads,clearSegment=()=>true,underpasses=()=>[],roadTravelY=()=>1.1,navigationRevision=()=>0}){
  let signature='',graph=null;const routes=new Map();
  function rebuild(){
-  const source=roads(),key=source.map(r=>`${r.x},${r.z},${r.w},${r.d}`).join('|');
+  const source=roads(),key=navigationRevision()+':'+source.map(r=>`${r.x},${r.z},${r.w},${r.d}`).join('|');
   if(graph&&key===signature)return graph;signature=key;routes.clear();
   const groups=new Map();
   for(const r of source){if(![r.x,r.z,r.w,r.d].every(Number.isFinite)||r.w<=0||r.d<=0)continue;
