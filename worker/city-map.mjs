@@ -1,6 +1,6 @@
 import {createVehicleRouter} from './vehicle-network.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 23;
+export const MAP_VERSION = 24;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -8,7 +8,7 @@ export const SKYLINE_PLOTS = {
 };
 export const SKY_LOUNGE = {...SKYLINE_PLOTS.empire,y:99};
 export const PETRONAS_TOWERS = {
- west:{x:-118,z:-43.5}, east:{x:-171,z:-43.5}, w:11,d:12,h:190,bridgeY:71,
+ west:{x:-118,z:-43.5}, east:{x:-138,z:-43.5}, w:11,d:12,h:190,bridgeY:71,
 };
 export const LUXURY_RESIDENCES = [
  {id:'toronto',name:'Tower Residences',capacity:8,purchaseValue:650000},
@@ -323,6 +323,10 @@ for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
 const twinWest=BUILDINGS.find(building=>building.id==='petronas');
 Object.assign(twinWest,PETRONAS_TOWERS.west,{w:PETRONAS_TOWERS.w,d:PETRONAS_TOWERS.d,h:PETRONAS_TOWERS.h});
 BUILDINGS.push({...twinWest,...PETRONAS_TOWERS.east,id:'petronas-east'});
+// Swap the obstructing apartment and the left tower. Its existing residents
+// retain their apartment title while the skybridge spans only the clear alley.
+const bridgeNeighbor=BUILDINGS.find(building=>building.id==='APT-33');
+Object.assign(bridgeNeighbor,{x:-171,z:-43.5,h:29});
 // These two original vacant parcels face the central Tower, at roughly half
 // the Empire's height. Keep their existing street and alley setbacks.
 for(const [index,x,height,capacity]of [[1,15,90,24],[2,41,96,28]]){
@@ -346,7 +350,7 @@ for(const building of BUILDINGS){
  if(building.kind==='landmark'||building.kind==='house')continue;
  const distance=Math.min(...landmarkParcels.map(plot=>Math.hypot(building.x-plot.x,building.z-plot.z)));
  if(distance<55){
-  building.skylineHeightLimit=building.id.startsWith('TOWER-COURT-')?building.h:24+distance*.25;
+  building.skylineHeightLimit=building.id.startsWith('TOWER-COURT-')?building.h:building.id==='APT-33'?29:24+distance*.25;
   building.h=Math.min(building.h,building.skylineHeightLimit);
  }
 }

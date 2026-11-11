@@ -1303,6 +1303,40 @@ function restoreState(persistedState) {
       const record=state.urbanWorld?.buildings?.[base.id];if(record)Object.assign(record,{x:base.x,z:base.z,w:base.w,d:base.d,h:base.h});
     }
   }
+  if(previousMapVersion<24){
+    for(const id of ['APT-33','petronas-east']){
+      const base=APARTMENTS.find(block=>block.id===id);
+      const block=state.housing.apartmentBlocks.find(block=>block.id===id);
+      if(block)Object.assign(block,base,{occupants:block.occupants||[]});
+      for(const household of Object.values(state.housing.households))if(household.unitId===id){household.homeX=base.x;household.homeZ=base.z;}
+      for(const fly of state.flies){
+        const atHome=fly.housingUnitId===id;
+        if(atHome){
+          fly.homeX=base.x;fly.homeZ=base.z;
+          if(fly.displacedFrom?.buildingId===id)Object.assign(fly.displacedFrom,{homeX:base.x,homeZ:base.z});
+          if(fly.alive&&fly.indoors&&!fly.traveling&&!fly.privateFlight&&(fly.currentLocationId===fly.homeId||fly.currentLocationId===id)){
+            Object.assign(fly,{x:base.x,z:base.z,y:1.1,targetX:base.x,targetZ:base.z,finalTargetX:base.x,finalTargetZ:base.z,movementTrace:[]});
+          }
+        }
+        if(fly.alive&&fly.traveling&&(fly.targetLocationId===id||atHome&&fly.targetLocationId===fly.homeId)){
+          fly.relocatedDestinationId=fly.targetLocationId;fly.relocatedDestinationPoint=entrance(base);
+        }
+        if(fly.alive&&!fly.indoors&&!fly.onTrain&&!fly.onPlane&&!fly.onFireEngine&&!fly.onAmbulance&&!fly.taxiPassenger&&!fly.heliPassenger&&!fly.privateFlight&&!fly.onPrivateHelicopter&&contains(base,fly,.45)){
+          Object.assign(fly,entrance(base),{y:1.1,movementTrace:[]});
+        }
+      }
+      const record=state.urbanWorld?.buildings?.[id];
+      if(record)Object.assign(record,{x:base.x,z:base.z,w:base.w,d:base.d,h:base.h,originalHeight:base.h});
+      for(const project of state.urbanWorld?.projects||[])if(project.buildingId===id)project.targetHeight=base.h;
+      for(const helicopter of state.sportsLuxury?.helicopters||[]){
+        for(const endpoint of [helicopter.flight?.from,helicopter.flight?.to]){
+          if(endpoint?.locationId!==id)continue;
+          if(endpoint===helicopter.flight.from&&state.simulationAgeSeconds>=helicopter.flight.departure)continue;
+          Object.assign(endpoint,{x:base.x,z:base.z,y:base.h+4,access:entrance(base)});
+        }
+      }
+    }
+  }
   migrateGroundHousesToSafeLots(previousMapVersion);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
@@ -2851,7 +2885,7 @@ function moveFly(fly,waypointHops=0) {
     }
 
     if(fly.targetLocationId==='rooftop'||fly.relocatedDestinationId===fly.targetLocationId){
-      const door=entrance(fly.targetLocationId==='rooftop'?SKY_LOUNGE:location(fly.targetLocationId));
+      const door=fly.relocatedDestinationPoint||entrance(fly.targetLocationId==='rooftop'?SKY_LOUNGE:location(fly.targetLocationId));
       if(Math.hypot(fly.x-door.x,fly.z-door.z)>1){
         // An older itinerary may finish at the former Empire site. Keep its
         // completed transit legs and walk to the new entrance before arrival.
@@ -2870,6 +2904,7 @@ function moveFly(fly,waypointHops=0) {
     }
     fly.currentLocationId = fly.targetLocationId;
     fly.relocatedDestinationId=null;
+    fly.relocatedDestinationPoint=null;
     if (fly.traveling) {
       const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
       fly.traveling = false;
