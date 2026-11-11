@@ -1,4 +1,4 @@
-import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
+import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
 import {FlightDoubleTap} from './flight-double-tap.ts';
 import {metroInterchangePaths} from './metro-interchanges.ts';
@@ -23,9 +23,11 @@ function terrain(x:number,z:number){
  const tunnel=UNDERPASSES.find(t=>Math.abs(x-t.x)<t.w/2+2.6&&Math.abs(z-t.z)<t.halfLength);
  if(tunnel){const d=Math.abs(z-tunnel.z),fraction=d<=tunnel.coveredHalf?1:(tunnel.halfLength-d)/(tunnel.halfLength-tunnel.coveredHalf);return .2-tunnel.depth*fraction;}
 
- if(URBAN_FLOODS.some(f=>contains(f,{x,z})))return -.15;
- if(onIsland({x,z}))return ((x-ISLAND.x)/(ISLAND.rx-18))**2+((z-ISLAND.z)/(ISLAND.rz-17))**2<1?.67:.55;
- if(atSea({x,z})||WATER.some(w=>contains(w,{x,z}))&&!BRIDGES.some(b=>contains(b,{x,z})))return -.65;
+ const point={x,z};
+ if(onWaterCrossing(point))return .2;
+ if(URBAN_FLOODS.some(f=>contains(f,point)))return -.15;
+ if(onIsland(point))return ((x-ISLAND.x)/(ISLAND.rx-18))**2+((z-ISLAND.z)/(ISLAND.rz-17))**2<1?.67:.55;
+ if(atSea(point)||WATER.some(w=>contains(w,point)))return -.65;
  return .2;
 }
 type SurfacePoint={x:number;y:number;z:number};
@@ -71,7 +73,7 @@ export class PlayerController{
  private metroLift:{x:number;z:number;target:number}|null=null;
  private liftCooldown=0;
  get feet(){return this.y-PLAYER_EYE;}
- get swimming(){const p={x:this.x,z:this.z};return !this.flying&&this.feet<.1&&terrain(this.x,this.z)<0&&(atSea(p)||WATER.some(w=>contains(w,p))||URBAN_FLOODS.some(f=>contains(f,p)))&&!BRIDGES.some(b=>contains(b,p));}
+ get swimming(){const p={x:this.x,z:this.z};return !this.flying&&this.feet<.1&&terrain(this.x,this.z)<0&&(atSea(p)||WATER.some(w=>contains(w,p))||URBAN_FLOODS.some(f=>contains(f,p)))&&!onWaterCrossing(p);}
  teleport(x:number,y:number,z:number,flying=false){this.x=x;this.y=y;this.z=z;this.flying=flying;this.grounded=false;this.verticalVelocity=0;this.jumpTap.reset();this.metroLift=null;this.liftCooldown=0;}
  jumpDown(now:number,repeat=false){
   const tap=this.jumpTap.down(now,repeat);if(tap==='ignored')return;

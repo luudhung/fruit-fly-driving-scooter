@@ -6,7 +6,7 @@ import {createCityVisitors} from './city-visitors.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
-import { MAP_VERSION, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -238,7 +238,7 @@ function migrateGroundHousesToSafeLots(previousMapVersion) {
 }
 
 function migrateResidentNavigation(previousMapVersion, residents=state.flies) {
-  if(previousMapVersion>=MAP_VERSION) return;
+  if(previousMapVersion>=20) return;
   if(previousMapVersion>=19){
     // The east-bank correction does not reset the entire city's cars, trains or flights.
     for(const f of [...residents,...(state.cityVisitors?.visitors||[])]){
@@ -1209,6 +1209,18 @@ function restoreState(persistedState) {
   settleRiversideResidents();
   initCityServices();
   migrateMetroAccess();
+  if(previousMapVersion<21){
+    const movedLandmarks=BUILDINGS.filter(b=>Object.hasOwn(SKYLINE_PLOTS,b.id));
+    for(const fly of neuralActors()){
+      if(!fly.traveling&&fly.currentLocationId==='rooftop'){
+        Object.assign(fly,SKY_LOUNGE,{targetX:SKY_LOUNGE.x,targetZ:SKY_LOUNGE.z,movementTrace:[]});
+        continue;
+      }
+      if(fly.onTrain||fly.onPlane||fly.onPrivateHelicopter||fly.heliPassenger)continue;
+      const building=movedLandmarks.find(b=>fly.y<b.h&&contains(b,fly,.45));
+      if(building)Object.assign(fly,entrance(building),{y:1.1,movementTrace:[]});
+    }
+  }
   return state;
 }
 
@@ -2517,7 +2529,9 @@ function startJourney(fly,chosen) {
   const p = legalDestinationPoint(dest);
   fly.finalTargetX = p.x;
   fly.finalTargetZ = p.z;
-  const travelPlan = chooseTravelMode(fly, p);
+  const travelPlan = chosen.mode === 'walk'
+    ? {mode: 'walk', route: buildPedestrianRoute(fly, p)}
+    : chooseTravelMode(fly, p);
   fly.transitMode = travelPlan.mode;
   fly.routeWaypoints = travelPlan.route || travelPlan.metro?.waypoints || [];
   fly.routeIndex = 0;
@@ -2667,6 +2681,24 @@ function moveFly(fly,waypointHops=0) {
       return;
     }
 
+    if(fly.targetLocationId==='rooftop'){
+      const door=entrance(SKY_LOUNGE);
+      if(Math.hypot(fly.x-door.x,fly.z-door.z)>1){
+        // An older itinerary may finish at the former Empire site. Keep its
+        // completed transit legs and walk to the new entrance before arrival.
+        const route=pedestrianRoute(fly,door);
+        if(route.length){
+          const next=route[0];
+          Object.assign(fly,{routeWaypoints:route,routeIndex:0,targetX:next.x,targetZ:next.z,
+            finalTargetX:door.x,finalTargetZ:door.z,transitMode:'walk',transitStage:next.stage,
+            travelStuckTicks:0,travelLastDistance:null});
+        }else{
+          fly.traveling=false;
+          fly.actionUntil=0;
+        }
+        return;
+      }
+    }
     fly.currentLocationId = fly.targetLocationId;
     if (fly.traveling) {
       const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
@@ -2680,7 +2712,7 @@ function moveFly(fly,waypointHops=0) {
         const room=fly.currentLocationId===fly.homeId?{x:fly.homeX,z:fly.homeZ}:location(fly.currentLocationId);
         fly.x=room.x;fly.z=room.z;fly.targetX=room.x;fly.targetZ=room.z;
       }
-      fly.y=fly.currentLocationId==="rooftop"?99:1.1;
+      fly.y=fly.currentLocationId==="rooftop"?SKY_LOUNGE.y:1.1;
       if(fly.vehicle&&!fly.parkedCar)fly.parkedCar=parkingPoint(fly);
       if(brainRand(fly)<.18)emit("arrival",`${fly.id} arrived: ${fly.action}.`,{flyId:fly.id,locationId:fly.currentLocationId});
       fly.travelGoalId = null;

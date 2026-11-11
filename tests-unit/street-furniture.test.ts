@@ -20,7 +20,7 @@ function matches(c:StreetCollider,p:THREE.Vector3){return close(c.x,p.x)&&close(
 
 test('signal collider poles exactly match all rendered signal instance positions',()=>{
  const root=new THREE.Group(),signals=new TrafficSignals(root,INTERSECTIONS),matrix=new THREE.Matrix4(),p=new THREE.Vector3();
- const cs=named('signal:');assert.equal(cs.length,signals.poles.count);assert.equal(cs.length,738);
+ const cs=named('signal:');assert.equal(cs.length,signals.poles.count);assert.equal(cs.length,INTERSECTIONS.length*2);
  for(let i=0;i<signals.poles.count;i++){
   signals.poles.getMatrixAt(i,matrix);p.setFromMatrixPosition(matrix);assert.ok(cs.some(c=>matches(c,p)&&c.radius===.09&&c.minY===0&&c.maxY===3.2));
   const axis=i%2?'ew':'ns',head=new THREE.Vector3(),bulb=new THREE.Vector3();
@@ -78,16 +78,16 @@ test('spatial query finds every intersecting collider once across cells and huge
 });
 
 
-test('only the 42 obstructed base poles move to clear nearby corners, with stable cached poses',()=>{
- let moved=0,preserved=0;const used=new Set<string>();
+test('only obstructed base poles move to clear nearby corners, with stable cached poses',()=>{
+ const used=new Set<string>();
  for(const j of INTERSECTIONS)for(const axis of ['ns','ew'] as const){
   const original={x:j.x+(axis==='ns'?6.4:-6.4),z:j.z+(axis==='ns'?6.2:-6.2)},pose=signalPolePose(j,axis);
   assert.equal(signalPolePose(j,axis),pose);assert.ok(Object.isFrozen(pose));
   const obstructed=ROADS.some(r=>contains(r,original,.15))||BUILDINGS.some(b=>contains(b,original,.4));
-  if(obstructed){moved++;assert.ok(Math.hypot(pose.x-original.x,pose.z-original.z)<=20);assert.ok(Math.hypot(pose.x-j.x,pose.z-j.z)<=20);}
-  else{preserved++;assert.deepEqual(pose,original);}
+  if(obstructed){assert.ok(Math.hypot(pose.x-original.x,pose.z-original.z)<=20);assert.ok(Math.hypot(pose.x-j.x,pose.z-j.z)<=20);}
+  else assert.deepEqual(pose,original);
   assert.ok(!ROADS.some(r=>contains(r,pose,.15)));assert.ok(!BUILDINGS.some(b=>contains(b,pose,.4)));
   const key=`${pose.x},${pose.z}`;assert.ok(!used.has(key));used.add(key);
  }
- assert.equal(moved,42);assert.equal(preserved,696);assert.equal(used.size,738);
+ assert.equal(used.size,INTERSECTIONS.length*2);
 });

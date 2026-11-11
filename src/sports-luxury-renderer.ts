@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {BUILDINGS} from '../worker/city-map.mjs';
 import {privateHelicopterPose,type SportsLuxurySnapshot,type LuxuryHelicopter,type LuxuryPad} from '../worker/sports-luxury.mjs';
 
 /** Private aviation uses seven shared instanced batches for the entire ten-aircraft fleet. */
@@ -55,7 +56,13 @@ export class SportsLuxuryRenderer{
    for(const side of [-1,1])this.place(this.padMarks,mi++,pad.x+side*1.8*size,pad.y+.10,pad.z,0,[.65*size,.08,6.6*size]);
    this.place(this.padMarks,mi++,pad.x,pad.y+.10,pad.z,0,[4.2*size,.08,.65*size]);
    if(pad.rooftop&&this.makeSign){const label=this.makeSign('H · '+(pad.householdIds?.join(' / ')||pad.name.replace(' rooftop','').toUpperCase()),18,5);label.material.depthTest=true;label.position.set(pad.x,pad.y+7,pad.z);this.root.add(label);this.padLabels.push(label);}
-   if(pad.rooftop)for(const x of [-3.5,3.5])for(const z of [-3.5,3.5])this.place(this.padLegs,li++,pad.x+x*size,pad.y-2,pad.z+z*size,0);
+   if(pad.rooftop){
+    const house = BUILDINGS.find(building => building.id === pad.locationId)?.kind === 'house';
+    const length = house ? 6.2 : 4;
+    for(const x of [-3.5,3.5])for(const z of [-3.5,3.5]){
+     this.place(this.padLegs,li++,pad.x+x*size,pad.y-length/2,pad.z+z*size,0,[1,length/4,1]);
+    }
+   }
   }
   this.padDecks.count=this.padRings.count=pi;this.padMarks.count=mi;this.padLegs.count=li;
   for(const mesh of [this.padDecks,this.padRings,this.padMarks,this.padLegs])mesh.instanceMatrix.needsUpdate=true;
@@ -67,7 +74,8 @@ export class SportsLuxuryRenderer{
   this.elapsed+=Math.max(0,Math.min(dt,.1));let i=0;
   for(const heli of this.fleet.slice(0,10)){
    const pad=this.pads.get(heli.padId),flight=heli.flight;
-   if(!pad&&!flight)continue;
+   if(!pad&&(!flight||gameNow<flight.departure))continue;
+   if(flight&&gameNow>=flight.arrival&&flight.to.rooftop&&!this.pads.has(flight.to.id))continue;
    const flying=Boolean(flight&&gameNow>=flight.departure&&gameNow<flight.arrival);
    const pose=flight&&gameNow>=flight.departure?privateHelicopterPose(gameNow,flight):{x:(pad||flight!.from).x,y:(pad||flight!.from).y+1.8,z:(pad||flight!.from).z,heading:Math.PI/2};
    const {x,y,z}=pose,yaw=pose.heading,sin=Math.sin(yaw),cos=Math.cos(yaw);

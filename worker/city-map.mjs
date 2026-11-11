@@ -1,6 +1,12 @@
 import {createVehicleRouter} from './vehicle-network.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 20;
+export const MAP_VERSION = 21;
+export const SKYLINE_PLOTS = {
+ toronto: {x:-11,z:-356},
+ empire: {x:-238,z:282},
+ 'burj-khalifa': {x:275,z:200},
+};
+export const SKY_LOUNGE = {...SKYLINE_PLOTS.empire,y:99};
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -49,6 +55,9 @@ export const overlaps = (a,b,m=0) => Math.abs(a.x-b.x)<(a.w+b.w)/2+m && Math.abs
 export const ROADS = [];
 function road(x,z,w,d) { ROADS.push({x,z,w,d}); }
 const GRID_HALF=360;
+const SOUTH_RING_Z=400;
+const SOUTH_RING_EAST=372;
+const harborRoadLinks=[-102,122,310];
 // Manhattan-style avenues and cross streets wrap the full Central Park superblock.
 for(const x of AVENUES) {
  if(Math.abs(x-PARK.x)<PARK.w/2+6){
@@ -65,14 +74,28 @@ for(const z of STREETS){
  }else road(0,z,GRID_HALF*2,9);
 }
 // Outer ring and bridge approaches keep the expanded city connected.
-for(const x of [-430,372])road(x,0,8,820);
-for(const z of [-400,400])road(-30,z,800,10);
+for(const x of [-430,SOUTH_RING_EAST])road(x,0,8,820);
+road(-30,-400,800,10);
+road((-430+SOUTH_RING_EAST)/2,SOUTH_RING_Z,SOUTH_RING_EAST+430,10);
+for(const x of harborRoadLinks)road(x,(GRID_HALF+SOUTH_RING_Z)/2,9.5,SOUTH_RING_Z-GRID_HALF);
 for(const x of [500,560,620,680,740,800,860])road(x,0,9.5,480);
 for(const z of [-240,-160,-80,0,80,160,240])road(Math.abs(z)===160?710:680,z,Math.abs(z)===160?300:360,9);
 for(const z of [-180,0,180])road(430,z,160,10);
 // The bridge axis continues straight across the east bank, with no park in its approach.
 for(const z of [-180,180])road(685,z,350,6);
 export const BRIDGES=[-180,0,180].map(z=>({x:430,z,w:160,d:16,landmark:z===0}));
+// South ring carriageway and its shore approaches sit on a separate harbor
+// causeway. Its narrow deck footprint must match the sidewalks in the viewer.
+const harborShore=HARBOR.z-HARBOR.d/2-3,harborWest=HARBOR.x-HARBOR.w/2-4;
+const causewayEnd=SOUTH_RING_EAST+3,eastLinkEnd=SOUTH_RING_Z+12;
+export const HARBOR_CAUSEWAYS=[
+ {x:(harborWest+causewayEnd)/2,z:SOUTH_RING_Z,w:causewayEnd-harborWest,d:16},
+ ...harborRoadLinks.map(x=>({x,z:(harborShore+SOUTH_RING_Z)/2,w:15.5,d:SOUTH_RING_Z-harborShore})),
+ {x:SOUTH_RING_EAST,z:(harborShore+eastLinkEnd)/2,w:16.5,d:eastLinkEnd-harborShore},
+];
+export function onWaterCrossing(p){
+ return BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p));
+}
 export const UNDERPASSES=BRIDGES.flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
 export function underpassAt(p){return UNDERPASSES.find(t=>Math.abs(p.x-t.x)<=t.w/2+.2&&Math.abs(p.z-t.z)<t.halfLength);}
 export function roadTravelY(p,axis='z'){
@@ -130,7 +153,7 @@ export const LOCATIONS = [
   { id: "arcade", type: "nightlife", name: "Hansdrex Arcade", x: -89, z: -72.5 },
   { id: "music-hall", type: "nightlife", name: "Hansdrex Music Hall", x: 67, z: 72.5 },
   { id: "nightclub", type: "nightlife", name: "Hansdrex Afterdark", x: 93, z: -14.5 },
-  { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", x: 15, z: 43.5 },
+  { id: "rooftop", type: "nightlife", name: "Hansdrex Sky Lounge", ...SKYLINE_PLOTS.empire },
   { id: "heliport", type: "luxury", name: "Hansdrex Airport · Heli Tours", ...AIRPORT.heliAccess },
   { id: "airport", type: "transit", name: "Hansdrex City Airport · HCA", x:AIRPORT.terminal.x,z:AIRPORT.terminal.z },
   { id: "island-airport", type: "transit", name: "Hansdrex Island Airport · HIA", x:ISLAND.terminal.x,z:ISLAND.terminal.z },
@@ -183,7 +206,7 @@ for(const loc of LOCATIONS) {
  const d=outer?20:14;
  place({...loc,w:loc.id==='firestation'?34:w,d:loc.id==='firestation'?24:d,h:loc.id==='firestation'?11:loc.id==='riverside-office'?96:loc.id==='riverside-hotel'?72:loc.type==='job'?36:loc.type==='health'?24:loc.type==='nightlife'?20:12,kind:'destination'});
 }
-// Existing signature skyline is preserved, then expanded with two new world landmarks.
+// Reserve the original footprints during procedural generation so existing lot IDs stay stable.
 for(const [id,x,z,w,d,h] of [
  ['toronto',-11,43.5,11,12,250],
  ['empire',15,43.5,11,12,196],
@@ -273,6 +296,17 @@ for(const x of [530,590,650,710,770,830])for(const z of [-200,-120,-40,40,120,20
  if(place(b)&&[590,710].includes(x)&&Math.abs(z)===200){b.kind='apartment';b.capacity=30;b.rent=24;b.purchaseValue=5040;APARTMENTS.push(b);}
 }
 
+// Relocate the landmarks after the city lots have been assigned. The three
+// destination parcels are open ground, so homes keep their IDs and footprints.
+for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
+ const building=BUILDINGS.find(b=>b.id===id);
+ const moved={...building,...plot};
+ if(ROADS.some(r=>overlaps(moved,r,2.6))||[...WATER,PARK,...SPORTS_VENUES,...BUILDINGS.filter(b=>b!==building)].some(b=>overlaps(moved,b,1))){
+  throw new Error(`Skyline parcel overlaps existing city geometry: ${id}`);
+ }
+ Object.assign(building,plot);
+}
+
 export function entrance(p) {
  const b=BUILDINGS.find(b=>contains(b,p,0.2));
  if(b)return {x:b.x,z:b.z+b.d/2+1.2};
@@ -333,8 +367,7 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
 export function blocked(p) {
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
  if(atSea(p))return true;
- if(URBAN_FLOODS.some(f=>contains(f,p))&&!BRIDGES.some(b=>contains(b,p)))return true;
- if(WATER.some(w=>contains(w,p,.25))&&!BRIDGES.some(b=>contains(b,p)))return true;
+ if((URBAN_FLOODS.some(f=>contains(f,p))||WATER.some(w=>contains(w,p,.25)))&&!onWaterCrossing(p))return true;
  return nearbyGeometry(buildingBins,p).some(b=>effectiveBuildingHeight(b)>0&&contains(b,p,.45));
 }
 export function clearSegment(a,b) {

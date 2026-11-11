@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PlayerCar,PLAYER_CAR_WORLD,playerCarClear,playerCarGround,PLAYER_CAR_PARKING,CAR_HALF_LENGTH,cityCarClear,cityCarGround,carExitPosition,type CarInput,type CarWorld} from '../src/player-car.ts';
 import {PlayerController} from '../src/player-controller.ts';
-import {BRIDGES,ROADS,contains,blocked,roadTravelY,WORLD_HALF,BUILDINGS,effectiveBuildingHeight} from '../worker/city-map.mjs';
+import {BRIDGES,ROADS,contains,blocked,clearSegment,pedestrianRoute,roadTravelY,WORLD_HALF,BUILDINGS,effectiveBuildingHeight} from '../worker/city-map.mjs';
 const open:CarWorld={clear:()=>true,ground:()=>.2};
 function run(car:PlayerCar,seconds:number,input:CarInput){for(let i=0;i<Math.round(seconds*120);i++)car.update(1/120,input);}
 
@@ -86,6 +86,25 @@ test('the car crosses the complete central bridge on its deck and never snaps in
  assert.ok(car.x>505,`bridge not crossed: ${car.x}`);
  assert.equal(cityCarGround(372,0,.2),.2);assert.ok(Math.abs(cityCarGround(372,0,-6)!+6)<.001);
  assert.equal(cityCarGround(372,8.1,.2),null,'bridge edge cannot drop directly onto the tunnel floor');
+});
+test('the south harbor road and its city approaches support drivers and pedestrians',()=>{
+ const car=new PlayerCar(PLAYER_CAR_WORLD);car.enter();Object.assign(car,{x:-172,z:400,heading:Math.PI/2});
+ run(car,36,{throttle:1,steer:0});assert.ok(car.x>335,`stopped on the harbor deck at ${car.x}`);
+ assert.ok(Math.abs(car.ground-.2)<.01);
+ const exit=carExitPosition(car.x,car.z,car.ground);assert.ok(exit&&Math.abs(exit.z-400)>5);
+ const walker=new PlayerController();walker.teleport(exit.x,exit.y,exit.z);
+ for(let i=0;i<120;i++)walker.update(1/120,{forward:1,strafe:0,yaw:Math.PI/2,sprint:1,ascend:false,descend:false});
+ assert.ok(walker.x>exit.x+1);assert.equal(walker.swimming,false);
+ assert.equal(playerCarClear(0,411,Math.PI/2),false,'water beside the causeway blocks the car');
+ for(const x of [-102,122,310,372]){
+  const town={x,z:350},deck={x:0,z:400};
+  for(const mode of ['walk','car','scooter'])for(const [start,end] of [[town,deck],[deck,town]]){
+   const route=pedestrianRoute(start,end,mode);
+   assert.ok(route.length>2,`missing ${mode} route at ${x}`);
+   assert.ok(route.every((p,i)=>!i||clearSegment(route[i-1],p)),`unsafe ${mode} route at ${x}`);
+   assert.deepEqual({x:route.at(-1)!.x,z:route.at(-1)!.z},end);
+  }
+ }
 });
 test('both riverbank roads descend into and emerge from every bridge underpass continuously',()=>{
  for(const x of [372,500])for(const z of [-180,0,180]){

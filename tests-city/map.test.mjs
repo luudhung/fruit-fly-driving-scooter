@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
+import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,SKYLINE_PLOTS,SKY_LOUNGE,LOCATIONS,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
 test('all building footprints clear roads, water, park and each other',()=>{
  for(let i=0;i<BUILDINGS.length;i++){
   const b=BUILDINGS[i];
@@ -48,6 +48,20 @@ test('park-edge housing and iconic skyline survive the v11 downtown expansion',(
    return Math.hypot(dx,dz)<28;
  });
  assert.ok(nearPark.length>=12,`expected park-edge apartment wall, got ${nearPark.length}`);
+});
+
+test('the three skyline landmarks occupy separate districts with pedestrian access',()=>{
+ const {toronto,empire,'burj-khalifa':khalifa}=SKYLINE_PLOTS;
+ assert.ok(toronto.z < -300 && empire.x < -200 && empire.z > 200 && khalifa.x > 250);
+ for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
+  const building=BUILDINGS.find(item=>item.id===id);
+  assert.deepEqual({x:building.x,z:building.z},plot);
+  const door=entrance(building);
+  assert.equal(blocked(door),false);
+  assert.ok(pedestrianRoute({x:2,z:0},door).length,`${id} has no access from the main city`);
+ }
+ const rooftop=LOCATIONS.find(location=>location.id==='rooftop');
+ assert.deepEqual({x:rooftop.x,z:rooftop.z},{x:SKY_LOUNGE.x,z:SKY_LOUNGE.z});
 });
 
 test('downtown is dense around Central Park and tapers toward detached-house districts',()=>{

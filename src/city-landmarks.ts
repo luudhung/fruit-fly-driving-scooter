@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {AIRPORT,ISLAND,SEA,MANSION} from '../worker/city-map.mjs';
+import {AIRPORT,ISLAND,SEA,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const stone=new THREE.MeshStandardMaterial({color:0xc8c5b9,roughness:.65,metalness:.12});
 const metal=new THREE.MeshStandardMaterial({color:0xa8bdc6,roughness:.26,metalness:.7});
@@ -16,7 +16,7 @@ function cylinder(g:THREE.Group,top:number,bottom:number,h:number,y:number,m:THR
 function ring(g:THREE.Group,r:number,y:number,m:THREE.Material,tube=.12){const b=new THREE.Mesh(new THREE.TorusGeometry(r,tube,6,40),m);b.rotation.x=Math.PI/2;b.position.y=y;g.add(b);}
 function sign(g:THREE.Group,make:Sign,text:string,x:number,y:number,z:number,w=30,h=1.4){const s=make(text,w,h);s.position.set(x,y,z);g.add(s);return s;}
 export function buildHansdrexTower(root:THREE.Group,make:Sign){
- const g=new THREE.Group();g.position.set(-11,0,43.5);const towerGlass=facade(glass,0x249cff,3.2);
+ const g=new THREE.Group();g.position.set(SKYLINE_PLOTS.toronto.x,0,SKYLINE_PLOTS.toronto.z);const towerGlass=facade(glass,0x249cff,3.2);
  cylinder(g,4.9,5.2,2,1,stone);cylinder(g,.72,2.7,192,97,facade(stone,0x2379cd,1.35));
  // Three tapering buttresses, continuous elevator glazing and a deep observation pod.
  for(let i=0;i<3;i++){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.25,1.15,146,3),stone);leg.position.set(Math.cos(i*Math.PI*2/3)*1.4,75,Math.sin(i*Math.PI*2/3)*1.4);g.add(leg);}
@@ -33,7 +33,7 @@ export function buildHansdrexTower(root:THREE.Group,make:Sign){
  sign(g,make,'HANSDREX TOWER · 250 M',0,258,0,31,1.5);root.add(g);
 }
 export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
- const g=new THREE.Group();g.position.set(15,0,43.5);
+ const g=new THREE.Group();g.position.set(SKYLINE_PLOTS.empire.x,0,SKYLINE_PLOTS.empire.z);
  const tiers=[[10.8,12,18],[9.7,10.6,37],[8.4,9.4,49],[6.8,7.8,32],[5.2,6.2,20],[3.8,4.8,10],[2.7,3.7,8]];
  let base=0;const matrices:THREE.Matrix4[]=[],dummy=new THREE.Object3D();
  for(const [w,d,h] of tiers){
@@ -48,7 +48,7 @@ export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
  const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),facade(),matrices.length);matrices.forEach((m,i)=>windows.setMatrixAt(i,m));g.add(windows);
  for(let i=0;i<4;i++){cylinder(g,1.1-i*.17,1.3-i*.17,1.6,175+i*1.7,i%2?gold:stone,8);}
  cylinder(g,.15,.53,14,188,metal,12);cylinder(g,.05,.15,2,196, warm,8);
- sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);root.add(g);
+ sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);root.add(g);return g;
 }
 export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  const g=new THREE.Group(),asphalt=new THREE.MeshStandardMaterial({color:0x293139,roughness:.95}),concrete=new THREE.MeshStandardMaterial({color:0xaeb8b7,roughness:.9});

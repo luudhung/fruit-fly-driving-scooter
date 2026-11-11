@@ -157,7 +157,7 @@ export function carExitPosition(x:number,z:number,ground:number){
 }
 
 type CarBox=[number,number,number,number,number,number];
-/** Open-top cabin with low doors, slim windshield posts and a small, low steering wheel. */
+/** Open-top cabin with low doors and a small, low steering wheel. */
 export class PlayerCarVisual{
  readonly root=new THREE.Group();private readonly wheel=new THREE.Group();
  constructor(scene:THREE.Scene){
@@ -165,7 +165,7 @@ export class PlayerCarVisual{
    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color,roughness:.65,metalness}),entries.length),dummy=new THREE.Object3D();
    entries.forEach(([x,y,z,w,h,d],i)=>{dummy.position.set(x,y,z);dummy.scale.set(w,h,d);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});this.root.add(mesh);
   };
-  boxes(0x225a58,[[0,.49,0,1.78,.5,4.15],[0,.77,1.4,1.78,.10,1.35],[-.87,.78,-.1,.065,.26,2.1],[.87,.78,-.1,.065,.26,2.1],[-.87,1.18,.94,.018,.58,.018],[.87,1.18,.94,.018,.58,.018]],.35);
+  boxes(0x225a58,[[0,.49,0,1.78,.5,4.15],[0,.77,1.4,1.78,.10,1.35],[-.87,.78,-.1,.065,.26,2.1],[.87,.78,-.1,.065,.26,2.1]],.35);
   boxes(0x192225,[[0,.85,.70,1.68,.12,.32],[0,.71,-1.15,1.55,.45,.7],[-.41,.89,-.54,.58,.6,.3],[.41,.89,-.54,.58,.6,.3],[0,.70,-.15,.2,.26,.8],[-.94,.3,-1.3,.18,.6,.65],[.94,.3,-1.3,.18,.6,.65],[-.94,.3,1.3,.18,.6,.65],[.94,.3,1.3,.18,.6,.65]]);
   boxes(0x9ae4c8,[[.38,.92,.535,.28,.045,.012],[-.25,.915,.535,.24,.045,.012]]);
   boxes(0xe8e3c5,[[-.65,.64,2.085,.37,.16,.025],[.65,.64,2.085,.37,.16,.025]]);

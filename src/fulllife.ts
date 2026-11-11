@@ -20,6 +20,8 @@ import {UrbanWorldRenderer,type UrbanWorldSnapshot} from "./urban-world-renderer
 import {SportsLuxuryRenderer} from "./sports-luxury-renderer.ts";
 import type {SportsLuxurySnapshot} from "../worker/sports-luxury.mjs";
 import {CityVisitorsRenderer} from "./city-visitors-renderer.ts";
+import {VisitorAviationRenderer} from "./visitor-aviation-renderer.ts";
+import type {VisitorAircraft} from "../worker/visitor-aviation.mjs";
 import {ResidentPhotoAlbum,type ResidentPhotoRecord} from "./city-photo-album.ts";
 import {ResidentCamera} from "./resident-camera.ts";
 import {buildRiverBridges,buildSportsDistrict,updateBridgeLighting} from "./city-district.ts";
@@ -30,6 +32,7 @@ import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
+import {HARBOR_CAUSEWAYS} from "../worker/city-map.mjs";
 import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
@@ -37,9 +40,10 @@ import {buildMansion} from "./mansion-renderer.ts";
 import {PlayerCar,PlayerCarVisual,PLAYER_CAR_WORLD} from "./player-car.ts";
 import {PlayerController,PLAYER_EYE,setPlayerHelipads} from "./player-controller.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
+import {buildPetronasTowers,updatePetronasLighting} from "./petronas-towers";
 import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
-import { MAP_VERSION, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
+import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
 
 const viewerBootStarted=performance.now();
 type FlyState = {
@@ -188,7 +192,7 @@ type CivilizationSnapshot = {
   civicConflict?:CivicSnapshot;
   urbanWorld?:UrbanWorldSnapshot;
   sportsLuxury?:SportsLuxurySnapshot;
-  cityVisitors?:(Parameters<CityVisitorsRenderer["sync"]>[0]&{visitors:FlyState[];totalArrivals:number;totalDepartures:number;taxiCompleted:number;reputation:number;photoCount:number;photos?:ResidentPhotoRecord[];hotelRooms:Array<{id:string;capacity:number;occupied:number}>});
+  cityVisitors?:(Parameters<CityVisitorsRenderer["sync"]>[0]&{visitors:FlyState[];totalArrivals:number;totalDepartures:number;taxiCompleted:number;reputation:number;photoCount:number;airportTraffic?:{flights:VisitorAircraft[];landed:number;departed:number;waiting:number};photos?:ResidentPhotoRecord[];hotelRooms:Array<{id:string;capacity:number;occupied:number}>});
   authoritative: boolean;
   mapVersion?:number;
   roadTraffic?:{drivingCars:number;targetDrivingCars:number;carOwners:number;parkedCars:number;recklessDrivers:number;chaosActive:boolean;incidents:RoadIncident[]};
@@ -650,12 +654,21 @@ function renderSnapshot(s: CivilizationSnapshot) {
   syncFlyMeshes(actors);
   updateHeliTourState(s.flies || []);
   updateMetroStationOccupancy(actors);
-  syncHomes(s.flies || []);
+  personalCars.sync(s.flies || [],s.roadTraffic?.incidents);
   if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
-  if(s.sportsLuxury){sportsVisuals.sync(s.sportsLuxury);setPlayerHelipads(s.sportsLuxury.pads);}
-  if(s.cityVisitors){visitorVisuals.sync(s.cityVisitors,actors);photoAlbum.sync(s.cityVisitors.photos||[]);}
+  if(s.sportsLuxury){
+    const roofs = new Map(BUILDINGS.map(building => [building.id, building]));
+    const pads = s.sportsLuxury.pads.filter(pad => {
+      if (!pad.rooftop) return true;
+      const building = roofs.get(pad.locationId);
+      return building && !['cleared','collapsed','construction'].includes(building.urbanStage ?? '');
+    });
+    sportsVisuals.sync({...s.sportsLuxury,pads});
+    setPlayerHelipads(pads);
+  }
+  if(s.cityVisitors){visitorVisuals.sync(s.cityVisitors,actors);visitorAircraft.sync(s.cityVisitors.airportTraffic?.flights);photoAlbum.sync(s.cityVisitors.photos||[]);}
   updateSocietyBoard(s);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
   updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
@@ -842,6 +855,7 @@ const cityRoot = new THREE.Group();
 const urbanVisuals=new UrbanWorldRenderer(cityRoot);
 const sportsVisuals=new SportsLuxuryRenderer(scene,makeCanvasSprite);
 const visitorVisuals=new CityVisitorsRenderer(scene);
+const visitorAircraft=new VisitorAviationRenderer(scene);
 const civicVisuals=new CivicConflictRenderer(scene);
 const emergencyVisuals=new FireServiceRenderer(scene);
 scene.add(cityRoot);
@@ -915,6 +929,11 @@ function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false
   roadSurfaceRoot.add(marker);
 }
 
+for(const deck of HARBOR_CAUSEWAYS){
+ const foundation=new THREE.Mesh(new THREE.BoxGeometry(deck.w,.22,deck.d),sidewalkMat);
+ foundation.position.set(deck.x,-.055,deck.z);
+ roadSurfaceRoot.add(foundation);
+}
 for(const road of ROADS)for(const piece of surfaceRoadPieces(road))addRoadStrip(piece.x,piece.z,piece.w,piece.d,piece.d>piece.w,piece!==road);
 const roadSurfaceDrawsBefore=roadSurfaceRoot.children.length;
 batchStaticBoxes(roadSurfaceRoot);
@@ -1002,7 +1021,7 @@ function buildTrees(){
 
 function addBuilding(
   x: number, z: number, w: number, d: number, h: number, seed: number,
-  options: { glass?: boolean; sign?: string; residential?: boolean; batchWindows?:boolean } = {},
+  options: { glass?: boolean; sign?: string; residential?: boolean; batchWindows?: boolean; pitchedRoof?: number } = {},
 ) {
   const group = new THREE.Group();
   const wallPalette = options.glass
@@ -1028,12 +1047,23 @@ function addBuilding(
   body.position.y = h / 2;
   group.add(body);
 
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(w + 0.35, 0.35, d + 0.35),
-    new THREE.MeshStandardMaterial({ color: 0x4c5558, roughness: 0.9 }),
-  );
-  roof.position.y = h + 0.18;
-  group.add(roof);
+  if (options.pitchedRoof) {
+    const roofHeight = options.pitchedRoof;
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry((w + .75) / Math.SQRT2, roofHeight, 4),
+      new THREE.MeshStandardMaterial({color: 0x985445, roughness: .94}),
+    );
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = h + roofHeight / 2;
+    group.add(roof);
+  } else {
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(w + .35, .35, d + .35),
+      new THREE.MeshStandardMaterial({color: 0x4c5558, roughness: .9}),
+    );
+    roof.position.y = h + .18;
+    group.add(roof);
+  }
   if(h>55){
     const cap=new THREE.Mesh(new THREE.BoxGeometry(w*.65,3.2,d*.65),new THREE.MeshStandardMaterial({color:0x718993,roughness:.4,metalness:.4}));cap.position.y=h+1.6;group.add(cap);
     const trim=new THREE.Mesh(new THREE.BoxGeometry(w+.12,.16,d+.12),new THREE.MeshBasicMaterial({color:options.residential?0xe0be88:0x86b9c4}));trim.position.y=h-.5;group.add(trim);
@@ -1083,6 +1113,14 @@ function addBuilding(
 const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment");
 const batchableFacades:THREE.Group[]=[];
 for(const b of renderableCityBuildings){const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment",batchWindows:true});if(paris)cityRoot.add(g);else batchableFacades.push(g);urbanVisuals.registerBuilding(b.id,g);}
+// The detached houses are part of the physical map, including vacant lots.
+for (const house of BUILDINGS.filter(building => building.kind === 'house')) {
+  const roofHeight = 2.2;
+  const group = addBuilding(house.x, house.z, house.w - 1, house.d - 1, house.h - roofHeight,
+    Math.abs(house.x + house.z), {residential: true, batchWindows: true, pitchedRoof: roofHeight});
+  batchableFacades.push(group);
+  urbanVisuals.registerBuilding(house.id, group);
+}
 const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,192,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
 renderer.domElement.dataset.facadeSourceDraws=String(cityFacadeBatches.stats.sourceDraws);
 renderer.domElement.dataset.facadeBatchDraws=String(cityFacadeBatches.stats.batchDraws);
@@ -1094,7 +1132,7 @@ renderer.domElement.dataset.roadBatchDraws=String(roadSurfaceRoot.children.lengt
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
 const landmarkCool=new THREE.MeshStandardMaterial({color:0x8db9d0,emissive:0x3c9fd4,emissiveIntensity:0.95,roughness:0.28});
 const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.38,metalness:0.58});
-const empireRoot=new THREE.Group();cityRoot.add(empireRoot);buildHansdrexEmpire(empireRoot,makeCanvasSprite);urbanVisuals.registerBuilding("empire",empireRoot);
+const empireRoot=buildHansdrexEmpire(cityRoot,makeCanvasSprite);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 buildMansion(cityRoot,makeCanvasSprite);
@@ -1118,9 +1156,12 @@ heliTourGroup.position.copy(heliPadCenter).add(new THREE.Vector3(0,2.2,0));cityR
 const heliTarget=heliTourGroup.position.clone();
 let heliGuestCount=0;
 
-function addPetronasTwinTowers(x:number,z:number){const g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color:0xb8c1c4,roughness:0.30,metalness:0.68});for(const sx of [-3.1,3.1]){const tg=new THREE.Group();for(let i=0;i<6;i++){const r=2.35-i*.18,h=12.2-i*.35,seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r,h,10),m);seg.position.y=7+i*13;tg.add(seg);}const crown=new THREE.Mesh(new THREE.CylinderGeometry(.7,1.8,10,9),m);crown.position.y=87;tg.add(crown);const spire=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.5,22,7),landmarkMetal);spire.position.y=104;tg.add(spire);tg.position.x=sx;g.add(tg);}const bridge=new THREE.Mesh(new THREE.BoxGeometry(6.2,1.5,2),landmarkWarm);bridge.position.y=52;g.add(bridge);g.position.set(x,0,z);cityRoot.add(g);}
-addPetronasTwinTowers(41,43.5);
-const petronasLabel=makeCanvasSprite("HANSDREX PETRONAS",22,1.15);petronasLabel.position.set(41,119,43.5);cityRoot.add(petronasLabel);
+const petronasPlot=BUILDINGS.find(b=>b.id==="petronas");
+if(petronasPlot){
+  const twinTowers=buildPetronasTowers(petronasPlot,makeCanvasSprite);
+  cityRoot.add(twinTowers);
+  urbanVisuals.registerBuilding("petronas",twinTowers);
+}
 
 function addBurjKhalifaStyle(x:number,z:number){
  const g=new THREE.Group(),
@@ -1152,7 +1193,8 @@ function addBurjKhalifaStyle(x:number,z:number){
  const sign=makeCanvasSprite("BURJ KHALIFA · HANSDREX",26,1.35);sign.position.set(0,194,0);g.add(sign);
  g.position.set(x,0,z);cityRoot.add(g);
 }
-addBurjKhalifaStyle(236,72.5);
+const khalifaPlot=SKYLINE_PLOTS['burj-khalifa'];
+addBurjKhalifaStyle(khalifaPlot.x,khalifaPlot.z);
 
 const marinaBay=buildMarinaBay(cityRoot,makeCanvasSprite);urbanVisuals.registerBuilding('marina-bay',marinaBay);
 // Distinct shopfronts: glazed windows, colored awnings and readable destination signs.
@@ -1169,13 +1211,18 @@ for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  }
 }
 const fireStation=buildFireStation(cityRoot,makeCanvasSprite);urbanVisuals.registerBuilding('firestation',fireStation);
-// A real rooftop destination above the Empire-style tower's terrace.
-const skyDeck=new THREE.Mesh(new THREE.BoxGeometry(10,.4,10),landmarkMetal);skyDeck.position.set(15,98,43.5);cityRoot.add(skyDeck);
-for(const x of [11,19])for(const z of [40,47]){
- const table=new THREE.Mesh(new THREE.CylinderGeometry(.65,.65,.15,10),landmarkWarm);table.position.set(x,99,z);cityRoot.add(table);
+// Sky Lounge uses the same local coordinates on the Empire after relocation.
+const skyDeck=new THREE.Mesh(new THREE.BoxGeometry(10,.4,10),landmarkMetal);
+skyDeck.position.set(0,SKY_LOUNGE.y-1,0);empireRoot.add(skyDeck);
+for(const x of [-4,4])for(const z of [-3.5,3.5]){
+ const table=new THREE.Mesh(new THREE.CylinderGeometry(.65,.65,.15,10),landmarkWarm);
+ table.position.set(x,SKY_LOUNGE.y,z);empireRoot.add(table);
 }
-const bar=new THREE.Mesh(new THREE.BoxGeometry(5,1.1,1.3),landmarkWarm);bar.position.set(15,98.8,40);cityRoot.add(bar);
-const skySign=makeCanvasSprite("EMPIRE SKY BAR",22,1.3);skySign.position.set(15,103,48);cityRoot.add(skySign);
+const bar=new THREE.Mesh(new THREE.BoxGeometry(5,1.1,1.3),landmarkWarm);
+bar.position.set(0,SKY_LOUNGE.y-.2,-3.5);empireRoot.add(bar);
+const skySign=makeCanvasSprite("EMPIRE SKY BAR",22,1.3);
+skySign.position.set(0,SKY_LOUNGE.y+4,4.5);empireRoot.add(skySign);
+urbanVisuals.registerBuilding("empire",empireRoot);
 
 function addShowroomCar(x:number,z:number,color:number){
   const g=new THREE.Group();
@@ -1366,7 +1413,7 @@ function syncFlyMeshes(flies: FlyState[]) {
       flyVisuals.set(fly.id, visual);
     }
     visual.target.set(fly.x, fly.y, fly.z);
-    if(fly.currentLocationId==="rooftop"&&!fly.traveling){visual.target.set(11+seeded(Number(fly.id.replace(/\D/g,"")))*8,99,47);}
+    if(fly.currentLocationId==="rooftop"&&!fly.traveling){visual.target.set(SKY_LOUNGE.x-4+seeded(Number(fly.id.replace(/\D/g,"")))*8,SKY_LOUNGE.y,SKY_LOUNGE.z+3.5);}
     visual.stationary=Boolean(fly.sleeping||!fly.traveling);
     visual.hasMotion=Boolean(fly.motion&&!visual.stationary);
     if(fly.motion)visual.motion.accept(fly,fly.motion);
@@ -1403,18 +1450,7 @@ function syncFlyMeshes(flies: FlyState[]) {
 }
 
 
-const homeVisuals=new Map<string,THREE.Group>();
 const personalCars=new PersonalCars(scene);
-function syncHomes(flies:FlyState[]){
- const occupied=new Set(flies.filter(f=>f.alive&&f.housingType==="house").map(f=>f.housingUnitId));
- for(const b of BUILDINGS.filter(b=>b.kind==="house")){
-  if(!occupied.has(b.id)||homeVisuals.has(b.id))continue;
-  const g=addBuilding(b.x,b.z,b.w-1,b.d-1,4.2,Math.abs(b.x+b.z),{residential:true});
-  const roof=new THREE.Mesh(new THREE.ConeGeometry(5.2,2.6,4),new THREE.MeshStandardMaterial({color:0x775545,roughness:.9}));roof.rotation.y=Math.PI/4;roof.position.y=5.5;g.add(roof);homeVisuals.set(b.id,g);urbanVisuals.registerBuilding(b.id,g);
- }
- for(const [id,g]of homeVisuals)g.visible=occupied.has(id);
- personalCars.sync(flies,snapshot?.roadTraffic?.incidents);
-}
 
 function updateDayNight(hour: number, minute: number, weather: WeatherState = {}, day=Math.floor(presentationClock.read(performance.now())/86400)) {
   activeWeather = weather;
@@ -1434,7 +1470,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   sun.position.copy(sunDirection(t)).multiplyScalar(400);
   sunFill.color.copy(palette.fill);sunFill.intensity=(.12+daylight*.34)*(1-cloud*.35);
   moon.intensity=.16+night*.65*(1-cloud*.28);
-  updateLandmarkLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
+  updateLandmarkLighting(night);updatePetronasLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
   for(const material of windowMaterials)material.color.setScalar(.72+night*.28);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
@@ -1681,6 +1717,7 @@ function animate(now = performance.now()) {
   urbanVisuals.update(dt,gameNow);
   sportsVisuals.update(dt,gameNow);
   visitorVisuals.update(dt,gameNow);
+  visitorAircraft.update(gameNow);
   civicVisuals.update();
   emergencyVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   updateMetroTrains(now);
