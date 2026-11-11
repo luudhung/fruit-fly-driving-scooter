@@ -18,7 +18,8 @@ export function privateHelipads(){
    return separation(b)-separation(a)||a.id.localeCompare(b.id);
   });if(!candidates.length)break;selected.push(candidates[0]);
  }
- const allHomes=BUILDINGS.filter(b=>b.luxury||['apartment','house'].includes(b.kind));
+ // The iconic towers have spires rather than a flat helicopter roof.
+ const allHomes=BUILDINGS.filter(b=>['apartment','house'].includes(b.kind));
  const selectedAndHomes=[...selected,...allHomes.filter(b=>!selected.includes(b))];
  const roofs=selectedAndHomes.map((b,index)=>{
   if(selected.includes(b)&&!locate(b.id))LOCATIONS.push({id:b.id,type:'service',name:`${b.x>480?'Riverside':'City'} Sky ${b.kind==='apartment'?'Residence':'Tower'} ${String(index+1).padStart(2,'0')}`,x:b.x,z:b.z});
@@ -81,7 +82,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   for(const h of d.helicopters){
    const owner=alive(h.ownerId),home=owner&&padById.get(`PAD-${owner.housingUnitId}`);
    if(home){ensurePrivateAccess(home);h.homePadId=home.id;h.familyHouseholdId=owner.householdId||null;}
-   else h.homePadId ||= pads.find(p=>p.rooftop&&p.id===h.padId)?.id||null;
+   else if(owner||!padById.has(h.homePadId))h.homePadId=null;
    const household=world().housing?.households?.[h.familyHouseholdId],familyOwner=owner||world().flies.find(f=>f.id===h.estateOwnerId);
    h.familyIds=[...new Set([h.ownerId,...(household?.members||[]),...(familyOwner?.children||[])].filter(id=>id&&alive(id)))];
   }
@@ -145,6 +146,21 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   h.padId=flight.to.id;h.flight=null;h.nextTripAt=now+7200;if(!alreadyLanded){h.trips++;get().privateFlights++;}
   emit?.('private_flight_recovered',`${h.id} completed its previously committed landing after its owner became unavailable.`,{helicopterId:h.id,flightId:flight.id,padId:h.padId});
  }
+ function retireUnsupportedParking(d,now){
+  for(const h of d.helicopters){
+   if(h.flight||padById.has(h.padId))continue;
+   const building=BUILDINGS.find(b=>`PAD-${b.id}`===h.padId);
+   if(!building)continue;
+   const safe=pads.filter(p=>padAvailable(p.id,h.id)).sort((a,b)=>Number(b.locationId==='airport')-Number(a.locationId==='airport'))[0];
+   if(!safe)continue;
+   // Keep the aircraft and its estate/title. A maintenance flight removes it
+   // from a retired rooftop without putting a deck above the building spire.
+   h.flight={id:`PRIVATE-FLIGHT-${d.nextFlight++}`,helicopterId:h.id,ownerId:null,
+    from:{id:h.padId,locationId:building.id,x:building.x,z:building.z,y:building.h+4,rooftop:true,access:entrance(building)},
+    to:{...safe},departure:now,arrival:now+1200,cost:0,fuel:0,paid:true,maintenance:true};
+   emit?.('private_rooftop_retired',`${h.id} is being repositioned from a landmark without a helicopter roof.`,{helicopterId:h.id,from:h.padId,to:safe.id});
+  }
+ }
  function cancelSports(f,reason){
   const session=f.sportsSession;if(!session)return;const m=get().match;if(m?.id===session.id){m.players=m.players.filter(id=>id!==f.id);m.spectators=m.spectators.filter(id=>id!==f.id);}
   f.sportsSession=null;if(!busy(f)){f.action=`sports session interrupted: ${reason}`;f.actionUntil=world().simulationAgeSeconds;}
@@ -154,6 +170,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  function tick(gameSeconds,clock){
   const d=get(),s=world(),now=s.simulationAgeSeconds;bindFamilyHomes(d);relocateLegacyParking(d);maintenance(d,Math.floor(now/86400));inherit(d,now);
   for(const h of d.helicopters)settleUnattendedFlight(h,now);
+  retireUnsupportedParking(d,now);
   for(const f of s.flies)if(f.sportsSession&&interruptedSports(f))cancelSports(f,'resident or venue unavailable');
   if(!d.match&&now>=d.nextMatchAt){d.nextMatchAt=nextAt(now);d.match={id:`MATCH-${Math.floor(now/86400)}`,startsAt:now+1800,endsAt:now+1800+SPORTS_RULES.matchSeconds,players:[],spectators:[],score:[0,0],lastGoalAt:now+2400,settled:false};emit?.('sports_fixture','Riverside Stadium opened registration for today’s city match.',{matchId:d.match.id,startsAt:d.match.startsAt});}
   const m=d.match;if(m){

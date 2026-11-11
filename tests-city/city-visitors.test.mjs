@@ -13,11 +13,29 @@ function setup(){
 function money(s){return s.flies.reduce((n,f)=>n+f.money+f.savings,0)+s.cityVisitors.visitors.reduce((n,f)=>n+f.money+f.savings,0)+Object.values(s.businesses).reduce((n,b)=>n+b.cash,0)+s.treasury.cash;}
 
 test('visitors own independent brains and finite prepaid hotel rooms; foreign cash is accounted explicitly',()=>{
- const h=setup(),before=money(h.state),visitors=Array.from({length:16},()=>h.system.spawnVisitor({budget:1000}));
- assert.ok(visitors.every(Boolean));assert.equal(new Set(visitors.map(v=>v.brain.id)).size,16);assert.equal(h.system.spawnVisitor(),null);assert.equal(h.state.flies.length,0);
- const rooms=h.system.snapshot().hotelRooms;assert.equal(rooms.reduce((n,x)=>n+x.occupied,0),16);assert.ok(rooms.every(x=>x.occupied<=x.capacity));
- assert.equal(h.state.cityVisitors.externalInflow,16000);assert.ok(Math.abs(money(h.state)-before-16000)<1e-6);
+ const h=setup(),before=money(h.state),visitors=Array.from({length:40},()=>h.system.spawnVisitor({budget:1000}));
+ assert.ok(visitors.every(Boolean));assert.equal(new Set(visitors.map(v=>v.brain.id)).size,40);assert.equal(h.system.spawnVisitor(),null);assert.equal(h.state.flies.length,0);
+ const rooms=h.system.snapshot().hotelRooms;assert.equal(rooms.reduce((n,x)=>n+x.occupied,0),40);assert.ok(rooms.every(x=>x.occupied<=x.capacity));
+ assert.equal(h.state.cityVisitors.externalInflow,40000);assert.ok(Math.abs(money(h.state)-before-40000)<1e-6);
  const v=visitors[0],cash=v.money,total=money(h.state);assert.ok(h.system.reserveRoom(v,v.hotelId,4));assert.equal(v.money,cash);assert.equal(money(h.state),total);
+});
+test('airport visitors choose an affordable taxi or public transport from their own traits and brain draw',()=>{
+ const state={simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{},treasury:{cash:0},centralBank:{priceLevel:1},weather:{condition:'clear',precipitation:0}};
+ const draws=[];
+ const system=createCityVisitors({world:()=>state,
+  createVisitor:(_name,index)=>person(`BRAIN-VIS-${index}`,AIRPORT.gate.x,AIRPORT.gate.z),
+  brainRandom:v=>{draws.push(v.id);return v.traits.thrift<.5?0:.99;},
+  startJourney:(v,chosen)=>Object.assign(v,{traveling:true,transitMode:'metro',targetLocationId:chosen.id,routeWaypoints:[{...loc(chosen.id),mode:'metro'}]}),
+ });
+ system.init();state.cityVisitors.nextArrivalAt=Infinity;state.cityVisitors.club.nextAt=Infinity;
+ const driver=person('AIRPORT-TAXI');driver.vehicle='compact car';driver.parkedCar=parkingPoint(driver);state.flies.push(driver);
+ const comfort=system.spawnVisitor({budget:1000}),saver=system.spawnVisitor({budget:1000});
+ comfort.traits.thrift=.05;saver.traits.thrift=.95;
+ state.simulationAgeSeconds=120;system.tick(120,{hour:8});
+ assert.ok(comfort.taxiJobId);assert.equal(comfort.lastTransportDecision.mode,'taxi');
+ assert.equal(saver.taxiJobId,undefined);assert.equal(saver.lastTransportDecision.mode,'metro');
+ assert.deepEqual(draws,[comfort.id,saver.id]);
+ assert.ok(comfort.money>30);assert.equal(state.cityVisitors.taxiJobs.length,1);
 });
 test('a visitor physically checks in, returns to airport and departs without entering the death census',()=>{
  const h=setup(),v=h.system.spawnVisitor({budget:1000,staySeconds:86400*3});assert.ok(v);

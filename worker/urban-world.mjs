@@ -1,4 +1,5 @@
 import {createFireService} from './fire-service.mjs';
+import {restoreInitialFireDamage} from './urban-restoration.mjs';
 import * as cityGeometry from './city-map.mjs';
 import {validDevelopmentLot,planAccessRoad,MIN_ALLEY} from './urban-roads.mjs';
 import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,contains,overlaps,entrance,blocked,applyUrbanGeometry} from './city-map.mjs';
@@ -15,6 +16,8 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  const fireService=createFireService({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance});
  const roll=()=>{const sample=raw().flies.find(f=>f.alive&&f.brain);return sample?random(sample):.5;};
  const report=(type,text,payload={})=>emit(type,text,payload);
+ const ongoing=p=>!['complete','cancelled'].includes(p.stage);
+ const activeProject=p=>ongoing(p)&&!p.recoveryPaused;
  function account(id){return raw().businesses[id] ||= {cash:0,inventory:0,price:0,sector:'civic'};}
  function transfer(from,to,amount){amount=Math.max(0,Math.min(Number(amount)||0,Number(from.cash||0)));if(amount<=0)return 0;from.cash-=amount;to.cash=Number(to.cash||0)+amount;raw().totalTransactions=Number(raw().totalTransactions||0)+1;return amount;}
  function geometry(){return {buildings:Object.values(u().buildings),floods:u().floods.filter(f=>f.depth>.35),roads:u().roads.filter(r=>r.stage==='operational')};}
@@ -43,7 +46,8 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   for(const fire of v.fires){const b=building(fire.buildingId)||v.buildings[fire.buildingId];if(b)taskSite(`CIVIC-FIRE-${fire.id}`,b);}
   for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b)taskSite(`CIVIC-SITE-${p.id}`,b);}
  }
- function init(){ensure();apply();fireService.init();return snapshot();}
+ function restoreRequestedDamage(){restoreInitialFireDamage(raw(),{completeProject:finishProject,reopen:reopenBuilding,report});}
+ function init(){ensure();apply();fireService.init();restoreRequestedDamage();apply();return snapshot();}
  function rememberEvent(f,kind,payload){remember(f,kind,payload);f.urbanMemories=(f.urbanMemories||[]).concat({kind,t:now(),...payload}).slice(-8);}
  function householdUnits(b){return Object.values(raw().housing?.households||{}).filter(h=>h.unitId===b.id);}
  function evacuate(b,cause){
@@ -63,6 +67,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function ignite(buildingId,reason='electrical fault'){
   ensure();if(u().fires.length>=MAX_FIRES||u().fires.some(f=>f.buildingId===buildingId))return null;
   const b=stateFor(buildingId);if(!b||['collapsed','cleared','construction'].includes(b.stage)||['landmark','mansion','airport'].includes(b.kind))return null;
+  b.originalHeight=Number(b.originalHeight||b.h);
   const fire={id:`FIRE-${u().nextIncidentId++}`,buildingId,reason,startedAt:now(),lastAt:now(),intensity:18,detected:false,teamIds:[],waterUsed:0,spreadAttemptAt:now()+3600};u().fires.push(fire);
   report('fire_started',`A fire started at ${buildingId}: ${reason}.`,{buildingId,incidentId:fire.id});evacuate(b,'fire');setStage(b,'unsafe');return fire;
  }
@@ -150,8 +155,43 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   account('civic-escrow').cash+=cost-remaining;raw().totalTransactions=Number(raw().totalTransactions||0)+contributions.length;
   return contributions;
  }
+ function recoveryCost(b){return Math.ceil(estimate(b)*(b.stage==='collapsed'?1:Math.max(.25,(100-b.health)/100)));}
+ function recoveryPriority(){
+  const hasFire=id=>u().fires.some(f=>f.buildingId===id&&!f.containedAt);
+  if(u().projects.some(p=>ongoing(p)&&p.kind!=='new'&&!hasFire(p.buildingId)))return true;
+  const activeIds=new Set(u().projects.filter(ongoing).map(p=>p.buildingId));
+  return Object.values(u().buildings).some(b=>{
+   if(!['damaged','collapsed'].includes(b.stage)||activeIds.has(b.id)||hasFire(b.id)||Number(b.recovery?.nextFundingCheckAt||0)>now())return false;
+   const cost=recoveryCost(b),recovery=residential(b)?householdPayers(b):null;
+   return recovery&&(recovery.payers.length||recovery.householdIds.length)
+    ?recovery.payers.reduce((sum,f)=>sum+wealth(f),0)+1e-8>=cost
+    :Number(raw().treasury.cash||0)>=cost;
+  });
+ }
+ function prioritizeRecovery(){
+  const priority=recoveryPriority();u().recoveryPriority=priority;
+  if(priority){
+   for(const p of u().projects){
+    if(!ongoing(p)||p.kind!=='new')continue;
+    p.recoveryPaused=true;p.priorityPausedAt??=now();p.pauseReason='disaster recovery priority';
+    for(const id of p.workerIds||[]){const f=byId.get(id);if(f?.urbanTask?.id===p.id)releaseTask(f);}
+    // Paid stock remains assigned to this project. A resumed courier carries the
+    // outstanding quantity; neither the invoice nor escrow reservation repeats.
+    p.workerIds=[];p.courierId=null;
+   }
+   return;
+  }
+  let available=Math.max(0,MAX_PROJECTS-u().projects.filter(activeProject).length);
+  for(const p of u().projects.filter(p=>ongoing(p)&&p.recoveryPaused).sort((a,b)=>a.startedAt-b.startedAt)){
+   if(available--<=0)break;
+   p.recoveryPaused=false;p.crewCheckAt=0;p.resumedAt=now();
+   if(p.pauseReason==='disaster recovery priority')p.pauseReason=null;
+  }
+ }
  function submitProject(buildingId,{ownerId=null,kind='repair',height=null,accessRoads=[]}={}){
-  ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS||u().projects.some(p=>p.buildingId===buildingId&&!['complete','cancelled'].includes(p.stage)))return null;
+  ensure();if(kind==='new'&&recoveryPriority())return null;
+  if(kind!=='new')prioritizeRecovery();
+  if(u().projects.filter(activeProject).length>=MAX_PROJECTS||u().projects.some(p=>p.buildingId===buildingId&&ongoing(p)))return null;
   const b=stateFor(buildingId);if(!b||u().fires.some(f=>f.buildingId===buildingId&&!f.containedAt))return null;
   if(kind==='repair'&&b.stage==='collapsed')kind='rebuild';
   const recovery=kind!=='new'&&residential(b)?householdPayers(b):null;
@@ -168,7 +208,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    transfer(raw().treasury,account('civic-escrow'),cost);
   }
   const payerId=owner?.id||contributions?.[0]?.residentId||null;
-  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,ownerId:payerId,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:height||b.h,roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0};
+  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,ownerId:payerId,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:kind==='new'?(height||b.h):(b.originalHeight||b.h),roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0};
   if(contributions){project.funding={type:recovery?'household':'resident',householdIds:recovery?.householdIds||[],contributions};}
   if(recovery)b.recovery={status:'funded',projectId:project.id,cost,householdIds:recovery.householdIds};  project.materialsRequired+=project.roadMaterialsRequired;
   for(const [index,road]of accessRoads.entries()){const record={...road,id:`ROAD-${project.id}-${index+1}`,projectId:project.id,buildingId,ownerId:owner?.id||null,stage:'planned',progress:0};u().roads.push(record);project.roadIds.push(record.id);}
@@ -179,7 +219,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   return {bounds:{minX:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
  }
  function develop(lot,ownerId){
-  ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS)return null;
+  ensure();if(recoveryPriority()||u().projects.filter(activeProject).length>=MAX_PROJECTS)return null;
   const owner=byId.get(ownerId);if(!owner||!live(owner))return null;
   lot={...lot,id:lot.id||`CIVIC-${Math.round(lot.x)}-${Math.round(lot.z)}`,kind:'civic'};
   if(!validDevelopmentLot(lot,developmentContext())||u().buildings[lot.id])return null;
@@ -190,7 +230,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   delete u().buildings[lot.id];apply();return null;
  }
  function grow(){
-  ensure();if(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).length>=MAX_PROJECTS-1)return;
+  ensure();if(recoveryPriority()||u().projects.filter(activeProject).length>=MAX_PROJECTS-1)return;
   const owners=raw().flies.filter(f=>available(f)&&Number(f.money||0)+Number(f.savings||0)>1800).sort((a,b)=>(b.money+b.savings)-(a.money+a.savings));
   const owner=owners[Math.min(owners.length-1,Math.floor(roll()*Math.min(6,owners.length)))];if(!owner)return;
   const frontier=ROADS.filter(r=>r.x+r.w/2>480&&r.z-r.d/2<450);if(!frontier.length)return;
@@ -207,7 +247,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
  }
  function advanceProject(p,dt){
-  if(['complete','cancelled'].includes(p.stage))return;
+  if(!activeProject(p))return;
   const b=stateFor(p.buildingId);if(!b)return;
   if(u().fires.some(f=>f.buildingId===b.id&&!f.containedAt)){p.pauseReason='active fire';return;}
   crewFor(p,'build',b,3);
@@ -260,7 +300,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
  }
  function finishProject(p){
-  const b=stateFor(p.buildingId);if(!b)return;p.stage='complete';p.completedAt=now();b.health=100;b.progress=1;b.h=p.targetHeight;setStage(b,'operational');u().completedProjects++;
+  const b=stateFor(p.buildingId);if(!b||p.stage==='complete')return;p.stage='complete';p.completedAt=now();b.h=p.targetHeight;reopenBuilding(b);u().completedProjects++;
   const refund=Math.max(0,p.budget-p.spent),owner=byId.get(p.ownerId),escrow=account('civic-escrow');
   if(p.funding?.contributions?.length){
    p.refunded=0;
@@ -277,14 +317,17 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(b.recovery?.projectId===p.id)b.recovery.status='restored';
   for(const id of p.workerIds)releaseTask(byId.get(id));
   if(p.kind==='new'){
-   addLocation(b.id,b,`Resident-built ${b.h>25?'tower':'workshop'}`);
+   addLocation(b.id,b,b.usage==='hotel'?'Resident-built hotel':b.usage==='restaurant'?'Resident-built restaurant':`Resident-built ${b.h>25?'tower':'workshop'}`);
    account(b.id).sector='resident-development';account(b.id).inventory=12;
    // Finished homes become actual housing capacity. Existing ownership and household IDs stay intact.
-   if(!raw().housing.apartmentBlocks.some(v=>v.id===b.id))raw().housing.apartmentBlocks.push({...b,capacity:Math.max(2,Math.floor(b.h/6)),rent:20,occupants:[],purchaseValue:estimate(b)*3});
+   if(!['hotel','restaurant'].includes(b.usage)&&!raw().housing.apartmentBlocks.some(v=>v.id===b.id))raw().housing.apartmentBlocks.push({...b,capacity:Math.max(2,Math.floor(b.h/6)),rent:20,occupants:[],purchaseValue:estimate(b)*3});
   }
+  report('construction_complete',`${b.id} passed inspection and reopened.`,{projectId:p.id,buildingId:b.id,ownerId:p.ownerId});
+ }
+ function reopenBuilding(b){
+  b.health=100;b.progress=1;setStage(b,'operational');
   for(const f of raw().flies)if(f.displacedFrom?.buildingId===b.id){f.displacedFrom=null;f.actionUntil=0;u().displaced=Math.max(0,u().displaced-1);rememberEvent(f,'home_restored',{buildingId:b.id});}
   for(const business of Object.values(raw().enterprises||{}))if(business.locationId===b.id){business.urbanSuspended=false;delete business.suspendedReason;}
-  report('construction_complete',`${b.id} passed inspection and reopened.`,{projectId:p.id,buildingId:b.id,ownerId:p.ownerId});
  }
  function floodStep(dt){
   const rain=Number(raw().weather?.precipitation||0),v=u();v.rainAccumulation=clamp(Number(v.rainAccumulation||0)+(rain>.68?dt/7200:-dt/4200),0,2);
@@ -307,13 +350,17 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   ensure();const dt=Math.max(0,Math.min(Number(gameSeconds)||0,Math.max(0,now()-Number(u().lastTickAt||0))));u().lastTickAt=now();if(!dt)return;
   fireService.tick(dt,clock);
   for(const fire of u().fires.slice())if(!fire.containedAt)detectAndFight(fire,dt);
+  restoreRequestedDamage();
   u().fires=u().fires.filter(f=>!f.containedAt||now()-f.containedAt<7200);
+  prioritizeRecovery();
   for(const p of u().projects){
+   if(p.recoveryPaused)continue;
    if(p.stage==='inspection'){if(now()>=p.inspectionAt)finishProject(p);}
    else advanceProject(p,dt);
   }
-  u().projects=u().projects.filter(p=>p.stage!=='complete'||now()-p.completedAt<DAY*3).slice(-24);
-  const active=new Set(u().projects.filter(p=>!['complete','cancelled'].includes(p.stage)).map(p=>p.buildingId));
+  const history=u().projects.filter(p=>!ongoing(p)&&(p.stage!=='complete'||now()-p.completedAt<DAY*3)).slice(-24);
+  u().projects=[...u().projects.filter(ongoing),...history];
+  const active=new Set(u().projects.filter(activeProject).map(p=>p.buildingId));
   if(active.size<MAX_PROJECTS){
    const occupied=new Set(Object.values(raw().housing?.households||{}).map(h=>h.unitId));
    const isHome=b=>['house','apartment'].includes(b.kind)||occupied.has(b.id);
@@ -357,7 +404,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   if(!f.urbanTask)return false;
   const task=f.urbanTask,job=task.type==='fire'?u().fires.find(v=>v.id===task.id&&!v.containedAt):u().projects.find(v=>v.id===task.id&&!['complete','cancelled'].includes(v.stage));
-  if(!job||!f.alive||f.health<20||f.energy<5||f.hunger>96||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession){releaseTask(f);return false;}
+  if(!job||job.recoveryPaused||!f.alive||f.health<20||f.energy<5||f.hunger>96||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession){releaseTask(f);return false;}
   const destination=task.phase==='collecting'?'construction':task.targetId;
   if(!f.traveling&&!present(f,destination)&&now()>=Number(task.nextRouteAt||0)){
    if(Number(task.routeFailures||0)>=3){f.urbanCrewRetryAt=now()+3600;releaseTask(f);return false;}

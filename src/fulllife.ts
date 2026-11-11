@@ -345,6 +345,23 @@ let visualLighting:string='auto';
 const lightingSelect=document.getElementById('visual-lighting') as HTMLSelectElement|null;
 lightingSelect?.addEventListener('change',()=>{visualLighting=lightingSelect.value;lastSkyMinute=-1;});
 const renderedHour=(hour:number)=>visualLighting==='auto'?hour:Number(visualLighting);
+type VisualWeather='auto'|'sunny'|'rain';
+let visualWeather:VisualWeather='auto';
+try{const saved=localStorage.getItem('fulllife_visual_weather');if(saved==='sunny'||saved==='rain')visualWeather=saved;}catch{}
+const weatherSelect=document.getElementById('visual-weather') as HTMLSelectElement|null;
+if(weatherSelect){
+ weatherSelect.value=visualWeather;
+ weatherSelect.addEventListener('change',()=>{
+  visualWeather=weatherSelect.value==='sunny'?'sunny':weatherSelect.value==='rain'?'rain':'auto';
+  try{localStorage.setItem('fulllife_visual_weather',visualWeather);}catch{}
+  lastSkyMinute=-1;
+ });
+}
+function renderedWeather(weather:WeatherState):WeatherState{
+ if(visualWeather==='sunny')return {...weather,condition:'clear',precipitation:0,cloudCover:.04,lightning:0};
+ if(visualWeather==='rain')return {...weather,condition:'rain',precipitation:.6,cloudCover:.78,lightning:0};
+ return weather;
+}
 const touchSizeInput=document.getElementById("touch-button-size") as HTMLInputElement|null;
 const touchSizeValue=document.getElementById("touch-button-size-value");
 let preferredTouchSize=72;
@@ -569,7 +586,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   const living=(s.flies||[]).filter(f=>f.alive);
   residentDirectory.update(living,s.deaths,s.births,s.mortality?.byCause);
   setConnection(s.authoritative?"authoritative":"offline",`${living.length} ALIVE · ${s.authoritative?(neuralLive?"FULL CONNECTOME":"CITY LIVE"):"LAST KNOWN"} ▾`);
-  if(s.mapVersion!==MAP_VERSION)setConnection("connecting",`${living.length} ALIVE · WORKER UPDATE NEEDED ▾`);
+  if(s.mapVersion!==MAP_VERSION)setConnection("connecting",`${living.length} ALIVE · ${Number(s.mapVersion)>MAP_VERSION?'CÓ BẢN MỚI · TẢI LẠI TRANG':'ĐANG CẬP NHẬT MÁY CHỦ'} ▾`);
   const residentBrains=s.neuralBridge?.registeredResidentBrains??s.neuralBridge?.registeredBrains??0;
   connection.title=`${living.length} living residents. ${residentBrains}/${living.length} resident brains and ${s.neuralBridge?.registeredVisitorBrains||0} visitor brains have fresh measured checkpoints.`;
   const neuralCensus=document.getElementById("neural-census"),neuralCadence=document.getElementById("neural-cadence");
@@ -666,7 +683,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
     const pads = s.sportsLuxury.pads.filter(pad => {
       if (!pad.rooftop) return true;
       const building = roofs.get(pad.locationId);
-      return building && !['cleared','collapsed','construction'].includes(building.urbanStage ?? '');
+      return s.mapVersion===MAP_VERSION && building?.kind!=='landmark' && building && !['cleared','collapsed','construction'].includes(building.urbanStage ?? '');
     });
     sportsVisuals.sync({...s.sportsLuxury,pads});
     setPlayerHelipads(pads);
@@ -836,11 +853,11 @@ function seeded(n: number) {
 
 const windowMaterials: THREE.MeshBasicMaterial[] = [];
 const residentCamera=new ResidentCamera(renderer,scene,camera,(record,origin,photoCamera)=>{
- const previousLighting=visualLighting,previousWeather=activeWeather,at=record.at%86400/3600;
- visualLighting='auto';const photoWeather={...previousWeather,condition:record.weather||'clear',cloudCover:record.weather==='clear'?0:record.weather==='cloudy'?.4:.8};
+ const previousLighting=visualLighting,previousWeather=activeWeather,previousVisualWeather=visualWeather,at=record.at%86400/3600;
+ visualLighting='auto';visualWeather='auto';const photoWeather={...previousWeather,condition:record.weather||'clear',cloudCover:record.weather==='clear'?0:record.weather==='cloudy'?.4:.8,precipitation:/rain|storm/.test(record.weather||'')?.6:0};
  updateDayNight(Math.floor(at),(at%1)*60,photoWeather,Math.floor(record.at/86400));citySky.update(at,origin,photoWeather.cloudCover,Math.floor(record.at/86400));
  cityWater.update(record.at/120,visualPalette.daylight,photoWeather.cloudCover,visualPalette.zenith,visualPalette.horizon,sunDirection(at),visualPalette.sunColor);
- return()=>{visualLighting=previousLighting;const hour=presentationClock.read(performance.now())%86400/3600;updateDayNight(Math.floor(hour),(hour%1)*60,previousWeather);citySky.update(renderedHour(hour),camera.position,previousWeather.cloudCover||0,Math.floor(presentationClock.read(performance.now())/86400));};
+ return()=>{visualLighting=previousLighting;visualWeather=previousVisualWeather;const hour=presentationClock.read(performance.now())%86400/3600;updateDayNight(Math.floor(hour),(hour%1)*60,previousWeather);citySky.update(renderedHour(hour),camera.position,activeWeather.cloudCover||0,Math.floor(presentationClock.read(performance.now())/86400));};
 });
 const photoAlbum=new ResidentPhotoAlbum(residentCamera.capture,()=>!document.hidden&&!playerCar.active);
 document.getElementById('resident-photo-album')?.addEventListener('click',closeSettings);
@@ -1453,6 +1470,7 @@ function syncFlyMeshes(flies: FlyState[]) {
 const personalCars=new PersonalCars(scene);
 
 function updateDayNight(hour: number, minute: number, weather: WeatherState = {}, day=Math.floor(presentationClock.read(performance.now())/86400)) {
+  weather=renderedWeather(weather);
   activeWeather = weather;
   const t = renderedHour(hour + minute / 60);
   const {daylight,dusk}=skyLight(t);
@@ -1723,7 +1741,7 @@ function animate(now = performance.now()) {
   updateMetroTrains(now);
   updateParkWheel(now);
   const visualHour=(gameNow%86400)/3600;
-  if(Math.floor(gameNow/60)!==lastSkyMinute){lastSkyMinute=Math.floor(gameNow/60);updateDayNight(Math.floor(visualHour),Math.floor((visualHour%1)*60),activeWeather);}
+  if(Math.floor(gameNow/60)!==lastSkyMinute){lastSkyMinute=Math.floor(gameNow/60);updateDayNight(Math.floor(visualHour),Math.floor((visualHour%1)*60),snapshot?.weather||{});}
   if(snapshot){
     const hour=Math.floor(gameNow%86400/3600),minute=Math.floor(gameNow%3600/60),text=`${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
     if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}

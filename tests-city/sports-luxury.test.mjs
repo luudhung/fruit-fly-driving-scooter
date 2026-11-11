@@ -11,6 +11,19 @@ function setup(count=18){
 const supply=s=>s.flies.reduce((a,f)=>a+f.money+f.savings,0)+Object.values(s.businesses).reduce((a,b)=>a+b.cash,0);
 const putAtPad=(s,h)=>{const pad=privateHelipads().find(p=>p.id===h.padId),f=s.flies.find(f=>f.id===h.ownerId),loc=LOCATIONS.find(l=>l.id===pad.locationId);Object.assign(f,{x:loc.x,z:loc.z,currentLocationId:pad.locationId,action:'taking a private helicopter',traveling:false,indoors:true});return f;};
 
+test('iconic spires never receive helipads; retired aircraft move without losing ownership or charging families',()=>{
+ const t=setup(),pads=privateHelipads(),icons=['toronto','empire','burj-khalifa','petronas','petronas-east'];
+ assert.ok(pads.every(p=>!icons.includes(p.locationId)));
+ const h=t.s.sportsLuxury.helicopters[0],owner=t.s.flies.find(f=>f.id===h.ownerId),before=supply(t.s);
+ owner.housingUnitId='petronas';h.homePadId=h.padId='PAD-petronas';
+ const id=h.id,ownerId=h.ownerId;t.system.tick(0,t.at(0));
+ assert.equal(h.homePadId,null);assert.equal(h.id,id);assert.equal(h.ownerId,ownerId);
+ assert.ok(h.flight?.maintenance);assert.equal(supply(t.s),before);
+ const to=h.flight.to.id;t.restore();t.system.tick(0,t.at(1201));
+ const restored=t.s.sportsLuxury.helicopters.find(aircraft=>aircraft.id===id);
+ assert.equal(restored.padId,to);assert.equal(restored.flight,null);assert.equal(restored.ownerId,ownerId);assert.equal(supply(t.s),before);
+});
+
 test('one-time founding grant selects ten wealthiest living adults after liabilities, then preserves ownership',()=>{
  const t=setup(),d=t.s.sportsLuxury;assert.equal(d.helicopters.length,10);
  const expected=t.s.flies.filter(f=>f.alive&&f.ageYears>=18).sort((a,b)=>helicopterNetWorth(b)-helicopterNetWorth(a)).slice(0,10).map(f=>f.id);

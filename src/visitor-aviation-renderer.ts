@@ -46,6 +46,8 @@ function makeApron() {
  ground(-180,VISITOR_TAXIWAY_Z,270,12,asphalt,.145);
  for(const x of [-308,-52])ground(x,-495,12,46,asphalt,.145);
  ground(-180,VISITOR_TAXIWAY_Z,259,.18,yellow);
+ ground(-180,-414,118,4,0x889293,.19);
+ ground(-180,-405,4,20,0x889293,.19);
  for(const x of [-308,-52])ground(x,-495,.18,44,yellow);
  const digits=[[0,1,2,3,4,5],[1,2],[0,1,6,4,3],[0,1,6,2,3],[5,6,1,2]];
  VISITOR_STANDS.forEach(({x,z},index)=>{
@@ -54,14 +56,30 @@ function makeApron() {
   ground(x,z+11.5,24,.19,yellow);
   ground(x,(z+VISITOR_TAXIWAY_Z)/2,.17,z-VISITOR_TAXIWAY_Z,yellow);
   ground(x,z+8,4,.23,white);
+  ground(x-6,-422,2,16,0x889293,.19);
   const segments=[[0,-1.15,1,.13],[.49,-.55,.13,1],[.49,.55,.13,1],[0,1.15,1,.13],[-.49,.55,.13,1],[-.49,-.55,.13,1],[0,0,1,.13]];
   for(const i of digits[index+1]){const [dx,dz,w,d]=segments[i];ground(x+dx,z+9.6+dz,w,d,white);}
  });
  return new THREE.Mesh(coloredGeometry(parts),new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));
 }
 
+function boardingStairsGeometry() {
+ const parts:Array<{geometry:THREE.BufferGeometry;color:number}>=[];
+ const box=(x:number,y:number,z:number,w:number,h:number,d:number,color:number)=>
+  parts.push({geometry:new THREE.BoxGeometry(w,h,d).translate(x,y,z),color});
+ const steps=10;
+ for(let i=0;i<steps;i++){
+  const y=1.1+(i+1)*.23,x=-6+(i+.5)*.46;
+  box(x,y-.1,4,.47,.2,1.25,0xc8d2d5);
+  for(const side of [-1,1])box(x,y+.43,4+side*.65,.06,.95,.06,0x71868c);
+ }
+ box(-1.55,3.3,4,.6,.2,1.25,0xc8d2d5);
+ return coloredGeometry(parts);
+}
+
 export class VisitorAviationRenderer {
  private aircraft:THREE.Mesh[];
+ private stairs:THREE.Mesh[];
  private flights:readonly VisitorAircraft[]=[];
 
  constructor(root:THREE.Object3D) {
@@ -74,6 +92,10 @@ export class VisitorAviationRenderer {
    root.add(mesh);
    return mesh;
   });
+  const stairsGeometry=boardingStairsGeometry();
+  this.stairs=VISITOR_STANDS.map(()=>{
+   const mesh=new THREE.Mesh(stairsGeometry,material);mesh.visible=false;root.add(mesh);return mesh;
+  });
  }
 
  sync(flights:readonly VisitorAircraft[]|undefined) {
@@ -85,6 +107,8 @@ export class VisitorAviationRenderer {
    const flight=this.flights[index];
    const pose=flight&&visitorAircraftPose(gameNow,flight);
    mesh.visible=Boolean(pose);
+   const stairs=this.stairs[index];stairs.visible=Boolean(pose?.phase==='parked');
+   if(stairs.visible&&pose)stairs.position.set(pose.x,0,pose.z);
    if(!pose)continue;
    mesh.position.set(pose.x,pose.y,pose.z);
    mesh.rotation.y=pose.heading;

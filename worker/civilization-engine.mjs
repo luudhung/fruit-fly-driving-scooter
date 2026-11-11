@@ -3,6 +3,7 @@ import {createCivicConflict} from './civic-conflict.mjs';
 import {createUrbanWorld} from './urban-world.mjs';
 import {createSportsLuxury} from './sports-luxury.mjs';
 import {createCityVisitors} from './city-visitors.mjs';
+import {isHospitalitySector,hospitalityPremises,hospitalityDemand,openHospitalityPremises,restoreHospitalityPremises,hospitalityReady,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
@@ -136,9 +137,10 @@ const VEHICLE_CATALOG = [
 ];
 
 const STARTUP_TYPES = [
-  { sector: "cafe", baseCapital: 900, locationId: "cafe", margin: 0.18 },
+  { sector: "hotel", baseCapital: 6500, locationId: "hotel", margin: 0.32 },
+  { sector: "cafe", baseCapital: 1500, locationId: "cafe", margin: 0.18 },
   { sector: "retail", baseCapital: 1100, locationId: "corner-shop", margin: 0.16 },
-  { sector: "food", baseCapital: 1300, locationId: "restaurant", margin: 0.20 },
+  { sector: "food", baseCapital: 2300, locationId: "restaurant", margin: 0.20 },
   { sector: "nightlife", baseCapital: 1700, locationId: "nightclub", margin: 0.24 },
   { sector: "logistics", baseCapital: 1500, locationId: "warehouse", margin: 0.14 },
   { sector: "manufacturing", baseCapital: 2300, locationId: "factory-east", margin: 0.17 },
@@ -152,6 +154,7 @@ const STARTUP_TYPES = [
 ];
 
 const EMERGENT_ROLES = {
+  hotel:["hotel receptionist","housekeeper","guest services","hotel manager"],
   cafe:["barista","coffee roaster","customer host","delivery runner"],
   retail:["sales associate","inventory planner","customer support","visual merchandiser"],
   food:["cook","kitchen specialist","food buyer","delivery runner"],
@@ -488,11 +491,11 @@ const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRe
 const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted};
 const urbanWorld=createUrbanWorld(cityServices);
 const sportsLuxury=createSportsLuxury(cityServices);
-const cityVisitors=createCityVisitors({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
+const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
-function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();}
+function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
   if(residentRelationships.handleResident(f,clock))return true;
@@ -1279,6 +1282,27 @@ function restoreState(persistedState) {
       }
     }
   }
+  if(previousMapVersion<23){
+    const base=APARTMENTS.find(block=>block.id==='petronas-east');
+    if(base){
+      const block=state.housing.apartmentBlocks.find(block=>block.id===base.id);
+      if(block)Object.assign(block,base,{occupants:block.occupants||[]});
+      for(const household of Object.values(state.housing.households))if(household.unitId===base.id){household.homeX=base.x;household.homeZ=base.z;}
+      for(const fly of state.flies){
+        if(fly.housingUnitId===base.id){
+          fly.homeX=base.x;fly.homeZ=base.z;
+          if(fly.indoors&&!fly.traveling&&fly.currentLocationId===fly.homeId){Object.assign(fly,{x:base.x,z:base.z,y:1.1,targetX:base.x,targetZ:base.z,finalTargetX:base.x,finalTargetZ:base.z,movementTrace:[]});}
+        }
+        if(fly.traveling&&fly.targetLocationId===base.id)fly.relocatedDestinationId=base.id;
+      }
+      for(const [oldId,newId]of Object.entries(SKYLINE_REDEVELOPMENTS))if(newId===base.id&&state.urbanWorld?.buildings?.[oldId]){
+        const old=state.urbanWorld.buildings[oldId];delete state.urbanWorld.buildings[oldId];
+        state.urbanWorld.buildings[base.id]={...old,...base};
+        for(const project of state.urbanWorld.projects||[])if(project.buildingId===oldId){project.buildingId=base.id;project.targetHeight=base.h;}
+      }
+      const record=state.urbanWorld?.buildings?.[base.id];if(record)Object.assign(record,{x:base.x,z:base.z,w:base.w,d:base.d,h:base.h});
+    }
+  }
   migrateGroundHousesToSafeLots(previousMapVersion);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
@@ -2049,7 +2073,7 @@ function chooseStartupType(fly) {
       type,
       score:
         fly.traits.ambition * 0.22 +
-        enterpriseSectorDemand(type.sector,gameClock()) * 0.18 +
+        enterpriseSectorDemand(type.sector,gameClock()) * (isHospitalitySector(type.sector)?0.32:0.18) +
         fly.traits.risk * sectorRisk +
         neuralDrive(fly, "exploreDrive") * 0.18 +
         neuralDrive(fly, "approachDrive") * 0.16 +
@@ -2062,10 +2086,31 @@ function chooseStartupType(fly) {
 
 function attemptStartup(fly) {
   if (fly.businessId || fly.currentLocationId !== "bank") return;
+  const planned=fly.hospitalityProject&&state.urbanWorld?.projects?.find(p=>p.id===fly.hospitalityProject);
+  if(planned&&!['complete','cancelled'].includes(planned.stage))return;
   const readiness = startupReadiness(fly);
   if (readiness < 0.50) return;
 
   const type = chooseStartupType(fly);
+  let site=null;
+  if(isHospitalitySector(type.sector)){
+    if(hospitalityDemand(state,type.sector)<.35)return;
+    site=hospitalityPremises(state,type.sector,fly).find(p=>p.fitoutCost+200<type.baseCapital);
+    if(!site){
+      // New commercial floors need an owner-funded construction project first.
+      // The resident returns to the bank after inspection; no instant free building.
+      const pending=fly.hospitalityProject&&state.urbanWorld?.projects?.find(p=>p.id===fly.hospitalityProject);
+      if(pending&&!['complete','cancelled'].includes(pending.stage))return;
+      if(state.simulationAgeSeconds<Number(fly.nextHospitalitySiteSearchAt||0))return;
+      fly.nextHospitalitySiteSearchAt=state.simulationAgeSeconds+3600;
+      for(let i=0;i<48;i++){
+        const x=500+Math.floor(brainRand(fly)*170),z=-330+Math.floor(brainRand(fly)*620);
+        const project=urbanWorld.develop({x,z,w:12,d:14,h:type.sector==='hotel'?30:12,usage:type.sector==='hotel'?'hotel':'restaurant'},fly.id);
+        if(project){fly.hospitalityProject=project.id;brainRemember(fly,'hospitality_building_planned',{projectId:project.id,sector:type.sector});break;}
+      }
+      return;
+    }
+  }
   const ownCapital = Math.min(type.baseCapital * 0.55, fly.money + fly.savings * 0.45);
   const needed = Math.max(0, type.baseCapital - ownCapital);
   const neuralRisk = fly.traits.risk * 0.45 + neuralDrive(fly, "approachDrive") * 0.35 - neuralDrive(fly, "avoidDrive") * 0.25;
@@ -2121,7 +2166,9 @@ function attemptStartup(fly) {
     status: "operating",
     badDays: 0,
   };
+  if(site&&!openHospitalityPremises(state,state.enterprises[id],site))throw new Error('reserved hospitality premises became unavailable');
   fly.businessId = id;
+  fly.hospitalityProject=null;
   fly.jobId = null;
   fly.jobTitle = "founder / owner";
   fly.wage = 0;
@@ -2133,6 +2180,7 @@ function attemptStartup(fly) {
 }
 
 function enterpriseSectorDemand(sector, clock) {
+  if(isHospitalitySector(sector))return hospitalityDemand(state,sector);
   const living = state.flies.filter((f) => f.alive).length;
   const base = clamp(living / Math.max(40, INITIAL_POPULATION), 0.45, 1.6);
   const weather = weatherDanger();
@@ -2184,6 +2232,14 @@ function hireEnterpriseEmployee(business, owner) {
 
 function closeEnterprise(business, owner, reason) {
   business.status = "bankrupt";
+  if(business.hospitality&&business.cash>0){
+    const repayment=Math.min(business.cash,Math.max(0,Number(business.loanBalance||0)));
+    business.cash-=repayment;business.loanBalance-=repayment;state.bank.reserves+=repayment;
+    state.bank.loansOutstanding=Math.max(0,state.bank.loansOutstanding-repayment);
+    if(owner)owner.bankLoan=Math.max(0,owner.bankLoan-repayment);
+    if(owner)owner.money+=business.cash;else state.treasury.cash+=business.cash;
+    business.cash=0;
+  }
   const defaultLoss = Math.max(0, Number(business.loanBalance || 0));
   if (defaultLoss > 0) {
     state.bank.defaults += defaultLoss;
@@ -2232,6 +2288,7 @@ function simulateEnterprises(clock) {
       continue;
     }
 
+    if(business.hospitality&&!hospitalityReady(state,business))continue;
     const demand = enterpriseSectorDemand(business.sector, clock);
     const neuralManagement =
       neuralDrive(owner, "approachDrive") * 0.22 +
@@ -2271,22 +2328,32 @@ function simulateEnterprises(clock) {
       ? workingEmployees.reduce((sum,e)=>sum+e.energy/100*e.health/100*(0.72+e.intelligence*0.22),0)/workingEmployees.length
       : 0.38;
 
-    const revenue =
+    const receipts=business.hospitality?Math.max(0,Number(business.pendingSales||0)):0;
+    const revenue = business.hospitality?receipts:
       ((!owner.traveling&&owner.currentLocationId===business.locationId)||workingEmployees.length?1:0) * demand *
       (8 + workingEmployees.length * 13) *
       management *
       (0.58 + employeeProductivity * 0.62) *
       brainRange(owner, 0.76, 1.28);
 
-    const rentUtility =
+    const rentUtility = business.hospitality?Number(business.lease?.hourlyRent||3)+1:
       business.sector === "manufacturing" ? 18 :
       business.sector === "nightlife" ? 13 :
       business.sector === "logistics" ? 14 : 8;
     const interest = Math.max(0, Number(business.loanBalance || 0)) * 0.00032;
-    const nonPayrollCost = rentUtility + interest + revenue * (1 - business.margin) * 0.23;
-    const paidCost=Math.min(nonPayrollCost,Math.max(0,business.cash+revenue));
-    business.cash += revenue-paidCost;
-    state.externalTrade=state.externalTrade||{exports:0,imports:0};state.externalTrade.exports+=revenue;
+    const nonPayrollCost = rentUtility + interest + (business.hospitality?0:revenue * (1 - business.margin) * 0.23);
+    const paidCost=Math.min(nonPayrollCost,Math.max(0,business.cash+(business.hospitality?0:revenue)));
+    business.cash += (business.hospitality?0:revenue)-paidCost;
+    let stockCost=0;
+    if(business.hospitality){
+      business.pendingSales=0;
+      if(business.sector!=='hotel'&&business.stock<24&&business.cash>30){
+        const supplied=Math.min(24-business.stock,Math.floor(business.cash/2)),cost=supplied*2;
+        business.cash-=cost;state.treasury.cash+=cost;business.stock+=supplied;stockCost=cost;
+      }
+    }else{
+      state.externalTrade=state.externalTrade||{exports:0,imports:0};state.externalTrade.exports+=revenue;
+    }
     state.treasury.cash+=paidCost; // domestic rent, supplies and utilities
 
 
@@ -2298,10 +2365,10 @@ function simulateEnterprises(clock) {
       const tax=pay*0.05,net=pay-tax;business.cash-=pay;employee.money+=net;employee.salaryLifetime+=net;employee.salaryEarnedToday+=net;payrollPaid+=pay;state.treasury.cash+=tax;state.treasury.taxRevenue=Number(state.treasury.taxRevenue||0)+tax;state.totalTransactions+=1;
       if(brainRand(employee)<0.035)emit("salary",`${business.name} paid ${employee.id} ${pay.toFixed(1)} ${CURRENCY_CODE} for this hour.`,{businessId:business.id,flyId:employee.id,amount:pay});
     }
-    const operatingCost=nonPayrollCost+payrollPaid;
+    const operatingCost=(business.hospitality?paidCost+stockCost:nonPayrollCost)+payrollPaid;
     const profit=revenue-operatingCost;
 
-    business.revenueLifetime += revenue;
+    if(!business.hospitality)business.revenueLifetime += revenue;
     business.expensesLifetime += operatingCost;
     business.profitToday = Number(business.profitToday || 0) + profit;
     business.reputation = clamp(business.reputation + (profit >= 0 ? 0.003 : -0.006) + (management - 0.5) * 0.002, 0.05, 1);
@@ -2411,6 +2478,13 @@ function brainChooseAction(fly, clock) {
   }
   add("cafe", "drinking Hansdrex coffee", (100 - fly.energy) * 0.58 + fly.sleepDebt * 0.46 + fly.thirst * 0.18 + (fly.money > 5 ? 8 : -30));
   add("tea-house", "drinking tea", fly.thirst * 0.48 + fly.stress * 0.28 + fly.loneliness * 0.12);
+  const ownerBusiness=fly.businessId?state.enterprises?.[fly.businessId]:null;
+  if(ownerBusiness?.status==='operating'&&(!ownerBusiness.hospitality||hospitalityReady(state,ownerBusiness))&&personalWorkWindow(fly,null,clock.hour)){
+    add(ownerBusiness.locationId,`managing ${ownerBusiness.name}`,110+fly.traits.ambition*24-fly.stress*.2);
+  }
+  for(const venue of diningVenues(state,fly).slice(0,3)){
+    add(venue.id,venue.sector==='cafe'?'visiting a resident cafe':'eating at a resident restaurant',fly.hunger*.8+14+fly.traits.sociability*8-Math.hypot(venue.x-fly.x,venue.z-fly.z)*.045);
+  }
   add("restaurant", "eating dinner", fly.hunger * 0.66 + fly.happiness * 0.08 + (fly.money > 12 ? 8 : -28));
   add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
@@ -2776,8 +2850,8 @@ function moveFly(fly,waypointHops=0) {
       return;
     }
 
-    if(fly.targetLocationId==='rooftop'){
-      const door=entrance(SKY_LOUNGE);
+    if(fly.targetLocationId==='rooftop'||fly.relocatedDestinationId===fly.targetLocationId){
+      const door=entrance(fly.targetLocationId==='rooftop'?SKY_LOUNGE:location(fly.targetLocationId));
       if(Math.hypot(fly.x-door.x,fly.z-door.z)>1){
         // An older itinerary may finish at the former Empire site. Keep its
         // completed transit legs and walk to the new entrance before arrival.
@@ -2795,6 +2869,7 @@ function moveFly(fly,waypointHops=0) {
       }
     }
     fly.currentLocationId = fly.targetLocationId;
+    fly.relocatedDestinationId=null;
     if (fly.traveling) {
       const completedMode = fly.metroLineId ? `metro ${fly.metroLineId}` : fly.transitMode;
       fly.traveling = false;
@@ -3726,6 +3801,9 @@ function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
     fly.thirst=clamp(fly.thirst-55);fly.stress=clamp(fly.stress-2);
     if(fly.currentLocationId==="tea-house")fly.action="drinking tea and water";
   }
+  if(!fly.traveling&&fly.hunger>40&&purchaseHospitalityMeal(state,fly,fly.currentLocationId)){
+    brainRemember(fly,'resident_restaurant_meal',{locationId:fly.currentLocationId});
+  }
   const foodPlaces = ["market","grocery","bakery","restaurant","night-market","riverside-market"];
   const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
   const workplaceMeal=String(fly.action||'').startsWith('working as')&&fly.currentLocationId===workLocation&&!urbanWorld.isUnavailable(workLocation,fly)&&(fly.indoors||workLocation==='power');
@@ -3900,7 +3978,7 @@ function tickFly(fly, clock) {
     fly.jobId = null;
     fly.jobTitle = null;
     fly.wage = 0;
-  } else if (!fly.jobId && fly.ageYears <= 75 && rand() < 0.00025 * (0.4 + fly.traits.ambition)) {
+  } else if (!fly.jobId && !fly.businessId && !fly.businessEmployeeOf && fly.ageYears <= 75 && rand() < 0.00025 * (0.4 + fly.traits.ambition)) {
     const job = pick(JOBS);
     fly.jobId = job.id;
     fly.jobTitle = job.title;
@@ -4321,5 +4399,5 @@ export {
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
   urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,
-  purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
+  attemptStartup,simulateEnterprises,startupReadiness,chooseStartupType,purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

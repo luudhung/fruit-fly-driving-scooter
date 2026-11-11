@@ -12,7 +12,7 @@ test('premium residences have actual for-sale capacity and are excluded from ran
   assert.equal(block.occupants.length,0);
  }
  assert.ok(PETRONAS_TOWERS.h>=180);
- for(const x of [-102,-92]){
+ for(const x of [-154,-102,-92]){
   assert.ok(clearSegment({x,z:-55},{x,z:-34}),'street under the elevated skybridge stays open');
  }
 });

@@ -12,7 +12,42 @@ const FAR = {west:[-1120,265,-650],north:[-180,320,-1120],east:[1090,285,-690]};
 const SEPARATION = 120;
 const runway = AIRPORT.runway;
 export const VISITOR_TAXIWAY_Z = -474;
+export const MIN_VISITOR_PASSENGERS = 10;
+export const VISITOR_ARRIVAL_STAGGER = 36;
 const taxiExit = direction => runway.x + direction*128;
+
+// A short, durable pedestrian itinerary, separate from the public street graph:
+// aircraft door -> portable stairs -> apron -> terminal -> immigration -> exit.
+export function visitorArrivalPath(flight,index=0,timeScale=120) {
+ const stand=VISITOR_STANDS.find(p=>p.id===flight.standId);
+ if(!stand)return [];
+ const speed=1.8/Math.max(1,timeScale),path=[];
+ let at=Number(flight.disembarkAt??flight.parkedAt)+120+index*VISITOR_ARRIVAL_STAGGER;
+ const add=(x,y,z,phase,wait=0)=>{
+  const previous=path.at(-1);
+  if(previous)at+=Math.hypot(x-previous.x,y-previous.y,z-previous.z)/speed+wait;
+  path.push({at,x,y,z,phase});
+ };
+ add(stand.x-1.4,3.4,stand.z+4,'disembarking');
+ add(stand.x-6,1.1,stand.z+4,'disembarking');
+ add(stand.x-6,1.1,-414,'apron');
+ add(AIRPORT.terminal.x,1.1,-403,'apron');
+ add(AIRPORT.terminal.x,1.1,AIRPORT.terminal.z,'immigration');
+ add(AIRPORT.terminal.x,1.1,AIRPORT.terminal.z,'immigration',420);
+ add(AIRPORT.gate.x,1.1,AIRPORT.gate.z,'complete');
+ return path;
+}
+
+export function visitorArrivalPose(now,flight,index=0,timeScale=120) {
+ const path=visitorArrivalPath(flight,index,timeScale);
+ if(!path.length)return null;
+ if(now<path[0].at){const pose=visitorAircraftPose(now,flight);return pose?{...pose,phase:'inbound',indoors:true,onPlane:true}:null;}
+ if(now>=path.at(-1).at)return {...path.at(-1),indoors:false,onPlane:false};
+ const next=path.findIndex(point=>point.at>now),a=path[next-1],b=path[next];
+ const u=Math.min(1,Math.max(0,(now-a.at)/Math.max(1,b.at-a.at)));
+ return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u,z:a.z+(b.z-a.z)*u,
+  phase:a.phase,indoors:a.phase==='immigration',onPlane:false,next:b};
+}
 
 export function visitorRunwaySlot(earliest, duration, flights) {
  let start = earliest;

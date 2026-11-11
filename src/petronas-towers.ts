@@ -118,7 +118,7 @@ export function buildPetronasTowers(
   const group = new THREE.Group();
   const centerX = (layout.west.x + layout.east.x) / 2;
   const centerZ = (layout.west.z + layout.east.z) / 2;
-  const offset = (layout.east.x - layout.west.x) / 2;
+  const offset = Math.abs(layout.east.x - layout.west.x) / 2;
   const heightScale = layout.h / REFERENCE_HEIGHT;
   const bridgeY = layout.bridgeY / heightScale;
   group.position.set(centerX, 0, centerZ);

@@ -1,6 +1,6 @@
 import {createVehicleRouter} from './vehicle-network.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 22;
+export const MAP_VERSION = 23;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -8,7 +8,7 @@ export const SKYLINE_PLOTS = {
 };
 export const SKY_LOUNGE = {...SKYLINE_PLOTS.empire,y:99};
 export const PETRONAS_TOWERS = {
- west:{x:-118,z:-43.5}, east:{x:-71,z:-43.5}, w:11,d:12,h:190,bridgeY:71,
+ west:{x:-118,z:-43.5}, east:{x:-171,z:-43.5}, w:11,d:12,h:190,bridgeY:71,
 };
 export const LUXURY_RESIDENCES = [
  {id:'toronto',name:'Tower Residences',capacity:8,purchaseValue:650000},
@@ -17,7 +17,7 @@ export const LUXURY_RESIDENCES = [
  {id:'petronas',name:'Petronas West Residences',capacity:12,purchaseValue:600000},
  {id:'petronas-east',name:'Petronas East Residences',capacity:12,purchaseValue:300000},
 ];
-export const SKYLINE_REDEVELOPMENTS = {'APT-34':'petronas','APT-49':'burj-khalifa'};
+export const SKYLINE_REDEVELOPMENTS = {'APT-34':'petronas','APT-49':'burj-khalifa','DOWNTOWN-2-8-1-0':'petronas-east'};
 export const WORLD_HALF = 1150;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
@@ -323,6 +323,13 @@ for(const [id,plot] of Object.entries(SKYLINE_PLOTS)){
 const twinWest=BUILDINGS.find(building=>building.id==='petronas');
 Object.assign(twinWest,PETRONAS_TOWERS.west,{w:PETRONAS_TOWERS.w,d:PETRONAS_TOWERS.d,h:PETRONAS_TOWERS.h});
 BUILDINGS.push({...twinWest,...PETRONAS_TOWERS.east,id:'petronas-east'});
+// These two original vacant parcels face the central Tower, at roughly half
+// the Empire's height. Keep their existing street and alley setbacks.
+for(const [index,x,height,capacity]of [[1,15,90,24],[2,41,96,28]]){
+ const home={id:`TOWER-COURT-${index}`,name:`Tower Court ${index}`,x,z:43.5,w:11,d:12,h:height,kind:'apartment',capacity,rent:28,purchaseValue:8400};
+ if(!place(home))throw new Error(`Tower Court overlaps existing city geometry: ${home.id}`);
+ APARTMENTS.push(home);
+}
 for(const residence of LUXURY_RESIDENCES){
  const building=BUILDINGS.find(item=>item.id===residence.id);
  Object.assign(building,{capacity:residence.capacity,purchaseValue:residence.purchaseValue,luxury:true,rent:0});
@@ -339,7 +346,7 @@ for(const building of BUILDINGS){
  if(building.kind==='landmark'||building.kind==='house')continue;
  const distance=Math.min(...landmarkParcels.map(plot=>Math.hypot(building.x-plot.x,building.z-plot.z)));
  if(distance<55){
-  building.skylineHeightLimit=24+distance*.25;
+  building.skylineHeightLimit=building.id.startsWith('TOWER-COURT-')?building.h:24+distance*.25;
   building.h=Math.min(building.h,building.skylineHeightLimit);
  }
 }

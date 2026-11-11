@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,SKYLINE_PLOTS,SKY_LOUNGE,LOCATIONS,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
+import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,SKYLINE_PLOTS,SKY_LOUNGE,PETRONAS_TOWERS,LOCATIONS,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
+test('twin tower bridge crosses one local avenue and Tower Court homes stay around half the Empire height',()=>{
+ assert.deepEqual(PETRONAS_TOWERS.west,{x:-118,z:-43.5});
+ assert.ok(PETRONAS_TOWERS.east.x<PETRONAS_TOWERS.west.x);
+ const span={x:(PETRONAS_TOWERS.east.x+PETRONAS_TOWERS.west.x)/2,z:-43.5,w:Math.abs(PETRONAS_TOWERS.east.x-PETRONAS_TOWERS.west.x),d:2};
+ assert.deepEqual(ROADS.filter(road=>overlaps(span,road)).map(road=>road.x),[-154]);
+ for(const x of [-154,-102,-92])assert.ok(clearSegment({x,z:-54},{x,z:-34}));
+ const courts=APARTMENTS.filter(b=>b.id.startsWith('TOWER-COURT-'));
+ assert.equal(courts.length,2);assert.ok(courts.every(b=>b.h>=90&&b.h<=96&&b.capacity>=24));
+ assert.ok(courts.every(b=>Math.hypot(b.x-SKYLINE_PLOTS.toronto.x,b.z-SKYLINE_PLOTS.toronto.z)<55));
+});
 test('all building footprints clear roads, water, park and each other',()=>{
  for(let i=0;i<BUILDINGS.length;i++){
   const b=BUILDINGS[i];
