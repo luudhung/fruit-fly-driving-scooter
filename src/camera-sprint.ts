@@ -17,5 +17,5 @@ export class CameraSprint {
     if(!this.pressed.has('KeyW')&&!this.pressed.has('ArrowUp'))this.sprinting=false;
   }
   reset(){this.pressed.clear();this.lastForwardDown=-Infinity;this.sprinting=false;}
-  get multiplier(){return this.sprinting||this.pressed.has('ControlLeft')||this.pressed.has('ControlRight')?2:1;}
+  get multiplier(){return this.sprinting?4:this.pressed.has('ControlLeft')||this.pressed.has('ControlRight')?2:1;}
 }

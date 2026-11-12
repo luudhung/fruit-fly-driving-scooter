@@ -1,0 +1,9 @@
+export type GovernmentRect={id:string;x:number;z:number;w:number;d:number};
+export const GOVERNMENT_BUILDINGS:Array<GovernmentRect&{name:string;h:number;kind:string}>;
+export const GOVERNMENT_RESERVED:GovernmentRect[];
+export const GOVERNMENT_LOCATIONS:Array<{id:string;name:string;type:string;x:number;z:number}>;
+export const GOVERNMENT_ROADS:GovernmentRect[];
+export const MILITARY_AIRFIELD:{runway:{x:number;z:number;w:number;d:number};taxiwayZ:number;stands:Array<{id:string;x:number;z:number}>};
+export const PUBLIC_SERVICE_TARGETS:{army:number;police:number};
+export type MilitaryAircraft={id:string;standId:string;owned?:boolean;pilotId?:string|null;flight?:{id:string;pilotId:string;departure:number;arrival:number;paid:boolean}|null};
+export function militaryAircraftPose(now:number,aircraft:MilitaryAircraft):{x:number;y:number;z:number;heading:number;phase:string};

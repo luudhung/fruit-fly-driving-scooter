@@ -17,7 +17,7 @@ export function metroInterchangePaths():MetroWalkPoint[][]{
  return paths;
 }
 /** Shared batches for bridges/lift shafts, with duplicate overlapping segments removed. */
-export function buildElevatedMetroWalkways(root:THREE.Object3D,paths:readonly (readonly MetroWalkPoint[])[]){
+export function buildElevatedMetroWalkways(root:THREE.Object3D,paths:readonly (readonly MetroWalkPoint[])[],cellSize=0){
  const pieces:THREE.Matrix4[]=[],glass:THREE.Matrix4[]=[],dummy=new THREE.Object3D(),keys=new Set<string>();
  const block=(list:THREE.Matrix4[],x:number,y:number,z:number,w:number,h:number,d:number,yaw=0)=>{dummy.position.set(x,y,z);dummy.rotation.set(0,yaw,0);dummy.scale.set(w,h,d);dummy.updateMatrix();list.push(dummy.matrix.clone());};
  const key=(a:MetroWalkPoint,b:MetroWalkPoint)=>[a,b].map(p=>`${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`).sort().join('|');
@@ -37,9 +37,13 @@ export function buildElevatedMetroWalkways(root:THREE.Object3D,paths:readonly (r
  }
  const meshes:THREE.InstancedMesh[]=[];
  for(const [list,material]of [[pieces,new THREE.MeshStandardMaterial({color:0x9ba9ad,roughness:.7,metalness:.3})],[glass,new THREE.MeshStandardMaterial({color:0x83b9cd,roughness:.28,metalness:.25,transparent:true,opacity:.45,depthWrite:false})]] as const){
-  const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),material,list.length);list.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix));mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();root.add(mesh);meshes.push(mesh);
+  const cells=new Map<string,THREE.Matrix4[]>();
+  for(const matrix of list){const key=cellSize>0?Math.floor(matrix.elements[12]/cellSize)+':'+Math.floor(matrix.elements[14]/cellSize):'all';const cell=cells.get(key)||[];cell.push(matrix);cells.set(key,cell);}
+  for(const cell of cells.values()){
+   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),material,cell.length);cell.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix));mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();root.add(mesh);meshes.push(mesh);
+  }
  }
  return meshes;
 }
 /** Platforms share elevated walkways and short lifts, entirely above the carriageway. */
-export function buildMetroInterchanges(root:THREE.Object3D){return buildElevatedMetroWalkways(root,metroInterchangePaths());}
+export function buildMetroInterchanges(root:THREE.Object3D,cellSize=0){return buildElevatedMetroWalkways(root,metroInterchangePaths(),cellSize);}

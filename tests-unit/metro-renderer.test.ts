@@ -6,6 +6,22 @@ const sign=(text:string)=>{const sprite=new THREE.Sprite();sprite.userData.text=
 const write=(sprite:THREE.Sprite,text:string)=>{sprite.userData.text=text;};
 const setup=()=>new MetroRenderer(new THREE.Group(),sign,write,3);
 
+test('a view budget hides distant infrastructure and trains, then restores current physical poses when approaching',()=>{
+ const renderer=setup(),camera=new THREE.PerspectiveCamera(68,1,.1,7000);
+ camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.setView(camera);renderer.update(45);
+ assert.ok(renderer.stats.visibleChunks>0&&renderer.stats.visibleChunks<renderer.stats.totalChunks);
+ assert.ok(renderer.stats.visibleStaticInstances<renderer.stats.totalStaticInstances*.6);
+ const all=renderer.stats.totalStaticInstances;
+ camera.position.set(20000,100,20000);camera.lookAt(21000,100,21000);renderer.update(45.2);
+ assert.equal(renderer.stats.visibleChunks,0);assert.equal(renderer.stats.visibleStaticInstances,0);assert.equal(renderer.stats.visibleTrains,0);
+ camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.update(45.4);
+ assert.equal(renderer.stats.totalStaticInstances,all);assert.ok(renderer.stats.visibleChunks>0);
+ for(const train of renderer.trains.filter(t=>t.group.visible)){
+  const line=METRO_LINES[train.lineIndex],pose=trainStates(line,45.4).find(p=>p.id===train.id)!;
+  assert.ok(train.group.position.distanceTo(new THREE.Vector3(pose.x,pose.y,pose.z))<1e-8);
+ }
+});
+
 test('metro lines retain two physical trains and two separately labeled platforms per stop',()=>{
  const m=setup();assert.equal(m.trains.length,METRO_LINES.length*2);assert.equal(new Set(m.trains.map(t=>t.id)).size,METRO_LINES.length*2);
  assert.equal(m.stations.length,METRO_LINES.reduce((n,l)=>n+l.points.length*2,0));
@@ -43,8 +59,8 @@ test('ridership is counted by physical train and waiting is counted by direction
 });
 
 test('M7 rail beds align with the exact mitered station polyline in both directions',()=>{
- const line=METRO_LINES.find(l=>l.id==='M7')!,m=setup(),beam=m.infrastructure.children.find(o=>o instanceof THREE.InstancedMesh&&(o.material as THREE.MeshStandardMaterial).color.getHex()===0x6e7478) as THREE.InstancedMesh;
- const positions:THREE.Vector3[]=[];for(let i=0;i<beam.count;i++){const matrix=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),scale=new THREE.Vector3();beam.getMatrixAt(i,matrix);matrix.decompose(p,q,scale);if(Math.abs(scale.y-.24)<1e-5&&Math.abs(scale.z-3.4)<1e-5)positions.push(p);}
+ const line=METRO_LINES.find(l=>l.id==='M7')!,m=setup(),beams=m.infrastructure.children.filter(o=>o instanceof THREE.InstancedMesh&&(o.material as THREE.MeshStandardMaterial).color.getHex()===0x6e7478) as THREE.InstancedMesh[];
+ const positions:THREE.Vector3[]=[];for(const beam of beams)for(let i=0;i<beam.count;i++){const matrix=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),scale=new THREE.Vector3();beam.getMatrixAt(i,matrix);matrix.decompose(p,q,scale);if(Math.abs(scale.y-.24)<1e-5&&Math.abs(scale.z-3.4)<1e-5)positions.push(p);}
  for(const direction of [1,-1]){const points=metroTrackPoints(line,direction);for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],middle=new THREE.Vector3((a.x+b.x)/2,line.height-.48,(a.z+b.z)/2);assert.ok(positions.some(p=>p.distanceTo(middle)<1e-4),`missing exact M7 rail bed ${direction}:${i}`);}}
 });
 

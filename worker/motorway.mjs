@@ -6,11 +6,12 @@ const {west,east,north,south,width}=MOTORWAY;
 const main=(id,x,z,w,d)=>({id,x,z,w,d,motorway:true,lanes:8,median:2});
 const access=(id,x,z,w,d)=>({id,x,z,w,d,motorwayAccess:true});
 export const MOTORWAY_ACCESS_ROADS=[
- ...[-260,0,260].map(z=>access(`RING-WEST-${z}`,(west-1000)/2,z,-1000-west,12)),
- ...[-430,50].map(x=>access(`RING-NORTH-${x}`,x,(north-1060)/2,12,-1060-north)),
- access('RING-EAST-160',(860+east)/2,160,east-860,12),
+ ...[-340,-260,-180,0,180,260,340,400].map(z=>access(`RING-WEST-${z}`,(west-1000)/2,z,-1000-west,12)),
+ ...[-430,-310,-260,-80,50].map(x=>access(`RING-NORTH-${x}`,x,(north-1060)/2,12,-1060-north)),
+ ...[160,180].map(z=>access(`RING-EAST-${z}`,(860+east)/2,z,east-860,12)),
+ access('RING-EAST-INDUSTRY',(680+east)/2,-400,east-680,12),
  access('RING-SOUTH-WEST',-430,420,12,40),
- access('RING-SOUTH-CENTRAL',122,420,12,40),
+ ...[-310,-102,122,310].map(x=>access(x===122?'RING-SOUTH-CENTRAL':`RING-SOUTH-CITY-${x}`,x,420,12,40)),
  access('RING-SOUTH-EAST',500,340,12,200),
 ];
 export const MOTORWAY_ROADS=[
@@ -24,7 +25,7 @@ export const MOTORWAY_DECKS=[
  {id:'RING-NORTH-RIVER',x:430,z:north,w:160,d:width+4},
  {id:'RING-SOUTH-RIVER',x:430,z:south,w:160,d:width+4},
  {id:'RING-SOUTH-HARBOR',x:120,z:south,w:568,d:width+4},
- {id:'RING-SOUTH-CENTRAL-DECK',x:122,z:420,w:16,d:48},
+ ...[-102,122,310].map(x=>({id:x===122?'RING-SOUTH-CENTRAL-DECK':`RING-SOUTH-CITY-DECK-${x}`,x,z:420,w:16,d:48})),
 ];
 const inside=(r,p,margin=0)=>Math.abs(p.x-r.x)<=r.w/2+margin&&Math.abs(p.z-r.z)<=r.d/2+margin;
 export function motorwaySegmentAt(p,axis){

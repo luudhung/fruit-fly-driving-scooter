@@ -45,7 +45,7 @@ export function buildMotorway(root:THREE.Object3D,makeSign?:(text:string,width:n
  for(const {material,parts}of layers.values()){
   const geometry=mergeGeometries(parts);if(geometry)group.add(new THREE.Mesh(geometry,material));for(const part of parts)part.dispose();
  }
- if(makeSign)for(const [text,x,z]of [['AIRPORT GARDENS  ·  CITY RING',-430,MOTORWAY.north+18],['RIVERSIDE  ·  CITY RING',MOTORWAY.east-18,160],['WEST DISTRICT  ·  CITY RING',MOTORWAY.west+18,0],['CENTRAL CITY  ·  RING EXIT',122,MOTORWAY.south-18]] as const){
+ if(makeSign)for(const [text,x,z]of [['PHÍA BẮC  ·  VÀNH ĐAI',-430,MOTORWAY.north+18],['CHÂU ÂU  ·  VÀNH ĐAI',MOTORWAY.east-18,160],['PHÍA TÂY  ·  VÀNH ĐAI',MOTORWAY.west+18,0],['MAIN CITY  ·  LỐI RA',122,MOTORWAY.south-18]] as const){
   const sign=makeSign(text,26,1.2);sign.position.set(x,7,z);group.add(sign);
  }
  return group;

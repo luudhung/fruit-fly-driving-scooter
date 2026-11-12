@@ -1,8 +1,10 @@
+import {districtProfile} from './district-economy.mjs';
 import {createVehicleRouter} from './vehicle-network.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
+import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED} from './government-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 25;
+export const MAP_VERSION = 26;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -36,8 +38,8 @@ export const SEA={x:0,z:900,w:2300,d:860};
 export function onIsland(p,margin=0){return ((p.x-ISLAND.x)/(ISLAND.rx-margin))**2+((p.z-ISLAND.z)/(ISLAND.rz-margin))**2<1;}
 export function atSea(p){return p.z>470&&!onIsland(p);}
 export const PARK = { x:15, z:-170, w:150, d:260 };
-export const AIRPORT_GARDENS={id:'airport-gardens',name:'Airport Gardens',x:-190,z:-830,w:540,d:460};
-export const WEST_DISTRICT={id:'west-gardens',name:'Westborough',x:-715,z:0,w:570,d:680};
+export const AIRPORT_GARDENS={id:'airport-gardens',name:'Thành phố phía Bắc',x:-190,z:-830,w:540,d:460};
+export const WEST_DISTRICT={id:'west-gardens',name:'Thành phố phía Tây',x:-715,z:0,w:570,d:680};
 export const AIRPORT_PARK={id:'airport-park',x:-170,z:-830,w:150,d:195};
 export const AIRPORT_PARK_PATHS=[
  {x:-170,z:-917.5,w:130,d:3},{x:-170,z:-742.5,w:130,d:3},
@@ -67,7 +69,7 @@ export const FERRIS_WHEEL={x:18,z:-218,y:33,radius:30,seats:20,period:7200};
 export function wheelCabin(seconds,seat){const a=seconds/FERRIS_WHEEL.period*Math.PI*2+seat/FERRIS_WHEEL.seats*Math.PI*2;return {x:FERRIS_WHEEL.x+Math.cos(a)*FERRIS_WHEEL.radius,y:FERRIS_WHEEL.y+Math.sin(a)*FERRIS_WHEEL.radius,z:FERRIS_WHEEL.z};}
 export const RIVER={id:"hansdrex-river",x:430,z:0,w:96,d:WORLD_HALF*2+4};
 // Administrative footprint: 360×480 is exactly one third of the 720×720 original urban core.
-export const RIVERSIDE={id:'riverside',name:'Hansdrex Riverside',x:680,z:0,w:360,d:480};
+export const RIVERSIDE={id:'riverside',name:'Tiểu khu châu Âu',x:680,z:0,w:360,d:480};
 export const SPORTS_VENUES=[
  {id:'stadium',name:'Hansdrex Riverside Stadium',x:770,z:200,w:44,d:62},
  {id:'tennis',name:'Riverside Tennis Club',x:830,z:120,w:42,d:56},
@@ -153,11 +155,11 @@ export function isGradeSeparated(p){return UNDERPASSES.some(t=>Math.abs(p.x-t.x)
 
 
 export const LOCATIONS = [
- {id:'airport-gardens-homes',type:'home',name:'Airport Gardens Residences',x:-285,z:-830},
- {id:'airport-park',type:'social',name:'Airport Gardens Park',x:-170,z:-740},
- {id:'west-gardens-homes',type:'home',name:'Westborough Residences',x:-715,z:40},
+ {id:'airport-gardens-homes',type:'home',name:'Nhà ở thành phố phía Bắc',x:-285,z:-830},
+ {id:'airport-park',type:'social',name:'Công viên thành phố phía Bắc',x:-170,z:-740},
+ {id:'west-gardens-homes',type:'home',name:'Nhà ở thành phố phía Tây',x:-715,z:40},
  {id:'firestation',type:'fire-service',name:'Riverside Fire and Rescue',x:830,z:-200},
- {id:'riverside-homes',type:'home',name:'Riverside Residences',x:650,z:120},
+ {id:'riverside-homes',type:'home',name:'Nhà ở tiểu khu châu Âu',x:650,z:120},
  {id:'riverside-market',type:'food',name:'Riverside Market',x:590,z:40},
  {id:'riverside-cafe',type:'food',name:'Riverbank Cafe',x:590,z:-40},
  {id:'riverside-hotel',type:'service',name:'Riverside Grand Hotel',x:530,z:-40},
@@ -243,7 +245,7 @@ export const METRO_LINES = [
 
 export const BUILDINGS=[];
 function place(b) {
- if(SPORTS_VENUES.some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || [PARK,AIRPORT_PARK].some(park=>overlaps(b,park,1)) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
+ if([...SPORTS_VENUES,...GOVERNMENT_RESERVED].some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || [PARK,AIRPORT_PARK].some(park=>overlaps(b,park,1)) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
  BUILDINGS.push(b);return true;
 }
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
@@ -409,7 +411,7 @@ for(let xi=0;xi<AIRPORT_AVENUES.length-1;xi++)for(let zi=0;zi<AIRPORT_STREETS.le
   const distance=Math.hypot(Math.max(0,Math.abs(x-AIRPORT_PARK.x)-AIRPORT_PARK.w/2),Math.max(0,Math.abs(z-AIRPORT_PARK.z)-AIRPORT_PARK.d/2));
   const seed=xi*19+zi*11+col*7+row*3,height=z>-710?28+(seed%3)*6:distance<60?60+(seed%4)*6:36+(seed%5)*6;
   const id=`AIRPORT-APT-${xi}-${zi}-${col}-${row}`;
-  const b={id,name:'Airport Gardens Apartments',x,z,w:Math.min(24,slotW),d:id==='AIRPORT-APT-2-5-0-1'?14:Math.min(24,slotD),h:height,kind:'apartment',capacity:Math.max(8,Math.floor(height/3)),rent:24,purchaseValue:6200};
+  const b={id,name:'Chung cư thành phố phía Bắc',x,z,w:Math.min(24,slotW),d:id==='AIRPORT-APT-2-5-0-1'?14:Math.min(24,slotD),h:height,kind:'apartment',capacity:Math.max(8,Math.floor(height/3)),rent:24,purchaseValue:6200};
   if(place(b))APARTMENTS.push(b);
  }
 }
@@ -426,12 +428,16 @@ for(let xi=0;xi<WEST_AVENUES.length-1;xi++)for(let zi=0;zi<WEST_STREETS.length-1
   }
  }else for(let side=0;side<2;side++){
   const height=xi<2?18+((seed+side*3)%6)*6:30+((seed+side*5)%14)*6;
-  const b={id:`WEST-APT-${xi}-${zi}-${side}`,name:'Westborough Apartments',x:cx+(side?18:-18),z:cz,w:22,d:Math.min(30,z1-z0-24),h:height,kind:'apartment',capacity:10,rent:24,purchaseValue:5800};
+  const b={id:`WEST-APT-${xi}-${zi}-${side}`,name:'Chung cư thành phố phía Tây',x:cx+(side?18:-18),z:cz,w:22,d:Math.min(30,z1-z0-24),h:height,kind:'apartment',capacity:10,rent:24,purchaseValue:5800};
   if(place(b))APARTMENTS.push(b);
  }
 }
-for(const home of APARTMENTS){home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
-for(const home of HOUSE_LOTS){home.capacity=1;home.capacityUnit='households';}
+// Public premises append after procedural IDs: existing homes keep their identity.
+BUILDINGS.push(...GOVERNMENT_BUILDINGS.map(b=>({...b})));
+LOCATIONS.push(...GOVERNMENT_LOCATIONS.map(l=>({...l})));
+ROADS.push(...GOVERNMENT_ROADS.map(r=>({...r})));
+for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
+for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}
 
 export function entrance(p) {
  const b=BUILDINGS.find(b=>contains(b,p,0.2));

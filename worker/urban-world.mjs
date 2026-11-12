@@ -1,3 +1,4 @@
+import {GOVERNMENT_RESERVED} from './government-map.mjs';
 import {createFireService} from './fire-service.mjs';
 import {restoreInitialFireDamage} from './urban-restoration.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
@@ -7,7 +8,7 @@ import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,conta
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
 const live=f=>f.alive&&f.ageYears>=18&&f.ageYears<76&&f.health>35;
 const MAX_FIRES=3,MAX_PROJECTS=5,DAY=86400;
-const available=f=>live(f)&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
+const available=f=>live(f)&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance}){
@@ -217,7 +218,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   report('construction_contract',`${payerId||'City recovery fund'} commissioned ${kind} at ${buildingId}.`,{buildingId,projectId:project.id,budget:cost});return project;
  }
  function developmentContext(){
-  return {bounds:{minX:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
+  return {bounds:{minX:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES,...GOVERNMENT_RESERVED],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
  }
  function develop(lot,ownerId){
   ensure();if(recoveryPriority()||u().projects.filter(activeProject).length>=MAX_PROJECTS)return null;

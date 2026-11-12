@@ -1,4 +1,6 @@
+import {districtProfile} from './district-economy.mjs';
 import {BUILDINGS,LOCATIONS} from './city-map.mjs';
+import {COMBINED_CAP} from './population-limits.mjs';
 
 const sectors=new Set(['hotel','food','cafe']);
 const alive=f=>f?.alive&&!f.departed;
@@ -51,7 +53,7 @@ export function hospitalityDemand(state,sector){
   const capacity=hotels.reduce((n,h)=>n+Number(h.capacity||0),0);
   const occupied=hotels.reduce((n,h)=>n+Object.keys(h.rooms||{}).length,0);
   const pending=operating.filter(b=>b.sector==='hotel'&&!hotels.some(h=>h.enterpriseId===b.id)).reduce((n,b)=>n+Number(b.guestCapacity||0),0);
-  const visitorLimit=Math.max(0,Math.min(Number(state.cityVisitors?.capacity||40),640-state.flies.filter(alive).length));
+  const visitorLimit=Math.max(0,Math.min(Number(state.cityVisitors?.capacity||40),COMBINED_CAP-state.flies.filter(alive).length));
   if(capacity+pending>=Math.max(10,Math.ceil(visitorLimit*1.25)))return .15;
   const pressure=Number(state.cityVisitors?.airportTraffic?.unmetGuests||0);
   return clamp((occupied+pressure+10)/Math.max(10,capacity+pending)*1.5,.1,2.2);
@@ -97,9 +99,11 @@ export function recordHospitalitySale(state,locationId,amount){
  return true;
 }
 
+function mealQuote(state,b){return Math.round(Number(b.mealPrice||9)*districtProfile(LOCATIONS.find(l=>l.id===b.locationId)||{}).food*clamp(Number(state.centralBank?.priceLevel||1),.6,8)*100)/100;}
+
 export function diningVenues(state,actor){
  return hospitalityBusinesses(state).filter(b=>['food','cafe'].includes(b.sector)&&hospitalityReady(state,b)&&Number(b.stock||0)>0)
-  .map(b=>{const l=LOCATIONS.find(l=>l.id===b.locationId);return {id:b.locationId,enterpriseId:b.id,name:b.name,x:l.x,z:l.z,price:b.mealPrice,sector:b.sector};})
+  .map(b=>{const l=LOCATIONS.find(l=>l.id===b.locationId);return {id:b.locationId,enterpriseId:b.id,name:b.name,x:l.x,z:l.z,price:mealQuote(state,b),sector:b.sector};})
   .sort((a,b)=>Math.hypot(a.x-actor.x,a.z-actor.z)-Math.hypot(b.x-actor.x,b.z-actor.z));
 }
 
@@ -108,7 +112,7 @@ export function purchaseHospitalityMeal(state,actor,venueId){
  const b=hospitalityAccount(state,venueId);if(!b||!hospitalityReady(state,b)||actor.traveling||actor.currentLocationId!==venueId||now(state)-Number(actor.lastHospitalityMealAt??-3600)<1800||!(b.stock>0))return false;
  const staff=new Set([b.ownerId,...(b.employees||[])]);
  if(!state.flies.some(f=>alive(f)&&staff.has(f.id)&&!f.traveling&&!f.sleeping&&f.currentLocationId===venueId))return false;
- const price=Number(b.mealPrice||9)*clamp(Number(state.centralBank?.priceLevel||1),.6,8),cash=Math.max(0,Number(actor.money||0)),savings=Math.max(0,Number(actor.savings||0));
+ const price=mealQuote(state,b),cash=Math.max(0,Number(actor.money||0)),savings=Math.max(0,Number(actor.savings||0));
  if(cash+savings<price)return false;
  const paidCash=Math.min(cash,price);actor.money=cash-paidCash;actor.savings=savings-(price-paidCash);b.cash+=price;b.stock--;
  actor.hunger=Math.max(0,Number(actor.hunger||0)-55);actor.thirst=Math.max(0,Number(actor.thirst||0)-25);actor.happiness=Math.min(100,Number(actor.happiness||0)+4);

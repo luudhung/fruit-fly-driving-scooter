@@ -1,17 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {freshState,restoreState,getState,getNeuralAgents,getNeuralStatus,cityVisitors,tick,tickFly,gameClock,liquidMoneySupply,needsAndActivities} from '../worker/civilization-engine.mjs';
 
 test('visitor brains join neural scheduling and selection without changing the resident census across restore',()=>{
  const s=freshState(),residentBrains=s.flies.map(f=>f.brain.id),before=liquidMoneySupply();
  const v=cityVisitors.spawnVisitor({budget:1000});assert.ok(v);const brainId=v.brain.id;
- assert.equal(s.flies.length,600);assert.equal(getNeuralAgents().length,601);assert.equal(getNeuralStatus().visitorBrains,1);
- assert.equal(new Set(getNeuralAgents().map(a=>a.brain_id)).size,601);
+ assert.equal(s.flies.length,RESIDENT_TARGET);assert.equal(getNeuralAgents().length,RESIDENT_TARGET+1);assert.equal(getNeuralStatus().visitorBrains,1);
+ assert.equal(new Set(getNeuralAgents().map(a=>a.brain_id)).size,RESIDENT_TARGET+1);
  assert.ok(Math.abs(liquidMoneySupply()-before-1000)<1e-6);
  let snapshot=getState({observer:true,selectedId:v.id});assert.equal(snapshot.selectedFly.id,v.id);assert.equal(snapshot.cityVisitors.visitors[0].brainId,brainId);
  const restored=restoreState(JSON.parse(JSON.stringify(s)));
  assert.deepEqual(restored.flies.map(f=>f.brain.id),residentBrains);assert.equal(restored.cityVisitors.visitors[0].brain.id,brainId);
- assert.equal(getNeuralAgents().length,601);assert.equal(getState().population,600);
+ assert.equal(getNeuralAgents().length,RESIDENT_TARGET+1);assert.equal(getState().population,RESIDENT_TARGET);
 });
 
 test('a resident taking disaster shelter still ages and reaches natural mortality',()=>{

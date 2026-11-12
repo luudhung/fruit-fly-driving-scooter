@@ -1,8 +1,9 @@
 import {DurableObject} from 'cloudflare:workers';
 import {parsePackedGraph,createNeuralState,runNeuralBatch,neuralSnapshotBytes} from './engine.mjs';
+import {COMBINED_CAP} from '../../../worker/population-limits.mjs';
 
 const SOURCE_SHA='1891bf482f299e6acb9032c748c884688750e5bf231d4f2dbc4224996005b92d';
-const CACHE_CHUNK=1024*1024,SHARDS=16,MAX_AGENTS=640;
+const CACHE_CHUNK=1024*1024,SHARDS=16,MAX_AGENTS=COMBINED_CAP;
 // Read-only graph cache only. No request/response/pending I/O is shared across objects.
 let immutableGraph=null;
 const bytes=v=>v instanceof Uint8Array?v:new Uint8Array(v);

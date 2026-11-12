@@ -11,6 +11,8 @@ import {MetroRenderer} from './metro-renderer.ts';
 import {NewYorkArchitecture} from './new-york-architecture.ts';
 import {buildAirportGardens} from './airport-gardens.ts';
 import {buildMotorway} from './motorway.ts';
+import {GovernmentDistrictRenderer} from './government-district.ts';
+import type {PublicServicesSnapshot} from '../worker/public-services.mjs';
 import {buildKhalifa,updateKhalifaLighting} from './khalifa.ts';
 import {buildContactShadows} from './city-contact-shadows.ts';
 import {CityWater} from './city-water.ts';
@@ -39,6 +41,7 @@ import {HARBOR_CAUSEWAYS} from "../worker/city-map.mjs";
 import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
+import {SceneViewBudget,selectViewBudget} from './view-budget.ts';
 import {buildMansion} from "./mansion-renderer.ts";
 import {PlayerCar,PlayerCarVisual,PLAYER_CAR_WORLD} from "./player-car.ts";
 import {PlayerController,PLAYER_EYE,setPlayerHelipads} from "./player-controller.ts";
@@ -191,8 +194,9 @@ type WeatherState = {
 };
 
 type CivilizationSnapshot = {
+  publicServices?:PublicServicesSnapshot;
   housing?:{capacityUnit?:'households';apartmentBlocks:Array<{id:string;capacity:number;occupants:number;occupiedHouseholds?:number;residentCount?:number;overCapacityHouseholds?:number}>;groundHouses?:Array<{id:string;capacity:number;occupiedHouseholds:number;residentCount:number}>};
-  districts?:{riverside:{residents:number;settlersAdded:number}};
+  districts?:{riverside:{residents:number;settlersAdded:number};airport?:{residents:number;settlersAdded:number};west?:{residents:number;settlersAdded:number}};
   civicConflict?:CivicSnapshot;
   urbanWorld?:UrbanWorldSnapshot;
   sportsLuxury?:SportsLuxurySnapshot;
@@ -694,6 +698,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
+  governmentVisuals.sync(s.publicServices);
   if(s.sportsLuxury){
     const roofs = new Map(BUILDINGS.map(building => [building.id, building]));
     const pads = s.sportsLuxury.pads.filter(pad => {
@@ -880,7 +885,7 @@ document.getElementById('resident-photo-album')?.addEventListener('click',closeS
 
 function updateSocietyBoard(s:CivilizationSnapshot){
  const urban=document.getElementById("urban-activity"),visitors=document.getElementById("visitor-activity"),sports=document.getElementById("sports-activity");
- const district=document.getElementById("riverside-residents");if(district&&s.districts)district.textContent=`Riverside: ${s.districts.riverside.residents} cư dân có nhà · ${s.districts.riverside.settlersAdded} cư dân mới`;
+ const district=document.getElementById("riverside-residents");if(district&&s.districts)district.textContent=`Tiểu khu châu Âu: ${s.districts.riverside.residents} dân · Phía Bắc: ${s.districts.airport?.residents||0} dân · Phía Tây: ${s.districts.west?.residents||0} dân`;
  if(urban)urban.textContent=s.urbanWorld?`🔥 ${s.urbanWorld.fires.length} đám cháy · ${s.urbanWorld.projects.length} công trình · ${s.urbanWorld.completedProjects||0} hoàn thành · ${s.urbanWorld.floods.length} vùng ngập`:"Đang kết nối cứu hỏa & xây dựng…";
  if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length} khách · ${s.cityVisitors.totalDepartures} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
  const civic=document.getElementById("civic-activity");if(civic)civic.textContent=s.civicConflict?`Xã hội: ${s.civicConflict.active.length} cuộc tập hợp · ${s.civicConflict.peacefulResolutions} hòa giải · niềm tin ${s.civicConflict.confidence}%`:"";
@@ -1153,13 +1158,14 @@ function addBuilding(
 // Building topology is authoritative city data and MUST NOT change with graphics quality.
 const renderableCityBuildings=BUILDINGS.filter(b=>b.kind==="block"||b.kind==="apartment");
 const batchableFacades:THREE.Group[]=[];
-for(const b of renderableCityBuildings){const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment",batchWindows:true});if(paris)cityRoot.add(g);else batchableFacades.push(g);urbanVisuals.registerBuilding(b.id,g);}
+for(const b of renderableCityBuildings){const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>40,residential:b.kind==="apartment",batchWindows:true});g.userData.buildingId=b.id;if(paris)cityRoot.add(g);else batchableFacades.push(g);urbanVisuals.registerBuilding(b.id,g);}
 // The detached houses are part of the physical map, including vacant lots.
 for (const house of BUILDINGS.filter(building => building.kind === 'house')) {
   const roofHeight = 2.2;
   const group = addBuilding(house.x, house.z, house.w - 1, house.d - 1, house.h - roofHeight,
     Math.abs(house.x + house.z), {residential: true, batchWindows: true, pitchedRoof: roofHeight});
   batchableFacades.push(group);
+  group.userData.buildingId=house.id;
   urbanVisuals.registerBuilding(house.id, group);
 }
 const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,192,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
@@ -1219,6 +1225,8 @@ for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
   const glass=new THREE.Mesh(new THREE.BoxGeometry(b.w*.72,2,.12),new THREE.MeshStandardMaterial({color:0x5c94a3,metalness:.3,roughness:.2}));glass.position.set(0,1.6,b.d/2+.1);g.add(glass);
  }
 }
+const governmentVisuals=new GovernmentDistrictRenderer(cityRoot,makeCanvasSprite);
+for(const [id,group] of governmentVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const fireStation=buildFireStation(cityRoot,makeCanvasSprite);urbanVisuals.registerBuilding('firestation',fireStation);
 // Sky Lounge uses the same local coordinates on the Empire after relocation.
 const skyDeck=new THREE.Mesh(new THREE.BoxGeometry(10,.4,10),landmarkMetal);
@@ -1281,7 +1289,9 @@ renderer.domElement.dataset.streetLights='0';
 renderer.domElement.dataset.realStreetLights='0';
 renderer.domElement.dataset.roadLighting='material';
 
-cityRoot.traverse(obj=>{obj.updateMatrix();obj.matrixAutoUpdate=false;});
+// Identity scene transform stays fixed; only moving branches update world matrices.
+scene.updateMatrix();scene.matrixAutoUpdate=false;
+cityRoot.traverse(obj=>{obj.updateMatrix();obj.matrixAutoUpdate=Boolean(obj.userData.dynamicCity);});
 for(const train of metroTrains) train.group.matrixAutoUpdate=true;
 // These parts move every frame and must not inherit the static-city matrix freeze.
 wheelRotor.matrixAutoUpdate=true;
@@ -1371,7 +1381,9 @@ function flyStatusEmoji(fly: FlyState) {
   return "";
 }
 
-const MAX_RENDERED_FLIES = 640;
+const MAX_RENDERED_FLIES = 180;
+const residentView=new SceneViewBudget({enterDistance:360,leaveDistance:410,frustumMargin:18,retainedMargin:35});
+let nextResidentViewAt=0;
 const flyVisuals = new Map<string, FlyVisual>();
 const residentBodies=new InstancedResidents(scene,640);
 const flyPickables=residentBodies.pickables;
@@ -1408,14 +1420,21 @@ function createFlyVisual(id: string): FlyVisual {
 
 function syncFlyMeshes(flies: FlyState[]) {
   const active = new Set<string>();
-  let rendered = 0;
-  for (const fly of flies) {
+  residentView.setCamera(camera);
+  const retained=new Set(flyVisuals.keys());
+  const visible=selectViewBudget(flies,residentView,fly=>{
+    if(!fly.alive||fly.onPlane||fly.heliPassenger||fly.onPrivateHelicopter||fly.onFireEngine||fly.onAmbulance||fly.taxiPassenger||fly.onTrain||fly.indoors||fly.traveling&&fly.transitMode==='car')return null;
+    return flyVisuals.get(fly.id)?.current||fly;
+  },fly=>fly.id,retained,MAX_RENDERED_FLIES);
+  let newVisuals=0;
+  for (const fly of visible) {
     if (!fly.alive) continue;
-    if (rendered >= MAX_RENDERED_FLIES && fly.id !== selectedFlyId) continue;
-    rendered += 1;
+
     active.add(fly.id);
     let visual = flyVisuals.get(fly.id);
     if (!visual) {
+      if(newVisuals>=10)continue;
+      newVisuals++;
       visual = createFlyVisual(fly.id);
       visual.current.set(fly.x, fly.y, fly.z);
       visual.group.position.copy(visual.current);
@@ -1452,7 +1471,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     if (!active.has(id)) {
       scene.remove(visual.group);
 
-      visual.status.material.map?.dispose();visual.status.material.dispose();
+      visual.status.material.map?.dispose();visual.status.material.dispose();visual.halo.geometry.dispose();(visual.halo.material as THREE.Material).dispose();
       flyVisuals.delete(id);
     }
   }
@@ -1480,7 +1499,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   sun.position.copy(sunDirection(t)).multiplyScalar(400);
   sunFill.color.copy(palette.fill);sunFill.intensity=(.12+daylight*.34)*(1-cloud*.35);
   moon.intensity=.16+night*.65*(1-cloud*.28);
-  updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night,performance.now()/1000);updateBridgeLighting(night);updateRoadLighting(night);
+  updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
   for(const material of windowMaterials)material.color.setScalar(.72+night*.28);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
@@ -1669,11 +1688,12 @@ function updateFreeCamera(dt: number) {
     cameraYaw+=playerCar.heading-heading;playerCarVisual.sync(playerCar);
     const seat=playerCar.driverPosition();freePosition.set(seat.x,seat.y,seat.z);
   } else if (followSelected && selectedFlyId) {
-    const visual = flyVisuals.get(selectedFlyId);
-    if (visual) {
-      const desired = visual.current.clone().add(new THREE.Vector3(-7, 4.8, 8));
+    const visual = flyVisuals.get(selectedFlyId),actor=latestFlyStates.get(selectedFlyId);
+    const position=visual?.current||(actor?new THREE.Vector3(actor.x,actor.y,actor.z):null);
+    if (position) {
+      const desired = position.clone().add(new THREE.Vector3(-7, 4.8, 8));
       freePosition.lerp(desired, Math.min(1, dt * 3.2));
-      const toward = visual.current.clone().sub(freePosition).normalize();
+      const toward = position.clone().sub(freePosition).normalize();
       cameraYaw = Math.atan2(toward.x, toward.z);
       cameraPitch = Math.asin(THREE.MathUtils.clamp(toward.y, -1, 1));
     }
@@ -1684,7 +1704,7 @@ function updateFreeCamera(dt: number) {
     if(pressed.has("KeyD")||pressed.has("ArrowRight"))strafe++;
     if(pressed.has("KeyA")||pressed.has("ArrowLeft"))strafe--;
     const descending=pressed.has("KeyQ")||pressed.has("ShiftLeft")||pressed.has("ShiftRight");
-    const sprint=pressed.has("ControlLeft")||pressed.has("ControlRight")?2:cameraSprint.multiplier;
+    const sprint=cameraSprint.multiplier;
     player.update(dt,{forward,strafe,yaw:cameraYaw,sprint,ascend:pressed.has("Space")||pressed.has("KeyE"),descend:descending});
     freePosition.set(player.x,player.y,player.z);
   }
@@ -1713,6 +1733,7 @@ function animate(now = performance.now()) {
   const gameNow=presentationClock.read(now);
   const signalSeconds=gameNow/Math.max(1,snapshot?.timeScale||120);
   if(Math.floor(signalSeconds)!==lastSignalSecond){lastSignalSecond=Math.floor(signalSeconds);updateTrafficSignals(signalSeconds);}
+  if(now>=nextResidentViewAt){nextResidentViewAt=now+180;syncFlyMeshes([...latestFlyStates.values()]);}
   residentBodies.begin();
   for (const [id,visual] of flyVisuals) {
     if(visual.hasMotion){visual.motion.advance(dt,gameNow,snapshot?.timeScale||120);visual.target.set(visual.motion.x,visual.motion.y,visual.motion.z);visual.route=[];}
@@ -1726,9 +1747,11 @@ function animate(now = performance.now()) {
   }
 
   residentBodies.finish();
+  personalCars.setView(camera);metroVisuals.setView(camera);
   personalCars.update(dt,gameNow,Math.max(1,snapshot?.timeScale||120));
   urbanVisuals.update(dt,gameNow);
   sportsVisuals.update(dt,gameNow);
+  governmentVisuals.update(gameNow);
   visitorVisuals.update(dt,gameNow);
   visitorAircraft.update(gameNow);
   civicVisuals.update();
@@ -1783,6 +1806,8 @@ function animate(now = performance.now()) {
   }
 
   updateFreeCamera(dt);
+  cityFacadeBatches.setView(camera);newYorkVisuals.setView(camera);
+  sportsVisuals.setView(camera,id=>cityFacadeBatches.isBuildingVisible(id));
   citySky.update(renderedHour(visualHour),camera.position,activeWeather.cloudCover||0,Math.floor(gameNow/86400));
   cityWater.update(now/1000,visualPalette.daylight,activeWeather.cloudCover||0,visualPalette.zenith,visualPalette.horizon,sunDirection(renderedHour(visualHour)),visualPalette.sunColor);
   renderTimings.begin(now);
@@ -1796,6 +1821,10 @@ function animate(now = performance.now()) {
     const output=document.getElementById('viewer-performance');if(output)output.textContent=info;
     renderer.domElement.dataset.fps=stats.fps.toFixed(1);renderer.domElement.dataset.frameP95=stats.p95FrameMs.toFixed(1);
     renderer.domElement.dataset.drawCalls=String(renderer.info.render.calls);
+    renderer.domElement.dataset.residentVisuals=String(flyVisuals.size);
+    renderer.domElement.dataset.carVisuals=String(personalCars.stats.cached);
+    renderer.domElement.dataset.activeFacadeInstances=String(cityFacadeBatches.viewStats.activeInstances);
+    renderer.domElement.dataset.metroVisibleInstances=String(metroVisuals.stats.visibleStaticInstances);
     renderer.domElement.dataset.frameCpuMs=cpuMs.toFixed(2);renderer.domElement.dataset.frameGpuMs=gpuMs===null?'unavailable':gpuMs.toFixed(2);renderer.domElement.dataset.triangles=String(renderer.info.render.triangles);
   }
 }

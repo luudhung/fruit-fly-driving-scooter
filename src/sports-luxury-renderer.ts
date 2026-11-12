@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {SceneViewBudget} from './view-budget.ts';
 import {BUILDINGS} from '../worker/city-map.mjs';
 import {privateHelicopterPose,type SportsLuxurySnapshot,type LuxuryHelicopter,type LuxuryPad} from '../worker/sports-luxury.mjs';
 
@@ -25,6 +26,13 @@ export class SportsLuxuryRenderer{
  private padSignature='';
  private padLabels:THREE.Sprite[]=[];
  private elapsed=0;
+ private view=new SceneViewBudget({enterDistance:1400,leaveDistance:1530,frustumMargin:16,retainedMargin:28});
+ private viewReady=false;private viewKey='';private buildingVisible:(id:string)=>boolean=()=>true;
+ setView(camera:THREE.Camera,buildingVisible:(id:string)=>boolean=()=>true){
+  this.view.setCamera(camera);this.viewReady=true;this.buildingVisible=buildingVisible;
+  const key=(this.data?.pads||[]).filter(p=>this.view.visible(p,false,12)&&(!p.rooftop||buildingVisible(p.locationId))).map(p=>p.id).join('|');
+  if(key!==this.viewKey){this.viewKey=key;this.padSignature='';if(this.data)this.sync(this.data);}
+ }
  constructor(scene:THREE.Object3D,private makeSign?:(text:string,fontSize?:number,scale?:number)=>THREE.Sprite){
   scene.add(this.root);
   const paint=new THREE.MeshStandardMaterial({color:0xc5cbd0,metalness:.45,roughness:.35}),glass=new THREE.MeshStandardMaterial({color:0x83afba,metalness:.25,roughness:.3}),dark=new THREE.MeshStandardMaterial({color:0x242b31,metalness:.3,roughness:.55});
@@ -51,7 +59,9 @@ export class SportsLuxuryRenderer{
   let pi=0,mi=0,li=0;
   for(const pad of (data.pads||[]).slice(0,48)){
    const radius=pad.radius??6,size=radius/6;
-   this.pads.set(pad.id,pad);this.place(this.padDecks,pi,pad.x,pad.y-.15,pad.z,0,[radius,.3,radius]);
+   this.pads.set(pad.id,pad);
+   if(this.viewReady&&(!this.view.visible(pad,false,12)||pad.rooftop&&!this.buildingVisible(pad.locationId)))continue;
+   this.place(this.padDecks,pi,pad.x,pad.y-.15,pad.z,0,[radius,.3,radius]);
    this.dummy.position.set(pad.x,pad.y+.02,pad.z);this.dummy.rotation.set(-Math.PI/2,0,0);this.dummy.scale.set(size,size,1);this.dummy.updateMatrix();this.padRings.setMatrixAt(pi++,this.dummy.matrix);
    for(const side of [-1,1])this.place(this.padMarks,mi++,pad.x+side*1.8*size,pad.y+.10,pad.z,0,[.65*size,.08,6.6*size]);
    this.place(this.padMarks,mi++,pad.x,pad.y+.10,pad.z,0,[4.2*size,.08,.65*size]);
@@ -78,6 +88,7 @@ export class SportsLuxuryRenderer{
    if(flight&&gameNow>=flight.arrival&&flight.to.rooftop&&!this.pads.has(flight.to.id))continue;
    const flying=Boolean(flight&&gameNow>=flight.departure&&gameNow<flight.arrival);
    const pose=flight&&gameNow>=flight.departure?privateHelicopterPose(gameNow,flight):{x:(pad||flight!.from).x,y:(pad||flight!.from).y+1.8,z:(pad||flight!.from).z,heading:Math.PI/2};
+   if(this.viewReady&&!this.view.visible(pose,false,8))continue;
    const {x,y,z}=pose,yaw=pose.heading,sin=Math.sin(yaw),cos=Math.cos(yaw);
    const color=new THREE.Color().setHSL((i*.61803398875)%1,.28,.45);this.body.setColorAt(i,color);this.fin.setColorAt(i,color);
    this.place(this.body,i,x,y,z,yaw,[1.25,.85,1.8]);

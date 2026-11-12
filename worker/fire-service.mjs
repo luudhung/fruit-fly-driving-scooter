@@ -3,7 +3,7 @@ import {createVehicleIndex} from './traffic.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
 export const EMERGENCY_RULES={engines:3,ambulances:2,firefighters:9,paramedics:6,speed:22,crewPerEngine:3,crewPerAmbulance:2};
 const DAY=86400,dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),loc=id=>LOCATIONS.find(l=>l.id===id);
-const essential=new Set(['doctor','school','police','power','power-evening','power-night','grid-dispatch','hospital-central','hospital-east']);
+const essential=new Set(['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','hospital-central','hospital-east']);
 const cap=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number(n)||0));
 const busy=f=>f.fireEngineDuty||f.ambulanceDuty||f.urbanTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested;
 /** Bounded public fleets. The server persists routes/tasks; the browser alone animates vehicles/lights. */

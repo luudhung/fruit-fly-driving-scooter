@@ -1,7 +1,7 @@
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute} from './city-map.mjs';
 const DAY=86400,MAX_ACTIVE=2,MAX_MEMBERS=12,MAX_HISTORY=20;
 const cap=(v,a=0,b=100)=>Math.max(a,Math.min(b,Number(v)||0));
-const ESSENTIAL=new Set(['firefighter','paramedic','doctor','school','police','power','power-evening','power-night','grid-dispatch']);
+const ESSENTIAL=new Set(['firefighter','paramedic','doctor','school','police','military','power','power-evening','power-night','grid-dispatch']);
 const actions={member:'joining a civic assembly',mediator:'mediating a civic assembly',police:'responding to civic unrest'};
 export const CIVIC_RULES={maxActive:MAX_ACTIVE,maxParticipants:MAX_MEMBERS,equipmentPrice:45,charges:4};
 /** Fictional civic unrest: durable decisions and outcomes, no server-side particle simulation. */

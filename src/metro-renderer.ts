@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {METRO_LINES,metroStationGeometry,metroTrackPoints,trainStates,ROADS,BUILDINGS,WATER,PARK,contains,type MetroLine} from '../worker/city-map.mjs';
 import {batchStaticBoxes} from './static-box-batches.ts';
 import {buildElevatedMetroWalkways,buildMetroInterchanges} from './metro-interchanges.ts';
+import {SceneViewBudget} from './view-budget.ts';
 type Point={x:number;y:number;z:number};
 type Actor={alive:boolean;onTrain?:boolean;metroLineId?:string;metroTrainId?:string;metroTrainDirection?:number;transitStage?:string|null;x:number;z:number};
 type Sign=(text:string,fontSize?:number,scale?:number)=>THREE.Sprite;
@@ -11,6 +12,7 @@ const colors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae,0xd7835e,0x6
 export function metroDirectionLabel(line:MetroLine,direction:number){return `${line.id} ${direction>=0?'→ BẾN CUỐI':'← BẾN ĐẦU'}`;}
 /** Two physical trains and two parallel services per line; infrastructure stays batched. */
 export class MetroRenderer{
+ readonly stats={visibleTrains:0,visibleChunks:0,visibleSigns:0,totalChunks:0,totalStaticInstances:0,visibleStaticInstances:0};
  readonly trains:Train[]=[];
  readonly stations:Station[]=[];
  readonly infrastructure=new THREE.Group();
@@ -25,6 +27,12 @@ export class MetroRenderer{
  private readonly edgeMaterials=colors.map(color=>new THREE.MeshBasicMaterial({color,toneMapped:false}));
  private readonly stripeMaterials=colors.map(color=>new THREE.MeshBasicMaterial({color}));
  private readonly counts=new Map<string,number>();
+ private readonly chunks:THREE.InstancedMesh[]=[];
+ private readonly signs:THREE.Sprite[]=[];
+ private readonly view=new SceneViewBudget({enterDistance:700,leaveDistance:780,frustumMargin:25,retainedMargin:40});
+ private camera:THREE.Camera|null=null;
+ private viewAt=-Infinity;
+ private readonly trainById=new Map<string,Train>();
  private readonly writeSign:(sprite:THREE.Sprite,text:string)=>void;
  constructor(root:THREE.Group,makeSign:Sign,writeSign:(sprite:THREE.Sprite,text:string)=>void,detail=2){
   this.writeSign=writeSign;this.infrastructure.name='Twin-track metro infrastructure';root.add(this.infrastructure);
@@ -47,14 +55,16 @@ export class MetroRenderer{
     }
     const interchangeLines=METRO_LINES.filter(other=>other.id!==line.id&&other.points.some(([x,z])=>x===line.points[index][0]&&z===line.points[index][1])).map(other=>other.id);
     const geo=geos[0],sign=makeSign(`${line.id} ↑ ${interchangeLines.length?`↔ ${interchangeLines.join('/')}`:'METRO'} · → / ←`,17,.9);
-    sign.position.set(geo.access.x,3.1,geo.access.z);root.add(sign);
+    sign.position.set(geo.access.x,3.1,geo.access.z);root.add(sign);this.signs.push(sign);
    }
    for(const slot of ['A','B'])this.addTrain(root,lineIndex,`${line.id}-${slot}`,makeSign,detail);
   }
-  batchStaticBoxes(this.infrastructure);
-  buildElevatedMetroWalkways(root,crossovers);
-  buildMetroInterchanges(root);
+  this.chunks.push(...batchStaticBoxes(this.infrastructure,160));
+  this.chunks.push(...buildElevatedMetroWalkways(root,crossovers,160));
+  this.chunks.push(...buildMetroInterchanges(root,160));
+  this.stats.totalChunks=this.chunks.length;this.stats.totalStaticInstances=this.chunks.reduce((n,m)=>n+m.count,0);
  }
+ setView(camera:THREE.Camera){this.camera=camera;}
  private box(w:number,h:number,d:number,x:number,y:number,z:number,material:THREE.Material,yaw=0,target=this.infrastructure){
   const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);mesh.rotation.y=yaw;target.add(mesh);return mesh;
  }
@@ -84,7 +94,7 @@ export class MetroRenderer{
    }
   }
   const title=metroDirectionLabel(line,direction),label=makeSign(`${title} · 0 CHỜ`,16,1.15);
-  label.position.set(geo.platform.x,geo.platform.y+3.45,geo.platform.z);root.add(label);
+  label.position.set(geo.platform.x,geo.platform.y+3.45,geo.platform.z);root.add(label);this.signs.push(label);
   this.stations.push({lineId:line.id,index,direction,x:geo.platform.x,z:geo.platform.z,label,title});
  }
  private addRailSegment(a:Point,b:Point){
@@ -113,23 +123,37 @@ export class MetroRenderer{
   }
   batchStaticBoxes(group);
   const label=makeSign(`${METRO_LINES[lineIndex].id} · ${id.endsWith('A')?'A':'B'}`,18,1.15);label.position.y=4;group.add(label);root.add(group);
-  this.trains.push({group,lineIndex,id,direction:0,label});
+  const train={group,lineIndex,id,direction:0,label};this.trains.push(train);this.trainById.set(id,train);
  }
  syncOccupancy(actors:readonly Actor[]){
-  this.counts.clear();for(const actor of actors)if(actor.alive&&actor.onTrain&&actor.metroTrainId)this.counts.set(actor.metroTrainId,(this.counts.get(actor.metroTrainId)||0)+1);
+  this.counts.clear();const waitingByService=new Map<string,Actor[]>();
+  for(const actor of actors){
+   if(!actor.alive)continue;
+   if(actor.onTrain&&actor.metroTrainId)this.counts.set(actor.metroTrainId,(this.counts.get(actor.metroTrainId)||0)+1);
+   else if(actor.transitStage==='platform-wait'&&actor.metroLineId){const key=actor.metroLineId+':'+actor.metroTrainDirection,list=waitingByService.get(key)||[];list.push(actor);waitingByService.set(key,list);}
+  }
   for(const station of this.stations){
-   const waiting=actors.filter(a=>a.alive&&!a.onTrain&&a.metroLineId===station.lineId&&a.metroTrainDirection===station.direction&&a.transitStage==='platform-wait'&&Math.hypot(a.x-station.x,a.z-station.z)<9).length;
+   let waiting=0;for(const actor of waitingByService.get(station.lineId+':'+station.direction)||[])if(Math.hypot(actor.x-station.x,actor.z-station.z)<9)waiting++;
    this.writeSign(station.label,`${station.title} · ${waiting} CHỜ`);
   }
   for(const train of this.trains)this.trainLabel(train);
  }
  private trainLabel(train:Train){this.writeSign(train.label,`${metroDirectionLabel(METRO_LINES[train.lineIndex],train.direction||1)} · ${this.counts.get(train.id)||0} KHÁCH`);}
  update(seconds:number){
+  if(this.camera&&(seconds-this.viewAt>=.15||seconds<this.viewAt)){
+   this.view.setCamera(this.camera);this.viewAt=seconds;let visible=0,signs=0,instances=0;
+   for(const chunk of this.chunks){const sphere=chunk.boundingSphere!;chunk.visible=this.view.visible(sphere.center,chunk.visible,sphere.radius);if(chunk.visible){visible++;instances+=chunk.count;}}
+   for(const sign of this.signs){sign.visible=this.view.visible(sign.position,sign.visible,5);if(sign.visible)signs++;}
+   this.stats.visibleChunks=visible;this.stats.visibleSigns=signs;this.stats.visibleStaticInstances=instances;
+  }
+  let visibleTrains=0;
   for(const [lineIndex,line]of METRO_LINES.entries())for(const pose of trainStates(line,seconds)){
-   const train=this.trains.find(t=>t.lineIndex===lineIndex&&t.id===pose.id);if(!train)continue;
-   train.group.visible=pose.active;train.group.position.set(pose.x,pose.y,pose.z);
+   const train=this.trainById.get(pose.id);if(!train)continue;
+   train.group.visible=pose.active&&(!this.camera||this.view.visible(pose,train.group.visible,16));if(this.camera&&!train.group.visible)continue;
+   if(train.group.visible)visibleTrains++;train.group.position.set(pose.x,pose.y,pose.z);
    const a=line.points[pose.from===pose.to?pose.from-pose.direction:pose.from],b=line.points[pose.to];train.group.rotation.y=Math.atan2(b[0]-a[0],b[1]-a[1]);
    if(train.direction!==pose.direction){train.direction=pose.direction;this.trainLabel(train);}
   }
+  this.stats.visibleTrains=visibleTrains;
  }
 }

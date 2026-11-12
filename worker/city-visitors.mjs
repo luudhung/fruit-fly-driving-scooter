@@ -1,5 +1,6 @@
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
+import {COMBINED_CAP} from './population-limits.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {syncHospitalityHotels,hospitalityAccount,recordHospitalitySale,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
 import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_STANDS, VISITOR_TOUCHDOWN_SECONDS, MIN_VISITOR_PASSENGERS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwaySlot} from './visitor-aviation.mjs';
@@ -64,7 +65,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   return true;
  }
  function spawnVisitor(options={}){
-  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=640||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
+  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=COMBINED_CAP||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
   const available=Object.values(s.hotels).filter(h=>!h.closed&&location(h.id)&&!isUnavailable(h.id)&&Object.keys(h.rooms).length<h.capacity);
   if(!available.length)return null;
   const index=s.nextVisitorId++,id=`VIS-${String(index).padStart(6,'0')}`,name=`Visitor ${index}`;
@@ -378,7 +379,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   const s=data(),active=s.visitors.filter(v=>v.alive&&!v.departed).length;
   const rooms=Object.values(s.hotels).filter(h=>!h.closed&&location(h.id)&&!isUnavailable(h.id))
    .reduce((sum,h)=>sum+Math.max(0,h.capacity-Object.keys(h.rooms).length),0);
-  return Math.max(0,Math.min(MAX_VISITORS-active,640-residents().length-active,rooms));
+  return Math.max(0,Math.min(MAX_VISITORS-active,COMBINED_CAP-residents().length-active,rooms));
  }
  function reserveManifest(flight){
   if(flight.arrivalPassengerIds)return true;

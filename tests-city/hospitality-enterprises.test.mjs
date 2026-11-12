@@ -53,8 +53,8 @@ test('resident restaurant meals require real on-site staff and pay once for real
  assert.ok(diningVenues(s,guest).some(v=>v.id===b.locationId));
  assert.equal(purchaseHospitalityMeal(s,guest,b.locationId),false,'an empty restaurant cannot serve');
  Object.assign(owner,{currentLocationId:b.locationId,traveling:false,sleeping:false});
- const before=liquidMoneySupply(),cash=b.cash,stock=b.stock;
- assert.equal(purchaseHospitalityMeal(s,guest,b.locationId),true);assert.equal(b.cash,cash+b.mealPrice);assert.equal(b.stock,stock-1);assert.equal(guest.hunger,30);
+ const before=liquidMoneySupply(),cash=b.cash,stock=b.stock,quote=diningVenues(s,guest).find(v=>v.id===b.locationId).price;
+ assert.equal(purchaseHospitalityMeal(s,guest,b.locationId),true);assert.equal(b.cash,cash+quote);assert.equal(b.stock,stock-1);assert.equal(guest.hunger,30);
  assert.equal(purchaseHospitalityMeal(s,guest,b.locationId),false);assert.ok(Math.abs(liquidMoneySupply()-before)<1e-6);
  s.urbanWorld.buildings[b.locationId]={id:b.locationId,stage:'unsafe',health:40};
  assert.equal(diningVenues(s,guest).some(v=>v.id===b.locationId),false);
