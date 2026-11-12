@@ -1,10 +1,11 @@
+import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_ROADS,INDUSTRIAL_RESERVED,INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
 import {districtProfile} from './district-economy.mjs';
 import {createVehicleRouter} from './vehicle-network.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED} from './government-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 26;
+export const MAP_VERSION = 27;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -245,7 +246,7 @@ export const METRO_LINES = [
 
 export const BUILDINGS=[];
 function place(b) {
- if([...SPORTS_VENUES,...GOVERNMENT_RESERVED].some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || [PARK,AIRPORT_PARK].some(park=>overlaps(b,park,1)) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
+ if([...SPORTS_VENUES,...GOVERNMENT_RESERVED,...INDUSTRIAL_RESERVED].some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || [PARK,AIRPORT_PARK].some(park=>overlaps(b,park,1)) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
  BUILDINGS.push(b);return true;
 }
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
@@ -436,6 +437,9 @@ for(let xi=0;xi<WEST_AVENUES.length-1;xi++)for(let zi=0;zi<WEST_STREETS.length-1
 BUILDINGS.push(...GOVERNMENT_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...GOVERNMENT_LOCATIONS.map(l=>({...l})));
 ROADS.push(...GOVERNMENT_ROADS.map(r=>({...r})));
+BUILDINGS.push(...INDUSTRIAL_BUILDINGS.map(b=>({...b})));
+LOCATIONS.push(...INDUSTRIAL_LOCATIONS.map(l=>({...l})));
+ROADS.push(...INDUSTRIAL_ROADS.map(r=>({...r})));
 for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
 for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}
 
@@ -808,7 +812,8 @@ for(const r of ROADS){
  for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
   const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
   if(UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+3&&Math.abs(p.z-t.z)<t.halfLength+8))continue;
-  const inNeighborhood=contains(RIVERSIDE,p,-8)||contains(AIRPORT_GARDENS,p,-8)||contains(WEST_DISTRICT,p,-8);
+  const inNeighborhood=contains(RIVERSIDE,p,-8)||contains(AIRPORT_GARDENS,p,-8)||contains(WEST_DISTRICT,p,-8)||INDUSTRIAL_BUILDINGS.some(b=>contains(b,p,30));
+  if(Object.values(INDUSTRIAL_LOADING_BAYS).some(b=>Math.abs(p.x-b.x)<5&&Math.abs(p.z-b.z)<3))continue;
   if((!inNeighborhood&&(Math.abs(p.x)>335||Math.abs(p.z)>335))||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
   if(ROADS.some(o=>o!==r&&(o.w>o.d)!==horizontal&&contains(o,p,8)))continue;
   if(METRO_LINES.some(l=>l.points.some(([x,z])=>Math.hypot(p.x-x,p.z-z)<12)))continue;

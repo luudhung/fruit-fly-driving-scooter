@@ -12,7 +12,7 @@ const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const location=id=>LOCATIONS.find(l=>l.id===id);
 const atAirport=v=>v.currentLocationId==='airport'&&dist(v,AIRPORT.terminal)<40;
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
-function busy(f,now=0){return f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
+function busy(f,now=0){return f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
 
 /** Persisted finite visitors, physical taxi trips and compact scene records. No pixel rendering on server. */
 export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false,isWorkCommitted=()=>false}){
@@ -161,7 +161,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   }
   if(f.routeIndex>=f.routeWaypoints.length){f.traveling=false;f.vx=f.vz=0;f.routeWaypoints=[];f.routeIndex=0;return true;}return false;
  }
- function divertedTaxiActor(f){return Boolean(f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||f.arrestedUntil>now());}
+ function divertedTaxiActor(f){return Boolean(f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||f.arrestedUntil>now());}
  function finishTaxi(job,cancel=false,reason=''){
   const s=data();job=job&&s.taxiJobs.find(current=>current.id===job.id);if(!job||['complete','cancelled'].includes(job.phase))return;
   const driver=actor(job.driverId),passenger=actor(job.passengerId),escrow=business('city-taxi-escrow');

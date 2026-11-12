@@ -1,3 +1,4 @@
+import {createIndustrialEconomy} from './industrial-economy.mjs';
 import {DISTRICT_PROFILES,districtAt,districtProfile,districtHousingUtility,applyDistrictExposure} from './district-economy.mjs';
 import {createPublicServices} from './public-services.mjs';
 import {createResidentRelationships} from './resident-relationships.mjs';
@@ -499,19 +500,23 @@ const sportsLuxury=createSportsLuxury(cityServices);
 const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld});
+const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
 function syncDistrictHousingPrices(){
  const base=new Map(APARTMENTS.map(b=>[b.id,b]));
+ const houses=new Map(HOUSE_LOTS.map(b=>[b.id,b]));for(const lot of state.housing.houseLots){const plot=houses.get(lot.id);if(plot)lot.baseValue=plot.baseValue;}
  for(const block of state.housing.apartmentBlocks){const plot=base.get(block.id);if(plot&&!plot.luxury){block.rent=plot.rent;block.purchaseValue=plot.purchaseValue;}}
  for(const hh of Object.values(state.housing.households))if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;
 }
-function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();}
+function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
+  if(f.industrialFreightDuty)return industrialEconomy.handleResident(f,clock);
   if(residentRelationships.handleResident(f,clock))return true;
   if(civicConflict.handleResident(f,clock))return true;
   if(publicServices.handleResident(f,clock))return true;
+  if(industrialEconomy.handleResident(f,clock))return true;
   if(cityVisitors.handleResident(f,clock))return true;
   return urbanWorld.handleResident(f,clock)||sportsLuxury.handleResident(f,clock);
 }
@@ -1861,6 +1866,7 @@ function workCommitment(fly,clock){
   return {job,onShift,essential,soon:essential&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
 }
 function isWorkCommitted(f){
+  if(f.industrialFreightDuty)return true;
   if(f.publicServiceRole&&(f.publicServiceDuty||f.militaryFlightId||publicServices.onShift(f,gameClock())))return true;
   const duty=workCommitment(f,gameClock());
   return Boolean(duty?.essential&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
@@ -2339,6 +2345,7 @@ function simulateEnterprises(clock) {
   let hourlyGdp = 0;
 
   for (const business of operating) {
+    if(business.industrial)continue;
     if(business.urbanSuspended||urbanWorld.isUnavailable(business.locationId))continue;
     const owner = state.flies.find((f) => f.id === business.ownerId && f.alive);
     if (!owner) {
@@ -2513,7 +2520,7 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
-  urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);
+  urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);industrialEconomy.addChoices(fly,clock,add);
   if(age>=21&&state.housing.households[fly.householdId]?.members?.[0]===fly.id&&!fly.ownsHome&&fly.money+fly.savings>100){
     const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
     const workplace=LOCATIONS.find(l=>l.id===workLocation),current=districtAt({x:fly.homeX,z:fly.homeZ});
@@ -4362,7 +4369,7 @@ function getState(options={}) {
     districtEconomy:Object.values(DISTRICT_PROFILES).map(profile=>({...profile,residents:living.filter(f=>districtAt({x:f.homeX,z:f.homeZ})===profile.id).length})),
     districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0},
       airport:{residents:living.filter(f=>f.housingUnitId?.startsWith('AIRPORT-APT-')).length,settlersAdded:state.expansionSettlement?.airport?.added||0},
-      west:{residents:living.filter(f=>f.housingUnitId?.startsWith('WEST-')).length,settlersAdded:state.expansionSettlement?.west?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),publicServices:publicServices.snapshot(),
+      west:{residents:living.filter(f=>f.housingUnitId?.startsWith('WEST-')).length,settlersAdded:state.expansionSettlement?.west?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),publicServices:publicServices.snapshot(),industrialEconomy:industrialEconomy.snapshot(),
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     aviation:aviationSummary(),
@@ -4440,8 +4447,8 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
-      for(const [name,service]of [['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
-      vehicleHeadway=createVehicleIndex(neuralActors());
+      for(const [name,service]of [['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
+      vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;
       roadLife.tick();
@@ -4492,6 +4499,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,
+  publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,
   attemptStartup,simulateEnterprises,startupReadiness,chooseStartupType,purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

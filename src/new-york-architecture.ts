@@ -1,22 +1,17 @@
 import * as THREE from 'three';
 import type {Building} from '../worker/city-map.mjs';
-import {SceneViewBudget} from './view-budget.ts';
 type Part={buildingId:string;matrix:THREE.Matrix4};
-type BuildingDetail={center:THREE.Vector3;radius:number};
 /** Batched iron fire escapes keep the Manhattan street detail to two draw calls citywide. */
 export class NewYorkArchitecture{
  private parts:Part[]=[];private iron:THREE.InstancedMesh;private tanks:THREE.InstancedMesh;
  readonly stats={sourceInstances:0,activeInstances:0,sourceBuildings:0,activeBuildings:0};
- private tankParts:Part[]=[];private hiddenIds=new Set<string>();private signature='';
- private buildings=new Map<string,BuildingDetail>();private fireActive=new Set<string>();private tankActive=new Set<string>();
- private fireView=new SceneViewBudget({enterDistance:175,leaveDistance:205,frustumMargin:10,retainedMargin:18});
- private tankView=new SceneViewBudget({enterDistance:420,leaveDistance:480,frustumMargin:10,retainedMargin:18});
- private budgeted=false;private lastRefresh=-Infinity;private lastCamera=new THREE.Vector3(Infinity,Infinity,Infinity);private lastDirection=new THREE.Vector3();private cameraPosition=new THREE.Vector3();private direction=new THREE.Vector3();
+ private tankParts:Part[]=[];private hiddenIds=new Set<string>();private signature:string|null=null;
+ private buildings=new Set<string>();
  constructor(root:THREE.Object3D,buildings:Building[]){
   const d=new THREE.Object3D(),part=(b:Building,w:number,h:number,depth:number,x:number,y:number,z:number,angle=0)=>{d.position.set(b.x+x,y,b.z+z);d.rotation.set(0,0,angle);d.scale.set(w,h,depth);d.updateMatrix();this.parts.push({buildingId:b.id,matrix:d.matrix.clone()});};
   for(const b of buildings){
    if(b.x>380||Math.abs(b.z)>355||b.h<12||b.h>62||!['block','apartment'].includes(b.kind)||b.w<8)continue;
-   this.buildings.set(b.id,{center:new THREE.Vector3(b.x,b.h/2,b.z),radius:Math.hypot(b.w,b.h,b.d)/2});
+   this.buildings.add(b.id);
    const front=b.d/2+.85,level=3.2,width=Math.min(4.4,b.w*.7);
    // Platforms start above head height. The final ladder is retracted, keeping sidewalks clear.
    for(let y=4.3,floor=0;y<b.h-1.5;y+=level,floor++){
@@ -44,19 +39,13 @@ export class NewYorkArchitecture{
  sync(buildings:Array<{id:string;stage:string}>){
   this.hiddenIds=new Set(buildings.filter(b=>['cleared','collapsed','construction'].includes(b.stage)).map(b=>b.id));this.refresh();
  }
- setView(camera:THREE.Camera){
-  camera.updateMatrixWorld();this.cameraPosition.setFromMatrixPosition(camera.matrixWorld);camera.getWorldDirection(this.direction);const now=performance.now();
-  if(this.budgeted&&this.cameraPosition.distanceToSquared(this.lastCamera)<64&&this.direction.dot(this.lastDirection)>.98&&now-this.lastRefresh<90)return;
-  this.budgeted=true;this.lastCamera.copy(this.cameraPosition);this.lastDirection.copy(this.direction);this.lastRefresh=now;this.fireView.setCamera(camera);this.tankView.setCamera(camera);
-  const fire=new Set<string>(),tanks=new Set<string>();
-  for(const [id,b]of this.buildings){if(this.fireView.visible(b.center,this.fireActive.has(id),b.radius))fire.add(id);if(this.tankView.visible(b.center,this.tankActive.has(id),b.radius))tanks.add(id);}
-  this.fireActive=fire;this.tankActive=tanks;this.refresh();
- }
+ /** All ironwork and tanks stay preloaded; camera movement never swaps building detail. */
+ setView(_camera:THREE.Camera){}
  private refresh(){
-  const key=`${[...this.hiddenIds].sort().join(',')}|${this.budgeted?[...this.fireActive].join(','):'all'}|${this.budgeted?[...this.tankActive].join(','):'all'}`;
+  const key=[...this.hiddenIds].sort().join(',');
   if(key===this.signature)return;this.signature=key;let activeInstances=0;const visibleBuildings=new Set<string>();
-  for(const [mesh,parts,selected]of [[this.iron,this.parts,this.fireActive],[this.tanks,this.tankParts,this.tankActive]] as const){
-   let i=0;for(const p of parts)if(!this.hiddenIds.has(p.buildingId)&&(!this.budgeted||selected.has(p.buildingId))){mesh.setMatrixAt(i++,p.matrix);visibleBuildings.add(p.buildingId);}
+  for(const [mesh,parts]of [[this.iron,this.parts],[this.tanks,this.tankParts]] as const){
+   let i=0;for(const p of parts)if(!this.hiddenIds.has(p.buildingId)){mesh.setMatrixAt(i++,p.matrix);visibleBuildings.add(p.buildingId);}
    mesh.count=i;mesh.visible=i>0;mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingBox();mesh.computeBoundingSphere();activeInstances+=i;
   }
   this.stats.activeInstances=activeInstances;this.stats.activeBuildings=visibleBuildings.size;

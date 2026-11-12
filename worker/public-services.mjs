@@ -15,7 +15,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
  const alive=id=>{const f=actor(id);return f?.alive?f:null;};
  const rand=f=>clamp(random(f));
  const enabled=()=>Boolean(loc('military-base')&&loc('police-hq'));
- const outsideCommitment=f=>f.socialTask||f.civicDuty||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.airTrip||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.emergencyTask||f.sportsSession||f.urbanFloodEscape;
+ const outsideCommitment=f=>f.industrialFreightDuty||f.socialTask||f.civicDuty||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.airTrip||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.emergencyTask||f.sportsSession||f.urbanFloodEscape;
  function account(){raw().businesses||={};return raw().businesses['public-service-supplies']||={cash:0,inventory:0,sector:'public-service-supplies'};}
  function data(){return raw().publicServices||={version:1,army:[],police:[],nextRecruitAt:0,nextFlightAt:now()+3600,nextFlightId:1,applications:0,recruits:0,retirements:0,trainingHours:0,wagesPaid:0,wageArrears:0,procurementPaid:0,flightCosts:0,trainingFlights:0,aircraft:[],history:[]};}
  function note(type,text,payload={}){const d=data();d.history.push({type,text,at:now(),...payload});d.history=d.history.slice(-24);emit(type,text,payload);}

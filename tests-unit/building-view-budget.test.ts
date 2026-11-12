@@ -20,32 +20,47 @@ function apartment(root:THREE.Group,id:string,z:number){
 }
 function camera(){const c=new THREE.PerspectiveCamera(60,1.5,.1,3000);c.position.set(0,10,0);c.lookAt(0,10,-100);c.updateProjectionMatrix();return c;}
 
-test('facade streaming compacts unseen windows, paints distant windows on the body and returns roofs with their buildings',()=>{
+test('static facades keep every building, fixed baked window grid and colors unchanged by camera approach',()=>{
  const root=new THREE.Group(),near=apartment(root,'NEAR',-60),far=apartment(root,'FAR',-650),behind=apartment(root,'BEHIND',70);
- const batch=new CityBoxBatches(root,[near.group,far.group,behind.group]),c=camera();batch.setView(c);
- assert.equal(batch.stats.instances,603);assert.equal(batch.viewStats.activeInstances,102);
- assert.equal(batch.isBuildingVisible('NEAR'),true);assert.equal(batch.isBuildingVisible('FAR'),true);assert.equal(batch.isBuildingVisible('BEHIND'),false);
- assert.equal(behind.group.visible,true,'presentation culling never rewrites authoritative building visibility');assert.equal(behind.roof.visible,false);
- const facade=root.children.find(o=>o instanceof THREE.InstancedMesh&&o.material.userData.normalizedFacade&&o.geometry.getAttribute('instanceFacadeWindows').getX(0)===1) as THREE.InstancedMesh<THREE.BoxGeometry,THREE.MeshStandardMaterial>;
- assert.ok(facade);assert.equal(facade.count,1,'far building submits its body, not 200 window boxes');
+ const batch=new CityBoxBatches(root,[near.group,far.group,behind.group]),c=camera();batch.enableStaticFacades();batch.sync();
+ assert.equal(batch.stats.instances,603);assert.equal(batch.viewStats.activeInstances,3,'all ordinary windows are baked at every distance');
+ const meshes=root.children.filter(o=>o instanceof THREE.InstancedMesh) as THREE.InstancedMesh[];
+ const facades=meshes.filter(o=>!Array.isArray(o.material)&&o.material.userData.normalizedFacade);
+ assert.equal(facades.reduce((sum,o)=>sum+o.count,0),3);
+ for(const mesh of facades)for(let i=0;i<mesh.count;i++)assert.equal(mesh.geometry.getAttribute('instanceFacadeWindows').getX(i),1);
+ const before=meshes.map(o=>({count:o.count,visible:o.visible,matrix:[...o.instanceMatrix.array],colors:[...(o.instanceColor?.array??[])],version:o.instanceMatrix.version}));
+ const facade=facades[0] as THREE.InstancedMesh<THREE.BoxGeometry,THREE.MeshStandardMaterial>;
  const shader={vertexShader:THREE.ShaderLib.standard.vertexShader,fragmentShader:THREE.ShaderLib.standard.fragmentShader,uniforms:{}};
  facade.material.onBeforeCompile(shader as THREE.WebGLProgramParametersWithUniforms,{} as THREE.WebGLRenderer);
- assert.match(shader.vertexShader,/original facade gradient/);assert.match(shader.fragmentShader,/totalEmissiveRadiance\+=lit/);
- c.position.x=2500;c.lookAt(2500,10,-100);batch.setView(c);assert.equal(batch.viewStats.activeInstances,0);assert.ok([near,far,behind].every(b=>!b.roof.visible));
- c.position.x=0;c.lookAt(0,10,-100);batch.setView(c);assert.equal(batch.viewStats.activeInstances,102);assert.equal(near.roof.visible,true);assert.equal(far.roof.visible,true);
- near.group.visible=false;batch.sync();assert.equal(batch.viewStats.activeInstances,1);assert.equal(near.roof.visible,false);
- near.group.visible=true;near.body.material=near.body.material.clone();near.body.material.color.setHex(0x443322);batch.sync();assert.equal(batch.viewStats.activeInstances,102);assert.equal(near.roof.visible,true);
- const activeBody=root.children.find(o=>o instanceof THREE.InstancedMesh&&o.material.userData.normalizedFacade&&o.count&&o.geometry.getAttribute('instanceFacadeWindows').getX(0)===0) as THREE.InstancedMesh;
- const color=new THREE.Color();activeBody.getColorAt(0,color);assert.ok(color.toArray().every((value,index)=>Math.abs(value-near.body.material.color.toArray()[index])<1e-6),'private damage/restoration colors survive streaming');
+ assert.match(shader.vertexShader,/original facade gradient/);
+ assert.match(shader.fragmentShader,/totalEmissiveRadiance\+=lit\*windowMask\*uCityWindowBrightness/);
+ assert.doesNotMatch(shader.fragmentShader,/distance\(.*cameraPosition|vViewPosition.*windowMask/,'window grid does not depend on camera distance');
+ const brightness=(shader.uniforms as Record<string,{value:number}>).uCityWindowBrightness;
+ batch.setNight(1);assert.equal(brightness.value,1);batch.setNight(0);assert.equal(brightness.value,.72);
+ for(const [x,z] of [[0,-620],[2500,0],[0,0],[0,100]]){
+  c.position.set(x,10,z);c.lookAt(x,10,z-100);batch.setView(c);batch.sync();batch.enableStaticFacades();
+  assert.equal(batch.viewStats.activeInstances,3);
+  assert.deepEqual(meshes.map(o=>({count:o.count,visible:o.visible,matrix:[...o.instanceMatrix.array],colors:[...(o.instanceColor?.array??[])],version:o.instanceMatrix.version})),before);
+  assert.ok([near,far,behind].every(b=>b.group.visible&&b.roof.visible&&batch.isBuildingVisible(b.group.userData.buildingId)));
+ }
+ near.group.visible=false;batch.sync();assert.equal(batch.viewStats.activeInstances,2);assert.equal(near.roof.visible,false);assert.equal(batch.isBuildingVisible('NEAR'),false);
+ near.group.visible=true;near.body.material=near.body.material.clone();near.body.material.color.setHex(0x443322);near.group.scale.y=.5;batch.sync();
+ assert.equal(batch.viewStats.activeInstances,3);assert.equal(near.roof.visible,true);
+ const activeBody=facades.find(o=>o.count&&Math.abs(o.instanceMatrix.array[14]+60)<1e-6)!;
+ const color=new THREE.Color(),matrix=new THREE.Matrix4();activeBody.getColorAt(0,color);activeBody.getMatrixAt(0,matrix);
+ assert.ok(color.toArray().every((value,index)=>Math.abs(value-near.body.material.color.toArray()[index])<1e-6),'damage/restoration colors remain authoritative');
+ assert.equal(matrix.elements[5],15,'rebuilding building height still synchronizes');
 });
 
-test('New York ironwork streams nearby visible buildings, preserves hidden construction, and returns after travelling back',()=>{
+test('New York ironwork stays fully preloaded during travel and hides only actual construction',()=>{
  const root=new THREE.Group(),buildings=[-60,-320,180].map((z,i)=>({id:`NY-${i}`,x:0,z,w:12,d:14,h:35,kind:'apartment'}));
- const architecture=new NewYorkArchitecture(root,buildings),source=architecture.stats.sourceInstances,c=camera();architecture.setView(c);
- assert.ok(architecture.stats.activeInstances>0&&architecture.stats.activeInstances<source/2);
- const visible=architecture.stats.activeInstances;
- c.position.x=2500;c.lookAt(2500,10,-100);architecture.setView(c);assert.equal(architecture.stats.activeInstances,0);
- c.position.x=0;c.lookAt(0,10,-100);architecture.setView(c);assert.equal(architecture.stats.activeInstances,visible);
- architecture.sync([{id:'NY-0',stage:'construction'}]);assert.ok(architecture.stats.activeInstances<visible);
- architecture.sync([{id:'NY-0',stage:'operational'}]);assert.equal(architecture.stats.activeInstances,visible);
+ const architecture=new NewYorkArchitecture(root,buildings),source=architecture.stats.sourceInstances,c=camera();
+ assert.equal(architecture.stats.activeInstances,source);assert.equal(architecture.stats.activeBuildings,3);
+ const meshes=root.children as THREE.InstancedMesh[],versions=meshes.map(o=>o.instanceMatrix.version);
+ for(const [x,z] of [[0,-620],[2500,0],[0,0],[0,100]]){
+  c.position.set(x,10,z);c.lookAt(x,10,z-100);architecture.setView(c);architecture.sync([]);
+  assert.equal(architecture.stats.activeInstances,source);assert.deepEqual(meshes.map(o=>o.instanceMatrix.version),versions);
+ }
+ architecture.sync([{id:'NY-0',stage:'construction'}]);assert.ok(architecture.stats.activeInstances<source);
+ architecture.sync([{id:'NY-0',stage:'operational'}]);assert.equal(architecture.stats.activeInstances,source);
 });

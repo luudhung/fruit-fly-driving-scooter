@@ -1,3 +1,6 @@
+import {districtProfile} from '../worker/district-economy.mjs';
+import {IndustrialDistrictRenderer} from './industrial-district.ts';
+import type {IndustrialSnapshot} from '../worker/industrial-economy.mjs';
 import type {SocialTie,SocialProfile} from '../worker/resident-relationships.mjs';
 import {TrafficSignals} from './traffic-signals.ts';
 import {FrameStats} from './frame-stats.ts';
@@ -53,6 +56,7 @@ import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AI
 
 const viewerBootStarted=performance.now();
 type FlyState = {
+  district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
   relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
   onFireEngine?:boolean;onAmbulance?:boolean;
   kind?:"resident"|"visitor"; taxiPassenger?:boolean; onPrivateHelicopter?:boolean;
@@ -195,6 +199,8 @@ type WeatherState = {
 
 type CivilizationSnapshot = {
   publicServices?:PublicServicesSnapshot;
+  industrialEconomy?:IndustrialSnapshot;
+  districtEconomy?:Array<{id:string;name:string;focus:string;wage:number;housing:number;food:number;living:number;pollution:number;amenities:number;residents:number}>;
   housing?:{capacityUnit?:'households';apartmentBlocks:Array<{id:string;capacity:number;occupants:number;occupiedHouseholds?:number;residentCount?:number;overCapacityHouseholds?:number}>;groundHouses?:Array<{id:string;capacity:number;occupiedHouseholds:number;residentCount:number}>};
   districts?:{riverside:{residents:number;settlersAdded:number};airport?:{residents:number;settlersAdded:number};west?:{residents:number;settlersAdded:number}};
   civicConflict?:CivicSnapshot;
@@ -549,6 +555,7 @@ function renderInspector(fly: FlyState | null) {
     const capacity=housingInfo?.capacity??homeBuilding.capacity??(homeBuilding.kind==='house'?1:10);
     flyHomeEl.textContent+=` · ${homeBuilding.id} · ${housingInfo?.occupiedHouseholds??(housingInfo&&'occupants'in housingInfo?housingInfo.occupants:0)}/${capacity} hộ${housingInfo?.residentCount!==undefined?` · ${housingInfo.residentCount} cư dân`:''}`;
   }
+  flyHomeEl.textContent+=` · ${districtProfile(fly.district||{x:fly.homeX,z:fly.homeZ}).name}${fly.localAirQuality!=null?` · không khí ${fly.localAirQuality}/100`:''}`;
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
@@ -699,6 +706,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
   governmentVisuals.sync(s.publicServices);
+  const publicBoard=document.getElementById('public-service-activity');if(publicBoard&&s.publicServices)publicBoard.textContent=`Quân đội ${s.publicServices.army.count}/${s.publicServices.army.target} · Cảnh sát ${s.publicServices.police.count}/${s.publicServices.police.target} · ${s.publicServices.trainingFlights} chuyến huấn luyện`;
+  const industryBoard=document.getElementById('industry-activity');if(industryBoard&&s.industrialEconomy)industryBoard.textContent=`Công nghiệp: ${s.industrialEconomy.companies.length}/${s.industrialEconomy.plants.length} xưởng hoạt động · ${s.industrialEconomy.delivered} đơn hàng đã giao`;
+  const districtBoard=document.getElementById('district-economy');if(districtBoard&&s.districtEconomy)districtBoard.textContent=s.districtEconomy.map(d=>`${d.name}: ${d.residents} dân · lương ${Math.round(d.wage*100)}% · thuê nhà ${Math.round(d.housing*100)}% · không khí ${Math.round((1-d.pollution)*100)}/100`).join('\n');
+  if(s.industrialEconomy)industrialVisuals.sync(s.industrialEconomy);
   if(s.sportsLuxury){
     const roofs = new Map(BUILDINGS.map(building => [building.id, building]));
     const pads = s.sportsLuxury.pads.filter(pad => {
@@ -1169,6 +1180,7 @@ for (const house of BUILDINGS.filter(building => building.kind === 'house')) {
   urbanVisuals.registerBuilding(house.id, group);
 }
 const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,192,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
+cityFacadeBatches.enableStaticFacades();
 renderer.domElement.dataset.facadeSourceDraws=String(cityFacadeBatches.stats.sourceDraws);
 renderer.domElement.dataset.facadeBatchDraws=String(cityFacadeBatches.stats.batchDraws);
 renderer.domElement.dataset.facadeBoxInstances=String(cityFacadeBatches.stats.instances);
@@ -1225,6 +1237,8 @@ for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
   const glass=new THREE.Mesh(new THREE.BoxGeometry(b.w*.72,2,.12),new THREE.MeshStandardMaterial({color:0x5c94a3,metalness:.3,roughness:.2}));glass.position.set(0,1.6,b.d/2+.1);g.add(glass);
  }
 }
+const industrialVisuals=new IndustrialDistrictRenderer(cityRoot,makeCanvasSprite);
+for(const [id,group] of industrialVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const governmentVisuals=new GovernmentDistrictRenderer(cityRoot,makeCanvasSprite);
 for(const [id,group] of governmentVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const fireStation=buildFireStation(cityRoot,makeCanvasSprite);urbanVisuals.registerBuilding('firestation',fireStation);
@@ -1499,7 +1513,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   sun.position.copy(sunDirection(t)).multiplyScalar(400);
   sunFill.color.copy(palette.fill);sunFill.intensity=(.12+daylight*.34)*(1-cloud*.35);
   moon.intensity=.16+night*.65*(1-cloud*.28);
-  updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
+  cityFacadeBatches.setNight(night);updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
   for(const material of windowMaterials)material.color.setScalar(.72+night*.28);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
@@ -1747,11 +1761,12 @@ function animate(now = performance.now()) {
   }
 
   residentBodies.finish();
-  personalCars.setView(camera);metroVisuals.setView(camera);
+  personalCars.setView(camera);metroVisuals.setView(camera);industrialVisuals.setView(camera);
   personalCars.update(dt,gameNow,Math.max(1,snapshot?.timeScale||120));
   urbanVisuals.update(dt,gameNow);
   sportsVisuals.update(dt,gameNow);
   governmentVisuals.update(gameNow);
+  industrialVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   visitorVisuals.update(dt,gameNow);
   visitorAircraft.update(gameNow);
   civicVisuals.update();
@@ -1806,7 +1821,7 @@ function animate(now = performance.now()) {
   }
 
   updateFreeCamera(dt);
-  cityFacadeBatches.setView(camera);newYorkVisuals.setView(camera);
+
   sportsVisuals.setView(camera,id=>cityFacadeBatches.isBuildingVisible(id));
   citySky.update(renderedHour(visualHour),camera.position,activeWeather.cloudCover||0,Math.floor(gameNow/86400));
   cityWater.update(now/1000,visualPalette.daylight,activeWeather.cloudCover||0,visualPalette.zenith,visualPalette.horizon,sunDirection(renderedHour(visualHour)),visualPalette.sunColor);

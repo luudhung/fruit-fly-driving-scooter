@@ -1,0 +1,13 @@
+export type IndustrialZone='north'|'west'|'europe';
+export type IndustrialSector='garments'|'food-production'|'building-materials'|'freight-logistics';
+export type IndustrialPlant={id:string;name:string;zone:IndustrialZone;district:IndustrialZone;sector:IndustrialSector;x:number;z:number;w:number;d:number;h:number;kind:string;frontage:{x:number;z:number};capacity:number};
+export const INDUSTRIAL_SECTORS:IndustrialSector[];
+export const INDUSTRIAL_ZONES:Record<IndustrialZone,{id:IndustrialZone;name:string;gateway:{x:number;z:number}}>;
+export const INDUSTRIAL_PLANTS:IndustrialPlant[];
+export const INDUSTRIAL_DEPOT:{id:string;name:string;x:number;z:number;w:number;d:number;h:number;kind:string;frontage:{x:number;z:number};zone:IndustrialZone};
+export const INDUSTRIAL_BUILDINGS:Array<IndustrialPlant|typeof INDUSTRIAL_DEPOT>;
+export const INDUSTRIAL_LOCATIONS:Array<{id:string;name:string;type:string;x:number;z:number}>;
+export const INDUSTRIAL_ROADS:Array<{id:string;x:number;z:number;w:number;d:number}>;
+export const INDUSTRIAL_RESERVED:Array<{id:string;x:number;z:number;w:number;d:number}>;
+export const MAX_FREIGHT_TRUCKS:number;
+export const INDUSTRIAL_LOADING_BAYS:Record<string,{x:number;z:number;y:number;heading:number}>;

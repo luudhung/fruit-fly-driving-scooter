@@ -9,7 +9,7 @@ export function createResidentRelationships({world,random,emit,remember,startJou
  let actors=new Map(),lastIndexAt=-1,indexedWorld=null,indexedFlies=null,activeTasks=0;
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),data=()=>raw().residentRelationships||init();
  const roll=f=>cap(random?.(f)??.5,0,1),locate=id=>LOCATIONS.find(l=>l.id===id);
- const incompatible=f=>Boolean(f.urbanTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain&&!(f.socialTask&&f.traveling&&f.targetLocationId===f.socialTask.locationId)||f.heliPassenger||f.wheelRideUntil>now()||f.arrested||Number(f.arrestedUntil||0)>now());
+ const incompatible=f=>Boolean(f.industrialFreightDuty||f.publicServiceDuty||f.urbanTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain&&!(f.socialTask&&f.traveling&&f.targetLocationId===f.socialTask.locationId)||f.heliPassenger||f.wheelRideUntil>now()||f.arrested||Number(f.arrestedUntil||0)>now());
  const busy=f=>incompatible(f)||f.socialTask||String(f.action||'').startsWith('working')||String(f.action||'').includes('teaching')||String(f.action||'').includes('studying');
  const canAct=f=>alive(f)&&f.ageYears>=16&&f.health>55&&f.energy>40&&f.hunger<75&&!f.sleeping&&!incompatible(f);
  const outdoors=f=>alive(f)&&f.ageYears>=8&&!f.traveling&&!f.indoors&&!f.sleeping&&!busy(f);

@@ -1,18 +1,16 @@
 import * as THREE from 'three';
-import {SceneViewBudget} from './view-budget.ts';
 
 type BuildingView={group:THREE.Group;sources:Source[];extras:Array<{object:THREE.Object3D;visible:boolean}>;localBounds:THREE.Box3;center:THREE.Vector3;radius:number;signature:string;active:boolean;windowStep:number;baked:boolean;sideX:number;sideZ:number;dirty:boolean};
 type Source={mesh:THREE.Mesh<THREE.BoxGeometry,THREE.Material>;building:BuildingView;matrices:THREE.Matrix4[];colors:THREE.Color[];faces:Int8Array;start:number;signature:string;window:boolean};
 type Batch={mesh:THREE.InstancedMesh<THREE.BoxGeometry,THREE.Material>;sources:Source[];facadeWindows?:THREE.InstancedBufferAttribute};
 
-/** Source geometry remains available for restoration. After setView, only the
- * selected visible instances are submitted to the GPU. */
+/** Fixed city geometry. A one-time baked facade replaces ordinary window boxes
+ * at every distance, so approaching a building never swaps its light pattern. */
 export class CityBoxBatches{
  readonly stats={sourceDraws:0,batchDraws:0,instances:0};
  readonly viewStats={activeInstances:0,activeBuildings:0,bakedBuildings:0,activeBatches:0};
  private batches:Batch[]=[];private buildings:BuildingView[]=[];
- private view=new SceneViewBudget({enterDistance:1400,leaveDistance:1530,frustumMargin:18,retainedMargin:34});
- private budgeted=false;private lastCamera=new THREE.Vector3(Infinity,Infinity,Infinity);private lastDirection=new THREE.Vector3();private direction=new THREE.Vector3();private lastRefresh=-Infinity;
+ private budgeted=false;private windowBrightness={value:.72};
  private matrix=new THREE.Matrix4();private inverse=new THREE.Matrix4();private color=new THREE.Color();private worldBounds=new THREE.Box3();private sphere=new THREE.Sphere();private localCamera=new THREE.Vector3();
  constructor(root:THREE.Group,groups:THREE.Group[],cellSize=192,onMaterial?:(material:THREE.Material)=>void){
   const buckets=new Map<string,{material:THREE.Material;sources:Source[]}>(),local=new THREE.Matrix4(),color=new THREE.Color(),unit=new THREE.Box3(new THREE.Vector3(-.5,-.5,-.5),new THREE.Vector3(.5,.5,.5)),bounds=new THREE.Box3();
@@ -45,19 +43,20 @@ export class CityBoxBatches{
   }
   this.sync();
  }
- /** Far windows are painted on an existing facade, rather than hundreds of boxes. */
+ /** Fixed window grids are painted on every ordinary facade, replacing window boxes. */
  private enableFacadeWindows(batch:Batch){
   if(!batch.mesh.material.userData.normalizedFacade)return;
   const material=batch.mesh.material,compile=material.onBeforeCompile,key=material.customProgramCacheKey.bind(material);
   material.onBeforeCompile=(shader,renderer)=>{
    compile.call(material,shader,renderer);
+   shader.uniforms.uCityWindowBrightness=this.windowBrightness;
    shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
 attribute float instanceFacadeWindows;varying float vBakedWindows;varying vec3 vBakedPosition;varying vec3 vBakedNormal;varying vec3 vBakedExtent;`)
     .replace('#include <begin_vertex>',`#include <begin_vertex>
 vBakedWindows=instanceFacadeWindows;vBakedPosition=position;vBakedNormal=normal;
 vBakedExtent=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));`);
    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-varying float vBakedWindows;varying vec3 vBakedPosition;varying vec3 vBakedNormal;varying vec3 vBakedExtent;`)
+uniform float uCityWindowBrightness;varying float vBakedWindows;varying vec3 vBakedPosition;varying vec3 vBakedNormal;varying vec3 vBakedExtent;`)
     .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
 if(vBakedWindows>.5&&abs(vBakedNormal.y)<.5){
  float facadeWidth=abs(vBakedNormal.x)>.5?vBakedExtent.z:vBakedExtent.x;
@@ -70,29 +69,29 @@ if(vBakedWindows>.5&&abs(vBakedNormal.y)<.5){
  windowMask*=step(0.,cell.x)*step(cell.x,columns-1.)*step(0.,cell.y)*step(cell.y,max(1.,floor(vBakedExtent.y/3.1))-1.);
  float room=fract(sin(dot(cell,vec2(12.9898,78.233)))*43758.5453);
  vec3 lit=room<.18?vec3(.035,.075,.12):room<.30?vec3(.36,.56,.66):room<.67?vec3(1.,.69,.34):vec3(.81,.51,.25);
- diffuseColor.rgb=mix(diffuseColor.rgb,lit,windowMask*.65);totalEmissiveRadiance+=lit*windowMask*.65;
+ diffuseColor.rgb*=1.-windowMask;totalEmissiveRadiance+=lit*windowMask*uCityWindowBrightness;
+ roughnessFactor=mix(roughnessFactor,1.,windowMask);metalnessFactor*=1.-windowMask;
 }`);
   };
   material.customProgramCacheKey=()=>key()+'-baked-windows-v1';material.needsUpdate=true;
   batch.facadeWindows=new THREE.InstancedBufferAttribute(new Float32Array(batch.mesh.instanceMatrix.count),1);batch.mesh.geometry.setAttribute('instanceFacadeWindows',batch.facadeWindows);
  }
- setView(camera:THREE.Camera){
-  camera.updateMatrixWorld();const now=performance.now(),position=this.localCamera.setFromMatrixPosition(camera.matrixWorld);camera.getWorldDirection(this.direction);
-  if(this.budgeted&&position.distanceToSquared(this.lastCamera)<64&&this.direction.dot(this.lastDirection)>.98&&now-this.lastRefresh<90)return;
-  if(!this.budgeted){this.budgeted=true;for(const batch of this.batches)this.enableFacadeWindows(batch);}
-  this.lastRefresh=now;this.lastCamera.copy(position);this.lastDirection.copy(this.direction);this.view.setCamera(camera);this.updateBuildingViews();this.rebuildVisibleBatches();
+ enableStaticFacades(){
+  if(this.budgeted)return;this.budgeted=true;
+  for(const batch of this.batches)this.enableFacadeWindows(batch);
+  for(const building of this.buildings)building.dirty=true;
+  this.updateBuildingViews();this.rebuildVisibleBatches();
  }
- isGroupVisible(group:THREE.Group){return this.buildings.find(b=>b.group===group)?.active??group.visible;}
- isBuildingVisible(id:string){return this.buildings.find(b=>b.group.userData.buildingId===id)?.active??true;}
+ setNight(night:number){this.windowBrightness.value=.72+THREE.MathUtils.clamp(night,0,1)*.28;}
+ /** Compatibility only: ordinary buildings never load or change with the camera. */
+ setView(_camera:THREE.Camera){}
+ isGroupVisible(group:THREE.Group){return group.visible;}
+ isBuildingVisible(id:string){return this.buildings.find(b=>b.group.userData.buildingId===id)?.group.visible??true;}
  private updateBuildingViews(){
   for(const building of this.buildings){
-   const {group}=building;this.worldBounds.copy(building.localBounds).applyMatrix4(group.matrix).getBoundingSphere(this.sphere);building.center.copy(this.sphere.center);building.radius=this.sphere.radius;
-   const active=group.visible&&this.view.visible(building.center,building.active,building.radius),distance=Math.sqrt(this.view.distanceSquared(building.center));
-   const windowStep=distance<135?1:distance<225?3:0,baked=distance>=160;
-   this.localCamera.copy(this.view.origin).applyMatrix4(this.inverse.copy(group.matrix).invert());
-   const sideX=this.localCamera.x>building.localBounds.max.x?1:this.localCamera.x<building.localBounds.min.x?-1:0,sideZ=this.localCamera.z>building.localBounds.max.z?1:this.localCamera.z<building.localBounds.min.z?-1:0;
-   if(active!==building.active||windowStep!==building.windowStep||baked!==building.baked||sideX!==building.sideX||sideZ!==building.sideZ)building.dirty=true;
-   Object.assign(building,{active,windowStep,baked,sideX,sideZ});for(const extra of building.extras)extra.object.visible=extra.visible&&active;
+   const active=building.group.visible;
+   if(active!==building.active||building.windowStep!==0||!building.baked)building.dirty=true;
+   Object.assign(building,{active,windowStep:0,baked:true});for(const extra of building.extras)extra.object.visible=extra.visible&&active;
   }
  }
  private rebuildVisibleBatches(){
