@@ -100,7 +100,7 @@ test('3D progress survives a long vertical concourse climb in severe weather wit
  assert.equal(f.routeWaypoints,route);assert.ok(f.y>20);assert.equal(f.travelStuckTicks,0);assert.equal(f.routeIndex,0);
 });
 
-test('all seven lines board residents in both directions, keep their physical train, and finish in bad weather',()=>{
+test('all lines board residents in both directions, keep their physical train, and finish in bad weather',()=>{
  const s=freshState();Object.assign(s.weather,{condition:'heavy rain',precipitation:1,wind:.9,cloudCover:1});const actors=[];
  for(const line of METRO_LINES)for(const direction of [1,-1]){
   const f=s.flies[actors.length],entryIndex=direction===1?0:line.points.length-1,exitIndex=direction===1?line.points.length-1:0,a=metroStationGeometry(line,entryIndex,direction),b=metroStationGeometry(line,exitIndex,direction);
@@ -112,7 +112,7 @@ test('all seven lines board residents in both directions, keep their physical tr
   s.simulationAgeSeconds+=getSimulationConfig().gameSecondsPerRealSecond*.5;
   for(const f of actors){const was=f.onTrain,id=f.metroTrainId;moveFly(f);if(f.onTrain){boarded.add(f.id);assert.ok(f.metroTrainId);if(was)assert.equal(f.metroTrainId,id);pinned.set(f.id,f.metroTrainId);}}
  }
- assert.equal(boarded.size,14);assert.equal(new Set(pinned.values()).size,14,'each line/direction boards a separate physical shuttle');
+ assert.equal(boarded.size,METRO_LINES.length*2);assert.equal(new Set(pinned.values()).size,METRO_LINES.length*2,'each line/direction boards a separate physical shuttle');
  for(const f of actors){assert.equal(f.traveling,false,`${f.id} stuck at ${f.transitStage}: ${f.action}`);assert.equal(f.metroBoardingsThisTrip,1);assert.equal(f.money,9.5);}
 });
 

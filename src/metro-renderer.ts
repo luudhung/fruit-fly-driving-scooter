@@ -7,7 +7,7 @@ type Actor={alive:boolean;onTrain?:boolean;metroLineId?:string;metroTrainId?:str
 type Sign=(text:string,fontSize?:number,scale?:number)=>THREE.Sprite;
 type Train={group:THREE.Group;lineIndex:number;id:string;direction:number;label:THREE.Sprite};
 type Station={lineId:string;index:number;direction:number;x:number;z:number;label:THREE.Sprite;title:string};
-const colors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae,0xd7835e];
+const colors=[0xe34a45,0x2f74c0,0x4aa75f,0xf0b541,0x9b5db5,0x46a7ae,0xd7835e,0x6b9e45,0xbda15e,0x6586c1,0xb26995];
 export function metroDirectionLabel(line:MetroLine,direction:number){return `${line.id} ${direction>=0?'→ BẾN CUỐI':'← BẾN ĐẦU'}`;}
 /** Two physical trains and two parallel services per line; infrastructure stays batched. */
 export class MetroRenderer{

@@ -1,4 +1,5 @@
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
+import {motorwaySpeedMultiplier} from './motorway.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {syncHospitalityHotels,hospitalityAccount,recordHospitalitySale,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
 import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_STANDS, VISITOR_TOUCHDOWN_SECONDS, MIN_VISITOR_PASSENGERS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwaySlot} from './visitor-aviation.mjs';
@@ -143,7 +144,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   let left=Math.max(0,gameSeconds)/Math.max(1,Number(raw().timeScale||120));
   for(let hop=0;left>1e-6&&hop<48;hop++){
    const p=f.routeWaypoints?.[f.routeIndex];if(!p){f.traveling=false;f.vx=f.vz=0;return true;}
-   f.targetX=p.x;f.targetZ=p.z;f.transitMode=p.mode||'walk';const dx=p.x-f.x,dz=p.z-f.z,length=Math.hypot(dx,dz),speed=f.transitMode==='car'?11:2.5;
+   f.targetX=p.x;f.targetZ=p.z;f.transitMode=p.mode||'walk';const dx=p.x-f.x,dz=p.z-f.z,length=Math.hypot(dx,dz),speed=f.transitMode==='car'?11*motorwaySpeedMultiplier(f):2.5;
    if(length<.05){f.x=p.x;f.z=p.z;f.y=p.y??1.1;f.routeIndex++;continue;}
    const ux=dx/length,uz=dz/length;let step=Math.min(length,left*speed),stop=false;
    if(f.transitMode==='car'){

@@ -12,7 +12,7 @@ test('the swapped twin towers have no intervening building and Tower Court homes
  assert.equal(BUILDINGS.find(building=>building.id==='APT-33').x,-171);
  for(const x of [-154,-102,-92])assert.ok(clearSegment({x,z:-54},{x,z:-34}));
  const courts=APARTMENTS.filter(b=>b.id.startsWith('TOWER-COURT-'));
- assert.equal(courts.length,2);assert.ok(courts.every(b=>b.h>=90&&b.h<=96&&b.capacity>=24));
+ assert.equal(courts.length,2);assert.ok(courts.every(b=>b.h>=90&&b.h<=96&&b.capacity>=23&&b.capacity<=25));
  assert.ok(courts.every(b=>Math.hypot(b.x-SKYLINE_PLOTS.toronto.x,b.z-SKYLINE_PLOTS.toronto.z)<55));
 });
 test('all building footprints clear roads, water, park and each other',()=>{
@@ -146,9 +146,9 @@ test('the east-bank bridge approaches continue straight without park trees or bu
 
 
 test('the river cuts both lands apart all the way to the map edges',async()=>{
- const {RIVER,BRIDGES,WORLD_HALF}=await import('../worker/city-map.mjs');
+ const {RIVER,onWaterCrossing,WORLD_HALF}=await import('../worker/city-map.mjs');
  assert.ok(RIVER.z-RIVER.d/2<=-WORLD_HALF&&RIVER.z+RIVER.d/2>=WORLD_HALF);
- for(let z=-WORLD_HALF+5;z<WORLD_HALF-5;z+=2)if(!BRIDGES.some(b=>Math.abs(z-b.z)<=b.d/2))assert.equal(blocked({x:RIVER.x,z}),true,`land bypass at ${z}`);
+ for(let z=-WORLD_HALF+5;z<WORLD_HALF-5;z+=2)if(!onWaterCrossing({x:RIVER.x,z}))assert.equal(blocked({x:RIVER.x,z}),true,`land bypass at ${z}`);
 });
 test('all metro stairs run along clear sidewalks and every interchange stays above trains',async()=>{
  const {metroTransferWaypoints,METRO_INTERCHANGES}=await import('../worker/metro-planner.mjs');

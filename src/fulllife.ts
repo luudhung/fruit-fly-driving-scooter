@@ -9,6 +9,9 @@ import {createRoadMaterial,updateRoadLighting} from './road-lighting.ts';
 import {buildMarinaBay} from './marina-bay.ts';
 import {MetroRenderer} from './metro-renderer.ts';
 import {NewYorkArchitecture} from './new-york-architecture.ts';
+import {buildAirportGardens} from './airport-gardens.ts';
+import {buildMotorway} from './motorway.ts';
+import {buildKhalifa,updateKhalifaLighting} from './khalifa.ts';
 import {buildContactShadows} from './city-contact-shadows.ts';
 import {CityWater} from './city-water.ts';
 import {buildFireStation,FireServiceRenderer} from './fire-service-renderer.ts';
@@ -188,6 +191,7 @@ type WeatherState = {
 };
 
 type CivilizationSnapshot = {
+  housing?:{capacityUnit?:'households';apartmentBlocks:Array<{id:string;capacity:number;occupants:number;occupiedHouseholds?:number;residentCount?:number;overCapacityHouseholds?:number}>;groundHouses?:Array<{id:string;capacity:number;occupiedHouseholds:number;residentCount:number}>};
   districts?:{riverside:{residents:number;settlersAdded:number}};
   civicConflict?:CivicSnapshot;
   urbanWorld?:UrbanWorldSnapshot;
@@ -424,11 +428,18 @@ function setConnection(state: "authoritative" | "offline" | "connecting", label:
   connectionLabel.textContent = label.replace(/\s*▾$/, "");
 }
 
+function extensionOrigin(error:unknown){
+ const stack=String((error as {stack?:unknown}|null)?.stack||'');
+ const firstFrame=stack.split('\n').find(line=>/^\s*at\s/.test(line))||'';
+ return /(?:chrome|moz|safari)-extension:\/\//.test(firstFrame);
+}
 window.addEventListener("error",(event)=>{
+  if(/^(?:chrome|moz|safari)-extension:\/\//.test(event.filename||'')||extensionOrigin(event.error))return;
   console.error("[fulllife] runtime error",event.error||event.message);
   if(connection.dataset.state==="connecting")setConnection("connecting","GRAPHICS ERROR · CENSUS RETRYING ▾");
 });
 window.addEventListener("unhandledrejection",(event)=>{
+  if(extensionOrigin(event.reason))return;
   console.error("[fulllife] unhandled rejection",event.reason);
   if(connection.dataset.state==="connecting")setConnection("connecting","APP ERROR · CENSUS RETRYING ▾");
 });
@@ -529,6 +540,11 @@ function renderInspector(fly: FlyState | null) {
   flyHomeEl.textContent=homeBuilding?.luxury
     ? `${homeBuilding.id} · ${fly.ownsHome?'sở hữu':'cư trú'} · giá căn hộ ${num(homeBuilding.purchaseValue||0)} H$`
     : fly.ownsHome ? `owned · tier ${fly.homeTier || 1}` : "rented unit";
+  const housingInfo=snapshot?.housing?.apartmentBlocks.find(building=>building.id===fly.housingUnitId)||snapshot?.housing?.groundHouses?.find(building=>building.id===fly.housingUnitId);
+  if(homeBuilding){
+    const capacity=housingInfo?.capacity??homeBuilding.capacity??(homeBuilding.kind==='house'?1:10);
+    flyHomeEl.textContent+=` · ${homeBuilding.id} · ${housingInfo?.occupiedHouseholds??(housingInfo&&'occupants'in housingInfo?housingInfo.occupants:0)}/${capacity} hộ${housingInfo?.residentCount!==undefined?` · ${housingInfo.residentCount} cư dân`:''}`;
+  }
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
@@ -954,10 +970,14 @@ for(const deck of HARBOR_CAUSEWAYS){
  foundation.position.set(deck.x,-.055,deck.z);
  roadSurfaceRoot.add(foundation);
 }
-for(const road of ROADS)for(const piece of surfaceRoadPieces(road))addRoadStrip(piece.x,piece.z,piece.w,piece.d,piece.d>piece.w,piece!==road);
+for(const road of ROADS){
+ if(road.motorway||road.motorwayAccess)continue;
+ for(const piece of surfaceRoadPieces(road))addRoadStrip(piece.x,piece.z,piece.w,piece.d,piece.d>piece.w,piece!==road);
+}
 const roadSurfaceDrawsBefore=roadSurfaceRoot.children.length;
 batchStaticBoxes(roadSurfaceRoot);
 buildUnderpasses(cityRoot);
+buildMotorway(cityRoot,makeCanvasSprite);
 
 // The full set of signals and crossings shares four instanced draw batches.
 const trafficPoleMat = new THREE.MeshStandardMaterial({ color:0x303638, roughness:0.72, metalness:0.42 });
@@ -970,6 +990,7 @@ buildSportsDistrict(cityRoot,makeCanvasSprite);
 // Central Park is a long protected Manhattan-style district with reservoirs, meadows and a highly visible wheel.
 const centralPark=new THREE.Mesh(new THREE.BoxGeometry(PARK.w,.10,PARK.d),parkMat);
 centralPark.position.set(PARK.x,.09,PARK.z);cityRoot.add(centralPark);
+buildAirportGardens(cityRoot,makeCanvasSprite,{waterMaterial:cityWater.material,treeScale:graphics.treeScale});
 const pathMat=new THREE.MeshStandardMaterial({color:0xd9c6a3,roughness:1});
 const parkPaths=PARK_PATHS;
 for(const r of parkPaths){const m=new THREE.Mesh(new THREE.BoxGeometry(r.w,.12,r.d),pathMat);m.position.set(r.x,.17,r.z);cityRoot.add(m);}
@@ -1180,38 +1201,9 @@ const twinTowers=buildPetronasTowers(PETRONAS_TOWERS,makeCanvasSprite);
 cityRoot.add(twinTowers);
 urbanVisuals.registerBuilding("petronas",twinTowers);
 
-function addBurjKhalifaStyle(x:number,z:number){
- const g=new THREE.Group(),
-   glass=new THREE.MeshStandardMaterial({color:0x89aebf,roughness:.2,metalness:.52}),
-   silver=new THREE.MeshStandardMaterial({color:0xcbd2d4,roughness:.28,metalness:.74}),
-   coolGlow=new THREE.MeshBasicMaterial({color:0xd7f5ff,toneMapped:false}),
-   warmGlow=new THREE.MeshBasicMaterial({color:0xffd89a,toneMapped:false});
- let y=0;
- const tiers=[[13,40],[11.2,34],[9.4,30],[7.7,25],[6.1,21],[4.6,17]] as const;
- tiers.forEach(([r,h],i)=>{
-   const tierBase=y;
-   const seg=new THREE.Mesh(new THREE.CylinderGeometry(r*.72/2,r/2,h,10),i%2?silver:glass);
-   seg.position.y=tierBase+h/2;seg.rotation.y=i*.17;g.add(seg);
-   // Thin fake-light bands and vertical accents give the tower a night identity without PointLights.
-   const ring=new THREE.Mesh(new THREE.TorusGeometry(r*.44,.075,5,22),i%2?warmGlow:coolGlow);
-   ring.rotation.x=Math.PI/2;ring.position.y=tierBase+h*.80;g.add(ring);
-   for(const a of [0,Math.PI/2,Math.PI,Math.PI*1.5]){
-     const rr=r*.37;
-     const strip=new THREE.Mesh(new THREE.BoxGeometry(.11,h*.72,.11),coolGlow);
-     strip.position.set(Math.cos(a)*rr,tierBase+h*.46,Math.sin(a)*rr);g.add(strip);
-   }
-   y+=h-2;
- });
- const crown=new THREE.Mesh(new THREE.CylinderGeometry(.65,2.0,18,9),silver);crown.position.y=y+9;g.add(crown);
- const crownGlow=new THREE.Mesh(new THREE.CylinderGeometry(.20,.62,14,8),warmGlow);crownGlow.position.y=y+12;g.add(crownGlow);
- const spire=new THREE.Mesh(new THREE.CylinderGeometry(.12,.42,42,7),silver);spire.position.y=y+37;g.add(spire);
- const spireGlow=new THREE.Mesh(new THREE.CylinderGeometry(.055,.13,39,6),coolGlow);spireGlow.position.y=y+37.5;g.add(spireGlow);
- const baseHalo=new THREE.Mesh(new THREE.TorusGeometry(6.2,.11,6,28),warmGlow);baseHalo.rotation.x=Math.PI/2;baseHalo.position.y=.18;g.add(baseHalo);
- const sign=makeCanvasSprite("BURJ KHALIFA · HANSDREX",26,1.35);sign.position.set(0,194,0);g.add(sign);
- g.position.set(x,0,z);cityRoot.add(g);
-}
 const khalifaPlot=SKYLINE_PLOTS['burj-khalifa'];
-addBurjKhalifaStyle(khalifaPlot.x,khalifaPlot.z);
+const khalifa=buildKhalifa({...khalifaPlot,h:190},makeCanvasSprite);
+cityRoot.add(khalifa);urbanVisuals.registerBuilding('burj-khalifa',khalifa);
 
 const marinaBay=buildMarinaBay(cityRoot,makeCanvasSprite);urbanVisuals.registerBuilding('marina-bay',marinaBay);
 // Distinct shopfronts: glazed windows, colored awnings and readable destination signs.
@@ -1488,7 +1480,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   sun.position.copy(sunDirection(t)).multiplyScalar(400);
   sunFill.color.copy(palette.fill);sunFill.intensity=(.12+daylight*.34)*(1-cloud*.35);
   moon.intensity=.16+night*.65*(1-cloud*.28);
-  updateLandmarkLighting(night);updatePetronasLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
+  updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night,performance.now()/1000);updateBridgeLighting(night);updateRoadLighting(night);
   for(const material of windowMaterials)material.color.setScalar(.72+night*.28);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
@@ -1575,6 +1567,9 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'nyc-street':[-102,7,-108,0,-.04,68],
  'nyc-overview':[420,290,510,-2.47,-.40,52],
  'paris':[740,9,110,.35,-.05,68],
+ 'airport-gardens':[160,300,-510,-2.31,-.56,60],
+ 'westborough':[-280,300,460,-2.385,-.45,60],
+ 'khalifa':[180,120,-110,-2.782,-.11,52],
 };
 if(perfPose&&perfPoses[perfPose]){const[x,y,z,yaw,pitch,fov]=perfPoses[perfPose];player.teleport(x,y,z,true);freePosition.set(x,y,z);cameraYaw=yaw;cameraPitch=pitch;camera.fov=fov;camera.updateProjectionMatrix();renderer.domElement.dataset.perfPose=perfPose;}
 camera.position.copy(freePosition);

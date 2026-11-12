@@ -3,11 +3,13 @@ import {createCivicConflict} from './civic-conflict.mjs';
 import {createUrbanWorld} from './urban-world.mjs';
 import {createSportsLuxury} from './sports-luxury.mjs';
 import {createCityVisitors} from './city-visitors.mjs';
+import {motorwaySpeedMultiplier} from './motorway.mjs';
+import {apartmentHouseholdCapacity,apartmentHasVacancy,occupiedHouseholdCount,normalizeHousingCapacities,housingOccupancy} from './housing-capacity.mjs';
 import {isHospitalitySector,hospitalityPremises,hospitalityDemand,openHospitalityPremises,restoreHospitalityPremises,hospitalityReady,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
-import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, AIRPORT_PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -200,11 +202,10 @@ function emergentRoleForBusiness(business, owner) {
 }
 
 
-const APARTMENT_CAPACITY = 10;
 const POPULATION_BOOTSTRAP_VERSION = 3;
 
-function buildApartmentBlocks() { return APARTMENTS.map(b=>({...b,occupants:[]})); }
-function buildGroundHouseLots() { return HOUSE_LOTS.map(b=>({...b,ownerHouseholdId:null})); }
+function buildApartmentBlocks() { return APARTMENTS.map(b=>({...b,capacity:apartmentHouseholdCapacity(b.h),capacityUnit:'households',occupants:[]})); }
+function buildGroundHouseLots() { return HOUSE_LOTS.map(b=>({...b,capacity:1,capacityUnit:'households',ownerHouseholdId:null})); }
 
 function ensureHousingState() {
   state.housing = state.housing || {
@@ -216,6 +217,7 @@ function ensureHousingState() {
   state.housing.apartmentBlocks = state.housing.apartmentBlocks || buildApartmentBlocks();
   state.housing.houseLots = state.housing.houseLots || buildGroundHouseLots();
   state.housing.households = state.housing.households || {};
+  state.housing.capacityUnit='households';
   state.housing.nextHouseholdId = Number(state.housing.nextHouseholdId || 1);
 }
 
@@ -309,9 +311,18 @@ function createHousehold(fly, inherited = null) {
 function availableApartmentBlock() {
   ensureHousingState();
   const available = state.housing.apartmentBlocks
-    .filter((b) => !b.luxury && (b.occupants?.length || 0) < b.capacity)
-    .sort((a, b) => (a.occupants?.length || 0) - (b.occupants?.length || 0));
+    .filter((b) => !b.luxury && apartmentHasVacancy(b))
+    .sort((a, b) => occupiedHouseholdCount(a)-occupiedHouseholdCount(b));
   return available.length ? available[Math.floor(rand() * Math.min(8, available.length))] : null;
+}
+
+function housingHomeLocation(block){
+  if(block.id.startsWith('AIRPORT-APT-'))return 'airport-gardens-homes';
+  if(block.id.startsWith('WEST-'))return 'west-gardens-homes';
+  if(block.x>480)return 'riverside-homes';
+  const centralHomes=new Set(['apt-north','apt-east','apt-south','apt-west']);
+  return homeLocations().filter(l=>centralHomes.has(l.id))
+    .sort((a,b)=>Math.hypot(a.x-block.x,a.z-block.z)-Math.hypot(b.x-block.x,b.z-block.z))[0]?.id||'apt-west';
 }
 
 function assignApartment(fly, household = null) {
@@ -332,8 +343,7 @@ function assignApartment(fly, household = null) {
   fly.housingUnitId = block.id;
   fly.homeX = block.x;
   fly.homeZ = block.z;
-  if(block.x>480)fly.homeId="riverside-homes";
-  else if(fly.homeId==="riverside-homes")fly.homeId=homeLocations().filter(l=>l.x<400).sort((a,b)=>Math.hypot(a.x-block.x,a.z-block.z)-Math.hypot(b.x-block.x,b.z-block.z))[0]?.id||"homes-west";
+  fly.homeId=housingHomeLocation(block);
   fly.ownsHome = false;
   fly.homeTier = 0;
   fly.homeEquity = 0;
@@ -346,7 +356,7 @@ function purchaseLuxuryApartment(fly,buildingId){
   if(!fly.alive||fly.ageYears<21||fly.ownsHome||!block||!household||
      household.members[0]!==fly.id||fly.traveling||fly.currentLocationId!==buildingId||
      urbanWorld.isUnavailable(buildingId,fly))return false;
-  if(household.unitId!==buildingId&&(block.occupants?.length||0)>=block.capacity)return false;
+  if(household.unitId!==buildingId&&!apartmentHasVacancy(block))return false;
   const price=block.purchaseValue;
   if(fly.money+fly.savings<price+5000)return false;
   const cash=Math.min(Math.max(0,fly.money),price);
@@ -397,7 +407,7 @@ function assignGroundHouse(fly, tier = 1, household = null) {
   fly.housingUnitId = lot.id;
   fly.homeX = lot.x;
   fly.homeZ = lot.z;
-  if(fly.homeId==="riverside-homes")fly.homeId=homeLocations().filter(l=>l.x<400).sort((a,b)=>Math.hypot(a.x-lot.x,a.z-lot.z)-Math.hypot(b.x-lot.x,b.z-lot.z))[0]?.id||"homes-west";
+  fly.homeId=housingHomeLocation(lot);
   fly.ownsHome = true;
   fly.homeTier = tier;
   fly.homeEquity = value;
@@ -495,7 +505,7 @@ const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isU
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
-function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();}
+function initCityServices(){state.emergencyServicesEnabled=true;urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
   if(residentRelationships.handleResident(f,clock))return true;
@@ -1338,6 +1348,7 @@ function restoreState(persistedState) {
     }
   }
   migrateGroundHousesToSafeLots(previousMapVersion);
+  normalizeHousingCapacities(state.housing,BUILDINGS);
   migrateResidentNavigation(previousMapVersion);
   state.mapVersion=MAP_VERSION;
   if(Number(state.airportExpansionVersion||0)<1){
@@ -2503,7 +2514,7 @@ function brainChooseAction(fly, clock) {
   const movingHousehold=state.housing?.households?.[fly.householdId];
   if(age>=21&&!fly.ownsHome&&movingHousehold?.members[0]===fly.id){
     const affordable=state.housing.apartmentBlocks.filter(block=>block.luxury&&
-      (block.occupants?.length||0)<block.capacity&&fly.money+fly.savings>=block.purchaseValue+5000);
+      apartmentHasVacancy(block)&&fly.money+fly.savings>=block.purchaseValue+5000);
     const block=affordable.sort((a,b)=>b.purchaseValue-a.purchaseValue)[0];
     if(block)add(block.id,'viewing a luxury apartment',85+fly.traits.ambition*25);
   }
@@ -2524,6 +2535,7 @@ function brainChooseAction(fly, clock) {
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
   add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
   add("park", "taking a walk", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
+  add("airport-park", "visiting Airport Gardens Park", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
   if(weatherDanger()<.3)add("ferris-wheel","riding the free Central Park wheel",fly.stress*.95+fly.loneliness*.2+fly.traits.sociability*18+12);
   add("gym", "exercising", fly.stress * 0.34 + (100 - fly.health) * 0.25 + fly.traits.ambition * 18);
   add("clinic", "seeking care", (100 - fly.health) * 1.05 + (fly.illness ? 55 : 0));
@@ -2945,7 +2957,7 @@ function moveFly(fly,waypointHops=0) {
 
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
-  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost * (fly.transitMode==="car"&&fly.brain?.driving?.style==="reckless"?1.28:1);
+  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost * motorwaySpeedMultiplier(fly,fly.transitMode) * (fly.transitMode==="car"&&fly.brain?.driving?.style==="reckless"?1.28:1);
   const danger = weatherDanger();
   const weatherFactor =
     fly.transitMode === "metro" ? 1 :
@@ -3776,29 +3788,29 @@ function regulateEmotions(fly, clock) {
   fly.emotionalArousal = clamp((Number(fly.excitement || 0) * 0.55 + fly.stress * 0.45) / 100, 0, 1);
 }
 
-function parkRoamTarget(fly){
+function parkRoamTarget(fly,park=PARK){
   // Brain-driven park roaming may cross grass/meadows; lakes and structures remain blocked.
   for(let attempt=0;attempt<14;attempt++){
-    const x=PARK.x-PARK.w/2+7+brainRand(fly)*(PARK.w-14);
-    const z=PARK.z-PARK.d/2+7+brainRand(fly)*(PARK.d-14);
+    const x=park.x-park.w/2+7+brainRand(fly)*(park.w-14);
+    const z=park.z-park.d/2+7+brainRand(fly)*(park.d-14);
     if(!blocked({x,z}))return{x,z,y:1.1};
   }
-  return{x:PARK.x,z:PARK.z,y:1.1};
+  return{x:park.x,z:park.z,y:1.1};
 }
 
 function maybeRoamInsidePark(fly){
-  if(!fly.alive||fly.traveling||fly.socialTask||fly.currentLocationId!=="park"||fly.wheelRideUntil>state.simulationAgeSeconds)return false;
+  if(!fly.alive||fly.traveling||fly.socialTask||!['park','airport-park'].includes(fly.currentLocationId)||fly.wheelRideUntil>state.simulationAgeSeconds)return false;
   if(state.simulationAgeSeconds-Number(fly.lastParkRoamAt||0)<480)return false;
-  const target=parkRoamTarget(fly);
+  const locationId=fly.currentLocationId,target=parkRoamTarget(fly,locationId==='airport-park'?AIRPORT_PARK:PARK);
   const route=buildPedestrianRoute({x:fly.x,z:fly.z},target);
   if(route.length<2)return false;
   fly.lastParkRoamAt=state.simulationAgeSeconds;
   fly.routeWaypoints=route.map((p)=>({...p,y:1.1,mode:"walk",stage:"park-roam"}));
   fly.routeIndex=0;fly.targetX=fly.routeWaypoints[0].x;fly.targetZ=fly.routeWaypoints[0].z;
-  fly.finalTargetX=target.x;fly.finalTargetZ=target.z;fly.targetLocationId="park";
+  fly.finalTargetX=target.x;fly.finalTargetZ=target.z;fly.targetLocationId=locationId;
   fly.pendingAction=fly.action&&fly.action!=="idle"?fly.action:"strolling through Central Park";
-  fly.action="strolling through Central Park";fly.traveling=true;fly.transitMode="walk";fly.transitStage="park-roam";
-  fly.travelStartedAt=state.simulationAgeSeconds;fly.travelLastDistance=Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z);fly.travelStuckTicks=0;fly.travelGoalId="park";
+  fly.action=locationId==='airport-park'?'strolling through Airport Gardens Park':'strolling through Central Park';fly.traveling=true;fly.transitMode="walk";fly.transitStage="park-roam";
+  fly.travelStartedAt=state.simulationAgeSeconds;fly.travelLastDistance=Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z);fly.travelStuckTicks=0;fly.travelGoalId=locationId;
   return true;
 }
 
@@ -3830,9 +3842,9 @@ function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
   }
 
   if(fly.traveling)return;
-  if(fly.currentLocationId==="park"&&maybeRoamInsidePark(fly))return;
+  if(['park','airport-park'].includes(fly.currentLocationId)&&maybeRoamInsidePark(fly))return;
   // Tap water is free in homes, indoor public places and park fountains.
-  if(fly.thirst>35&&(fly.indoors||atHome||fly.currentLocationId==="park")){
+  if(fly.thirst>35&&(fly.indoors||atHome||['park','airport-park'].includes(fly.currentLocationId))){
     fly.thirst=clamp(fly.thirst-55);fly.stress=clamp(fly.stress-2);
     if(fly.currentLocationId==="tea-house")fly.action="drinking tea and water";
   }
@@ -3922,7 +3934,7 @@ function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
     }
   }
 
-  if (fly.currentLocationId === "park") {
+  if (['park','airport-park'].includes(fly.currentLocationId)) {
     const sunset = sunsetQuality();
     fly.stress = clamp(fly.stress - (sunset > 0.48 ? 0.24 : 0.18));
     fly.excitement = clamp(fly.excitement + (sunset > 0.48 ? 0.09 : 0.015));
@@ -3972,7 +3984,7 @@ function maintainHouseholds(){
 }
 
 function riversideApartment(){
-  return state.housing?.apartmentBlocks?.filter(b=>!b.luxury&&b.x>480&&(b.occupants?.length||0)<b.capacity&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>(a.occupants?.length||0)-(b.occupants?.length||0))[0]||null;
+  return state.housing?.apartmentBlocks?.filter(b=>!b.luxury&&b.x>480&&apartmentHasVacancy(b)&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>occupiedHouseholdCount(a)-occupiedHouseholdCount(b))[0]||null;
 }
 function completeRiversideMove(f){
   if(f.traveling||f.action!=='viewing a Riverside apartment'||f.currentLocationId!=='riverside-homes')return false;
@@ -4248,6 +4260,7 @@ function visitorSnapshot(options){
 }
 function getState(options={}) {
   const living = state.flies.filter((f) => f.alive);
+  const housingCounts=housingOccupancy(state.housing,living);
   const moneySupply = liquidMoneySupply();
   const clock = gameClock();
   const selected = options.selectedId?neuralActors().find(f=>f.id===options.selectedId)||living[0]||null:living[0]||null;
@@ -4312,16 +4325,18 @@ function getState(options={}) {
     roadTraffic:roadLife.summary(),
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
+      capacityUnit:'households',
       apartmentBlocks: state.housing?.apartmentBlocks?.map((b) => ({
         id: b.id,
         x: b.x,
         z: b.z,
-        capacity: b.capacity,
-        occupants: (b.occupants || []).length,
+        ...housingCounts.apartments.get(b.id),
+        occupants: occupiedHouseholdCount(b),
         rent: b.rent,
         luxury: Boolean(b.luxury),
         purchaseValue: b.purchaseValue,
       })) || [],
+      groundHouses:state.housing?.houseLots?.map(lot=>({id:lot.id,x:lot.x,z:lot.z,...housingCounts.houses.get(lot.id)}))||[],
       occupiedGroundHouses: state.housing?.houseLots?.filter((x) => x.ownerHouseholdId).length || 0,
       totalGroundHouseLots: state.housing?.houseLots?.length || 0,
     },

@@ -16,7 +16,7 @@ test('every physical station approach and descent reaches its platform or sidewa
   assert.equal(fly.routeIndex,route.length-1,`${label}: stuck at waypoint ${fly.routeIndex}`);
   assert.ok(Math.hypot(fly.x-end.x,fly.y-end.y,fly.z-end.z)<.01,label);traversals++;
  }
- assert.equal(traversals,220);
+ assert.equal(traversals,METRO_LINES.reduce((sum,line)=>sum+line.points.length*4,0));
 });
 
 test('an elevated station walkway clears a low roof while a wall and ground route remain solid',()=>{

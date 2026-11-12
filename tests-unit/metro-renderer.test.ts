@@ -6,8 +6,8 @@ const sign=(text:string)=>{const sprite=new THREE.Sprite();sprite.userData.text=
 const write=(sprite:THREE.Sprite,text:string)=>{sprite.userData.text=text;};
 const setup=()=>new MetroRenderer(new THREE.Group(),sign,write,3);
 
-test('seven metro lines retain fourteen physical trains and two separately labeled platforms per stop',()=>{
- const m=setup();assert.equal(m.trains.length,14);assert.equal(new Set(m.trains.map(t=>t.id)).size,14);
+test('metro lines retain two physical trains and two separately labeled platforms per stop',()=>{
+ const m=setup();assert.equal(m.trains.length,METRO_LINES.length*2);assert.equal(new Set(m.trains.map(t=>t.id)).size,METRO_LINES.length*2);
  assert.equal(m.stations.length,METRO_LINES.reduce((n,l)=>n+l.points.length*2,0));
  for(const line of METRO_LINES){assert.deepEqual(m.trains.filter(t=>METRO_LINES[t.lineIndex].id===line.id).map(t=>t.id),[line.id+'-A',line.id+'-B']);for(let index=0;index<line.points.length;index++){const platforms=m.stations.filter(s=>s.lineId===line.id&&s.index===index);assert.deepEqual(platforms.map(s=>s.direction),[1,-1]);assert.ok(platforms[0].title.includes('→'));assert.ok(platforms[1].title.includes('←'));}}
  assert.ok(m.infrastructure.children.filter(o=>o instanceof THREE.Mesh).every(o=>o instanceof THREE.InstancedMesh),'all immutable station/rail boxes should be batched');
@@ -26,7 +26,7 @@ test('a terminal arrival retains its incoming rail heading instead of rotating a
   assert.ok(terminal);m.update(terminal.seconds);const a=line.points[terminal.pose.from-direction],b=line.points[terminal.pose.to],visual=m.trains.find(t=>t.id===terminal.pose.id)!;
   assert.ok(Math.abs(visual.group.rotation.y-Math.atan2(b[0]-a[0],b[1]-a[1]))<1e-8);seen++;
  }
- assert.equal(seen,14);
+ assert.equal(seen,METRO_LINES.length*2);
 });
 
 test('ridership is counted by physical train and waiting is counted by direction and platform',()=>{

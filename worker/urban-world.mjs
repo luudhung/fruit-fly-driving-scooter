@@ -1,5 +1,6 @@
 import {createFireService} from './fire-service.mjs';
 import {restoreInitialFireDamage} from './urban-restoration.mjs';
+import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import * as cityGeometry from './city-map.mjs';
 import {validDevelopmentLot,planAccessRoad,MIN_ALLEY} from './urban-roads.mjs';
 import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,contains,overlaps,entrance,blocked,applyUrbanGeometry} from './city-map.mjs';
@@ -320,7 +321,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    addLocation(b.id,b,b.usage==='hotel'?'Resident-built hotel':b.usage==='restaurant'?'Resident-built restaurant':`Resident-built ${b.h>25?'tower':'workshop'}`);
    account(b.id).sector='resident-development';account(b.id).inventory=12;
    // Finished homes become actual housing capacity. Existing ownership and household IDs stay intact.
-   if(!['hotel','restaurant'].includes(b.usage)&&!raw().housing.apartmentBlocks.some(v=>v.id===b.id))raw().housing.apartmentBlocks.push({...b,capacity:Math.max(2,Math.floor(b.h/6)),rent:20,occupants:[],purchaseValue:estimate(b)*3});
+   if(!['hotel','restaurant'].includes(b.usage)&&!raw().housing.apartmentBlocks.some(v=>v.id===b.id))raw().housing.apartmentBlocks.push({...b,capacity:apartmentHouseholdCapacity(b.h),capacityUnit:'households',rent:20,occupants:[],purchaseValue:estimate(b)*3});
   }
   report('construction_complete',`${b.id} passed inspection and reopened.`,{projectId:p.id,buildingId:b.id,ownerId:p.ownerId});
  }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {ROADS,BRIDGES,UNDERPASSES,BUILDINGS,WORLD_HALF,contains,blocked,roadTravelY,effectiveBuildingHeight,urbanGeometryRevision} from '../worker/city-map.mjs';
 import {PLAYER_EYE} from './player-controller.ts';
 import {streetCollidersNear} from '../worker/street-furniture.mjs';
+import {motorwaySpeedMultiplier,motorwayMedianBlocked} from '../worker/motorway.mjs';
 
 export const CAR_HALF_WIDTH=.93,CAR_HALF_LENGTH=2.1;
 /** East-facing curb space on the main-city approach, before the west-bank underpass. */
@@ -25,7 +26,7 @@ export function cityCarClear(x:number,z:number,heading:number,ground=.2){
 function sceneryClear(x:number,z:number,heading:number,ground:number){
  refreshSolids();const sin=Math.sin(heading),cos=Math.cos(heading),w=CAR_HALF_WIDTH,l=CAR_HALF_LENGTH;
  if(Math.abs(x)>WORLD_HALF-4-l||Math.abs(z)>WORLD_HALF-4-l)return false;
- for(const [a,b]of footprint){const p={x:x+a*w*cos+b*l*sin,z:z-a*w*sin+b*l*cos};if(blocked(p))return false;}
+ for(const [a,b]of footprint){const p={x:x+a*w*cos+b*l*sin,z:z-a*w*sin+b*l*cos};if(blocked(p)||motorwayMedianBlocked(p))return false;}
  return !(solids.get(`${Math.floor(x/size)},${Math.floor(z/size)}`)||[]).some(b=>{
   const dx=b.x-x,dz=b.z-z,bw=b.w/2+.12,bl=b.d/2+.12;
   return Math.abs(dx)<bw+w*Math.abs(cos)+l*Math.abs(sin)&&Math.abs(dz)<bl+w*Math.abs(sin)+l*Math.abs(cos)&&Math.abs(dx*cos-dz*sin)<w+bw*Math.abs(cos)+bl*Math.abs(sin)&&Math.abs(dx*sin+dz*cos)<l+bw*Math.abs(sin)+bl*Math.abs(cos);
@@ -102,10 +103,14 @@ export class PlayerCar{
  }
  private advance(dt:number,input:CarInput){
   const throttle=Math.max(-1,Math.min(1,input.throttle||0)),steer=Math.max(-1,Math.min(1,input.steer||0));
+  const motorwayBoost=motorwaySpeedMultiplier(this),forwardLimit=15*motorwayBoost;
   this.steering=approach(this.steering,steer,dt*4.5);
   if(input.brake)this.speed=approach(this.speed,0,dt*12);
   else if(throttle&&this.speed*throttle<-.1)this.speed=approach(this.speed,0,dt*9);
-  else if(throttle)this.speed=Math.max(-5,Math.min(15,this.speed+throttle*dt*(throttle>0?4.1:3)));
+  else if(throttle){
+   const proposed=this.speed+throttle*dt*(throttle>0?4.1*Math.sqrt(motorwayBoost):3);
+   this.speed=Math.max(-5,proposed>forwardLimit?approach(this.speed,forwardLimit,dt*6):proposed);
+  }
   else this.speed=approach(this.speed,0,dt*(.65+Math.abs(this.speed)*.065));
   // Positive steering is right, consistent with D / the right mobile arrow.
   const turn=-this.speed/2.7*Math.tan(this.steering*.48)*dt/(1+Math.abs(this.speed)*.055);

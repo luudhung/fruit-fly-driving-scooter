@@ -1,4 +1,5 @@
 import {ROADS,PARK,contains,isGradeSeparated,urbanGeometryRevision} from './city-map.mjs';
+import {motorwaySegmentAt} from './motorway.mjs';
 
 // One authoritative signal cycle for road physics and the observer, in real-equivalent seconds.
 export function signalState(seconds,axis){
@@ -13,7 +14,7 @@ function refresh(){
  const key=ROADS.map(r=>`${r.x},${r.z},${r.w},${r.d}`).join('|');if(key===signature)return;signature=key;
  const vertical=ROADS.filter(r=>r.d>r.w),horizontal=ROADS.filter(r=>r.w>=r.d),xs=[...new Set(vertical.map(r=>r.x))],zs=[...new Set(horizontal.map(r=>r.z))];
  INTERSECTIONS.length=0;rows.clear();columns.clear();
- for(const x of xs)for(const z of zs){const p={id:`${x},${z}`,x,z};if(contains(PARK,p,5)||isGradeSeparated(p)||!vertical.some(r=>inside(r,p))||!horizontal.some(r=>inside(r,p)))continue;
+ for(const x of xs)for(const z of zs){const p={id:`${x},${z}`,x,z};if(contains(PARK,p,5)||isGradeSeparated(p)||motorwaySegmentAt(p)||!vertical.some(r=>inside(r,p))||!horizontal.some(r=>inside(r,p)))continue;
   INTERSECTIONS.push(p);if(!rows.has(z))rows.set(z,[]);rows.get(z).push(p);if(!columns.has(x))columns.set(x,[]);columns.get(x).push(p);
  }
  // Adjacent intersections can have overlapping stop lines. They form one controlled box,
@@ -79,6 +80,19 @@ export function createVehicleIndex(drivers){
    // queue rule then stops both forever; give one deterministic merge priority.
    if(along<5&&ox*h.x+oz*h.z<-.05&&String(other.id).localeCompare(String(f.id))>0)continue;
    allowed=Math.min(allowed,Math.max(0,along-5));
+  }
+  // Slip-road traffic yields at the edge. Established motorway traffic keeps
+  // moving, and a vehicle already inside the merge box can clear it.
+  const entering=motorwaySegmentAt(end);
+  if(entering&&!motorwaySegmentAt(f)){
+   const horizontal=entering.w>entering.d,waiting=nearby(end.x-42,end.x+42,end.z-42,end.z+42).some(other=>{
+    if(other.id===f.id||!motorwaySegmentAt(other)||!other.heading)return false;
+    return horizontal?Math.abs(other.heading.x)>.85:Math.abs(other.heading.z)>.85;
+   });
+   if(waiting){
+    let lo=0,hi=allowed;for(let i=0;i<12;i++){const mid=(lo+hi)/2;if(motorwaySegmentAt({x:f.x+ux*mid,z:f.z+uz*mid}))hi=mid;else lo=mid;}
+    allowed=Math.min(allowed,Math.max(0,lo-.7));
+   }
   }
   // Do not enter a junction until its box and downstream receiving space are clear.
   // Existing occupants skip this guard and can drain even when the signal changes.

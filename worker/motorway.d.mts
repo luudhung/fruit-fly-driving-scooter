@@ -1,0 +1,10 @@
+export type MotorwayRoad={id:string;x:number;z:number;w:number;d:number;motorway?:boolean;motorwayAccess?:boolean;lanes?:number;median?:number};
+export const MOTORWAY:{west:number;east:number;north:number;south:number;width:number;lanesPerDirection:number;laneWidth:number;medianWidth:number};
+export const MOTORWAY_LANE_OFFSETS:number[],MOTORWAY_LANE_MULTIPLIERS:number[];
+export const MOTORWAY_ACCESS_ROADS:MotorwayRoad[],MOTORWAY_ROADS:MotorwayRoad[],MOTORWAY_DECKS:MotorwayRoad[];
+export function motorwaySegmentAt(p:{x:number;z:number},axis?:'x'|'z'):MotorwayRoad|undefined;
+export function motorwayLaneAt(p:{x:number;z:number},axis?:'x'|'z'):{roadId:string;axis:'x'|'z';lane:number;offset:number;side:number;speedMultiplier:number}|null;
+export function motorwaySpeedMultiplier(p:{x:number;z:number;heading?:number;vx?:number;vz?:number},mode?:string):number;
+export function motorwayMedianBlocked(p:{x:number;z:number}):boolean;
+export function motorwayLaneOffset(lane?:number):number;
+export function chooseMotorwayLane(actor?:{id?:string;traits?:{risk?:number;ambition?:number;thrift?:number};brain?:{driving?:{motorwayLane?:number}}}):number;

@@ -1,5 +1,6 @@
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES} from './city-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
+import {motorwaySpeedMultiplier} from './motorway.mjs';
 export const EMERGENCY_RULES={engines:3,ambulances:2,firefighters:9,paramedics:6,speed:22,crewPerEngine:3,crewPerAmbulance:2};
 const DAY=86400,dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),loc=id=>LOCATIONS.find(l=>l.id===id);
 const essential=new Set(['doctor','school','police','power','power-evening','power-night','grid-dispatch','hospital-central','hospital-east']);
@@ -109,10 +110,11 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   for(let hop=0;hop<64&&time>1e-6;hop++){
    const p=e.route[e.routeIndex];if(!p){e.traveling=false;return true;}const dx=p.x-e.x,dz=p.z-e.z,len=Math.hypot(dx,dz);e.targetX=p.x;e.targetZ=p.z;
    if(len<.05){e.x=p.x;e.z=p.z;e.y=p.y??1.1;e.routeIndex++;continue;}
-   let step=Math.min(len,time*EMERGENCY_RULES.speed);const ux=dx/len,uz=dz/len;
+   const speed=EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e);e.speed=speed;
+   let step=Math.min(len,time*speed);const ux=dx/len,uz=dz/len;
    if(index){const limit=index({...e,alive:true,traveling:true,transitMode:'car'},{x:e.x+ux*step,z:e.z+uz*step});if(limit<step){step=limit;e.blocked=true;}}
    const target={x:e.x+ux*step,z:e.z+uz*step};if(!clearSegment(e,target)){e.blocked=true;break;}
-   e.heading=Math.atan2(dx,dz);e.x=target.x;e.z=target.z;e.y+=(Number(p.y??1.1)-Number(e.y||1.1))*Math.min(1,step/len);time-=step/EMERGENCY_RULES.speed;if(e.blocked)break;if(step>=len-.001)e.routeIndex++;
+   e.heading=Math.atan2(dx,dz);e.x=target.x;e.z=target.z;e.y+=(Number(p.y??1.1)-Number(e.y||1.1))*Math.min(1,step/len);time-=step/speed;if(e.blocked)break;if(step>=len-.001)e.routeIndex++;
   }
   e.traveling=e.routeIndex<e.route.length;return !e.traveling;
  }
@@ -242,7 +244,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   if(!f.onFireEngine&&!f.onAmbulance&&f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}care(f,clock);f.action=f.onFireEngine||f.onAmbulance?'riding an emergency vehicle':e.phase==='loading'?'reporting to the emergency garage':'returning to the emergency vehicle';return true;
  }
  function snapshot(){
-  const d=data(),project=e=>({id:e.id,kind:e.kind,phase:e.phase,homeLocationId:e.homeLocationId,x:e.x,y:e.y,z:e.z,heading:e.heading,crewIds:e.crewIds,incidentId:e.incidentId||null,patientId:e.patientId||null,completedTrips:e.completedTrips,emergency:e.phase!=='idle',signalPermit:true,traveling:['enroute','hospital','returning'].includes(e.phase),transitMode:'car',targetX:e.targetX,targetZ:e.targetZ,motion:{at:now(),speed:EMERGENCY_RULES.speed,mode:'car',signalPermit:true,blocked:Boolean(e.blocked),points:(e.route||[]).slice(e.routeIndex||0,(e.routeIndex||0)+12).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}});
+  const d=data(),project=e=>({id:e.id,kind:e.kind,phase:e.phase,homeLocationId:e.homeLocationId,x:e.x,y:e.y,z:e.z,heading:e.heading,crewIds:e.crewIds,incidentId:e.incidentId||null,patientId:e.patientId||null,completedTrips:e.completedTrips,emergency:e.phase!=='idle',signalPermit:true,traveling:['enroute','hospital','returning'].includes(e.phase),transitMode:'car',targetX:e.targetX,targetZ:e.targetZ,motion:{at:now(),speed:EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e),mode:'car',signalPermit:true,blocked:Boolean(e.blocked),points:(e.route||[]).slice(e.routeIndex||0,(e.routeIndex||0)+12).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}});
   return {enabled:enabled(),stationId:'firestation',speed:EMERGENCY_RULES.speed,roster:d.roster.map(id=>{const f=alive(id);return f?{id:f.id,role:f.jobId,stationId:f.emergencyStationId,onDuty:Boolean(f.fireEngineDuty),shiftStart:f.preferredWorkStart}:null;}).filter(Boolean),engines:d.engines.map(project),ambulances:d.ambulances.map(project),dispatches:d.dispatches,medicalDispatches:d.medicalDispatches,hospitalDeliveries:d.hospitalDeliveries,returns:d.returns,operatingCosts:d.operatingCosts,history:d.history.slice(-12)};
  }
  return {enabled,init,tick,handleResident,snapshot,dispatchFire,dispatchAmbulance};
