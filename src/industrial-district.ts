@@ -1,7 +1,10 @@
+import {CityMotion} from './city-motion.ts';
+import {SceneViewBudget} from './view-budget.ts';
+import {REGIONAL_TRUCK_LIMIT} from '../worker/regional-freight.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_PLANTS,INDUSTRIAL_ZONES,INDUSTRIAL_LOADING_BAYS,MAX_FREIGHT_TRUCKS} from '../worker/industry-map.mjs';
-import type {IndustrialSnapshot,FreightTruckView} from '../worker/industrial-economy.mjs';
+import type {IndustrialSnapshot} from '../worker/industrial-economy.mjs';
 const brick=new THREE.MeshStandardMaterial({color:0x836957,roughness:1}),concrete=new THREE.MeshStandardMaterial({color:0xb1aca0,roughness:1}),roof=new THREE.MeshStandardMaterial({color:0x536470,roughness:.8}),dark=new THREE.MeshStandardMaterial({color:0x25343d,roughness:.9}),glass=new THREE.MeshBasicMaterial({color:0xb6cbd1}),marking=new THREE.MeshBasicMaterial({color:0xd5be69,toneMapped:false});
 type Layer={material:THREE.Material;parts:THREE.BufferGeometry[]};
 class Batch{
@@ -32,20 +35,31 @@ export class IndustrialDistrictRenderer{
  private dummy=new THREE.Object3D();
  private signs:THREE.Sprite[]=[];
  private camera:THREE.Camera|null=null;
+ private view=new SceneViewBudget({enterDistance:900,leaveDistance:1040,frustumMargin:22,retainedMargin:38});
+ private motions=new Map<string,CityMotion>();
+ private colors=[0xe1d9c3,0x678caa,0xc37c5c,0x7f9b79].map(c=>new THREE.Color(c));
  constructor(root:THREE.Object3D,sign?:(text:string,width:number,height:number)=>THREE.Sprite){
   for(const site of INDUSTRIAL_BUILDINGS){const g=factory(site);this.buildings.set(site.id,g);root.add(g);if(sign){const label=sign(site.name,site.w*.85,3);label.position.set(0,site.h*.82,0);g.add(label);this.signs.push(label);}}
   if(sign)for(const zone of Object.values(INDUSTRIAL_ZONES)){const first=INDUSTRIAL_PLANTS.find(p=>p.zone===zone.id)!;const label=sign(zone.name,70,5);label.position.set(0,34,-25);this.buildings.get(first.id)!.add(label);this.signs.push(label);}
-  const bays=new Batch();for(const p of Object.values(INDUSTRIAL_LOADING_BAYS)){for(const side of [-1,1]){bays.box(marking,p.x+side*3.3,.21,p.z,.12,.015,2.6);bays.box(marking,p.x,.21,p.z+side*1.3,6.7,.015,.12);}}bays.finish(root);const template=truckGeometry();template.traverse(o=>{if(o instanceof THREE.Mesh){const mesh=new THREE.InstancedMesh(o.geometry,o.material,MAX_FREIGHT_TRUCKS);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(mesh);this.fleet.push(mesh);}});
+  const bays=new Batch();for(const p of Object.values(INDUSTRIAL_LOADING_BAYS)){for(const side of [-1,1]){bays.box(marking,p.x+side*3.3,.21,p.z,.12,.015,2.6);bays.box(marking,p.x,.21,p.z+side*1.3,6.7,.015,.12);}}bays.finish(root);const template=truckGeometry();template.traverse(o=>{if(o instanceof THREE.Mesh){const mesh=new THREE.InstancedMesh(o.geometry,o.material,MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(mesh);this.fleet.push(mesh);}});
  }
- setView(camera:THREE.Camera){this.camera=camera;}
+ setView(camera:THREE.Camera){this.camera=camera;this.view.setCamera(camera);}
  sync(data:IndustrialSnapshot){this.snapshotData=data||null;}
- update(_dt:number,gameNow:number,timeScale=120){
-  const trucks=this.snapshotData?.trucks||[];let count=0;for(const t of trucks.slice(0,MAX_FREIGHT_TRUCKS)){if(this.camera&&Math.hypot(t.x-this.camera.position.x,t.z-this.camera.position.z)>1450)continue;const p=this.pose(t,gameNow,timeScale);this.dummy.position.set(p.x,(p.y??1.1)-1.1,p.z);this.dummy.rotation.set(0,p.heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();for(const mesh of this.fleet)mesh.setMatrixAt(count,this.dummy.matrix);count++;}for(const mesh of this.fleet){mesh.count=count;mesh.instanceMatrix.needsUpdate=true;}
- }
- private pose(t:FreightTruckView,gameNow:number,timeScale:number){
-  let x=t.x,z=t.z,y=t.y,heading=t.heading,left=Math.max(0,Math.min(360,gameNow-t.at))/Math.max(1,timeScale)*t.motionSpeed;
-  for(const p of t.routeWaypoints){if(left<=0)break;const dx=p.x-x,dz=p.z-z,d=Math.hypot(dx,dz);if(d<.01)continue;heading=Math.atan2(dx,dz);if(left<d){x+=dx/d*left;z+=dz/d*left;left=0;}else{x=p.x;z=p.z;y=p.y??y;left-=d;}}
-  return{x,y,z,heading};
+ update(dt:number,gameNow:number,timeScale=120){
+  const trucks=this.snapshotData?.trucks||[],active=new Set<string>();let count=0;
+  for(const t of trucks.slice(0,MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT)){
+   if(this.camera&&!this.view.visible(t,this.motions.has(t.id),5))continue;
+   active.add(t.id);let motion=this.motions.get(t.id);if(!motion){motion=new CityMotion();this.motions.set(t.id,motion);}
+   motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});
+   motion.advance(dt,gameNow,timeScale);
+   const next={x:motion.targetX-motion.x,z:motion.targetZ-motion.z},heading=Math.hypot(next.x,next.z)>.05?Math.atan2(next.x,next.z):t.heading;
+   this.dummy.position.set(motion.x,motion.y-1.1,motion.z);this.dummy.rotation.set(0,heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
+   for(const mesh of this.fleet)mesh.setMatrixAt(count,this.dummy.matrix);
+   this.fleet[0]?.setColorAt(count,this.colors[(Number(t.id.split('-').at(-1))||0)%this.colors.length]);count++;
+  }
+  for(const id of this.motions.keys())if(!active.has(id))this.motions.delete(id);
+  for(const mesh of this.fleet){mesh.count=count;mesh.instanceMatrix.needsUpdate=true;}
+  if(this.fleet[0]?.instanceColor)this.fleet[0].instanceColor.needsUpdate=true;
  }
  dispose(){for(const g of this.buildings.values()){g.traverse(o=>{if(o instanceof THREE.Mesh)o.geometry.dispose();});g.removeFromParent();}for(const mesh of this.fleet){mesh.geometry.dispose();mesh.removeFromParent();}for(const s of this.signs){s.material.map?.dispose();s.material.dispose();s.removeFromParent();}}
 }

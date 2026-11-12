@@ -707,7 +707,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
   governmentVisuals.sync(s.publicServices);
   const publicBoard=document.getElementById('public-service-activity');if(publicBoard&&s.publicServices)publicBoard.textContent=`Quân đội ${s.publicServices.army.count}/${s.publicServices.army.target} · Cảnh sát ${s.publicServices.police.count}/${s.publicServices.police.target} · ${s.publicServices.trainingFlights} chuyến huấn luyện`;
-  const industryBoard=document.getElementById('industry-activity');if(industryBoard&&s.industrialEconomy)industryBoard.textContent=`Công nghiệp: ${s.industrialEconomy.companies.length}/${s.industrialEconomy.plants.length} xưởng hoạt động · ${s.industrialEconomy.delivered} đơn hàng đã giao`;
+  const industryBoard=document.getElementById('industry-activity');if(industryBoard&&s.industrialEconomy)industryBoard.textContent=`Công nghiệp: ${s.industrialEconomy.companies.length}/${s.industrialEconomy.plants.length} xưởng hoạt động · ${s.industrialEconomy.delivered+(s.industrialEconomy.regionalFreight?.delivered||0)} đơn hàng đã giao · ${s.industrialEconomy.regionalFreight?.driving||0} xe tải liên vùng đang chạy`;
   const districtBoard=document.getElementById('district-economy');if(districtBoard&&s.districtEconomy)districtBoard.textContent=s.districtEconomy.map(d=>`${d.name}: ${d.residents} dân · lương ${Math.round(d.wage*100)}% · thuê nhà ${Math.round(d.housing*100)}% · không khí ${Math.round((1-d.pollution)*100)}/100`).join('\n');
   if(s.industrialEconomy)industrialVisuals.sync(s.industrialEconomy);
   if(s.sportsLuxury){
@@ -1597,6 +1597,7 @@ player.teleport(8,1.9,-35.4);freePosition.set(player.x,player.y,player.z);camera
 // Read-only, reproducible viewer cameras for native GPU comparisons. No simulation state changes.
 const perfPose=new URLSearchParams(location.search).get('perf');
 const perfPoses:Record<string,[number,number,number,number,number,number]>={
+ 'motorway-freight':[-1064,12,300,-3.13,-.06,68],
  'nyc-street':[-102,7,-108,0,-.04,68],
  'nyc-overview':[420,290,510,-2.47,-.40,52],
  'paris':[740,9,110,.35,-.05,68],

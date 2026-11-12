@@ -606,7 +606,7 @@ function nearestCell(p,c,region) {
 const routeCache=new Map();
 const vehicleRouter=createVehicleRouter({roads:()=>ROADS,clearSegment,underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:()=>urbanNavigationRevision});
 export function pedestrianRoute(start,dest,mode="walk") {
- if(mode==='car'||mode==='scooter')return vehicleRouter.route(start,dest,mode);
+ if(mode==='car'||mode==='scooter')return vehicleRouter.route(start,dest,mode,Number.isInteger(start.motorwayLane)?{motorwayLane:start.motorwayLane}:{});
  // The island is a separate pedestrian district. Never join it to the city lattice over water.
  if(onIsland(start)||onIsland(dest)){
   if(!onIsland(start)||!onIsland(dest)||mode!=="walk")return [];

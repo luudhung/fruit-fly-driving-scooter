@@ -1,3 +1,4 @@
+import {createRegionalFreight} from './regional-freight.mjs';
 import {LOCATIONS,parkingPoint,pedestrianRoute,clearSegment} from './city-map.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
@@ -10,7 +11,7 @@ const sourceId='industrial-raw-depot',escrowId='industrial-freight-escrow',suppl
 const launchAction='planning an industrial company',hireAction='applying for industrial work';
 
 /** Finite inputs, on-site labour, funded contracts and physical freight. No rendering or extra brains. */
-export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,urbanWorld}){
+export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,urbanWorld,regionalDistribution=true}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),loc=id=>LOCATIONS.find(l=>l.id===id);
  let cachedState,cachedAt=-1,cachedLength=-1,actors=new Map();
  const actor=id=>{if(cachedState!==raw()||cachedAt!==now()||cachedLength!==raw().flies.length){cachedState=raw();cachedAt=now();cachedLength=raw().flies.length;actors=new Map(raw().flies.map(f=>[f.id,f]));}return actors.get(id);};
@@ -25,13 +26,14 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  function transfer(from,to,amount){amount=Math.max(0,Number(amount)||0);if(Number(from.cash||0)+1e-7<amount)return false;from.cash=Number(from.cash||0)-amount;to.cash=Number(to.cash||0)+amount;raw().totalTransactions=Number(raw().totalTransactions||0)+1;return true;}
  function spendResident(f,amount,to){if(Number(f.money||0)+Number(f.savings||0)+1e-7<amount)return false;const cash=Math.min(Number(f.money||0),amount);f.money-=cash;f.savings=Number(f.savings||0)-(amount-cash);to.cash=Number(to.cash||0)+amount;return true;}
  function refreshPlants(){const d=data();for(const p of INDUSTRIAL_PLANTS){const b=companies().find(b=>b.industrialPlantId===p.id);d.plants[p.id]={id:p.id,district:p.zone,zone:p.zone,sector:p.sector,businessId:b?.id||null,status:b?(unavailable(p.id)?'suspended':now()<b.openingAt?'fitting-out':'operating'):'vacant',workers:b?.employees?.length||0,productionUnits:Number(b?.productionUnits||0),lastProducedAt:b?.lastProducedAt||null};}}
+ const regionalFreight=createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable});
  function init(){
   const d=data();raw().enterprises||={};raw().nextEnterpriseId=Number(raw().nextEnterpriseId||1);for(const id of [sourceId,escrowId,supplierId,'industrial-fuel'])account(id);
   // A paid, finite public wholesale reserve bootstraps private factories; no free enterprise is spawned.
   if(!d.seeded&&loc(sourceId)){const units=Math.floor(Math.min(6000,Math.max(0,Number(raw().treasury?.cash||0)))/2);if(units>0){transfer(raw().treasury,account(supplierId),units*2);for(const key of ['fabric','grain','aggregate'])d.rawStock[key]=Math.floor(units/3);d.externalOutflow+=units*2;d.seeded=true;}}
   for(const b of companies()){b.inventory||={raw:0,finished:0};b.employees||=[];b.industrialPayrollManaged=true;}
-  for(const truck of d.trucks){truck.alive=true;truck.transitMode='car';if(truck.boarding&&!loc(`FREIGHT-BOARD-${truck.id}`))LOCATIONS.push({id:`FREIGHT-BOARD-${truck.id}`,name:'Freight truck loading bay',type:'industrial-duty',x:truck.x,z:truck.z});if(truck.driverId){const f=actor(truck.driverId);if(f?.alive)f.industrialFreightDuty={truckId:truck.id,orderId:truck.orderId};}}
-  refreshPlants();return d;
+  for(const truck of d.trucks){truck.alive=true;truck.vehicleLength=6.4;truck.transitMode='car';if(truck.boarding&&!loc(`FREIGHT-BOARD-${truck.id}`))LOCATIONS.push({id:`FREIGHT-BOARD-${truck.id}`,name:'Freight truck loading bay',type:'industrial-duty',x:truck.x,z:truck.z});if(truck.driverId){const f=actor(truck.driverId);if(f?.alive)f.industrialFreightDuty={truckId:truck.id,orderId:truck.orderId};}}
+  if(regionalDistribution)regionalFreight.init();refreshPlants();return d;
  }
  function availablePlants(){const used=new Set(companies().map(b=>b.industrialPlantId));return INDUSTRIAL_PLANTS.filter(p=>loc(p.id)&&!used.has(p.id)&&!unavailable(p.id));}
  function eligible(f){return f?.alive&&f.ageYears>=23&&f.ageYears<67&&!f.businessId&&!f.businessEmployeeOf&&!essential.has(f.jobId)&&!committed(f)&&!isWorkCommitted(f)&&!f.onTrain&&!f.onPlane&&f.energy>30&&f.health>50;}
@@ -48,7 +50,7 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
   spendResident(f,own,b);if(loan>0){raw().bank.reserves-=loan;raw().bank.loansOutstanding=Number(raw().bank.loansOutstanding||0)+loan;b.cash+=loan;f.bankLoan=Number(f.bankLoan||0)+loan;}
   transfer(b,raw().treasury,500);transfer(b,account(supplierId),700);b.expensesLifetime+=1200;
   raw().enterprises[id]=b;Object.assign(f,{businessId:id,jobId:null,jobTitle:'industrial founder / owner',wage:0,industrialPayrollManaged:true,nextIndustrialStartupAt:now()+DAY});
-  const bay=INDUSTRIAL_LOADING_BAYS[p.id]||parkingPoint(loc(p.id))||p.frontage;data().trucks.push({id:`FREIGHT-${data().nextTruckId++}`,ownerBusinessId:id,x:bay.x,z:bay.z,y:Number(bay.y??1.1),alive:true,traveling:false,transitMode:'car',routeWaypoints:[],routeIndex:0,driverId:null,orderId:null,phase:'parked',heading:0,lastProgressAt:now()});
+  const bay=INDUSTRIAL_LOADING_BAYS[p.id]||parkingPoint(loc(p.id))||p.frontage;data().trucks.push({id:`FREIGHT-${data().nextTruckId++}`,ownerBusinessId:id,x:bay.x,z:bay.z,y:Number(bay.y??1.1),alive:true,vehicleLength:6.4,traveling:false,transitMode:'car',routeWaypoints:[],routeIndex:0,driverId:null,orderId:null,phase:'parked',heading:0,lastProgressAt:now()});
   remember(f,'industrial_startup',{businessId:id,plantId:p.id,sector:p.sector,loan});note('industrial_startup',`${f.id} opened ${p.name} using private capital and a bank loan.`,{flyId:f.id,businessId:id,plantId:p.id});refreshPlants();return b;
  }
  function acceptsOffer(f,p,wage){const home={x:Number(f.homeX??f.x),z:Number(f.homeZ??f.z)},oldWork=loc(f.jobId)||loc('bank')||home;const commuteSaving=Math.max(-1,Math.min(1,(dist(home,oldWork)-dist(home,p))*.001));return !f.jobId||wage+commuteSaving>=Number(f.wage||0)*.9;}
@@ -91,7 +93,7 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  function zone(id){if(id===sourceId)return 'west';return plant(id)?.zone||((loc(id)?.x||0)>480?'europe':(loc(id)?.z||0)<-440?'north':null);}
  function roadPath(a,b,sourceLocationId,destId){
   const za=zone(sourceLocationId),zb=zone(destId),anchors=[a];if(za&&zb&&za!==zb)anchors.push(INDUSTRIAL_ZONES[za].gateway,INDUSTRIAL_ZONES[zb].gateway);else if(za&&zb===null)anchors.push(INDUSTRIAL_ZONES[za].gateway);anchors.push(b);const points=[];
-  for(let i=1;i<anchors.length;i++){const leg=pedestrianRoute(anchors[i-1],anchors[i],'car');if(!leg.length)return [];for(const p of leg)if(!points.length||dist(points.at(-1),p)>.02)points.push({...p,mode:'car'});}return points;
+  for(let i=1;i<anchors.length;i++){const leg=pedestrianRoute({...anchors[i-1],motorwayLane:a.motorwayLane},anchors[i],'car');if(!leg.length)return [];for(const p of leg)if(!points.length||dist(points.at(-1),p)>.02)points.push({...p,mode:'car'});}return points;
  }
  function routeTruck(t,destinationId,sourceLocationId){const bay=INDUSTRIAL_LOADING_BAYS[destinationId]||parkingPoint(loc(destinationId));if(!bay)return false;const points=roadPath(t,bay,sourceLocationId,destinationId);if(!points.length)return false;t.routeWaypoints=points;t.routeIndex=0;t.traveling=true;t.motionSpeed=0;t.lastProgressAt=now();return true;}
  function driverFor(b,clock){return [actor(b.ownerId),...(b.employees||[]).map(actor)].find(f=>present(f,b,clock));}
@@ -124,7 +126,7 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
   if(t.routeIndex>=t.routeWaypoints.length)t.traveling=false;
  }
  function tickTrucks(seconds,clock){
-  const d=data(),drivers=raw().flies.filter(f=>!f.industrialFreightDuty);const headway=createVehicleIndex([...drivers,...d.trucks]);for(const t of d.trucks){if(!t.orderId)continue;const o=d.orders.find(o=>o.id===t.orderId),f=actor(t.driverId),carrier=raw().enterprises[t.ownerBusinessId];if(!o||o.paid)continue;if(driverDiverted(f)){finishOrder(o,true);continue;}if(t.boarding){if(f?.alive&&now()-o.createdAt<DAY)continue;finishOrder(o,true);continue;}
+  const d=data(),drivers=raw().flies.filter(f=>!f.industrialFreightDuty);const headway=createVehicleIndex([...drivers,...d.trucks,...(raw().regionalFreight?.trucks||[])]);for(const t of d.trucks){if(!t.orderId)continue;const o=d.orders.find(o=>o.id===t.orderId),f=actor(t.driverId),carrier=raw().enterprises[t.ownerBusinessId];if(!o||o.paid)continue;if(driverDiverted(f)){finishOrder(o,true);continue;}if(t.boarding){if(f?.alive&&now()-o.createdAt<DAY)continue;finishOrder(o,true);continue;}
    if(!f?.alive||f.fireEngineDuty||f.ambulanceDuty||f.urbanFloodEscape||f.civicDuty||f.emergencyTask||f.onPlane||f.onTrain||!carrier||carrier.status!=='operating'||unavailable(o.sourceLocationId)||unavailable(o.destinationId)||now()>o.deadline){finishOrder(o,true);continue;}
    const before=now()-Number(t.lastProgressAt||now());moveTruck(t,seconds,headway);const hours=Math.min(1800,seconds);if(f.businessEmployeeOf===carrier.id)wage(f,carrier,hours);
    Object.assign(f,{x:t.x,y:t.y,z:t.z,indoors:true,traveling:false});
@@ -152,9 +154,9 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  }
  function restock(){
   const d=data();if(d.rawRestock&&now()>=d.rawRestock.arrival){for(const key of ['fabric','grain','aggregate'])d.rawStock[key]+=d.rawRestock.units;d.rawRestock=null;}
-  if(!d.rawRestock&&now()>=d.nextRestockAt){d.nextRestockAt=now()+DAY;const units=Math.min(400,Math.floor(account(sourceId).cash/6));if(units>0&&Object.values(d.rawStock).some(v=>v<600)){transfer(account(sourceId),account(supplierId),units*6);d.externalOutflow+=units*6;d.rawRestock={units,arrival:now()+21600};}}
+  if(!d.rawRestock&&now()>=d.nextRestockAt){const regional=Boolean(raw().regionalFreight?.funded);d.nextRestockAt=now()+(regional?21600:DAY);const units=Math.min(regional?800:400,Math.floor(account(sourceId).cash/6));if(units>0&&Object.values(d.rawStock).some(v=>v<(regional?1400:600))){transfer(account(sourceId),account(supplierId),units*6);d.externalOutflow+=units*6;d.rawRestock={units,arrival:now()+(regional?3600:21600)};}}
  }
- function tick(seconds,clock){const d=data();if(!loc(sourceId))return;const elapsed=Math.max(0,Math.min(1800,now()-Number(d.lastTickAt??now())));d.lastTickAt=now();for(const b of companies()){if(!actor(b.ownerId)?.alive){close(b);continue;}b.employees=b.employees.filter(id=>actor(id)?.alive&&actor(id).businessEmployeeOf===b.id);production(b,clock);decisions(b);}for(const o of d.orders)if(!o.paid&&now()>o.deadline)finishOrder(o,true);dispatch(clock);tickTrucks(elapsed,clock);restock();d.orders=[...d.orders.filter(o=>!o.paid),...d.orders.filter(o=>o.paid&&now()-Number(o.completedAt||0)<DAY).slice(-32)];refreshPlants();}
- function snapshot(){const d=data();refreshPlants();return{version:1,plants:Object.values(d.plants),rawStock:{...d.rawStock},companies:companies().map(b=>({id:b.id,name:b.name,ownerId:b.ownerId,plantId:b.industrialPlantId,zone:b.industrialZone,sector:b.industrialSector,cash:b.cash,inventory:{...b.inventory},employees:[...b.employees],productionUnits:b.productionUnits,revenueLifetime:b.revenueLifetime})),trucks:d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,driverId:t.driverId,orderId:t.orderId,motionSpeed:t.motionSpeed||0,routeWaypoints:t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12),at:now()})),orders:d.orders.filter(o=>!o.paid).map(o=>({...o})),wagesPaid:d.wagesPaid,revenue:d.revenue,unitsProduced:d.unitsProduced,delivered:d.delivered,cancelled:d.cancelled,history:d.history,algorithmOnly:true};}
+ function tick(seconds,clock){const d=data();if(!loc(sourceId))return;const elapsed=Math.max(0,Math.min(1800,now()-Number(d.lastTickAt??now())));d.lastTickAt=now();for(const b of companies()){if(!actor(b.ownerId)?.alive){close(b);continue;}b.employees=b.employees.filter(id=>actor(id)?.alive&&actor(id).businessEmployeeOf===b.id);production(b,clock);decisions(b);}for(const o of d.orders)if(!o.paid&&now()>o.deadline)finishOrder(o,true);dispatch(clock);tickTrucks(elapsed,clock);if(regionalDistribution)regionalFreight.tick(elapsed);restock();d.orders=[...d.orders.filter(o=>!o.paid),...d.orders.filter(o=>o.paid&&now()-Number(o.completedAt||0)<DAY).slice(-32)];refreshPlants();}
+ function snapshot(){const d=data(),regional=regionalFreight.snapshot();refreshPlants();return{regionalFreight:regional,version:1,plants:Object.values(d.plants),rawStock:{...d.rawStock},companies:companies().map(b=>({id:b.id,name:b.name,ownerId:b.ownerId,plantId:b.industrialPlantId,zone:b.industrialZone,sector:b.industrialSector,cash:b.cash,inventory:{...b.inventory},employees:[...b.employees],productionUnits:b.productionUnits,revenueLifetime:b.revenueLifetime})),trucks:[...regional.trucks,...d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,driverId:t.driverId,orderId:t.orderId,motionSpeed:t.motionSpeed||0,routeWaypoints:t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12),at:now()}))],orders:d.orders.filter(o=>!o.paid).map(o=>({...o})),wagesPaid:d.wagesPaid,revenue:d.revenue,unitsProduced:d.unitsProduced,delivered:d.delivered,cancelled:d.cancelled,history:d.history,algorithmOnly:true};}
  return{init,tick,addChoices,handleResident,snapshot,foundCompany,applyJob,requestInput,requestSale,finishOrder,roadPath};
 }

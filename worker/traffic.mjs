@@ -56,7 +56,7 @@ function heading(other){
 export function createVehicleIndex(drivers){
  const bins=new Map(),cell=20;
  for(const f of drivers){if(!f.alive||!f.traveling||!['car','scooter'].includes(f.transitMode))continue;
-  const sample={id:f.id,x:f.x,z:f.z,y:Number(f.y??1.1),heading:heading(f),emergency:f.emergency===true};
+  const sample={id:f.id,x:f.x,z:f.z,y:Number(f.y??1.1),heading:heading(f),length:Math.max(2,Math.min(12,Number(f.vehicleLength)||4)),emergency:f.emergency===true};
   const key=`${Math.floor(f.x/cell)},${Math.floor(f.z/cell)}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(sample);
  }
  function nearby(minX,maxX,minZ,maxZ){const found=[];
@@ -65,7 +65,7 @@ export function createVehicleIndex(drivers){
  return (f,end)=>{
   const dx=end.x-f.x,dz=end.z-f.z,len=Math.hypot(dx,dz);if(len<1e-8)return len;
   const ux=dx/len,uz=dz/len,fy=Number(f.y??1.1);let allowed=len;
-  for(const other of nearby(Math.min(f.x,end.x)-6,Math.max(f.x,end.x)+6,Math.min(f.z,end.z)-6,Math.max(f.z,end.z)+6)){
+  for(const other of nearby(Math.min(f.x,end.x)-9,Math.max(f.x,end.x)+9,Math.min(f.z,end.z)-9,Math.max(f.z,end.z)+9)){
    if(other.id===f.id||Math.abs(other.y-fy)>2)continue;
    const ox=other.x-f.x,oz=other.z-f.z,along=ox*ux+oz*uz,lateral=Math.abs(ox*uz-oz*ux),h=other.heading;
    // A legacy checkpoint may contain two co-located cars. Release one deterministically,
@@ -78,8 +78,9 @@ export function createVehicleIndex(drivers){
    if(along<=.05||lateral>2.2||!h||h.x*ux+h.z*uz<=.7)continue;
    // Two shallow merging paths can each project the other car ahead. A strict
    // queue rule then stops both forever; give one deterministic merge priority.
-   if(along<5&&ox*h.x+oz*h.z<-.05&&String(other.id).localeCompare(String(f.id))>0)continue;
-   allowed=Math.min(allowed,Math.max(0,along-5));
+   const gap=Math.max(5,(Math.max(2,Math.min(12,Number(f.vehicleLength)||4))+other.length)/2+1);
+   if(along<gap&&ox*h.x+oz*h.z<-.05&&String(other.id).localeCompare(String(f.id))>0)continue;
+   allowed=Math.min(allowed,Math.max(0,along-gap));
   }
   // Slip-road traffic yields at the edge. Established motorway traffic keeps
   // moving, and a vehicle already inside the merge box can clear it.

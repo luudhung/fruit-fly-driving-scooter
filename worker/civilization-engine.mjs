@@ -4448,7 +4448,7 @@ async function tick(options = {}) {
       }
       roadLife.normalizeParking();
       for(const [name,service]of [['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
-      vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[])]);
+      vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;
       roadLife.tick();

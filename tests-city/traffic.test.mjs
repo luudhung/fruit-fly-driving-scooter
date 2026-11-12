@@ -88,3 +88,10 @@ test('shallow merging paths choose one leader without weakening an ordinary lane
  assert.ok(index(a,{x:10,z:998})>10);assert.equal(index(b,{x:10,z:1001}),0);
  const leader={...a,id:'leader',x:3,z:999.4};assert.equal(createVehicleIndex([a,leader])(a,{x:10,z:998}),0);
 });
+
+ test('cars and long freight trucks preserve bumper clearance using their actual lengths',()=>{
+ const truck={id:'truck',alive:true,traveling:true,transitMode:'car',vehicleLength:6.4,x:0,z:1000,targetX:30,targetZ:1000},leader={...truck,id:'leader',x:8};
+ assert.ok(Math.abs(createVehicleIndex([truck,leader])(truck,{x:20,z:1000})-.6)<1e-9);
+ const car={...truck,id:'car',vehicleLength:4};assert.ok(Math.abs(createVehicleIndex([car,leader])(car,{x:20,z:1000})-1.8)<1e-9);
+ assert.equal(createVehicleIndex([truck,{...leader,targetX:-30}])(truck,{x:20,z:1000}),20);
+ });
