@@ -808,15 +808,20 @@ async function fetchSnapshot(){
 addEventListener("visibilitychange",()=>{if(!document.hidden)void fetchSnapshot();});
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 7000);
-const renderCanvas=document.createElement('canvas');
-const contextAttributes:WebGLContextAttributes={antialias:true,alpha:false,depth:true,powerPreference:graphicsPreset==='low'?'low-power':'high-performance'};
-const webgl=renderCanvas.getContext('webgl2',contextAttributes);
-const reverseDepth=Boolean(webgl?.getExtension('EXT_clip_control')&&webgl.getExtension('EXT_color_buffer_float'))&&new URLSearchParams(location.search).get('depth')!=='log';
-const renderer = new THREE.WebGLRenderer({
-  canvas:renderCanvas,context:webgl||undefined,
-  antialias:true,logarithmicDepthBuffer:!reverseDepth,reversedDepthBuffer:reverseDepth,
-  powerPreference:contextAttributes.powerPreference,precision:'highp',
-});
+// The scene has its own MSAA target; the fullscreen output needs neither
+// default-framebuffer MSAA nor depth. The compatibility path keeps native AA.
+function createViewerRenderer(){
+ const attributes:WebGLContextAttributes={alpha:false,powerPreference:graphicsPreset==='low'?'low-power':'high-performance'};
+ let canvas=document.createElement('canvas'),context=canvas.getContext('webgl2',{...attributes,antialias:false,depth:false});
+ const supportsMSAA=(format:number)=>Boolean((context?.getInternalformatParameter(context.RENDERBUFFER,format,context.SAMPLES) as Int32Array|null)?.includes(4));
+ const reverseDepth=new URLSearchParams(location.search).get('depth')!=='log'&&Boolean(context?.getExtension('EXT_clip_control')&&context.getExtension('EXT_color_buffer_float')&&supportsMSAA(context.DEPTH_COMPONENT32F)&&(supportsMSAA(context.R11F_G11F_B10F)||supportsMSAA(context.RGBA16F)));
+ if(!reverseDepth){
+  context?.getExtension('WEBGL_lose_context')?.loseContext();
+  canvas=document.createElement('canvas');context=canvas.getContext('webgl2',{...attributes,antialias:true,depth:true});
+ }
+ return new THREE.WebGLRenderer({canvas,context:context||undefined,antialias:!reverseDepth,logarithmicDepthBuffer:!reverseDepth,reversedDepthBuffer:reverseDepth,powerPreference:attributes.powerPreference,precision:'highp'});
+}
+const renderer=createViewerRenderer();
 const renderTimings=new RenderTimings(renderer.getContext());
 // Limit oversized Retina framebuffers while keeping all Ultra geometry and materials.
 const renderPixelRatio=()=>Math.min(devicePixelRatio,graphics.pixelRatio,Math.sqrt(2_200_000/Math.max(1,innerWidth*innerHeight)));
@@ -831,6 +836,9 @@ host.appendChild(renderer.domElement);
 const cityFrame=new CityFrameRenderer(renderer);
 renderer.info.autoReset=false;
 renderer.domElement.dataset.depthMode=renderer.capabilities.reversedDepthBuffer?'reversed-z-float32':'logarithmic-highp';
+renderer.domElement.dataset.sceneSamples=String(cityFrame.target?.samples||0);
+renderer.domElement.dataset.sceneColor=cityFrame.target?.texture.type===THREE.UnsignedInt101111Type?'r11g11b10-hdr':'rgba';
+renderer.domElement.dataset.defaultAntialias=String(renderer.getContext().getContextAttributes()?.antialias);
 renderer.domElement.addEventListener("webglcontextlost",(event)=>{
   event.preventDefault();
   console.error("[fulllife] WebGL context lost");
@@ -1704,7 +1712,10 @@ function pickResidentAt(clientX:number,clientY:number){
  if(id)focusResident(id,false);
 }
 
-function updateFreeCamera(dt: number) {
+let nextPositionDiagnosticAt=0;
+let lastFlyingClass:boolean|undefined;
+const cameraLookTarget=new THREE.Vector3();
+function updateFreeCamera(dt: number,now:number) {
   if(playerCar.active){
     const forward=Number(pressed.has("KeyW")||pressed.has("ArrowUp"))-Number(pressed.has("KeyS")||pressed.has("ArrowDown"));
     const steer=Number(pressed.has("KeyD")||pressed.has("ArrowRight"))-Number(pressed.has("KeyA")||pressed.has("ArrowLeft"));
@@ -1739,11 +1750,16 @@ function updateFreeCamera(dt: number) {
     renderer.domElement.dataset.playerMode=mode;
     const status=document.getElementById('player-movement-mode');if(status)status.textContent=playerCar.active?'Đang lái xe · W/S ga, lùi · A/D lái · Space phanh':player.flying?'Đang bay · Space/E lên · Shift/Q xuống':'Đang đi bộ · Space ×2 để bay';
   }
-  renderer.domElement.dataset.playerPosition=`${freePosition.x.toFixed(2)},${freePosition.y.toFixed(2)},${freePosition.z.toFixed(2)}`;
-  document.body.classList.toggle("player-flying",!playerCar.active&&player.flying);
+  if(now>=nextPositionDiagnosticAt){
+    nextPositionDiagnosticAt=now+200;
+    const position=`${freePosition.x.toFixed(2)},${freePosition.y.toFixed(2)},${freePosition.z.toFixed(2)}`;
+    if(renderer.domElement.dataset.playerPosition!==position)renderer.domElement.dataset.playerPosition=position;
+  }
+  const flyingClass=!playerCar.active&&player.flying;
+  if(lastFlyingClass!==flyingClass){lastFlyingClass=flyingClass;document.body.classList.toggle("player-flying",flyingClass);}
   camera.position.copy(freePosition);
   cameraForward(lookDirection);
-  camera.lookAt(freePosition.clone().add(lookDirection));
+  camera.lookAt(cameraLookTarget.copy(freePosition).add(lookDirection));
 }
 
 let lastSkyMinute=-1;
@@ -1831,7 +1847,7 @@ function animate(now = performance.now()) {
     weatherFlash.intensity = 0;
   }
 
-  updateFreeCamera(dt);
+  updateFreeCamera(dt,now);
 
   sportsVisuals.setView(camera,id=>cityFacadeBatches.isBuildingVisible(id));
   citySky.update(renderedHour(visualHour),camera.position,activeWeather.cloudCover||0,Math.floor(gameNow/86400));

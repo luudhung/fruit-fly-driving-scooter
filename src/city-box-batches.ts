@@ -9,6 +9,7 @@ type Batch={mesh:THREE.InstancedMesh<THREE.BoxGeometry,THREE.Material>;sources:S
 export class CityBoxBatches{
  readonly stats={sourceDraws:0,batchDraws:0,instances:0};
  readonly viewStats={activeInstances:0,activeBuildings:0,bakedBuildings:0,activeBatches:0};
+ private byId=new Map<string,BuildingView>();
  private batches:Batch[]=[];private buildings:BuildingView[]=[];
  private budgeted=false;private windowBrightness={value:.72};
  private matrix=new THREE.Matrix4();private inverse=new THREE.Matrix4();private color=new THREE.Color();private worldBounds=new THREE.Box3();private sphere=new THREE.Sphere();private localCamera=new THREE.Vector3();
@@ -16,7 +17,7 @@ export class CityBoxBatches{
   const buckets=new Map<string,{material:THREE.Material;sources:Source[]}>(),local=new THREE.Matrix4(),color=new THREE.Color(),unit=new THREE.Box3(new THREE.Vector3(-.5,-.5,-.5),new THREE.Vector3(.5,.5,.5)),bounds=new THREE.Box3();
   for(const group of groups){
    group.updateMatrix();
-   const building:BuildingView={group,sources:[],extras:[],localBounds:new THREE.Box3(),center:new THREE.Vector3(),radius:1,signature:'',active:true,windowStep:1,baked:false,sideX:0,sideZ:0,dirty:true};this.buildings.push(building);
+   const building:BuildingView={group,sources:[],extras:[],localBounds:new THREE.Box3(),center:new THREE.Vector3(),radius:1,signature:'',active:true,windowStep:1,baked:false,sideX:0,sideZ:0,dirty:true};this.buildings.push(building);if(typeof group.userData.buildingId==='string')this.byId.set(group.userData.buildingId,building);
    for(const object of group.children){
     if(!(object instanceof THREE.Mesh)||!(object.geometry instanceof THREE.BoxGeometry)||Array.isArray(object.material)||(object.material.userData.cityFacade&&!object.material.userData.normalizedFacade)){building.extras.push({object,visible:object.visible});continue;}
     const material=object.material as THREE.Material&{color?:THREE.Color};if(material.transparent||!material.color){building.extras.push({object,visible:object.visible});continue;}
@@ -86,7 +87,7 @@ if(vBakedWindows>.5&&abs(vBakedNormal.y)<.5){
  /** Compatibility only: ordinary buildings never load or change with the camera. */
  setView(_camera:THREE.Camera){}
  isGroupVisible(group:THREE.Group){return group.visible;}
- isBuildingVisible(id:string){return this.buildings.find(b=>b.group.userData.buildingId===id)?.group.visible??true;}
+ isBuildingVisible(id:string){return this.byId.get(id)?.group.visible??true;}
  private updateBuildingViews(){
   for(const building of this.buildings){
    const active=building.group.visible;
