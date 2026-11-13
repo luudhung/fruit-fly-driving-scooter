@@ -112,8 +112,13 @@ export class PlayerController{
   const dx=(Math.sin(input.yaw)*input.forward-Math.cos(input.yaw)*input.strafe)/length*speed*dt;
   const dz=(Math.cos(input.yaw)*input.forward+Math.sin(input.yaw)*input.strafe)/length*speed*dt;
   const attempt=(x:number,z:number)=>{
-   const feet=this.feet,ground=support(x,z,feet+(this.grounded&&!this.flying?STEP:0));
-   const candidate=this.grounded&&!this.flying?Math.max(feet,ground):feet;
+   const feet=this.feet;
+   // A switchback can leave the feet a few centimetres above its landing for
+   // one falling frame. Keep the normal step allowance while that supporting
+   // surface remains close; jumping and genuine airborne travel never attach.
+   const canStep=!this.flying&&(this.grounded||this.verticalVelocity<=0&&feet-support(this.x,this.z,feet)<=STEP+EPS);
+   const ground=support(x,z,feet+(canStep?STEP:0));
+   const candidate=canStep?Math.max(feet,ground):feet;
    if(!collides(x,z,candidate)){this.x=x;this.z=z;this.y=candidate+PLAYER_EYE;}
   };
   attempt(Math.max(-WORLD_HALF+1,Math.min(WORLD_HALF-1,this.x+dx)),this.z);

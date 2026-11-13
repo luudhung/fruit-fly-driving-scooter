@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
-import {AIRPORT,ISLAND,SEA,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
+import {AIRPORT,ISLAND,SEA,RIVER,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
+import {createAirportGroundLayout,AIRPORT_SPARE_PLANE,AIRPORT_GROUND_LEVELS} from './airport-ground-layout.ts';
+import {subtractRects} from './surface-rectangles.ts';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const stone=new THREE.MeshStandardMaterial({color:0xc8c5b9,roughness:.65,metalness:.12});
 const metal=new THREE.MeshStandardMaterial({color:0xa8bdc6,roughness:.26,metalness:.7});
@@ -57,17 +59,13 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  function slab(x:number,z:number,w:number,d:number,m:THREE.Material,y=.15){box(g,w,.12,d,x,y,z,m);}
  function runway(r:{x:number;z:number;w:number;d:number},code:string){
   const level=r.z>470?.85:0;
-  slab(r.x,r.z,r.w+12,r.d+10,concrete,level+.05);slab(r.x,r.z,r.w,r.d,asphalt,level+.15);
-  for(let x=r.x-r.w/2+16;x<r.x+r.w/2-14;x+=18)slab(x,r.z,8,.55,white,level+.23);
   for(const side of [-1,1]){
-   for(let i=0;i<5;i++)slab(r.x+side*(r.w/2-13),r.z+(i-2)*2.3,12,1.1,white,level+.24);
    for(let x=r.x-r.w/2+5;x<r.x+r.w/2;x+=20){const b=new THREE.Mesh(new THREE.SphereGeometry(.28,6,4),teal);b.position.set(x,level+.5,r.z+side*(r.d/2+1));g.add(b);}
   }
   sign(g,make,code,r.x,3,r.z-15,48,1.6);
  }
- slab(AIRPORT.apron.x,AIRPORT.apron.z,AIRPORT.apron.w,AIRPORT.apron.d,concrete);
- slab(-180,-480,13,62,asphalt);slab(-180,-480,.5,62,yellow,.23);
- slab(-180,-375,65,8,concrete);slab(-85,-395,5,70,concrete);
+ const groundMaterials={concrete,asphalt,white,yellow};
+ for(const floor of createAirportGroundLayout()){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(floor.w,floor.d),groundMaterials[floor.material]);mesh.rotation.x=-Math.PI/2;mesh.position.set(floor.x,floor.topY,floor.z);g.add(mesh);}
  runway(AIRPORT.runway,'09  HANSDREX CITY AIRPORT  27');
  for(const t of [AIRPORT.terminal,ISLAND.terminal]){
   box(g,t.w,6,t.d,t.x,3,t.z,glass);box(g,t.w+4,.8,t.d+5,t.x,6.4,t.z,stone);
@@ -79,17 +77,15 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  // Control tower, hangar, ground-service road and parking bays.
  box(g,6,24,6,-245,12,-417,stone);box(g,12,5,12,-245,27,-417,glass);box(g,14,.7,14,-245,30,-417,metal);
  box(g,46,13,32,-310,6.5,-441,metal);box(g,39,9,.4,-310,4.5,-424.8,glass);
- slab(-245,-375,44,22,asphalt);for(let i=0;i<7;i++)slab(-262+i*6,-375,.3,18,white,.23);
- const pad=AIRPORT.helipad;slab(pad.x,pad.z,26,26,asphalt);
- const circle=new THREE.Mesh(new THREE.TorusGeometry(9,.22,5,32),yellow);circle.rotation.x=Math.PI/2;circle.position.set(pad.x,.28,pad.z);g.add(circle);
- for(const x of [-2,2])box(g,.65,.12,6,pad.x+x,.3,pad.z,white);box(g,4,.12,.65,pad.x,.3,pad.z,white);
+ const pad=AIRPORT.helipad;
+ const circle=new THREE.Mesh(new THREE.RingGeometry(8.78,9.22,40),yellow);circle.rotation.x=-Math.PI/2;circle.position.set(pad.x,AIRPORT_GROUND_LEVELS.paint,pad.z);g.add(circle);
  sign(g,make,'HELI TOURS · SKYLINE FLIGHTS',pad.x,12,pad.z,44,1.6);
  // Ocean reaches the horizon; an elevated sand ellipse and smaller grass core form the island.
- const sea=new THREE.Mesh(new THREE.PlaneGeometry(SEA.w,SEA.d),new THREE.MeshStandardMaterial({color:0x176c91,roughness:.23,metalness:.25}));sea.rotation.x=-Math.PI/2;sea.position.set(SEA.x,.03,SEA.z);g.add(sea);
+ const seaMaterial=new THREE.MeshStandardMaterial({color:0x176c91,roughness:.23,metalness:.25});
+ for(const piece of subtractRects([SEA],[RIVER])){const sea=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),seaMaterial);sea.rotation.x=-Math.PI/2;sea.position.set(piece.x,.03,piece.z);g.add(sea);}
  const sand=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,80),new THREE.MeshStandardMaterial({color:0xe4d3a0,roughness:1}));sand.scale.set(ISLAND.rx,.48,ISLAND.rz);sand.position.set(ISLAND.x,.31,ISLAND.z);g.add(sand);
  const grass=new THREE.Mesh(new THREE.CylinderGeometry(1,1,.12,64),new THREE.MeshStandardMaterial({color:0x6fa779,roughness:1}));grass.scale.set(ISLAND.rx-18,1,ISLAND.rz-17);grass.position.set(ISLAND.x,.61,ISLAND.z);g.add(grass);
  runway(ISLAND.runway,'09  HIA · HANSDREX ISLAND  27');
- slab(65,762,11,42,asphalt,.8);slab(130,858,170,4,concrete,.8);slab(65,824,4,68,concrete,.8);
  // Low-rise resort with shaded verandas, villas, pool and a beach pier.
  const r=ISLAND.resort;box(g,r.w,9,r.d,r.x,5,r.z,stone);box(g,r.w+4,.7,r.d+4,r.x,10,r.z,gold);
  for(const z of [-1,1])for(let i=-4;i<=4;i++){box(g,2.8,4,.1,r.x+i*4.5,5,r.z+z*(r.d/2+.1),glass);box(g,.2,7,.2,r.x+i*4.5,4,r.z+z*(r.d/2+3),metal);}
@@ -119,6 +115,6 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  }
  for(const x of [-1.5,1.5]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.35,10),asphalt);wheel.rotation.z=Math.PI/2;wheel.position.set(x,-1.55,-.5);plane.add(wheel);}
  sign(plane,make,'HANSDREX AIR · HCA ↔ HIA',0,5,0,37,1.3);
- const spare=plane.clone();spare.position.set(-300,3,-407);spare.rotation.y=Math.PI/2;root.add(spare);slab(-295,-409,75,20,concrete);
+ const spare=plane.clone();spare.position.set(AIRPORT_SPARE_PLANE.x,AIRPORT_SPARE_PLANE.y,AIRPORT_SPARE_PLANE.z);spare.rotation.y=Math.PI/2;root.add(spare);
  root.add(plane);return {plane,propellers:plane.children.filter(c=>c instanceof THREE.Group)};
 }

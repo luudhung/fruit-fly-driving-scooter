@@ -5,7 +5,7 @@ import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED} from './government-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 27;
+export const MAP_VERSION = 28;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -105,7 +105,11 @@ for(const z of STREETS){
 }
 // Outer ring and bridge approaches keep the expanded city connected.
 for(const x of [-430,SOUTH_RING_EAST])road(x,0,8,820);
-road(-30,-400,800,10);
+// The north ring skirts the terminal on its landside instead of entering its rear wall.
+road(-355,-400,150,10);road(120,-400,500,10);
+road(-280,-377.5,10,45);road(-130,-377.5,10,45);road(-205,-355,150,10);
+// Join the bypass centerline, not just its asphalt edge, to the Manhattan avenues.
+for(const x of [-260,-210,-154])road(x,-357.5,9.5,5);
 road((-430+SOUTH_RING_EAST)/2,SOUTH_RING_Z,SOUTH_RING_EAST+430,10);
 for(const x of harborRoadLinks)road(x,(GRID_HALF+SOUTH_RING_Z)/2,9.5,SOUTH_RING_Z-GRID_HALF);
 for(const x of [500,560,620,680,740,800,860])road(x,0,9.5,480);
@@ -250,6 +254,9 @@ function place(b) {
  BUILDINGS.push(b);return true;
 }
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
+// These existing landmark meshes also need authoritative ground collision footprints.
+place({id:'airport-control-tower',x:-245,z:-417,w:14,d:14,h:30,kind:'airport-service'});
+place({id:'airport-hangar',x:-310,z:-441,w:46,d:32,h:13,kind:'airport-service'});
 place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
 place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
 place({id:'hansdrex-mansion',...MANSION,kind:'mansion'});
@@ -476,7 +483,7 @@ export function effectiveBuildingHeight(b){
 }
 /** Apply durable world changes on both server and viewer; invalidate navigation only on geometry changes. */
 export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
- const key=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.h,b.stage,Math.floor(Number(b.progress||0)*10)]),floods.map(f=>[f.id,f.x,f.z,f.w,f.d,Math.round(Number(f.depth||0)*10)]),roads.map(r=>[r.id,r.x,r.z,r.w,r.d,r.stage])]);
+ const key=JSON.stringify([buildings.map(b=>[b.id,b.x,b.z,b.w,b.d,b.h,b.stage,Math.floor(Number(b.progress||0)*10),b.usage,b.facilityType,b.ownerId,b.capacity,b.industrySector,b.frontage?.x,b.frontage?.z]),floods.map(f=>[f.id,f.x,f.z,f.w,f.d,Math.round(Number(f.depth||0)*10)]),roads.map(r=>[r.id,r.x,r.z,r.w,r.d,r.stage])]);
  if(key===urbanGeometryKey)return false;
  urbanGeometryKey=key;urbanGeometryRevision++;
  URBAN_ROADS=roads.filter(r=>r.stage==='operational'&&[r.x,r.z,r.w,r.d].every(Number.isFinite)&&r.w>0&&r.d>0).map(r=>({...r}));
@@ -493,6 +500,7 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
   }
   if(Number.isFinite(record.h)&&record.h>0&&record.h<=160)b.h=record.h;
   if(Number.isFinite(b.skylineHeightLimit))b.h=Math.min(b.h,b.skylineHeightLimit);
+  if(record.id?.startsWith('CIVIC-'))for(const key of ['usage','facilityType','name','capacity','ownerId','industrySector','frontage','district'])if(record[key]!==undefined)b[key]=record[key];
   b.urbanStage=record.stage;b.urbanProgress=record.progress||0;
  }
  URBAN_FLOODS=floods.filter(f=>[f.x,f.z,f.w,f.d,f.depth].every(Number.isFinite)&&f.depth>.35).slice(0,4).map(f=>({...f}));
@@ -551,11 +559,13 @@ const NAV_REGIONS=[
  {id:'riverside',minX:480,maxX:WORLD_HALF-20,minZ:-WORLD_HALF+20,maxZ:450},
  {id:'airport',minX:-470,maxX:100,minZ:-1100,maxZ:-390},
  {id:'west',minX:-1120,maxX:-380,minZ:-440,maxZ:460},
+ {id:'north-industry',minX:-850,maxX:-460,minZ:-1060,maxZ:-960},
 ].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
-const regionFor=p=>NAV_REGIONS[p.x>430?1:p.z<-420&&p.x>=-470&&p.x<=100?2:p.x<-440?3:0];
+const regionFor=p=>NAV_REGIONS[p.x>=-850&&p.x< -470&&p.z>=-1060&&p.z<=-960?4:p.x>430?1:p.z<-420&&p.x>=-470&&p.x<=100?2:p.x<-440?3:0];
 const AIRPORT_WALK_PORTALS=[{x:-423.85,z:-410},{x:56.15,z:-410}];
 const WEST_WALK_PORTALS=[{x:-410,z:-334.1},{x:-410,z:5.9},{x:-410,z:334.1}];
-const publicDistrictPortals=region=>region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
+const NORTH_INDUSTRY_PORTALS=[{x:-466,z:-1006.4}];
+const publicDistrictPortals=region=>region.id==='north-industry'?NORTH_INDUSTRY_PORTALS:region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
 function airportAirside(p){return contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4);}
 function publicMotorway(p){return nearbyGeometry(roadBins,p).some(road=>road.motorway&&contains(road,p,.35));}
 const costCache=new Map();
@@ -624,6 +634,10 @@ export function pedestrianRoute(start,dest,mode="walk") {
  }
  // Outer neighbourhoods each use a compact cached lattice. Public sidewalk
  // gateways lead through the core, including journeys between outer districts.
+ if(from!==to&&[from.id,to.id].includes('north-industry')&&[from.id,to.id].includes('airport')){
+  const portal=NORTH_INDUSTRY_PORTALS[0],first=localRoute(start,portal,mode,from),last=localRoute(portal,dest,mode,to);
+  return first.length&&last.length?[...first,...last]:[];
+ }
  const fromPortals=publicDistrictPortals(from),toPortals=publicDistrictPortals(to);
  if(from!==to&&(fromPortals||toPortals)){
   const portals=[...(fromPortals||toPortals)].sort((a,b)=>

@@ -1,5 +1,9 @@
 import {spatialInstanceCells} from './spatial-instances.ts';
 import {CityFrameRenderer} from './city-frame-renderer.ts';
+import {subtractRects} from './surface-rectangles.ts';
+import {buildRoadSurfaceLayout} from './road-surface-layout.ts';
+import {buildRoadSurfaceMeshes} from './road-surface-renderer.ts';
+import {AIRPORT_ROAD_EXCLUSIONS} from './airport-ground-layout.ts';
 import {districtProfile} from '../worker/district-economy.mjs';
 import {IndustrialDistrictRenderer} from './industrial-district.ts';
 import type {IndustrialSnapshot} from '../worker/industrial-economy.mjs';
@@ -58,6 +62,7 @@ import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AI
 
 const viewerBootStarted=performance.now();
 type FlyState = {
+  facilityEmployment?:{buildingId:string;shiftStart:number;wage:number;suspended?:boolean}|null;
   district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
   relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
   onFireEngine?:boolean;onAmbulance?:boolean;
@@ -704,7 +709,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   updateHeliTourState(s.flies || []);
   updateMetroStationOccupancy(actors);
   personalCars.sync(s.flies || [],s.roadTraffic?.incidents);
-  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
+  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);refreshStreetSurfaceLayout();newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
   governmentVisuals.sync(s.publicServices);
@@ -945,21 +950,17 @@ const cityWater=new CityWater();
 const waterMat=cityWater.material;
 const river = new THREE.Mesh(new THREE.PlaneGeometry(RIVER.w, RIVER.d), waterMat);
 river.rotation.x = -Math.PI / 2;
-river.position.set(RIVER.x, 0.015, RIVER.z);
+river.position.set(RIVER.x, 0.03, RIVER.z);
 cityRoot.add(river);
-const harbor = new THREE.Mesh(new THREE.PlaneGeometry(HARBOR.w, HARBOR.d), waterMat);
-harbor.rotation.x = -Math.PI / 2;
-harbor.position.set(HARBOR.x, 0.018, HARBOR.z);
-cityRoot.add(harbor);
+for(const piece of subtractRects([HARBOR],[RIVER])){
+ const harbor=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),waterMat);harbor.rotation.x=-Math.PI/2;harbor.position.set(piece.x,.03,piece.z);cityRoot.add(harbor);
+}
 
 const roadMat = createRoadMaterial(0x242a2e);
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb6b5ad, roughness: 1 });
 const laneMat = new THREE.MeshBasicMaterial({
   color: 0xe9dfb1,
   toneMapped: false,
-  polygonOffset: true,
-  polygonOffsetFactor: -4,
-  polygonOffsetUnits: -4,
 });
 const parkMat = new THREE.MeshStandardMaterial({ color: 0x4f8459, roughness: 1 });
 const plazaMat = new THREE.MeshStandardMaterial({ color: 0xc7c3b8, roughness: 1 });
@@ -968,43 +969,19 @@ const avenueXs = AVENUES;
 const streetZs = STREETS;
 const roadSurfaceRoot=new THREE.Group();cityRoot.add(roadSurfaceRoot);
 
-function addRoadStrip(x: number, z: number, w: number, d: number, avenue = false,clipped=false) {
-  // Keep each road layer physically separated in Y. This prevents distant-camera z-fighting.
-  const base = new THREE.Mesh(new THREE.BoxGeometry(w + (clipped&& !avenue?0:6), 0.06, d + (clipped&&avenue?0:6)), sidewalkMat);
-  base.position.set(x, 0.03, z);
-  roadSurfaceRoot.add(base);
-
-  const road = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, d), roadMat);
-  road.position.set(x, 0.10, z);
-  roadSurfaceRoot.add(road);
-
-  const sidewalkOffset = (avenue ? w : d) / 2 + 1.55;
-  for (const side of [-1, 1]) {
-    const walk = new THREE.Mesh(
-      avenue ? new THREE.BoxGeometry(2.6, 0.18, d + (clipped?0:5)) : new THREE.BoxGeometry(w + 5, 0.18, 2.6),
-      sidewalkMat,
-    );
-    walk.position.set(avenue ? x + side * sidewalkOffset : x, 0.15, avenue ? z : z + side * sidewalkOffset);
-    roadSurfaceRoot.add(walk);
-  }
-
-  const marker = new THREE.Mesh(
-    new THREE.BoxGeometry(avenue ? 0.16 : w * 0.92, 0.008, avenue ? d * 0.92 : 0.16),
-    laneMat,
-  );
-  marker.position.set(x, 0.151, z);
-  roadSurfaceRoot.add(marker);
+const authoredRoads=ROADS.map(r=>({...r}));
+const streetSurfaceRoads=authoredRoads.filter(r=>!r.motorway&&!r.motorwayAccess).flatMap(r=>surfaceRoadPieces(r).map(piece=>({...piece,axis:r.w>=r.d?'x' as const:'z' as const})));
+const streetSurfaceExclusions=[...AIRPORT_ROAD_EXCLUSIONS,...authoredRoads.filter(r=>r.motorway||r.motorwayAccess)];
+const harborFoundations=HARBOR_CAUSEWAYS.map(deck=>({...deck,height:.22,centerY:-.055}));
+let streetLayout=buildRoadSurfaceLayout(streetSurfaceRoads,{allRoads:ROADS,exclusions:streetSurfaceExclusions});
+let streetSurfaces=buildRoadSurfaceMeshes(roadSurfaceRoot,streetLayout,{sidewalk:sidewalkMat,asphalt:roadMat,markings:laneMat},harborFoundations);
+let streetSurfaceRevision='';
+function refreshStreetSurfaceLayout(){
+ const key=ROADS.filter(r=>'stage' in r).map(r=>`${r.x},${r.z},${r.w},${r.d}`).join('|');if(key===streetSurfaceRevision)return;streetSurfaceRevision=key;
+ streetSurfaces.dispose();streetLayout=buildRoadSurfaceLayout(streetSurfaceRoads,{allRoads:ROADS,exclusions:streetSurfaceExclusions});
+ streetSurfaces=buildRoadSurfaceMeshes(roadSurfaceRoot,streetLayout,{sidewalk:sidewalkMat,asphalt:roadMat,markings:laneMat},harborFoundations);
 }
 
-for(const deck of HARBOR_CAUSEWAYS){
- const foundation=new THREE.Mesh(new THREE.BoxGeometry(deck.w,.22,deck.d),sidewalkMat);
- foundation.position.set(deck.x,-.055,deck.z);
- roadSurfaceRoot.add(foundation);
-}
-for(const road of ROADS){
- if(road.motorway||road.motorwayAccess)continue;
- for(const piece of surfaceRoadPieces(road))addRoadStrip(piece.x,piece.z,piece.w,piece.d,piece.d>piece.w,piece!==road);
-}
 const roadSurfaceDrawsBefore=roadSurfaceRoot.children.length;
 batchStaticBoxes(roadSurfaceRoot);
 buildUnderpasses(cityRoot);
@@ -1012,7 +989,7 @@ buildMotorway(cityRoot,makeCanvasSprite);
 
 // The full set of signals and crossings shares four instanced draw batches.
 const trafficPoleMat = new THREE.MeshStandardMaterial({ color:0x303638, roughness:0.72, metalness:0.42 });
-const trafficSignals=new TrafficSignals(cityRoot,INTERSECTIONS,graphics.trafficStride);
+const trafficSignals=new TrafficSignals(cityRoot,INTERSECTIONS,graphics.trafficStride,p=>streetSurfaceRoads.some(r=>Math.abs(p.x-r.x)<=r.w/2&&Math.abs(p.z-r.z)<=r.d/2)&&!streetSurfaceExclusions.some(r=>Math.abs(p.x-r.x)<r.w/2&&Math.abs(p.z-r.z)<r.d/2));
 function updateTrafficSignals(seconds:number){trafficSignals.update(seconds);}
 
 buildRiverBridges(cityRoot);
@@ -1147,9 +1124,6 @@ function addBuilding(
   const windowMat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     toneMapped: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
   });
   windowMat.userData.cityWindow=true;
   if(!options.batchWindows)windowMaterials.push(windowMat);
@@ -1622,6 +1596,9 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'airport-gardens':[160,300,-510,-2.31,-.56,60],
  'westborough':[-280,300,460,-2.385,-.45,60],
  'khalifa':[180,120,-110,-2.782,-.11,52],
+ 'airport-ground':[-230,10,-400,Math.PI/2,-.14,68],
+ 'north-industry':[-650,135,-740,Math.PI,-.35,68],
+ 'motorway-exit':[-1064,7,210,0,-.04,68],
 };
 if(perfPose&&perfPoses[perfPose]){const[x,y,z,yaw,pitch,fov]=perfPoses[perfPose];player.teleport(x,y,z,true);freePosition.set(x,y,z);cameraYaw=yaw;cameraPitch=pitch;camera.fov=fov;camera.updateProjectionMatrix();renderer.domElement.dataset.perfPose=perfPose;}
 camera.position.copy(freePosition);

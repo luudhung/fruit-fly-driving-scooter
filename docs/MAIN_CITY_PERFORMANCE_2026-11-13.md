@@ -35,6 +35,6 @@ A separate facade depth prepass was tried and removed: its extra work did not ju
 
 ## Verification and limits
 
-Production build and focused rendering/interaction checks pass. The full unit suite reports 161 passing tests and two pre-existing failures, reproduced from unchanged commit 63c0eee: the exhaustive player stair traversal at M10 stop 3 and a metro-column fixture still expecting 139 colliders while the expanded map has 416. This graphics change does not modify those routes or colliders.
+Production build and focused rendering/interaction checks pass. During the initial rendering audit the full unit suite reported 161 passing tests and two pre-existing failures, reproduced from unchanged commit 63c0eee: player stair traversal at M10 stop 3 and a metro-column fixture expecting 139 colliders while the expanded map has 416. Subsequent integration fixes retain ground support at switchback landings and compare colliders with the actual rendered supports; all 110 directional station up/down paths now pass. Current release test totals are recorded with the civic development release evidence.
 
-Only the viewer changes. There are no Worker changes, simulation resets, resident/brain ID changes, property or wallet mutations, added server rendering, paid hosting requirements or new lighting sources.
+The rendering optimizations run only in the viewer and add no server rendering, paid hosting requirement or real lighting source. The subsequent civic/industry release also updates Worker simulation and map version; see CIVIC_DEVELOPMENT_2026-11-13.md. No production reset or test-state import is part of that deployment.

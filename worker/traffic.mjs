@@ -14,7 +14,7 @@ function refresh(){
  const key=ROADS.map(r=>`${r.x},${r.z},${r.w},${r.d}`).join('|');if(key===signature)return;signature=key;
  const vertical=ROADS.filter(r=>r.d>r.w),horizontal=ROADS.filter(r=>r.w>=r.d),xs=[...new Set(vertical.map(r=>r.x))],zs=[...new Set(horizontal.map(r=>r.z))];
  INTERSECTIONS.length=0;rows.clear();columns.clear();
- for(const x of xs)for(const z of zs){const p={id:`${x},${z}`,x,z};if(contains(PARK,p,5)||isGradeSeparated(p)||motorwaySegmentAt(p)||!vertical.some(r=>inside(r,p))||!horizontal.some(r=>inside(r,p)))continue;
+ for(const x of xs)for(const z of zs){const p={id:`${x},${z}`,x,z};if(contains(PARK,p,5)||isGradeSeparated(p)||motorwaySegmentAt(p)||!vertical.some(r=>r.x===x&&inside(r,p))||!horizontal.some(r=>r.z===z&&inside(r,p)))continue;
   INTERSECTIONS.push(p);if(!rows.has(z))rows.set(z,[]);rows.get(z).push(p);if(!columns.has(x))columns.set(x,[]);columns.get(x).push(p);
  }
  // Adjacent intersections can have overlapping stop lines. They form one controlled box,

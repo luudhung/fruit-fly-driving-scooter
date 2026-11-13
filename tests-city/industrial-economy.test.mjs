@@ -26,7 +26,7 @@ test('sixteen physical leases remain vacant until existing resident founders fin
 
 test('essential personnel and government recruits cannot be poached; industrial wages depend on district and actual attendance',()=>{
  const t=fixture(),b=t.found(0,'INDUSTRY-west-1');for(const [i,job]of ['doctor','power','firefighter','paramedic','transit','military','police'].entries()){const f=t.s.flies[i+1];f.jobId=job;t.place(f,b.locationId);assert.equal(t.service.applyJob(f,b.id),false);assert.equal(f.jobId,job);}
- const f=t.s.flies[10];t.place(f,b.locationId);assert.equal(t.service.applyJob(f,b.id),true);assert.equal(f.wage,4.6*.82);const total=cash(t.s),money=f.money;
+ const f=t.s.flies[10];t.place(f,b.locationId);assert.equal(t.service.applyJob(f,b.id),true);assert.equal(f.wage,b.wageOffer);assert.ok(f.wage>=4.6*.82);const total=cash(t.s),money=f.money;
  t.service.handleResident(f,{hour:9});t.s.simulationAgeSeconds+=1800;t.service.handleResident(f,{hour:9.5});assert.ok(Math.abs(f.money-money-f.wage*.5*.95)<1e-7);assert.ok(Math.abs(cash(t.s)-total)<1e-7);
  const paid=f.money;t.service.handleResident(f,{hour:9.5});assert.equal(f.money,paid);t.place(f,'park');t.s.simulationAgeSeconds+=1800;t.service.handleResident(f,{hour:10});assert.equal(f.money,paid);
 });
@@ -43,7 +43,7 @@ test('a real escrow reserves raw stock, survives restore, settles once and refun
 });
 
 test('inter-zone cargo follows actual motorway lanes and physically completes rather than creating remote stock',()=>{
- const t=fixture(),b=t.found(0,'INDUSTRY-north-1'),f=t.s.flies[0];b.openingAt=1e12;t.place(f,b.locationId);const total=cash(t.s),o=t.service.requestInput(b.id,40);assert.ok(o);t.service.tick(0,{hour:9});const truck=t.s.industrialEconomy.trucks[0];assert.equal(o.phase,'collecting');assert.equal(truck.boarding,true);const parked={x:truck.x,z:truck.z};assert.equal(f.traveling,true);assert.deepEqual({x:truck.x,z:truck.z},parked);assert.ok(truck.routeWaypoints.some(p=>motorwaySegmentAt(p)),'the inter-zone haul uses the ring road');assert.equal(b.inventory.raw,0);
+ const t=fixture(),b=t.found(0,'INDUSTRY-north-1'),f=t.s.flies[0];b.openingAt=1e12;t.place(f,b.locationId);const total=cash(t.s),o=t.service.requestInput(b.id,40);assert.ok(o);t.service.tick(0,{hour:9});const truck=t.s.industrialEconomy.trucks[0];assert.equal(o.phase,'collecting');assert.equal(truck.boarding,Math.hypot(byId(b.locationId).x-truck.x,byId(b.locationId).z-truck.z)>5);const parked={x:truck.x,z:truck.z};assert.equal(f.traveling,truck.boarding);assert.deepEqual({x:truck.x,z:truck.z},parked);assert.ok(truck.routeWaypoints.some(p=>motorwaySegmentAt(p)),'the inter-zone haul uses the ring road');assert.equal(b.inventory.raw,0);
  let fastest=0;for(let i=0;i<2200&&!t.s.industrialEconomy.orders.find(x=>x.id===o.id)?.paid;i++){t.step();fastest=Math.max(fastest,t.s.industrialEconomy.trucks[0]?.motionSpeed||0);if(i===30)t.restore();}
  const saved=t.s.industrialEconomy.orders.find(x=>x.id===o.id);assert.ok(saved?.paid,JSON.stringify({phase:saved?.phase,truck:t.s.industrialEconomy.trucks[0],age:t.s.simulationAgeSeconds}));assert.equal(saved.phase,'complete');assert.equal(t.s.enterprises[b.id].inventory.raw,40);assert.ok(fastest>=20);assert.equal(t.s.flies[0].industrialFreightDuty,null);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
 });

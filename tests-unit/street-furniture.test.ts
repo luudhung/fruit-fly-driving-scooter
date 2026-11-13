@@ -39,8 +39,8 @@ test('signal collider poles exactly match all rendered signal instance positions
 test('metro column colliders match renderer supports, including offset choice and height',()=>{
  const root=new THREE.Group(),sign=()=>new THREE.Sprite();new MetroRenderer(root,sign,()=>{},2);
  const columns=transforms(root).filter(v=>close(v.scale.x,.72)&&close(v.scale.z,.72));
- const cs=named('metro:');assert.equal(cs.length,139);assert.equal(columns.length,cs.length);
- for(const c of cs){assert.ok(columns.some(v=>matches(c,v.position)&&close(c.maxY-c.minY,v.scale.y)));assert.ok(!ROADS.some(r=>contains(r,c,.36)));}
+ const cs=named('metro:');assert.ok(cs.length>0);assert.equal(columns.length,cs.length,'every current directional track support has one physical collider');
+ const unmatched=[...columns];for(const c of cs){const index=unmatched.findIndex(v=>matches(c,v.position)&&close(c.maxY-c.minY,v.scale.y));assert.ok(index>=0,`missing rendered support ${c.id}`);unmatched.splice(index,1);assert.ok(!ROADS.some(r=>contains(r,c,.36)));}assert.equal(unmatched.length,0,'no rendered column is missing its own collider');
 });
 
 test('bridge lamp and concrete pier colliders match renderer and stay above tunnel cars',()=>{

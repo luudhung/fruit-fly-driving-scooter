@@ -12,3 +12,9 @@ test('real engine publishes the three industrial zones and skips fabricated expo
  const records=s.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]),cash=b.cash,inventory={...b.inventory};const restored=restoreState(structuredClone(s));
  assert.deepEqual(restored.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]),records);assert.equal(restored.enterprises[b.id].cash,cash);assert.deepEqual(restored.enterprises[b.id].inventory,inventory);assert.equal(getState().industrialEconomy.companies.length,1);
 });
+
+test('real engine restores a resident-financed clothing shop without fabricated exports or stock',()=>{
+ const s=freshState(),f=s.flies.find(f=>f.alive&&f.ageYears>=23&&f.ageYears<60&&!f.businessId&&!f.businessEmployeeOf&&!f.publicServiceRole&&!['doctor','power','police','military','firefighter','paramedic','school','transit'].includes(f.jobId));assert.ok(f);const bank=LOCATIONS.find(l=>l.id==='bank');Object.assign(f,{jobId:null,jobTitle:null,wage:0,money:6000,savings:4000,health:95,energy:90,currentLocationId:'bank',x:bank.x,z:bank.z,traveling:false});f.traits.ambition=.95;f.traits.thrift=.3;
+ const total=liquidMoneySupply(),b=industrialEconomy.clothingRetail.open(f);assert.ok(b);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);b.openingAt=0;const cash=b.cash;s.economy.lastEnterpriseHour=-1;simulateEnterprises({day:1,hour:9});assert.equal(b.cash,cash);assert.equal(b.revenueLifetime,0);assert.equal(b.inventory,0);
+ const records=s.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]),restored=restoreState(structuredClone(s));assert.deepEqual(restored.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]),records);assert.equal(restored.enterprises[b.id].cash,cash);assert.equal(restored.enterprises[b.id].inventory,0);assert.equal(getState().industrialEconomy.clothingShops.find(shop=>shop.id===b.id).ownerId,f.id);
+});

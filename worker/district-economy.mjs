@@ -7,7 +7,7 @@ export const DISTRICT_PROFILES={
 };
 export function districtAt(point={}){
  const x=Number(point.x??point.homeX??0),z=Number(point.z??point.homeZ??0);
- if(z< -440&&x>=-470&&x<=100)return 'north';
+ if(z< -440&&x>=-470&&x<=100||z>=-1060&&z<=-960&&x>=-850&&x< -470)return 'north';
  if(x< -440)return 'west';
  if(x>480)return 'europe';
  return 'main';

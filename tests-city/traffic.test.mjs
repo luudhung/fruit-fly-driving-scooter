@@ -95,3 +95,15 @@ test('shallow merging paths choose one leader without weakening an ordinary lane
  const car={...truck,id:'car',vehicleLength:4};assert.ok(Math.abs(createVehicleIndex([car,leader])(car,{x:20,z:1000})-1.8)<1e-9);
  assert.equal(createVehicleIndex([truck,{...leader,targetX:-30}])(truck,{x:20,z:1000}),20);
  });
+
+test('signals belong to the actual crossing road centers, preserving genuinely close avenues',async()=>{
+ const{ROADS}=await import('../worker/city-map.mjs');
+ for(const p of INTERSECTIONS){
+  assert.ok(ROADS.some(r=>r.d>r.w&&r.x===p.x&&Math.abs(r.z-p.z)<=r.d/2+.001),`no north-south center at ${p.id}`);
+  assert.ok(ROADS.some(r=>r.w>=r.d&&r.z===p.z&&Math.abs(r.x-p.x)<=r.w/2+.001),`no east-west center at ${p.id}`);
+ }
+ for(const z of [-1060,-1000,-950,-890,-830,-770,-710,-650,-600]){
+  assert.ok(INTERSECTIONS.some(p=>p.x===-20&&p.z===z));assert.ok(!INTERSECTIONS.some(p=>p.x===-24&&p.z===z));
+ }
+ for(const x of [-102,-92])assert.ok(INTERSECTIONS.some(p=>p.x===x&&p.z===29));
+});

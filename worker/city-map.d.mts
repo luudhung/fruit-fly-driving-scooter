@@ -57,7 +57,7 @@ export function vehicleRoute(a:Point,b:Point,mode?:string,parked?:Point|null,des
 export const RIVERSIDE:Rect&{id:string;name:string};
 export const SPORTS_VENUES:Array<Rect&{id:string;name:string}>;
 
-export type UrbanBuildingRecord=Rect&{id:string;h:number;stage:string;progress?:number;health?:number;kind?:string};
+export type UrbanBuildingRecord=Rect&{id:string;h:number;stage:string;progress?:number;health?:number;kind?:string;usage?:string;facilityType?:string;name?:string;capacity?:number;ownerId?:string|null;industrySector?:string;frontage?:{x:number;z:number}};
 export type UrbanFlood=Rect&{id:string;depth:number};
 export let urbanGeometryRevision:number;
 export let URBAN_FLOODS:UrbanFlood[];

@@ -71,11 +71,21 @@ test('every directional metro access can be walked to its platform and back with
   }
   completed++;
  }
- assert.equal(completed,110);
+ assert.equal(completed,METRO_LINES.reduce((n,line)=>n+line.points.length*2,0));
 });
 
 test('walking onto or away from a metro platform does not automatically ride its lift',async()=>{
  const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs'),geo=metroStationGeometry(METRO_LINES[0],0),platform=geo.platform,p=new PlayerController();
  p.teleport(platform.x,platform.y-.9+PLAYER_EYE,platform.z);run(p,.15);const feet=p.feet;
  run(p,.25,{forward:1,yaw:Math.PI/2});assert.ok(Math.abs(p.feet-feet)<.02);assert.equal(p.flying,false);
+});
+
+
+test('the steep North City switchback retains nearby landing support without enabling flight or midair climbing',async()=>{
+ const {METRO_LINES,metroStationGeometry}=await import('../worker/city-map.mjs'),line=METRO_LINES.find(l=>l.id==='M10')!,geo=metroStationGeometry(line,3,1),landing=geo.stairs[2],target=geo.stairs[3];
+ for(const fps of [30,60,120]){const p=new PlayerController();p.teleport(landing.x-.03,landing.y-.9+PLAYER_EYE+.06,landing.z-.17);p.verticalVelocity=-.9;
+  const seconds=Math.hypot(target.x-p.x,target.z-p.z)/4.4;for(let i=0;i<Math.ceil(seconds*fps);i++){const dx=target.x-p.x,dz=target.z-p.z;if(Math.hypot(dx,dz)<.08)break;p.update(1/fps,{...idle,forward:1,yaw:Math.atan2(dx,dz)});}
+  assert.ok(p.feet>target.y-.9-.2,`landing dropped at ${fps}fps: ${p.feet}`);assert.equal(p.flying,false);
+ }
+ const airborne=new PlayerController();airborne.teleport(landing.x,landing.y-.9+PLAYER_EYE+1,landing.z);airborne.verticalVelocity=-.5;airborne.update(1/120,{...idle,forward:1,yaw:Math.PI/2});assert.ok(airborne.feet>landing.y-.9+.9);assert.equal(airborne.grounded,false);
 });

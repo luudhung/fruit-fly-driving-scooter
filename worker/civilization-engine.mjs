@@ -1,4 +1,5 @@
 import {createIndustrialEconomy} from './industrial-economy.mjs';
+import {migrateNorthIndustry} from './industry-relocation.mjs';
 import {DISTRICT_PROFILES,districtAt,districtProfile,districtHousingUtility,applyDistrictExposure} from './district-economy.mjs';
 import {createPublicServices} from './public-services.mjs';
 import {createResidentRelationships} from './resident-relationships.mjs';
@@ -509,7 +510,7 @@ function syncDistrictHousingPrices(){
  for(const block of state.housing.apartmentBlocks){const plot=base.get(block.id);if(plot&&!plot.luxury){block.rent=plot.rent;block.purchaseValue=plot.purchaseValue;}}
  for(const hh of Object.values(state.housing.households))if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;
 }
-function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
+function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
   if(f.industrialFreightDuty)return industrialEconomy.handleResident(f,clock);
@@ -768,7 +769,7 @@ const GRID_JOB_IDS=new Set(['power','power-evening','power-night','grid-dispatch
 function ensurePowerPlantStaff(){
   const staff=state.flies.filter(f=>f.alive&&f.ageYears>=18&&f.ageYears<=75&&GRID_JOB_IDS.has(f.jobId));
   // Cover three crews from existing grid employees first. Never recruit over another profession.
-  const candidates=staff.length<18?state.flies.filter(f=>f.alive&&f.ageYears>=20&&f.ageYears<=68&&!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&!f.urbanTask&&!f.cityService&&!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty)
+  const candidates=staff.length<18?state.flies.filter(f=>f.alive&&f.ageYears>=20&&f.ageYears<=68&&!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!f.urbanTask&&!f.cityService&&!f.civicDuty&&!f.fireEngineDuty&&!f.ambulanceDuty)
     .sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition)):[];
   while(staff.length<18&&candidates.length){
     const f=candidates.shift(),job=JOBS.find(j=>j.id===['power','power-evening','power-night'][staff.length%3]);
@@ -823,10 +824,12 @@ function simulatePowerGrid(clock){
   plant.assetLedger=plant.assetLedger.slice(-48);
   if(plant.fuelReserve<1200&&plant.cash>900){plant.cash-=650;state.externalTrade||={exports:0,imports:0};state.externalTrade.imports+=650;plant.fuelReserve+=6500;emit('power_fuel','Hansdrex Power purchased fuel reserves.',{fuelReserve:plant.fuelReserve});}
   plant.fuelReserve=Math.max(0,plant.fuelReserve-Math.max(12,plant.demand*.055));
-  plant.capacity=plant.installedCapacity;
+  const civicGeneration=urbanWorld.serviceCapacity(clock).power;
+  plant.capacity=plant.installedCapacity+civicGeneration;
+  plant.civicGenerationCapacity=civicGeneration;
   // Commissioned turbine modules include controls: two operators cover full dispatch; one can run a reduced load.
   const fuelFactor=plant.fuelReserve>0?1:.25,staffFactor=.3+.7*Math.min(1,onDuty.length/2);
-  plant.generation=Math.min(plant.capacity*plant.maintenance*fuelFactor*staffFactor,plant.demand*1.08);
+  plant.generation=Math.min((plant.installedCapacity*staffFactor+civicGeneration)*plant.maintenance*fuelFactor,plant.demand*1.08);
   const online=plant.generation>=plant.demand*.72;
   if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit('grid_restored','Hansdrex electrical grid returned to stable operation.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit('grid_outage','Hansdrex grid entered a blackout.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}
   billElectricity(clock);
@@ -1866,7 +1869,7 @@ function workCommitment(fly,clock){
   return {job,onShift,essential,soon:essential&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
 }
 function isWorkCommitted(f){
-  if(f.industrialFreightDuty)return true;
+  if(f.industrialFreightDuty||f.facilityEmployment)return true;
   if(f.publicServiceRole&&(f.publicServiceDuty||f.militaryFlightId||publicServices.onShift(f,gameClock())))return true;
   const duty=workCommitment(f,gameClock());
   return Boolean(duty?.essential&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
@@ -1879,7 +1882,7 @@ function ensureAcademyTeacher(force=false){
   state.education=state.education||{teacherId:null,teacherGeneration:0,lessons:0};
   let current=academyTeacher();
   if(current && !force){ensureCognitiveProfile(current);return current;}
-  const adults=state.flies.filter((f)=>f.alive&&f.ageYears>=22&&f.ageYears<=72);
+  const adults=state.flies.filter((f)=>f.alive&&f.ageYears>=22&&f.ageYears<=72&&!f.facilityEmployment&&!f.businessId&&!f.businessEmployeeOf&&!f.publicServiceRole);
   if(!adults.length)return null;
   for(const f of adults)ensureCognitiveProfile(f);
   const ranked=adults.slice().sort((a,b)=>
@@ -2345,7 +2348,7 @@ function simulateEnterprises(clock) {
   let hourlyGdp = 0;
 
   for (const business of operating) {
-    if(business.industrial)continue;
+    if(business.industrial||business.garmentRetail)continue;
     if(business.urbanSuspended||urbanWorld.isUnavailable(business.locationId))continue;
     const owner = state.flies.find((f) => f.id === business.ownerId && f.alive);
     if (!owner) {
@@ -2484,14 +2487,14 @@ function simulateEnterprises(clock) {
   state.economy.businessCount = Object.values(state.enterprises || {}).filter((b) => b.status === "operating").length;
   const enterpriseWorkers=state.flies.filter((f)=>f.alive&&f.businessEmployeeOf).length;
   const staticWorkers=state.flies.filter((f)=>f.alive&&f.jobId).length;
-  state.economy.employed=state.flies.filter(f=>f.alive&&(f.jobId||f.businessEmployeeOf)).length;
+  state.economy.employed=state.flies.filter(f=>f.alive&&(f.jobId||f.businessId||f.businessEmployeeOf||f.facilityEmployment)).length;
   if(hourKey%4===0&&state.economy.lastLaborPulseHour!==hourKey){
     state.economy.lastLaborPulseHour=hourKey;
     emit("labor",`Hansdrex labor pulse: ${state.economy.employed} employed, ${enterpriseWorkers} in brain-created roles, ${state.economy.businessCount} resident-run businesses.`,{employed:state.economy.employed,enterpriseWorkers,businesses:state.economy.businessCount});
   }
 
   const adults = state.flies.filter((f) => f.alive && f.ageYears >= 18 && f.ageYears <= 75);
-  const unemployed = adults.filter((f) => !f.jobId && !f.businessId && !f.businessEmployeeOf).length;
+  const unemployed = adults.filter((f) => !f.jobId && !f.businessId && !f.businessEmployeeOf && !f.facilityEmployment).length;
   state.economy.unemployment = adults.length ? unemployed / adults.length : 0;
   const netWorths = state.flies.filter((f) => f.alive).map(netWorth);
   state.economy.averageNetWorth = netWorths.length ? netWorths.reduce((a,b) => a+b, 0) / netWorths.length : 0;
@@ -3195,7 +3198,7 @@ function ensureHeliTourStaff(){
   if(staff.length>=4)return staff;
   const slots=["heli-pilot-day","heli-pilot-evening","heli-ground","heli-ground-evening"];
   const candidates=state.flies
-    .filter((f)=>f.alive&&f.ageYears>=23&&f.ageYears<=66&&!f.businessId&&!f.businessEmployeeOf&&!ids.has(f.jobId)&&!["doctor","police","military","power","power-evening","power-night","grid-dispatch","school"].includes(f.jobId))
+    .filter((f)=>f.alive&&f.ageYears>=23&&f.ageYears<=66&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!ids.has(f.jobId)&&!["doctor","police","military","power","power-evening","power-night","grid-dispatch","school"].includes(f.jobId))
     .sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition));
   while(staff.length<4&&candidates.length){
     const fly=candidates.shift(),job=JOBS.find((j)=>j.id===slots[staff.length]);
@@ -4072,7 +4075,7 @@ function tickFly(fly, clock) {
     fly.jobId = null;
     fly.jobTitle = null;
     fly.wage = 0;
-  } else if (!fly.jobId && !fly.businessId && !fly.businessEmployeeOf && fly.ageYears <= 75 && rand() < 0.00025 * (0.4 + fly.traits.ambition)) {
+  } else if (!fly.jobId && !fly.businessId && !fly.businessEmployeeOf && !fly.facilityEmployment && fly.ageYears <= 75 && rand() < 0.00025 * (0.4 + fly.traits.ambition)) {
     const job = pick(JOBS.filter(j=>!j.publicOnly));
     fly.jobId = job.id;
     fly.jobTitle = job.title;
@@ -4172,7 +4175,8 @@ function compactFly(f) {
     criminalRecordCount:Array.isArray(f.criminalRecord)?f.criminalRecord.length:0,
     sentence:f.sentence||null,
     capitalCharge:Boolean(f.capitalCharge),
-    jobTitle: f.jobTitle,
+    jobTitle: f.facilityEmployment ? `${state.urbanWorld?.buildings?.[f.facilityEmployment.buildingId]?.name||'Civic facility'} staff` : f.jobTitle,
+    facilityEmployment:f.facilityEmployment?{...f.facilityEmployment}:null,
     partnerId: f.partnerId,
     affection: Number(f.affection.toFixed(1)),
     relationshipTrust: Number((f.relationshipTrust || 0).toFixed(1)),
@@ -4292,7 +4296,7 @@ function motionPlan(f){
 function observerFly(f,selectedId){
  if(f.id===selectedId)return {...compactFly(f),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
  record.motion=motionPlan(f);
@@ -4443,7 +4447,7 @@ async function tick(options = {}) {
       ensureAcademyTeacher();
       ensureHeliTourStaff();
       if(!state.flies.some(f=>f.alive&&f.jobId==="rooftop")){
-       const host=state.flies.find(f=>f.alive&&f.ageYears>=21&&f.ageYears<65&&!f.jobId&&!f.businessEmployeeOf);
+       const host=state.flies.find(f=>f.alive&&f.ageYears>=21&&f.ageYears<65&&!f.jobId&&!f.businessEmployeeOf&&!f.businessId&&!f.facilityEmployment);
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
