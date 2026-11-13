@@ -23,7 +23,7 @@ export function createMansionMeshes(){
  for(const boxes of groups.values()){
   const b=boxes[0],glass=b.finish==='glass',glow=b.finish==='glow';
   const material=new THREE.MeshStandardMaterial({color:glass?b.color:0xffffff,roughness:glass?.16:b.finish==='gold'?.3:.7,metalness:b.finish==='gold'?.65:glass?.2:0,transparent:glass,opacity:glass?.26:1,depthWrite:!glass,emissive:glass?b.color:0xffffff,emissiveIntensity:glow?.8:glass?0:.14});
-  if(!glass)material.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n#ifdef USE_COLOR\ntotalEmissiveRadiance*=vColor;\n#endif');};
+  if(!glass)material.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n#ifdef USE_COLOR\ntotalEmissiveRadiance*=vColor.rgb;\n#endif');};
   const mesh=new THREE.InstancedMesh(geometry,material,boxes.length);mesh.name='Mansion architecture and furniture';
   for(let i=0;i<boxes.length;i++){const a=boxes[i];transform.position.set(a.x,a.y,a.z);transform.scale.set(a.w,a.h,a.d);transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);if(!glass)mesh.setColorAt(i,new THREE.Color(a.color));}
   mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();meshes.push(mesh);

@@ -1608,6 +1608,7 @@ const perfPose=new URLSearchParams(location.search).get('perf');
 const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'motorway-freight':[-1064,12,300,-3.13,-.06,68],
  'nyc-street':[-102,7,-108,0,-.04,68],
+ 'mansion':[145,23,947,-2.743,-.19,68],
  'nyc-overview':[420,290,510,-2.47,-.40,52],
  'paris':[740,9,110,.35,-.05,68],
  'airport-gardens':[160,300,-510,-2.31,-.56,60],
