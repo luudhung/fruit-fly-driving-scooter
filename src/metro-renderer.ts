@@ -143,7 +143,7 @@ export class MetroRenderer{
   if(this.camera&&(seconds-this.viewAt>=.15||seconds<this.viewAt)){
    this.view.setCamera(this.camera);this.viewAt=seconds;let visible=0,signs=0,instances=0;
    for(const chunk of this.chunks){const sphere=chunk.boundingSphere!;chunk.visible=this.view.visible(sphere.center,chunk.visible,sphere.radius);if(chunk.visible){visible++;instances+=chunk.count;}}
-   for(const sign of this.signs){sign.visible=this.view.visible(sign.position,sign.visible,5);if(sign.visible)signs++;}
+   for(const sign of this.signs){const distance=Math.sqrt(this.view.distanceSquared(sign.position));sign.material.opacity=THREE.MathUtils.clamp((220-distance)/60,0,1);sign.visible=distance<220&&this.view.visible(sign.position,sign.visible,5);if(sign.visible)signs++;}
    this.stats.visibleChunks=visible;this.stats.visibleSigns=signs;this.stats.visibleStaticInstances=instances;
   }
   let visibleTrains=0;
@@ -151,6 +151,7 @@ export class MetroRenderer{
    const train=this.trainById.get(pose.id);if(!train)continue;
    train.group.visible=pose.active&&(!this.camera||this.view.visible(pose,train.group.visible,16));if(this.camera&&!train.group.visible)continue;
    if(train.group.visible)visibleTrains++;train.group.position.set(pose.x,pose.y,pose.z);
+   if(this.camera){const distance=Math.sqrt(this.view.distanceSquared(pose));train.label.visible=distance<220;train.label.material.opacity=THREE.MathUtils.clamp((220-distance)/60,0,1);}
    const a=line.points[pose.from===pose.to?pose.from-pose.direction:pose.from],b=line.points[pose.to];train.group.rotation.y=Math.atan2(b[0]-a[0],b[1]-a[1]);
    if(train.direction!==pose.direction){train.direction=pose.direction;this.trainLabel(train);}
   }

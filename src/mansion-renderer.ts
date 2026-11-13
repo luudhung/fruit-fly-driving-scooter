@@ -9,16 +9,24 @@ export function buildMansion(parent:THREE.Group,_sign:Sign){
   const s=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthWrite:false,depthTest:true}));s.scale.set(w,h,1);return s;
  };
  const root=new THREE.Group();root.name='Hansdrex Mansion · fully walkable interiors';parent.add(root);
+ root.add(...createMansionMeshes());
+ for(const r of mansionRooms){const s=sign(r.name,Math.min(9,r.name.length*.3),.8);s.position.set(r.x,(r.floor?MANSION_UPPER:MANSION_FLOOR)+3.7,r.z);root.add(s);}
+ return root;
+}
+
+/** Shared finish materials retain per-room colors and matching emissive tints. */
+export function createMansionMeshes(){
+ const meshes:THREE.InstancedMesh[]=[];
  const groups=new Map<string,typeof mansionBoxes>();
- for(const b of mansionBoxes){const key=`${b.color}:${b.finish||''}`;if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(b);}
+ for(const b of mansionBoxes){const key=b.finish==='glass'?`${b.color}:glass`:b.finish||'';if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(b);}
  const transform=new THREE.Object3D(),geometry=new THREE.BoxGeometry(1,1,1);
  for(const boxes of groups.values()){
   const b=boxes[0],glass=b.finish==='glass',glow=b.finish==='glow';
-  const material=new THREE.MeshStandardMaterial({color:b.color,roughness:glass?.16:b.finish==='gold'?.3:.7,metalness:b.finish==='gold'?.65:glass?.2:0,transparent:glass,opacity:glass?.26:1,depthWrite:!glass,emissive:b.color,emissiveIntensity:glow?.8:glass?0:.14});
+  const material=new THREE.MeshStandardMaterial({color:glass?b.color:0xffffff,roughness:glass?.16:b.finish==='gold'?.3:.7,metalness:b.finish==='gold'?.65:glass?.2:0,transparent:glass,opacity:glass?.26:1,depthWrite:!glass,emissive:glass?b.color:0xffffff,emissiveIntensity:glow?.8:glass?0:.14});
+  if(!glass)material.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n#ifdef USE_COLOR\ntotalEmissiveRadiance*=vColor;\n#endif');};
   const mesh=new THREE.InstancedMesh(geometry,material,boxes.length);mesh.name='Mansion architecture and furniture';
-  for(let i=0;i<boxes.length;i++){const a=boxes[i];transform.position.set(a.x,a.y,a.z);transform.scale.set(a.w,a.h,a.d);transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);}
-  mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();root.add(mesh);
+  for(let i=0;i<boxes.length;i++){const a=boxes[i];transform.position.set(a.x,a.y,a.z);transform.scale.set(a.w,a.h,a.d);transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);if(!glass)mesh.setColorAt(i,new THREE.Color(a.color));}
+  mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();meshes.push(mesh);
  }
- for(const r of mansionRooms){const s=sign(r.name,Math.min(9,r.name.length*.3),.8);s.position.set(r.x,(r.floor?MANSION_UPPER:MANSION_FLOOR)+3.7,r.z);root.add(s);}
- return root;
+ return meshes;
 }

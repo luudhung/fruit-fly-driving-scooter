@@ -21,7 +21,7 @@ export class CityBoxBatches{
     if(!(object instanceof THREE.Mesh)||!(object.geometry instanceof THREE.BoxGeometry)||Array.isArray(object.material)||(object.material.userData.cityFacade&&!object.material.userData.normalizedFacade)){building.extras.push({object,visible:object.visible});continue;}
     const material=object.material as THREE.Material&{color?:THREE.Color};if(material.transparent||!material.color){building.extras.push({object,visible:object.visible});continue;}
     const json=material.toJSON() as unknown as Record<string,unknown>;for(const field of ['uuid','color','metadata'])delete json[field];
-    const key=`${Math.floor(group.position.x/cellSize)}:${Math.floor(group.position.z/cellSize)}:${JSON.stringify(json)}`;
+    const key=`${cellSize>0?Math.floor(group.position.x/cellSize)+':'+Math.floor(group.position.z/cellSize):'static'}:${JSON.stringify(json)}`;
     let bucket=buckets.get(key);if(!bucket){const copy=material.clone() as typeof material;copy.color!.setHex(0xffffff);if(material.userData.normalizedFacade){copy.onBeforeCompile=material.onBeforeCompile;copy.customProgramCacheKey=material.customProgramCacheKey;}bucket={material:copy,sources:[]};buckets.set(key,bucket);onMaterial?.(copy);}
     object.updateMatrix();const p=object.geometry.parameters,dimensions=new THREE.Matrix4().makeScale(p.width,p.height,p.depth),matrices:THREE.Matrix4[]=[],colors:THREE.Color[]=[];
     const instances=object instanceof THREE.InstancedMesh?object.count:1,faces=new Int8Array(instances);

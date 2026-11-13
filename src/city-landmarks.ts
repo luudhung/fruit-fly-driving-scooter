@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {batchStaticMeshes} from './static-box-batches.ts';
 import {AIRPORT,ISLAND,SEA,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const stone=new THREE.MeshStandardMaterial({color:0xc8c5b9,roughness:.65,metalness:.12});
@@ -30,7 +31,7 @@ export function buildHansdrexTower(root:THREE.Group,make:Sign){
  cylinder(g,.52,.9,8,211,metal);
  for(let i=0;i<8;i++)cylinder(g,.20-i*.02,.24-i*.02,4.3,217+i*4.3,i%2?stone:new THREE.MeshStandardMaterial({color:0xd55243,roughness:.6}),10);
  cylinder(g,.04,.13,3,248.5,metal);ring(g,.4,249, warm,.09);
- sign(g,make,'HANSDREX TOWER · 250 M',0,258,0,31,1.5);root.add(g);
+ sign(g,make,'HANSDREX TOWER · 250 M',0,258,0,31,1.5);batchStaticMeshes(g);root.add(g);
 }
 export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
  const g=new THREE.Group();g.position.set(SKYLINE_PLOTS.empire.x,0,SKYLINE_PLOTS.empire.z);
@@ -48,7 +49,7 @@ export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
  const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),facade(),matrices.length);matrices.forEach((m,i)=>windows.setMatrixAt(i,m));g.add(windows);
  for(let i=0;i<4;i++){cylinder(g,1.1-i*.17,1.3-i*.17,1.6,175+i*1.7,i%2?gold:stone,8);}
  cylinder(g,.15,.53,14,188,metal,12);cylinder(g,.05,.15,2,196, warm,8);
- sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);root.add(g);return g;
+ sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);batchStaticMeshes(g);root.add(g);return g;
 }
 export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  const g=new THREE.Group(),asphalt=new THREE.MeshStandardMaterial({color:0x293139,roughness:.95}),concrete=new THREE.MeshStandardMaterial({color:0xaeb8b7,roughness:.9});
@@ -105,7 +106,7 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  slab(295,850,64,4,new THREE.MeshStandardMaterial({color:0x977b53}),1.2);
  sign(g,make,'HANSDREX ISLAND · PALM BEACH RESORT',170,34,846,96,3.1);
  sign(g,make,'HIA · ARRIVALS & RETURN FLIGHTS',65,13,785,48,1.5);
- root.add(g);
+ batchStaticMeshes(g);root.add(g);
  // One 15-seat high-wing twin-turboprop, matching the server's scheduled aircraft.
  const plane=new THREE.Group(),whitePaint=new THREE.MeshStandardMaterial({color:0xe5edeb,roughness:.32,metalness:.35});
  const fuselage=new THREE.Mesh(new THREE.SphereGeometry(1,16,10),whitePaint);fuselage.scale.set(1.3,1.4,7.7);plane.add(fuselage);

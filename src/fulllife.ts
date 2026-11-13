@@ -1,3 +1,5 @@
+import {spatialInstanceCells} from './spatial-instances.ts';
+import {CityFrameRenderer} from './city-frame-renderer.ts';
 import {districtProfile} from '../worker/district-economy.mjs';
 import {IndustrialDistrictRenderer} from './industrial-district.ts';
 import type {IndustrialSnapshot} from '../worker/industrial-economy.mjs';
@@ -7,7 +9,7 @@ import {FrameStats} from './frame-stats.ts';
 import {IdleSnapshotCache} from './idle-snapshot-cache.ts';
 import {CityBoxBatches} from './city-box-batches.ts';
 import {RenderTimings} from './render-timings.ts';
-import {batchStaticBoxes} from './static-box-batches.ts';
+import {batchStaticBoxes,batchStaticMeshes} from './static-box-batches.ts';
 import {createRoadMaterial,updateRoadLighting} from './road-lighting.ts';
 import {buildMarinaBay} from './marina-bay.ts';
 import {MetroRenderer} from './metro-renderer.ts';
@@ -806,11 +808,14 @@ async function fetchSnapshot(){
 addEventListener("visibilitychange",()=>{if(!document.hidden)void fetchSnapshot();});
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 7000);
+const renderCanvas=document.createElement('canvas');
+const contextAttributes:WebGLContextAttributes={antialias:true,alpha:false,depth:true,powerPreference:graphicsPreset==='low'?'low-power':'high-performance'};
+const webgl=renderCanvas.getContext('webgl2',contextAttributes);
+const reverseDepth=Boolean(webgl?.getExtension('EXT_clip_control')&&webgl.getExtension('EXT_color_buffer_float'))&&new URLSearchParams(location.search).get('depth')!=='log';
 const renderer = new THREE.WebGLRenderer({
-  antialias: true,
-  logarithmicDepthBuffer: true,
-  powerPreference: graphicsPreset === "low" ? "low-power" : "high-performance",
-  precision: "highp",
+  canvas:renderCanvas,context:webgl||undefined,
+  antialias:true,logarithmicDepthBuffer:!reverseDepth,reversedDepthBuffer:reverseDepth,
+  powerPreference:contextAttributes.powerPreference,precision:'highp',
 });
 const renderTimings=new RenderTimings(renderer.getContext());
 // Limit oversized Retina framebuffers while keeping all Ultra geometry and materials.
@@ -823,7 +828,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = graphicsPreset === "ultra" ? 1.18 : graphicsPreset === "high" ? 1.14 : graphicsPreset === "medium" ? 1.10 : 1.06;
 renderer.domElement.style.cursor = "grab";
 host.appendChild(renderer.domElement);
-renderer.domElement.dataset.depthMode="logarithmic-highp";
+const cityFrame=new CityFrameRenderer(renderer);
+renderer.info.autoReset=false;
+renderer.domElement.dataset.depthMode=renderer.capabilities.reversedDepthBuffer?'reversed-z-float32':'logarithmic-highp';
 renderer.domElement.addEventListener("webglcontextlost",(event)=>{
   event.preventDefault();
   console.error("[fulllife] WebGL context lost");
@@ -890,7 +897,7 @@ const residentCamera=new ResidentCamera(renderer,scene,camera,(record,origin,pho
  updateDayNight(Math.floor(at),(at%1)*60,photoWeather,Math.floor(record.at/86400));citySky.update(at,origin,photoWeather.cloudCover,Math.floor(record.at/86400));
  cityWater.update(record.at/120,visualPalette.daylight,photoWeather.cloudCover,visualPalette.zenith,visualPalette.horizon,sunDirection(at),visualPalette.sunColor);
  return()=>{visualLighting=previousLighting;visualWeather=previousVisualWeather;const hour=presentationClock.read(performance.now())%86400/3600;updateDayNight(Math.floor(hour),(hour%1)*60,previousWeather);citySky.update(renderedHour(hour),camera.position,activeWeather.cloudCover||0,Math.floor(presentationClock.read(performance.now())/86400));};
-});
+},(scene,view)=>cityFrame.draw(scene,view));
 const photoAlbum=new ResidentPhotoAlbum(residentCamera.capture,()=>!document.hidden&&!playerCar.active);
 document.getElementById('resident-photo-album')?.addEventListener('click',closeSettings);
 
@@ -1073,7 +1080,7 @@ for(let i=0;i<Math.round(95*graphics.treeScale);i++)addTree(-150+seeded(i+1500)*
 function buildTrees(){
  const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.13,.22,1.8,6),new THREE.MeshStandardMaterial({color:0x674a34}),treeTransforms.length);
  const crowns=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.05,graphics.metroDetail>=2?1:0),new THREE.MeshStandardMaterial({color:0x3b7250,roughness:1}),treeTransforms.length);
- const d=new THREE.Object3D();treeTransforms.forEach((t,i)=>{d.scale.setScalar(t.scale);d.position.set(t.x,.9*t.scale,t.z);d.updateMatrix();trunks.setMatrixAt(i,d.matrix);d.position.y=2.3*t.scale;d.updateMatrix();crowns.setMatrixAt(i,d.matrix);});cityRoot.add(trunks,crowns);
+ const d=new THREE.Object3D();treeTransforms.forEach((t,i)=>{d.scale.setScalar(t.scale);d.position.set(t.x,.9*t.scale,t.z);d.updateMatrix();trunks.setMatrixAt(i,d.matrix);d.position.y=2.3*t.scale;d.updateMatrix();crowns.setMatrixAt(i,d.matrix);});trunks.name="Park tree trunks";crowns.name="Park tree crowns";spatialInstanceCells(trunks,cityRoot);spatialInstanceCells(crowns,cityRoot);
 }
 
 function addBuilding(
@@ -1179,13 +1186,6 @@ for (const house of BUILDINGS.filter(building => building.kind === 'house')) {
   group.userData.buildingId=house.id;
   urbanVisuals.registerBuilding(house.id, group);
 }
-const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,192,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
-cityFacadeBatches.enableStaticFacades();
-renderer.domElement.dataset.facadeSourceDraws=String(cityFacadeBatches.stats.sourceDraws);
-renderer.domElement.dataset.facadeBatchDraws=String(cityFacadeBatches.stats.batchDraws);
-renderer.domElement.dataset.facadeBoxInstances=String(cityFacadeBatches.stats.instances);
-renderer.domElement.dataset.roadSourceDraws=String(roadSurfaceDrawsBefore);
-renderer.domElement.dataset.roadBatchDraws=String(roadSurfaceRoot.children.length);
 
 // Hansdrex iconic skyline — stylized landmark references on reserved central plots.
 const landmarkWarm=new THREE.MeshStandardMaterial({color:0xe6c98d,emissive:0xffc85a,emissiveIntensity:1.15,roughness:0.35});
@@ -1229,6 +1229,7 @@ for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  if(b.id==="power"||b.id==="firestation")continue;
  const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;
  const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>25,sign:b.name?.replace("Hansdrex ","").toUpperCase()});
+ g.userData.buildingId=b.id;if(!paris)batchableFacades.push(g);
  if(paris){cityRoot.add(g);const label=makeCanvasSprite(b.name||b.id,18,2);label.position.set(0,3.3,b.d/2+.3);g.add(label);}
  urbanVisuals.registerBuilding(b.id,g);
  if(["food","social","shop","nightlife"].includes(b.type||"")){
@@ -1237,6 +1238,14 @@ for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
   const glass=new THREE.Mesh(new THREE.BoxGeometry(b.w*.72,2,.12),new THREE.MeshStandardMaterial({color:0x5c94a3,metalness:.3,roughness:.2}));glass.position.set(0,1.6,b.d/2+.1);g.add(glass);
  }
 }
+const cityFacadeBatches=new CityBoxBatches(cityRoot,batchableFacades,0,material=>{if(material.userData.cityWindow)windowMaterials.push(material as THREE.MeshBasicMaterial);});
+cityFacadeBatches.enableStaticFacades();
+renderer.domElement.dataset.facadeSourceDraws=String(cityFacadeBatches.stats.sourceDraws);
+renderer.domElement.dataset.facadeBatchDraws=String(cityFacadeBatches.stats.batchDraws);
+renderer.domElement.dataset.facadeBoxInstances=String(cityFacadeBatches.stats.instances);
+renderer.domElement.dataset.roadSourceDraws=String(roadSurfaceDrawsBefore);
+renderer.domElement.dataset.roadBatchDraws=String(roadSurfaceRoot.children.length);
+
 const industrialVisuals=new IndustrialDistrictRenderer(cityRoot,makeCanvasSprite);
 for(const [id,group] of industrialVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const governmentVisuals=new GovernmentDistrictRenderer(cityRoot,makeCanvasSprite);
@@ -1274,7 +1283,7 @@ function addPowerPlant(x:number,z:number){
   for(const sx of [-10,10]){const stack=new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.8,34,12),concrete);stack.position.set(sx,25,-6);g.add(stack);const ring=new THREE.Mesh(new THREE.TorusGeometry(2.2,.18,6,14),glow);ring.rotation.x=Math.PI/2;ring.position.set(sx,40,-6);g.add(ring);}
   for(let i=-2;i<=2;i++){const transformer=new THREE.Mesh(new THREE.BoxGeometry(4.2,3.2,4.8),copper);transformer.position.set(i*4.2,2.1,8);g.add(transformer);const pole=new THREE.Mesh(new THREE.CylinderGeometry(.12,.16,8,6),dark);pole.position.set(i*4.2,6,8);g.add(pole);}
   const sign=makeCanvasSprite("HANSDREX POWER PLANT · 24/7",20,1.25);sign.position.set(0,22,13);g.add(sign);
-  g.position.set(x,0,z);cityRoot.add(g);
+  g.position.set(x,0,z);batchStaticMeshes(g);cityRoot.add(g);
 }
 const powerBuilding=BUILDINGS.find(b=>b.id==="power") || {x:-285,z:-75};
 addPowerPlant(powerBuilding.x,powerBuilding.z);
@@ -1827,12 +1836,13 @@ function animate(now = performance.now()) {
   citySky.update(renderedHour(visualHour),camera.position,activeWeather.cloudCover||0,Math.floor(gameNow/86400));
   cityWater.update(now/1000,visualPalette.daylight,activeWeather.cloudCover||0,visualPalette.zenith,visualPalette.horizon,sunDirection(renderedHour(visualHour)),visualPalette.sunColor);
   renderTimings.begin(now);
-  renderer.render(scene, camera);
+  renderer.info.reset();
+  cityFrame.draw(scene,camera);
   renderTimings.end(performance.now()-frameWorkStarted);
   if(!renderer.domElement.dataset.initializationMs){renderer.domElement.dataset.initializationMs=(frameWorkStarted-viewerBootStarted).toFixed(1);renderer.domElement.dataset.firstFrameCpuMs=(performance.now()-frameWorkStarted).toFixed(2);renderer.domElement.dataset.firstFrameDrawCalls=String(renderer.info.render.calls);}
   const stats=frameStats.sample(now);
   if(stats){
-    const cpuMs=renderTimings.sampleCPU(),gpuMs=renderTimings.gpuMs;
+    const cpuMs=renderTimings.sampleCPU(),gpuMs=renderTimings.sampleGPU();
     const info=`${stats.fps.toFixed(1)} FPS · p95 ${stats.p95FrameMs.toFixed(1)} ms · CPU ${cpuMs.toFixed(1)} ms · GPU ${gpuMs===null?'n/a':gpuMs.toFixed(1)+' ms'} · ${renderer.info.render.calls} lượt vẽ · ${renderer.info.render.triangles.toLocaleString()} tam giác · ${renderer.domElement.width}×${renderer.domElement.height}`;
     const output=document.getElementById('viewer-performance');if(output)output.textContent=info;
     renderer.domElement.dataset.fps=stats.fps.toFixed(1);renderer.domElement.dataset.frameP95=stats.p95FrameMs.toFixed(1);
@@ -1841,6 +1851,7 @@ function animate(now = performance.now()) {
     renderer.domElement.dataset.carVisuals=String(personalCars.stats.cached);
     renderer.domElement.dataset.activeFacadeInstances=String(cityFacadeBatches.viewStats.activeInstances);
     renderer.domElement.dataset.metroVisibleInstances=String(metroVisuals.stats.visibleStaticInstances);
+    renderer.domElement.dataset.metroVisibleTrains=String(metroVisuals.stats.visibleTrains);
     renderer.domElement.dataset.frameCpuMs=cpuMs.toFixed(2);renderer.domElement.dataset.frameGpuMs=gpuMs===null?'unavailable':gpuMs.toFixed(2);renderer.domElement.dataset.triangles=String(renderer.info.render.triangles);
   }
 }
@@ -1859,5 +1870,5 @@ addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(renderPixelRatio());
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(innerWidth, innerHeight);cityFrame.resize();
 });

@@ -64,3 +64,26 @@ test('New York ironwork stays fully preloaded during travel and hides only actua
  architecture.sync([{id:'NY-0',stage:'construction'}]);assert.ok(architecture.stats.activeInstances<source);
  architecture.sync([{id:'NY-0',stage:'operational'}]);assert.equal(architecture.stats.activeInstances,source);
 });
+
+test('immutable New York cells let the native frustum reject distant ironwork without unloading detail',()=>{
+ const root=new THREE.Group(),buildings=[-300,0,300].map((x,i)=>({id:`CELL-${i}`,x,z:-70,w:12,d:14,h:35,kind:'apartment'}));
+ const architecture=new NewYorkArchitecture(root,buildings),c=camera();root.updateMatrixWorld();c.updateMatrixWorld();
+ const projection=new THREE.Matrix4().multiplyMatrices(c.projectionMatrix,c.matrixWorldInverse),frustum=new THREE.Frustum().setFromProjectionMatrix(projection);
+ const meshes=root.children as THREE.InstancedMesh[],total=meshes.reduce((n,m)=>n+m.count,0),visible=meshes.filter(m=>frustum.intersectsObject(m)).reduce((n,m)=>n+m.count,0);
+ assert.equal(total,architecture.stats.sourceInstances);
+ assert.ok(visible>0&&visible<total/2,'off-screen buildings keep their full ironwork outside the submitted draw bounds');
+ const before=meshes.map(m=>[...m.instanceMatrix.array]);
+ architecture.sync([{id:'CELL-1',stage:'collapsed'}]);
+ assert.equal(meshes.filter(m=>frustum.intersectsObject(m)).reduce((n,m)=>n+m.count,0),0);
+ architecture.sync([{id:'CELL-1',stage:'operational'}]);
+ assert.deepEqual(meshes.map(m=>[...m.instanceMatrix.array]),before,'restoration preserves every original bar and tank transform');
+});
+
+test('citywide static facade batches retain fixed colors and independent building restoration',()=>{
+ const root=new THREE.Group(),groups=[-900,0,900].map((x,i)=>{const g=apartment(root,`GLOBAL-${i}`,-80).group;g.position.x=x;return g;});
+ const batch=new CityBoxBatches(root,groups,0);batch.enableStaticFacades();const meshes=root.children.filter(o=>o instanceof THREE.InstancedMesh) as THREE.InstancedMesh[];
+ assert.equal(meshes.filter(m=>m.count>0).length,1,'one facade draw at any city position');
+ const source=batch.viewStats.activeInstances,before=meshes.map(m=>({matrix:[...m.instanceMatrix.array],color:[...(m.instanceColor?.array||[])]}));
+ batch.setView(camera());batch.sync();assert.deepEqual(meshes.map(m=>({matrix:[...m.instanceMatrix.array],color:[...(m.instanceColor?.array||[])]})),before);
+ groups[1].visible=false;batch.sync();assert.ok(batch.viewStats.activeInstances<source);groups[1].visible=true;batch.sync();assert.equal(batch.viewStats.activeInstances,source);
+});

@@ -46,3 +46,26 @@ test('spatial infrastructure batches preserve all transforms while giving distan
  const batches=batchStaticBoxes(group,160);assert.equal(batches.length,2);assert.ok(batches.every(m=>m.count===1&&m.frustumCulled&&m.boundingSphere!.radius<10));
  const matrix=new THREE.Matrix4();batches[1].getMatrixAt(0,matrix);assert.equal(matrix.elements[12],500);assert.equal(matrix.elements[13],8);assert.equal(matrix.elements[0],4);assert.equal(matrix.elements[5],2);assert.equal(matrix.elements[10],6);
 });
+
+test('actor interests preserve front, rear and distance decisions under reversed-Z projection',()=>{
+ const regular=camera(),reverse=camera();
+ // WebGLRenderer enables this camera flag after detecting EXT_clip_control.
+ Reflect.set(reverse,'_reversedDepth',true);reverse.updateProjectionMatrix();
+ const normalView=new SceneViewBudget({enterDistance:100,leaveDistance:120}),reverseView=new SceneViewBudget({enterDistance:100,leaveDistance:120});
+ normalView.setCamera(regular);reverseView.setCamera(reverse);
+ for(const position of [{x:0,y:2,z:-60},{x:0,y:2,z:30},{x:95,y:2,z:-30},{x:0,y:2,z:-125}]){
+  assert.equal(reverseView.visible(position),normalView.visible(position),JSON.stringify(position));
+ }
+ assert.equal(reverseView.visible({x:0,y:2,z:-60}),true);
+ assert.equal(reverseView.visible({x:0,y:2,z:30}),false);
+});
+
+test('landmark merging retains exact surfaces, shared night materials, glass and existing instancing',async()=>{
+ const{batchStaticMeshes}=await import('../src/static-box-batches.ts'),root=new THREE.Group(),material=new THREE.MeshStandardMaterial({emissive:0x2244ff});
+ const a=new THREE.Mesh(new THREE.BoxGeometry(2,4,6),material),b=new THREE.Mesh(new THREE.CylinderGeometry(1,2,3,8),material);a.position.set(2,5,7);b.position.set(-8,9,-3);b.rotation.z=.3;root.add(a,b);
+ const glass=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({transparent:true,opacity:.3})),instances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),material,4);root.add(glass,instances);
+ const expected=[a,b].flatMap(m=>{m.updateMatrix();const geo=m.geometry.toNonIndexed().applyMatrix4(m.matrix);const positions=[...geo.getAttribute('position').array];geo.dispose();return positions;});
+ const merged=batchStaticMeshes(root);assert.equal(merged.length,1);assert.deepEqual([...merged[0].geometry.getAttribute('position').array],expected);assert.equal(merged[0].material,material);
+ material.emissiveIntensity=2;assert.equal((merged[0].material as THREE.MeshStandardMaterial).emissiveIntensity,2);assert.ok(root.children.includes(glass)&&root.children.includes(instances));assert.equal(instances.count,4);
+ assert.equal(a.parent,null);assert.equal(b.parent,null);assert.equal(root.children.length,3);
+});

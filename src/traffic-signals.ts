@@ -1,16 +1,19 @@
 import * as THREE from 'three';
+import {spatialInstanceCells,syncSpatialInstanceColors,type SpatialInstanceCell} from './spatial-instances.ts';
 import {signalState} from '../worker/traffic.mjs';
 import {signalPolePose} from '../worker/street-furniture.mjs';
 
 type Junction={x:number;z:number};
 const bulbColors={red:[0x3a0808,0xff2b2b],yellow:[0x302707,0xffc928],green:[0x07351c,0x35ef87]} as const;
-/** Identical signal/crossing geometry in four citywide batches; no additional light sources. */
+/** Identical signal/crossing geometry in immutable spatial batches; no light sources. */
 export class TrafficSignals{
  readonly poles:THREE.InstancedMesh;
  readonly heads:THREE.InstancedMesh;
  readonly bulbs:THREE.InstancedMesh;
  readonly crossings:THREE.InstancedMesh;
  private readonly signalAxes:Array<'ns'|'ew'>=[];
+ readonly cells:SpatialInstanceCell[]=[];
+ private bulbCells:SpatialInstanceCell[]=[];
  private lastPhase='';
  private disposed=false;
  constructor(root:THREE.Object3D,intersections:readonly Junction[],stride=1){
@@ -39,7 +42,7 @@ export class TrafficSignals{
   for(const mesh of [this.poles,this.heads,this.bulbs,this.crossings]){
    mesh.instanceMatrix.needsUpdate=true;
    // Static bounds are computed once; signal changes only alter per-instance color.
-   mesh.computeBoundingSphere();root.add(mesh);
+   mesh.computeBoundingSphere();const cells=spatialInstanceCells(mesh,root,384);this.cells.push(...cells);if(mesh===this.bulbs)this.bulbCells=cells;
   }
   this.update(0);
   if(this.bulbs.instanceColor)this.bulbs.instanceColor.setUsage(THREE.DynamicDrawUsage);
@@ -54,9 +57,11 @@ export class TrafficSignals{
    for(const name of ['red','yellow','green'] as const){color.setHex(bulbColors[name][state===name?1:0]);this.bulbs.setColorAt(i++,color);}
   }
   if(this.bulbs.instanceColor)this.bulbs.instanceColor.needsUpdate=true;
+  syncSpatialInstanceColors(this.bulbs,this.bulbCells);
  }
  dispose(){
   if(this.disposed)return;this.disposed=true;
+  for(const{mesh}of this.cells){mesh.removeFromParent();mesh.dispose();}
   for(const mesh of [this.poles,this.heads,this.bulbs,this.crossings]){
    mesh.removeFromParent();mesh.dispose();mesh.geometry.dispose();
    for(const material of Array.isArray(mesh.material)?mesh.material:[mesh.material])material.dispose();

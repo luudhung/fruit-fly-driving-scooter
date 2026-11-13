@@ -67,3 +67,11 @@ test('M7 rail beds align with the exact mitered station polyline in both directi
 test('interchange walkways include both source and destination directions',()=>{
  const paths=metroInterchangePaths();assert.ok(paths.length>0);for(const direction of [1,-1]){const line=METRO_LINES[0],index=line.points.findIndex(p=>p[0]===-102&&p[1]===0),platform=metroStationGeometry(line,index,direction).platform;assert.ok(paths.some(path=>Math.hypot(path[0].x-platform.x,path[0].z-platform.z,path[0].y-platform.y)<.01));}
 });
+
+test('unreadably distant station labels fade out while all physical tracks and services remain available',()=>{
+ const renderer=setup(),camera=new THREE.PerspectiveCamera(52,1.7,.1,7000),all=renderer.stats.totalStaticInstances;
+ camera.position.set(420,290,510);camera.lookAt(0,40,0);renderer.setView(camera);renderer.update(45);
+ assert.ok(renderer.stats.visibleChunks>0);assert.equal(renderer.stats.visibleSigns,0);assert.equal(renderer.stats.totalStaticInstances,all);assert.equal(renderer.trains.length,METRO_LINES.length*2);
+ const label=renderer.stations[0].label;camera.position.copy(label.position).add(new THREE.Vector3(0,0,-15));camera.lookAt(label.position);renderer.update(45.3);
+ assert.equal(label.visible,true);assert.equal(label.material.opacity,1);assert.equal(renderer.stats.totalStaticInstances,all);
+});

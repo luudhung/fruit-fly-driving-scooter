@@ -22,7 +22,7 @@ export class SceneViewBudget{
  setCamera(camera:THREE.Camera){
   camera.updateMatrixWorld();this.origin.setFromMatrixPosition(camera.matrixWorld);
   this.projection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
-  this.frustum.setFromProjectionMatrix(this.projection);this.ready=true;
+  this.frustum.setFromProjectionMatrix(this.projection,THREE.WebGLCoordinateSystem,camera.reversedDepth);this.ready=true;
  }
  distanceSquared(point:ViewPoint){const dx=point.x-this.origin.x,dy=(point.y??1.1)-this.origin.y,dz=point.z-this.origin.z;return dx*dx+dy*dy+dz*dz;}
  visible(point:ViewPoint,retained=false,radius=0){

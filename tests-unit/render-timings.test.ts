@@ -11,3 +11,9 @@ test('GPU time is read only after an asynchronous result is ready; disjoint samp
 test('an unsupported GPU timer leaves rendering and CPU measurements available',()=>{
  const timer=new RenderTimings({getExtension:()=>null} as unknown as WebGL2RenderingContext);timer.begin(0);timer.end(4);timer.begin(1000);timer.end(8);assert.equal(timer.gpuMs,null);assert.equal(timer.sampleCPU(),6);
 });
+
+test('the displayed GPU time averages completed queries over the same reporting window as CPU',()=>{
+ let nanoseconds=4e6;const ext={TIME_ELAPSED_EXT:1,GPU_DISJOINT_EXT:2};
+ const gl={QUERY_RESULT_AVAILABLE:3,QUERY_RESULT:4,getExtension:()=>ext,isContextLost:()=>false,createQuery:()=>({}),beginQuery:()=>{},endQuery:()=>{},getQueryParameter:(_q:unknown,p:number)=>p===3?true:nanoseconds,getParameter:()=>false,deleteQuery:()=>{}} as unknown as WebGL2RenderingContext;
+ const timer=new RenderTimings(gl);timer.begin(1);timer.end(1);timer.begin(10);timer.end(1);nanoseconds=8e6;timer.begin(1100);timer.end(1);timer.begin(1110);timer.end(1);assert.equal(timer.gpuMs,8);assert.equal(timer.sampleGPU(),6);assert.equal(timer.sampleGPU(),8);
+});
