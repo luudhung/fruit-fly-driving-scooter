@@ -46,6 +46,7 @@ import {CitySky,skyLight,citySkyPalette,cityFogRange,sunDirection} from "./city-
 import {INTERSECTIONS} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
+import {ConnectionHealth,requestCitySnapshot} from "./connection-health.ts";
 import {CityClock} from "./city-clock.ts";
 import * as THREE from "three";
 import {HARBOR_CAUSEWAYS} from "../worker/city-map.mjs";
@@ -466,6 +467,22 @@ window.addEventListener("unhandledrejection",(event)=>{
 });
 
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
+const connectionHealth=new ConnectionHealth();
+let lastLiveConnection:{state:"authoritative"|"offline"|"connecting";label:string;title:string}|null=null;
+function refreshConnectionHealth(){
+ const health=connectionHealth.view(Date.now(),navigator.onLine!==false);
+ if(health.reason!=="live"){
+  const alive=snapshot?.flies?.filter(f=>f.alive).length||residentDirectory.count||0;
+  const label=health.reason==="delayed"?`SYNC DELAY · RETRYING · ${alive} ALIVE`:health.reason==="stale"?`STALE SNAPSHOT · RETRYING · ${alive} ALIVE`:health.reason==="offline"?`OFFLINE · LAST GOOD ${alive} ALIVE · RETRYING`:"CONNECTING · CENSUS RETRYING";
+  setConnection(health.state,label);
+  if(health.state==="offline")residentDirectory.offline();
+ }else if(lastLiveConnection)setConnection(lastLiveConnection.state,lastLiveConnection.label);
+ const title=lastLiveConnection?.title||connection.title.split('\nSnapshot status:')[0];
+ connection.title=`${title}\nSnapshot status: ${health.detail}`;
+ connection.dataset.authoritativeSimulationSeconds=health.simulationTime===null?'unknown':String(health.simulationTime);
+ connection.dataset.snapshotAgeSeconds=health.advanceAgeMs===null?'unknown':String(Math.floor(health.advanceAgeMs/1000));
+}
+window.setInterval(refreshConnectionHealth,1000);
 const SNAPSHOT_CACHE_KEY = "fulllife:last-good-civilization-snapshot:v1";
 const recoveryCache=new IdleSnapshotCache<CivilizationSnapshot>({
  write:value=>localStorage.setItem(SNAPSHOT_CACHE_KEY,JSON.stringify(value)),
@@ -761,39 +778,35 @@ function updateHeliTourState(flies:FlyState[]){
 }
 
 async function fetchSnapshotOnce() {
-  // The civilization keeps running on Railway; hidden tabs do not need to poll/render it.
+  // The civilization keeps running without a viewer; hidden tabs do not poll/render it.
   if (document.hidden) return;
+  refreshConnectionHealth();
   let payload: CivilizationSnapshot;
-  const controller=new AbortController(),timeout=window.setTimeout(()=>controller.abort(),12000);
   try {
-    const response = await fetch(`${apiBase}/api/civilization/state?view=observer${selectedFlyId?`&selected=${encodeURIComponent(selectedFlyId)}`:""}`, {
-      signal:controller.signal,
-      headers: { Accept: "application/json" },
-      cache: "no-store",
+    payload = await requestCitySnapshot(`${apiBase}/api/civilization/state?view=observer${selectedFlyId?`&selected=${encodeURIComponent(selectedFlyId)}`:""}`, {
+      read:async response=>await readCitySnapshot(response) as CivilizationSnapshot,
+      usable:usableSnapshot,
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    payload = await readCitySnapshot(response) as CivilizationSnapshot;
-    if (!usableSnapshot(payload)) throw new Error("invalid or empty civilization snapshot");
-    window.clearTimeout(timeout);
-    if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds)return;
-    saveCachedSnapshot(payload);
   } catch (error) {
-    window.clearTimeout(timeout);
+    connectionHealth.failed();
     console.error("[fulllife] civilization fetch failed", error);
     const cached = snapshot && usableSnapshot(snapshot) ? snapshot : loadCachedSnapshot();
     if (cached && (!snapshot || !usableSnapshot(snapshot))) {
+      connectionHealth.cached(Date.parse(cached.serverTime));
       try {
         renderSnapshot({ ...cached, authoritative: false });
       } catch (renderError) {
         console.error("[fulllife] cached snapshot render failed", renderError);
       }
     }
-    residentDirectory.offline();
-    const lastSeen = snapshot?.flies?.filter((f) => f.alive).length || residentDirectory.count || 0;
-    setConnection("offline", `OFFLINE · LAST GOOD ${lastSeen} ALIVE · RETRYING ▾`);
+    refreshConnectionHealth();
     if (!snapshot) events.textContent = "Civilization worker is unavailable; retrying automatically.";
     return;
   }
+  if(payload.authoritative)connectionHealth.accepted(payload.simulationAgeSeconds,Date.now());
+  else connectionHealth.failed();
+  if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds){refreshConnectionHealth();return;}
+  try{saveCachedSnapshot(payload);}catch(error){console.error("[fulllife] snapshot recovery cache failed",error);}
   try {
     renderSnapshot(payload);
   } catch (error) {
@@ -802,6 +815,8 @@ async function fetchSnapshotOnce() {
     const living = (payload.flies || []).filter((f) => f.alive).length;
     setConnection(payload.authoritative ? "authoritative" : "connecting", `${living} ALIVE · CITY LIVE · VISUAL DEGRADED ▾`);
   }
+  lastLiveConnection={state:connection.dataset.state as "authoritative"|"offline"|"connecting",label:connectionLabel.textContent||'',title:connection.title.split('\nSnapshot status:')[0]};
+  refreshConnectionHealth();
 }
 
 // ---------- Three.js city ----------
