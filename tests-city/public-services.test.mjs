@@ -47,6 +47,14 @@ test('actual attendance earns treasury wages and training, with no duplicate sal
  assert.equal(f.publicServicePayrollManaged,true);const dutyId=f.publicServiceDuty.targetId;t.restore();assert.ok(LOCATIONS.some(l=>l.id===dutyId));assert.equal(t.s.flies[0].money,paid);
 });
 
+test('eight hours of physical ground drill improve army skills without turning infantry into qualified pilots',()=>{
+ const t=fixture(10,0),f=t.enlist(0),choices=[];f.preferredWorkHours=10;t.service.addChoices(f,{hour:0},(id,action)=>choices.push({id,action}));const duty=choices.find(c=>c.action==='army training duty');assert.ok(duty);t.place(f,duty.id);f.action=duty.action;t.service.handleResident(f,{hour:0});f.publicServiceDuty.duration=36000;f.publicServiceDuty.until=t.s.simulationAgeSeconds+36000;for(let i=1;i<=16;i++){t.s.simulationAgeSeconds+=1800;t.service.handleResident(f,{hour:i/2});}assert.equal(f.publicServiceTrainingHours,8);assert.ok(f.professionSkills.armyTraining>0);assert.ok(f.professionSkills.marksmanship>0);assert.equal(Number(f.professionSkills.aviation||0),0);assert.equal(Number(f.aviationTrainingHours||0),0);
+});
+
+test('actual aircraft operation alone improves aviation, credits completion, and never credits the same interval twice',()=>{
+ const t=fixture(10,0),pilot=t.enlist(0);Object.assign(pilot,{preferredWorkStart:8,publicServiceTrainingHours:8});pilot.professionSkills.aviation=.4;t.s.simulationAgeSeconds=9*3600;t.place(pilot,'military-base');t.service.tick(120,{hour:9});const plane=t.s.publicServices.aircraft.find(p=>p.boardingPilotId===pilot.id);assert.ok(plane);t.place(pilot,`MILITARY-BOARD-${plane.id}`);t.s.simulationAgeSeconds+=120;t.service.tick(120,{hour:9});assert.ok(plane.flight);const flight={...plane.flight},before=pilot.professionSkills.aviation;t.s.simulationAgeSeconds=flight.departure+600;t.service.handleResident(pilot,{hour:9.2});assert.ok(pilot.professionSkills.aviation>before);assert.ok(Math.abs(pilot.aviationTrainingHours-1/6)<1e-9);const once=pilot.professionSkills.aviation;t.service.handleResident(pilot,{hour:9.2});assert.equal(pilot.professionSkills.aviation,once);t.s.simulationAgeSeconds=flight.arrival;t.service.tick(120,{hour:9.7});assert.ok(Math.abs(pilot.aviationTrainingHours-(flight.arrival-flight.departure)/3600)<1e-9);const completed=pilot.professionSkills.aviation;t.service.tick(0,{hour:9.7});assert.equal(pilot.professionSkills.aviation,completed);t.restore();assert.equal(t.s.flies.find(f=>f.id===pilot.id).professionSkills.aviation,completed);
+});
+
 test('retirement and death release vacancies without replacing resident identities or stealing emergency work',()=>{
  const t=fixture(10,0),f=t.enlist(0),other=t.enlist(1);f.ageYears=65;other.alive=false;
  const before=t.s.flies.map(f=>f.id);t.s.simulationAgeSeconds+=3600;t.service.tick(3600,{hour:1});

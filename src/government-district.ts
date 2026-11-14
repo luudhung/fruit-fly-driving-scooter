@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {GOVERNMENT_BUILDINGS,MILITARY_AIRFIELD,MILITARY_NAVAL_BASE,militaryAircraftPose,type MilitaryAircraft} from '../worker/government-map.mjs';
+import {GOVERNMENT_BUILDINGS,MILITARY_AIRFIELD,MILITARY_NAVAL_BASE,MILITARY_GATES,MILITARY_PERIMETER_WALLS,militaryAircraftPose,type MilitaryAircraft} from '../worker/government-map.mjs';
 import type {PublicServicesSnapshot} from '../worker/public-services.mjs';
 import {militaryShipPose,type MilitaryLifeSnapshot} from '../worker/military-life.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
@@ -110,10 +110,6 @@ function grounds(){
  b.box(grass,710,.07,-610,260,.1,190);b.box(stone,710,.12,-625,104,.1,60);
  for(let row=0;row<5;row++)b.box(paint,710,.18,-639+row*6,62,.01,.08);
  b.box(stone,710,.13,-515,10,.12,35);b.box(stone,710,.13,-598,5,.12,55);
- for(const side of [-1,1]){
-  b.box(stone,710+side*120,.25,-610,1,.5,180);
-  for(let z=-695;z<=-525;z+=10)b.column(stone,710+side*120,1,z,.11,1.7);
- }
  for(const x of [695,725])b.column(stone,x,3.3,-515,.2,6.5);
  b.column(stone,762,7,-620,.12,14);b.box(blue,764,12.5,-620,4,2,.08);
  b.box(asphalt,710,.13,-735,240,.12,18);b.box(stone,710,.05,-735,244,.1,22);
@@ -121,6 +117,22 @@ function grounds(){
  for(let x=600;x<=820;x+=18)b.box(paint,x,.2,-735,8,.013,.25);
  for(const x of [599,821])for(let z=-741;z<=-729;z+=3)b.box(paint,x,.2,z,10,.013,1);
  for(const stand of MILITARY_AIRFIELD.stands){b.box(asphalt,stand.x,.14,stand.z,28,.12,28);b.box(asphalt,stand.x,.14,-700,8,.12,25);b.box(paint,stand.x,.205,stand.z,8,.012,.15);}
+ b.finish(group);return group;
+}
+function militaryPerimeter(){
+ const group=new THREE.Group(),b=new ShapeBatch();group.name='Army compound perimeter';
+ for(const wall of MILITARY_PERIMETER_WALLS){
+  const horizontal=wall.w>wall.d,length=horizontal?wall.w:wall.d;
+  b.box(stone,wall.x,1.3,wall.z,wall.w,2.6,wall.d);
+  b.box(olive,wall.x,2.66,wall.z,wall.w+.12,.16,wall.d+.12);
+  for(const y of [2.9,3.16])b.box(slate,wall.x,y,wall.z,horizontal?wall.w:.07,.07,horizontal?.07:wall.d);
+  for(let s=-length/2;s<=length/2+.01;s+=Math.max(1,length/Math.ceil(length/5)))b.box(slate,wall.x+(horizontal?s:0),2.95,wall.z+(horizontal?0:s),.09,.6,.09);
+ }
+ for(const gate of MILITARY_GATES){
+  const horizontal=gate.axis==='x',span=horizontal?gate.w:gate.d;
+  for(const side of [-1,1]){const x=gate.x+(horizontal?side*span/2:0),z=gate.z+(horizontal?0:side*span/2);b.box(stone,x,1.9,z,1.5,3.8,1.5);b.box(olive,x,3.86,z,1.7,.15,1.7);}
+  if(horizontal){b.box(stone,gate.x-18,1.5,gate.z-3,4,3,4);b.box(slate,gate.x-18,1.9,gate.z-.95,2,.9,.08);}
+ }
  b.finish(group);return group;
 }
 function aircraftGeometry(){
@@ -154,7 +166,7 @@ export class GovernmentDistrictRenderer{
  private readonly shotDirection=new THREE.Vector3();
  readonly stats={ships:0,armedMembers:0,shots:0};
  constructor(parent:THREE.Object3D,makeSign?:Sign){
-  parent.add(this.root);this.root.add(grounds(),navalGrounds());
+  parent.add(this.root);this.root.add(grounds(),navalGrounds(),militaryPerimeter());
   for(const [id,group]of [['white-house',whiteHouse()],['police-hq',policeHeadquarters()],['military-base',barracks()],['military-hangar-west',hangar(625)],['military-hangar-east',hangar(795)],['naval-command',navalWatch()]] as Array<[string,THREE.Group]>){
    this.buildings.set(id,group);this.root.add(group);
    if(makeSign){const b=GOVERNMENT_BUILDINGS.find(b=>b.id===id)!;const label=makeSign(b.name.toUpperCase(),25,id==='military-base'?1.7:1.1);label.position.set(0,Math.min(b.h+2,20),b.d/2+.3);group.add(label);}

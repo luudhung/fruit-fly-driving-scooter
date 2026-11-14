@@ -2,6 +2,7 @@ import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
 import {FlightDoubleTap} from './flight-double-tap.ts';
 import {metroInterchangePaths} from './metro-interchanges.ts';
+import {MILITARY_PERIMETER_WALLS} from '../worker/government-map.mjs';
 export const PLAYER_EYE=1.7;
 const RADIUS=.32,HEIGHT=1.78,STEP=.29,EPS=.0001;
 export type PlayerInput={forward:number;strafe:number;yaw:number;sprint:number;ascend:boolean;descend:boolean};
@@ -12,7 +13,8 @@ function refreshUrbanCollision(){
  if(collisionRevision===urbanGeometryRevision)return;
  collisionRevision=urbanGeometryRevision;bins.clear();
  const citySolids:MansionBox[]=BUILDINGS.filter(b=>b.kind!=='mansion'&&effectiveBuildingHeight(b)>0).map(b=>({...b,h:effectiveBuildingHeight(b),y:effectiveBuildingHeight(b)/2,color:0,solid:true}));
- const solids=[...citySolids,...mansionBoxes.filter(b=>b.solid)];
+ const perimeterSolids:MansionBox[]=MILITARY_PERIMETER_WALLS.map(b=>({...b,y:b.h/2,color:0,solid:true}));
+ const solids=[...citySolids,...perimeterSolids,...mansionBoxes.filter(b=>b.solid)];
  for(const b of solids)for(let x=Math.floor((b.x-b.w/2-RADIUS)/cellSize);x<=Math.floor((b.x+b.w/2+RADIUS)/cellSize);x++)for(let z=Math.floor((b.z-b.d/2-RADIUS)/cellSize);z<=Math.floor((b.z+b.d/2+RADIUS)/cellSize);z++){
   const key=`${x},${z}`;if(!bins.has(key))bins.set(key,[]);bins.get(key)!.push(b);
  }

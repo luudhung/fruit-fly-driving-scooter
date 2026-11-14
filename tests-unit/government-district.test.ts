@@ -61,3 +61,10 @@ test('only current actual shot records produce bounded traces, which expire with
  renderer.sync(snapshot([],{shots:Array.from({length:50},(_,i)=>({...shot,id:`SHOT-${i}`}))}));renderer.update(110);assert.equal(renderer.stats.shots,32);
  let lights=0;parent.traverse(o=>{if(o instanceof THREE.Light)lights++;});assert.equal(lights,0);
 });
+
+test('the complete army perimeter is merged into three static material batches without lights',()=>{
+ const renderer=new GovernmentDistrictRenderer(new THREE.Group()),perimeter=renderer.root.getObjectByName('Army compound perimeter')!;
+ assert.ok(perimeter);assert.equal(perimeter.children.length,3);let triangles=0;
+ perimeter.traverse(o=>{assert.equal(o instanceof THREE.Light,false);assert.equal(Boolean(o.userData.dynamicCity),false);if(o instanceof THREE.Mesh)triangles+=(o.geometry.index?.count||0)/3;});
+ assert.ok(triangles<5000,'walls and gate posts stay a small static mesh budget');
+});

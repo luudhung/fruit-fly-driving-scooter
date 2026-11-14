@@ -2125,7 +2125,7 @@ function updateSocialClass(fly) {
 }
 
 function startupReadiness(fly) {
-  if (fly.ageYears < 18 || fly.ageYears > 75 || fly.businessId) return 0;
+  if (fly.ageYears < 18 || fly.ageYears > 75 || fly.businessId || fly.publicServiceRole || fly.facilityEmployment || fly.industrialFreightDuty) return 0;
   const approach = neuralDrive(fly, "approachDrive");
   const avoid = neuralDrive(fly, "avoidDrive");
   const explore = neuralDrive(fly, "exploreDrive");
@@ -2285,7 +2285,7 @@ function enterpriseSectorDemand(sector, clock) {
 function hireEnterpriseEmployee(business, owner) {
   const candidates = state.flies.filter((f) =>
     f.alive && f.ageYears >= 18 && f.ageYears <= 72 && f.id !== owner.id &&
-    !f.businessId && !f.businessEmployeeOf && (!f.jobId || f.socialClass === "low income")
+    !f.businessId && !f.businessEmployeeOf && !f.publicServiceRole && !f.facilityEmployment && !f.industrialFreightDuty && !["military","police","doctor","hospital-central","hospital-east","school","power","power-evening","power-night","grid-dispatch","transit","firefighter","paramedic"].includes(f.jobId) && (!f.jobId || f.socialClass === "low income")
   );
   if (!candidates.length) return null;
   for(const f of candidates)ensureCognitiveProfile(f);
@@ -2854,7 +2854,7 @@ function validBoardingPlatform(waypoint,lineId){
   const platform=metroStationGeometry(line,waypoint.stationIndex,waypoint.direction).platform;
   return Math.hypot(waypoint.x-platform.x,waypoint.z-platform.z,(waypoint.y??0)-platform.y)<.01;
 }
-function moveFly(fly,waypointHops=0) {
+function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_SECONDS_PER_REAL_SECOND) {
   if(!fly.traveling){fly.vx=fly.vz=0;return;}
   const boarding=fly.routeWaypoints?.[fly.routeIndex];
   if(!fly.onTrain&&boarding?.stage==='station-entry'&&(!validBoardingPlatform(boarding,fly.metroLineId)||fly.targetX!==boarding.x||fly.targetZ!==boarding.z)){
@@ -2940,7 +2940,7 @@ function moveFly(fly,waypointHops=0) {
       fly.travelLastDistance = Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z,next.mode==='walk'?(next.y??1.1)-fly.y:0);
       fly.travelStuckTicks = 0;
       // Close curve samples are bookkeeping, not a whole extra simulation second per point.
-      if(waypointHops<12&&['car','scooter'].includes(next.mode)&&['road','underpass','parking'].includes(currentWp?.stage))moveFly(fly,waypointHops+1);
+      if(waypointHops<64&&((movementSeconds>1.001||waypointHops>0)&&['walk','car','scooter'].includes(next.mode)||['car','scooter'].includes(next.mode)&&['road','underpass','parking'].includes(currentWp?.stage)))moveFly(fly,waypointHops+1,movementSeconds);
       return;
     }
 
@@ -3016,7 +3016,7 @@ function moveFly(fly,waypointHops=0) {
   const ux = dx / dist;
   const uz = dz / dist;
   fly.motionSpeed=routeTarget?.stage==='station-lift'?8:Math.max(0.08,baseSpeed*weatherFactor);
-  let step = Math.min(fly.motionSpeed, dist);
+  let step = Math.min(fly.motionSpeed*Math.max(0,movementSeconds), dist);
   const barrier=stopForSignal(fly,{x:fly.x+ux*step,z:fly.z+uz*step});
   if(barrier){
     const key=`${barrier.id}:${barrier.axis}:${Math.sign(dx||dz)}`;
@@ -3029,9 +3029,9 @@ function moveFly(fly,waypointHops=0) {
     if(!fly.signalEncounter.permit){step=Math.min(step,barrier.distance);fly.trafficStatus="waiting at red light";}
   }else{fly.signalEncounter=null;fly.trafficStatus=null;}
   if(vehicleHeadway&&["car","scooter"].includes(fly.transitMode)){const limit=vehicleHeadway(fly,{x:fly.x+ux*step,z:fly.z+uz*step});if(limit<step){step=limit;fly.trafficStatus="queuing behind traffic";}}
-  fly.vx = ux * step;
-  fly.vz = uz * step;
-  const nextPosition={x:fly.x+fly.vx,z:fly.z+fly.vz};
+  const movedX=ux*step,movedZ=uz*step;
+  fly.vx=movedX/Math.max(.001,movementSeconds);fly.vz=movedZ/Math.max(.001,movementSeconds);
+  const nextPosition={x:fly.x+movedX,z:fly.z+movedZ};
   const activeWp=fly.routeWaypoints?.[fly.routeIndex];
   const targetY=Number.isFinite(activeWp?.y)?activeWp.y:1.1;
   const yBlend=dist>0?Math.min(1,step/dist):1;
@@ -3043,6 +3043,10 @@ function moveFly(fly,waypointHops=0) {
   if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
   const remaining = Math.hypot(fly.targetX-fly.x,fly.targetZ-fly.z,fly.transitMode==='walk'?(routeTarget?.y??1.1)-fly.y:0);
+  const timeLeft=movementSeconds-step/Math.max(.001,fly.motionSpeed);
+  // A sampled background tick must use the same travel time as many ordinary
+  // ticks, validating each remaining segment instead of jumping over corners.
+  if((movementSeconds>1.001||waypointHops>0)&&remaining<.01&&timeLeft>.001&&waypointHops<64&&fly.routeWaypoints?.length){moveFly(fly,waypointHops+1,timeLeft);return;}
   if(step<.001&&fly.trafficStatus){fly.travelStuckTicks=0;fly.travelLastDistance=remaining;return;}
   if (Number.isFinite(fly.travelLastDistance)) {
     if (remaining >= fly.travelLastDistance - 0.02) fly.travelStuckTicks += 1;

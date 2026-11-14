@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 const clamp=(v:number)=>Math.max(0,Math.min(1,v));
 const smooth=(v:number)=>{const x=clamp(v);return x*x*(3-2*x);};
+/** Keep the inhabited city clear; only distant terrain fades into the horizon. */
+export function cityFogRange(precipitation=0,cloud=0){
+ const wet=clamp(Number.isFinite(precipitation)?precipitation:0)*.9+clamp(Number.isFinite(cloud)?cloud:0)*.1;
+ return{near:1600-wet*650,far:6500-wet*2200};
+}
 /** Artistic, deliberately long 16:00–20:00 sunset. This is not an astronomical ephemeris. */
 export function skyLight(hour:number){
  const t=((hour%24)+24)%24;

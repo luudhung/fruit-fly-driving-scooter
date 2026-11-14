@@ -28,6 +28,27 @@ export const GOVERNMENT_ROADS=[
  {id:'NAVAL-SHORE',x:490,z:-567.5,w:8,d:125},
 ];
 export const MILITARY_AIRFIELD={runway:{x:710,z:-735,w:240,d:18},taxiwayZ:-709,stands:[{id:'ARMY-STAND-1',x:660,z:-690},{id:'ARMY-STAND-2',x:750,z:-690}]};
+// The airfield and garrison share one perimeter. Gates remain permanently open
+// for the authoritative walking/vehicle graph; no decorative invisible barrier.
+export const MILITARY_COMPOUND={x:710,z:-637.5,w:260,d:245,height:3.2};
+export const MILITARY_GATES=[
+ {id:'ARMY-MAIN-GATE',x:695,z:-515,w:46,d:1,axis:'x'},
+ {id:'ARMY-NAVAL-GATE',x:580,z:-590,w:1,d:16,axis:'z'},
+ {id:'ARMY-NAVAL-SOUTH-GATE',x:580,z:-630,w:1,d:16,axis:'z'},
+];
+export const MILITARY_PERIMETER_WALLS=[];
+for(const edge of [{axis:'x',fixed:-760,lo:580,hi:840},{axis:'x',fixed:-515,lo:580,hi:840},{axis:'z',fixed:580,lo:-760,hi:-515},{axis:'z',fixed:840,lo:-760,hi:-515}]){
+ const gaps=MILITARY_GATES.filter(g=>g.axis===edge.axis&&(edge.axis==='x'?g.z:g.x)===edge.fixed).map(g=>({lo:(edge.axis==='x'?g.x-g.w/2:g.z-g.d/2),hi:(edge.axis==='x'?g.x+g.w/2:g.z+g.d/2)})).sort((a,b)=>a.lo-b.lo);
+ let cursor=edge.lo;
+ for(const gap of [...gaps,{lo:edge.hi,hi:edge.hi}]){
+  if(gap.lo>cursor)MILITARY_PERIMETER_WALLS.push({id:`ARMY-WALL-${MILITARY_PERIMETER_WALLS.length+1}`,x:edge.axis==='x'?(cursor+gap.lo)/2:edge.fixed,z:edge.axis==='z'?(cursor+gap.lo)/2:edge.fixed,w:edge.axis==='x'?gap.lo-cursor:1,d:edge.axis==='z'?gap.lo-cursor:1,h:MILITARY_COMPOUND.height});
+  cursor=gap.hi;
+ }
+}
+export function militaryPerimeterBlocked(p,margin=.45){
+ if(Math.abs(p.x-MILITARY_COMPOUND.x)>MILITARY_COMPOUND.w/2+margin+.5||Math.abs(p.z-MILITARY_COMPOUND.z)>MILITARY_COMPOUND.d/2+margin+.5||Number(p.y??1.1)>MILITARY_COMPOUND.height+.8)return false;
+ return MILITARY_PERIMETER_WALLS.some(r=>Math.abs(p.x-r.x)<=r.w/2+margin&&Math.abs(p.z-r.z)<=r.d/2+margin);
+}
 /** Fixed river berths leave the navigable western channel open. Access stays on
  * the European bank; the jetty and short gangways cross the water to each hull. */
 export const MILITARY_NAVAL_BASE={

@@ -1,5 +1,5 @@
 import {createMilitaryLife} from './military-life.mjs';
-import {LOCATIONS,BUILDINGS,entrance} from './city-map.mjs';
+import {LOCATIONS,BUILDINGS,entrance,clearSegment} from './city-map.mjs';
 import {PUBLIC_SERVICE_TARGETS,MILITARY_AIRFIELD,militaryAircraftPose} from './government-map.mjs';
 
 const DAY=86400,clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,Number(n)||0));
@@ -35,9 +35,9 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   if(branch==='police'){f.lawAwareness=Math.max(.98,Number(f.lawAwareness||0));f.professionSkills.law=Math.max(.7,Number(f.professionSkills.law||0));}
   if(!existing){d.recruits++;memory(f,'public_service_enlistment',{branch,stationId:station[branch],wage:f.wage});note('public_service_hire',`${f.id} voluntarily joined the ${branch==='army'?'army':'police academy'}.`,{flyId:f.id,branch,stationId:station[branch]});}
  }
- const military=createMilitaryLife({world,roster,actor,now,random,neuralDrive,remember,note,supply,assignDuty,releaseDuty,target,onShift,outsideCommitment,recordViolation});
+ const military=createMilitaryLife({world,roster,actor,now,random,neuralDrive,remember,note,supply,assignDuty,releaseDuty,target,onShift,outsideCommitment,recordViolation,garrisonNeeds});
  function initializeCadre(){
-  const d=data();if(d.cadreInitialized)return 0;const authorized=new Set(raw().thousandSettlement?.militaryCadreIds||[]);if(!authorized.size)return 0;let added=0;for(const f of raw().flies){if(roster('army').length>=50)break;if(!authorized.has(f.id)||!f.militaryCadreArrival||!f.alive||f.businessId||f.businessEmployeeOf||f.publicServiceRole||f.facilityEmployment||essential.has(f.jobId)||f.ageYears<21||f.ageYears>55)continue;bind(f,'army');const index=d.army.indexOf(f.id);Object.assign(f,{preferredWorkStart:8,preferredWorkHours:8,x:680+(index%10)*6,y:1.1,z:-584-Math.floor(index/10)*3,indoors:false,onTrain:false,onPlane:false,traveling:false,routeWaypoints:[],routeIndex:0,currentLocationId:'military-base',targetLocationId:'military-base',action:'arrived for army induction',actionUntil:now()+600});f.professionSkills||={};if(added<2){f.professionSkills.aviation=Math.max(.55,Number(f.professionSkills.aviation||0));f.publicServiceTrainingHours=Math.max(8,Number(f.publicServiceTrainingHours||0));}added++;}
+  const d=data();if(d.cadreInitialized)return 0;const authorized=new Set(raw().thousandSettlement?.militaryCadreIds||[]);if(!authorized.size)return 0;let added=0;for(const f of raw().flies){if(roster('army').length>=50)break;if(!authorized.has(f.id)||!f.militaryCadreArrival||!f.alive||f.businessId||f.businessEmployeeOf||f.publicServiceRole||f.facilityEmployment||essential.has(f.jobId)||f.ageYears<21||f.ageYears>55)continue;bind(f,'army');const index=d.army.indexOf(f.id);Object.assign(f,{militaryGarrisonResident:true,preferredWorkStart:8,preferredWorkHours:8,x:680+(index%10)*6,y:1.1,z:-584-Math.floor(index/10)*3,indoors:false,onTrain:false,onPlane:false,traveling:false,routeWaypoints:[],routeIndex:0,currentLocationId:'military-base',targetLocationId:'military-base',action:'arrived for army induction',actionUntil:now()+600});f.professionSkills||={};if(added<2){f.professionSkills.aviation=Math.max(.55,Number(f.professionSkills.aviation||0));f.publicServiceTrainingHours=Math.max(8,Number(f.publicServiceTrainingHours||0));}added++;}
   d.cadreInitialized={at:now(),added,arrivalIds:d.army.filter(id=>authorized.has(id))};return added;
  }
  function init(){
@@ -53,7 +53,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    if(!plane.owned&&Number(raw().treasury?.cash||0)>=2800){const paid=supply(2800);plane.owned=true;plane.purchasedAt=now();d.procurementPaid+=paid;note('military_procurement',`${plane.id} entered the public training-aircraft fleet.`,{aircraftId:plane.id,cost:paid});}
    if(plane.boardingPilotId){const stand=MILITARY_AIRFIELD.stands.find(p=>p.id===plane.standId);if(stand)target(`MILITARY-BOARD-${plane.id}`,{x:stand.x,z:stand.z+6},'Military aircraft boarding');}
   }
-  initializeCadre();military.init();
+  initializeCadre();initGarrison();military.init();
   for(const f of raw().flies)if(f.publicServiceDuty?.formation)target(f.publicServiceDuty.targetId,f.publicServiceDuty.formation,'Army training position');
   return d;
  }
@@ -79,10 +79,14 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   if(preserve||outsideCommitment(f)||f.onTrain||f.onPlane)return;
   if(f.targetLocationId===duty.targetId){f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;}f.actionUntil=now()+600;
  }
+ function startDutyJourney(f,targetId,action){
+  const place=loc(targetId);if(!place)return;const local=f.publicServiceRole==='army'&&dist(f,place)<=450;startJourney?.(f,{id:targetId,action,...(local?{mode:'walk'}:{})});
+  if(local&&!f.onTrain&&clearSegment(f,place)){Object.assign(f,{targetLocationId:targetId,finalTargetX:place.x,finalTargetZ:place.z,targetX:place.x,targetZ:place.z,routeWaypoints:[{x:place.x,y:1.1,z:place.z,mode:'walk',stage:'public-duty-walk'}],routeIndex:0,transitMode:'walk',transitStage:'public-duty-walk',metroLineId:null,indoors:false,pendingAction:action,action,traveling:dist(f,place)>.85});if(!f.traveling)f.currentLocationId=targetId;}
+ }
  function assignDuty(f,kind,targetId,duration=3600){
   const place=loc(targetId);if(!place||f.publicServiceDuty||f.traveling||outsideCommitment(f))return false;
   f.publicServiceDuty={kind,targetId,assignedAt:now(),arrivedAt:null,until:null,duration,...(kind==='training'?{formation:{x:place.x,z:place.z}}:{})};f.publicServiceWorkSampleAt=now();f.publicServiceAttending=false;f.roadDuty=false;f.mobilityShopping=false;
-  if(f.currentLocationId!==targetId||dist(f,place)>16)startJourney?.(f,{id:targetId,action:kind==='training'?'reporting for army training':kind==='patrol'?'beginning a public police patrol':'reporting for public service'});
+  if(f.currentLocationId!==targetId||dist(f,place)>16)startDutyJourney(f,targetId,kind==='training'?'reporting for army training':kind==='patrol'?'beginning a public police patrol':'reporting for public service');
   if(!f.traveling&&f.currentLocationId!==targetId&&dist(f,place)>16){releaseDuty(f);return false;}
   return true;
  }
@@ -95,6 +99,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   const branch=f.publicServiceRole;
   if(branch){
    if(!onShift(f,clock)||f.energy<25||f.hunger>80||f.health<45)return;
+   if(branch==='army'&&f.militaryGuardPostId){add(`ARMY-GUARD-${f.militaryGuardPostId}`,'army guard duty',195);return;}
    const kind=branch==='army'?'training':Number(clock.hour||0)%3===0?'headquarters':'patrol';
    const patrols=['riverside-market','bridge-view','park','airport-park','airport'].filter(id=>loc(id));
    const destination=branch==='army'?trainingTarget(f).id:kind==='headquarters'||!patrols.length?station.police:patrols[(data().police.indexOf(f.id)+Math.floor(now()/3600))%patrols.length];
@@ -105,6 +110,22 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    const score=suitability(f,option),improvement=Math.max(-15,Math.min(20,(wages[option]-Number(f.wage||0))*4));
    add(station[option],application[option],28+score*45+improvement+(f.jobId?0:20));
   }
+ }
+ function garrison(){return data().garrison||={rations:0,pendingRations:null,mealsServed:0,procurementPaid:0,restHours:0};}
+ function initGarrison(){target('military-quarters',{x:710,z:-579.2},'Army barracks quarters and mess');garrison();}
+ function provisionGarrison(){const g=garrison();if(g.pendingRations&&now()>=g.pendingRations.arrival){g.rations+=g.pendingRations.quantity;g.pendingRations=null;}const people=roster('army').filter(f=>f.militaryGarrisonResident).length;if(!people||g.pendingRations||g.rations>=people)return;const vendor=['market','grocery','bakery','riverside-market'].map(id=>({id,b:raw().businesses?.[id]})).filter(v=>Number(v.b?.inventory||0)>0).sort((a,b)=>Number(b.b.inventory)-Number(a.b.inventory))[0];if(!vendor)return;const price=Math.max(1,Number(vendor.b.price||4)),units=Math.max(0,Math.min(people*4-g.rations,Math.floor(vendor.b.inventory),Math.floor(Number(raw().treasury?.cash||0)/price)));if(units<1)return;const paid=units*price;raw().treasury.cash-=paid;vendor.b.cash=Number(vendor.b.cash||0)+paid;vendor.b.inventory-=units;raw().totalTransactions=Number(raw().totalTransactions||0)+1;g.procurementPaid+=paid;g.pendingRations={quantity:units,arrival:now()+1800,paid,vendorId:vendor.id};}
+ function garrisonNeeds(f,clock){if(f.publicServiceDuty?.kind==='guard'&&onShift(f,clock)&&f.energy>=25&&f.hunger<80)return false;return Boolean(f.militaryGarrisonResident&&(f.hunger>45||f.energy<30||!onShift(f,clock)));}
+ function handleGarrison(f,clock){
+  if(!f.militaryGarrisonResident||f.publicServiceRole!=='army'||outsideCommitment(f)||f.onTrain||f.onPlane||f.militaryFlightId||f.militaryShipId||urbanWorld?.isUnavailable?.('military-base',f))return false;
+  if(f.publicServiceDuty?.kind==='guard'&&onShift(f,clock)&&f.energy>=25&&f.hunger<80)return false;
+  const hungry=f.hunger>45,exhausted=f.energy<30,off=!onShift(f,clock);if(!hungry&&!exhausted&&!off)return false;
+  if(f.publicServiceDuty){if(f.traveling)return false;releaseDuty(f);}
+  const place=loc('military-quarters');if(!place)return false;
+  if(f.traveling&&f.targetLocationId!=='military-quarters')return false;
+  if(!f.traveling&&(f.currentLocationId!=='military-quarters'||dist(f,place)>8)){startDutyJourney(f,'military-quarters','returning to barracks quarters');}
+  if(f.traveling){moveFly?.(f);care(f,clock);return true;}if(dist(f,place)>8)return false;
+  f.currentLocationId='military-quarters';f.indoors=true;const g=garrison();if(f.hunger>40&&g.rations>0){g.rations--;g.mealsServed++;raw().foodReserve=Math.max(0,Number(raw().foodReserve||0)-1);f.hunger=Math.max(0,f.hunger-60);f.thirst=Math.max(0,Number(f.thirst||0)-35);memory(f,'military_mess_meal',{rationsRemaining:g.rations,paid:true});}
+  const previous=Number(f.garrisonRestAt??now()),elapsed=Math.min(1800,Math.max(0,now()-previous));f.garrisonRestAt=now();f.recoveringEnergy=Boolean(off||f.energy<75);f.action=f.recoveringEnergy?'resting indoors':'eating at the army mess';f.sleeping=f.recoveringEnergy;f.actionUntil=now()+600;if(f.recoveringEnergy)g.restHours+=elapsed/3600;care(f,clock);return true;
  }
  function care(f,clock){
   if(f.publicServiceCareAt===now())return;f.publicServiceCareAt=now();needsAndActivities(f,clock);payAndFinance(f,clock);
@@ -119,22 +140,25 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   const day=Math.floor(now()/DAY);if(f.publicServiceWorkDay!==day){f.publicServiceWorkDay=day;f.publicServiceWorkMinutesToday=0;}
   f.publicServiceWorkMinutesToday=Number(f.publicServiceWorkMinutesToday||0)+elapsed/60;
  }
+ function trainAviation(f,flight){const seconds=Math.max(0,Math.min(1800,Math.min(now(),flight.arrival)-Math.max(Number(f.publicServiceWorkSampleAt??now()),flight.departure)));if(seconds>0){f.professionSkills||={};f.professionSkills.aviation=clamp(Number(f.professionSkills.aviation||0)+seconds/3600*.025);f.aviationTrainingHours=Number(f.aviationTrainingHours||0)+seconds/3600;}}
  function handleResident(f,clock){
   if(f.militaryShipId){const ship=data().militaryLife?.ships?.find(s=>s.id===f.militaryShipId);if(ship?.exercise){const pose=military.crewPose(f,ship);Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,indoors:false,traveling:false,action:'serving aboard a naval training patrol'});pay(f,Math.max(0,Math.min(1800,now()-Number(f.publicServiceWorkSampleAt??now()))));f.publicServiceWorkSampleAt=now();care(f,clock);return true;}}
   if(f.militaryFlightId){
    const plane=data().aircraft.find(p=>p.flight?.id===f.militaryFlightId);if(!plane)return false;
    const pose=militaryAircraftPose(now(),plane);Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,onPlane:true,indoors:true,traveling:false,action:'flying an army training circuit'});
-   const elapsed=Math.max(0,Math.min(1800,now()-Number(f.publicServiceWorkSampleAt??now())));pay(f,elapsed);f.publicServiceWorkSampleAt=now();care(f,clock);return true;
+   const elapsed=Math.max(0,Math.min(1800,now()-Number(f.publicServiceWorkSampleAt??now())));trainAviation(f,plane.flight);pay(f,elapsed);f.publicServiceWorkSampleAt=now();care(f,clock);return true;
   }
+  if(handleGarrison(f,clock))return true;
   if(!f.publicServiceRole){
    const branch=Object.keys(application).find(branch=>f.action===application[branch]||f.pendingAction===application[branch]);
    if(branch&&!f.traveling)apply(f,branch);return false;
   }
+  if(f.publicServiceRole==='army'&&!f.publicServiceDuty&&!f.traveling&&onShift(f,clock)&&Number(f.professionSkills?.aviation||0)>=.2&&Number(f.publicServiceTrainingHours||0)>=8&&data().aircraft.some(p=>p.owned&&!p.flight)){f.action='awaiting an aviation assignment at the barracks';f.sleeping=false;f.recoveringEnergy=false;f.actionUntil=now()+600;care(f,clock);return true;}
   if(outsideCommitment(f)||f.onPlane||f.health<35||f.energy<12||f.hunger>92){releaseDuty(f,true);return false;}
   let duty=f.publicServiceDuty;
   if(!duty){
-   const kind=f.action==='army training duty'?'training':f.action==='public police patrol'?'patrol':f.action==='public headquarters duty'?'headquarters':null;
-   if(kind&&onShift(f,clock))assignDuty(f,kind,kind==='training'?trainingTarget(f).id:kind==='headquarters'?station.police:f.currentLocationId);
+   const kind=f.action==='army guard duty'?'guard':f.action==='army training duty'?'training':f.action==='public police patrol'?'patrol':f.action==='public headquarters duty'?'headquarters':null;
+   if(kind&&onShift(f,clock))assignDuty(f,kind,kind==='guard'?`ARMY-GUARD-${f.militaryGuardPostId}`:kind==='training'?trainingTarget(f).id:kind==='headquarters'?station.police:f.currentLocationId);
    duty=f.publicServiceDuty;if(!duty)return false;
   }
   if(!onShift(f,clock)&&!f.traveling&&!f.onTrain){releaseDuty(f);return false;}
@@ -144,7 +168,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   if(!f.traveling&&!f.onTrain&&dist(f,goal)>16&&now()>=Number(duty.nextRouteAt||0)){
    if(Number(duty.routeFailures||0)>=3){releaseDuty(f);f.actionUntil=now()+1800;return false;}
    duty.routeFailures=Number(duty.routeFailures||0)+1;duty.nextRouteAt=now()+600;
-   startJourney?.(f,{id:duty.targetId,action:'returning to a public service assignment'});
+   startDutyJourney(f,duty.targetId,'returning to a public service assignment');
   }
   moveFly?.(f);care(f,clock);
   const place=loc(duty.targetId),present=Boolean(place&&!f.traveling&&!f.onTrain&&dist(f,place)<16);
@@ -154,11 +178,11 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    if(duty.arrivedAt===null){duty.arrivedAt=now();duty.until=now()+duty.duration;}
    if(f.publicServiceAttending)pay(f,elapsed);
    f.publicServiceAttending=true;f.indoors=duty.kind==='headquarters';f.sleeping=false;f.actionUntil=now()+600;
-   f.action=duty.kind==='range'?'practising at the army firing range':duty.kind==='formation'?'attending army formation':duty.kind==='naval-transfer'?'walking to a naval patrol vessel':duty.kind==='training'?'training with the army':duty.kind==='patrol'?'patrolling a public district':duty.kind==='pilot-transfer'?'boarding a military training aircraft':'working at police headquarters';
+   f.action=duty.kind==='guard'?'guarding the army gate':duty.kind==='range'?'practising at the army firing range':duty.kind==='formation'?'attending army formation':duty.kind==='naval-transfer'?'walking to a naval patrol vessel':duty.kind==='training'?'training with the army':duty.kind==='patrol'?'patrolling a public district':duty.kind==='pilot-transfer'?'boarding a military training aircraft':'working at police headquarters';
    military.trainPresence(f,elapsed,duty.kind);
    if(['training','formation','range'].includes(duty.kind)&&elapsed>0&&now()>duty.arrivedAt){
     const hours=elapsed/3600;f.publicServiceTrainingHours=Number(f.publicServiceTrainingHours||0)+hours;data().trainingHours+=hours;
-    f.professionSkills||={};f.professionSkills.armyTraining=clamp(Number(f.professionSkills.armyTraining||0)+hours*.018);f.professionSkills.aviation=clamp(Number(f.professionSkills.aviation||0)+hours*.025);
+    f.professionSkills||={};f.professionSkills.armyTraining=clamp(Number(f.professionSkills.armyTraining||0)+hours*.018);
    }
    if(duty.kind!=='pilot-transfer'&&now()>=duty.until){memory(f,'public_service_shift',{branch:f.publicServiceRole,kind:duty.kind,locationId:duty.targetId});releaseDuty(f);}
   }else f.publicServiceAttending=false;
@@ -172,12 +196,12 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   });
  }
  function tick(gameSeconds,clock){
-  const d=data();if(!enabled())return;military.tick(clock);
+  const d=data();if(!enabled())return;provisionGarrison();military.tick(clock);
   if(now()>=d.nextRecruitAt){d.nextRecruitAt=now()+3600;retireAndClean();}
   for(const plane of d.aircraft){
    if(plane.flight&&now()>=plane.flight.arrival){
     const f=alive(plane.flight.pilotId),stand=MILITARY_AIRFIELD.stands.find(p=>p.id===plane.standId);
-    if(f?.militaryFlightId===plane.flight.id){Object.assign(f,{militaryFlightId:null,onPlane:false,indoors:false,x:stand.x,y:1.1,z:stand.z,currentLocationId:'military-airfield',traveling:false,action:'completed an army training flight',actionUntil:now()+600,publicServiceWorkSampleAt:now()});memory(f,'military_training_flight',{flightId:plane.flight.id,aircraftId:plane.id});}
+    if(f?.militaryFlightId===plane.flight.id){trainAviation(f,plane.flight);Object.assign(f,{militaryFlightId:null,onPlane:false,indoors:false,x:stand.x,y:1.1,z:stand.z,currentLocationId:'military-airfield',traveling:false,action:'completed an army training flight',actionUntil:now()+600,publicServiceWorkSampleAt:now()});memory(f,'military_training_flight',{flightId:plane.flight.id,aircraftId:plane.id});}
     plane.flight=null;plane.pilotId=null;plane.trips++;d.trainingFlights++;plane.nextFlightAt=now()+7200;
    }
    if(plane.boardingPilotId){
@@ -200,8 +224,8 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   if(assignDuty(pilot,'pilot-transfer',point.id,7200)){pilot.publicServiceDuty.aircraftId=plane.id;plane.boardingPilotId=pilot.id;plane.boardingStartedAt=now();d.nextFlightAt=now()+3000;}
  }
  function snapshot(){
-  const d=data(),militaryView=military.snapshot(),project=f=>({x:f.x,y:f.y,z:f.z,indoors:Boolean(f.indoors),onPlane:Boolean(f.onPlane),onTrain:Boolean(f.onTrain),rank:f.militaryRank||null,rankName:f.militaryRank?.name||null,commanderId:f.militaryCommanderId||null,armed:Boolean(f.militaryArmed),weaponSkill:Number(f.professionSkills?.marksmanship||0),id:f.id,branch:f.publicServiceRole,jobId:f.jobId,stationId:station[f.publicServiceRole],onDuty:Boolean(f.publicServiceDuty||f.militaryFlightId),trainingHours:Number(f.publicServiceTrainingHours||0),duty:f.publicServiceDuty?.kind||null,targetId:f.publicServiceDuty?.targetId||null});
-  return{military:militaryView,ships:militaryView.ships,exercise:militaryView.exercise,shots:militaryView.shots,ammunition:militaryView.ammunition,spentRounds:militaryView.spentRounds,version:2,enabled:enabled(),targets:{...PUBLIC_SERVICE_TARGETS},army:{target:50,count:roster('army').length,members:roster('army').map(project)},police:{target:28,count:roster('police').length,members:roster('police').map(project)},wagesPaid:d.wagesPaid,wageArrears:d.wageArrears,recruits:d.recruits,retirements:d.retirements,trainingHours:d.trainingHours,trainingFlights:d.trainingFlights,procurementPaid:d.procurementPaid,flightCosts:d.flightCosts,aircraft:d.aircraft.map(p=>({...p,flight:p.flight?{...p.flight}:null})),history:d.history.slice(-12),algorithmOnly:true};
+  const d=data(),militaryView=military.snapshot(),project=f=>({x:f.x,y:f.y,z:f.z,indoors:Boolean(f.indoors),onPlane:Boolean(f.onPlane),onTrain:Boolean(f.onTrain),rank:f.militaryRank||null,guardPostId:f.militaryGuardPostId||null,rankName:f.militaryRank?.name||null,commanderId:f.militaryCommanderId||null,armed:Boolean(f.militaryArmed),weaponSkill:Number(f.professionSkills?.marksmanship||0),id:f.id,branch:f.publicServiceRole,jobId:f.jobId,stationId:station[f.publicServiceRole],onDuty:Boolean(f.publicServiceDuty||f.militaryFlightId),trainingHours:Number(f.publicServiceTrainingHours||0),duty:f.publicServiceDuty?.kind||null,targetId:f.publicServiceDuty?.targetId||null});
+  return{garrison:{...garrison()},military:militaryView,ships:militaryView.ships,exercise:militaryView.exercise,shots:militaryView.shots,ammunition:militaryView.ammunition,spentRounds:militaryView.spentRounds,version:2,enabled:enabled(),targets:{...PUBLIC_SERVICE_TARGETS},army:{target:50,count:roster('army').length,members:roster('army').map(project)},police:{target:28,count:roster('police').length,members:roster('police').map(project)},wagesPaid:d.wagesPaid,wageArrears:d.wageArrears,recruits:d.recruits,retirements:d.retirements,trainingHours:d.trainingHours,trainingFlights:d.trainingFlights,procurementPaid:d.procurementPaid,flightCosts:d.flightCosts,aircraft:d.aircraft.map(p=>({...p,flight:p.flight?{...p.flight}:null})),history:d.history.slice(-12),algorithmOnly:true};
  }
  return{military,initializeCadre,init,tick,addChoices,handleResident,snapshot,apply,onShift,suitability};
 }

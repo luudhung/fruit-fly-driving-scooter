@@ -2,6 +2,11 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {PlayerController,PLAYER_EYE} from '../src/player-controller.ts';
 const idle={forward:0,strafe:0,yaw:0,sprint:1,ascend:false,descend:false};
 function run(p:PlayerController,seconds:number,patch:Partial<typeof idle>={}){for(let i=0;i<Math.round(seconds*120);i++)p.update(1/120,{...idle,...patch});}
+test('army walls stop ground walking while the public main gate and naval gate remain traversable',()=>{
+ const p=new PlayerController();p.teleport(835,PLAYER_EYE+.2,-610);run(p,.2);run(p,3,{strafe:-1});assert.ok(p.x<839.2&&p.x>838,'east perimeter stops the player');
+ p.teleport(695,PLAYER_EYE+.2,-510);run(p,.2);run(p,3,{forward:1,yaw:Math.PI});assert.ok(p.z< -521,'main gate admits the player');
+ p.teleport(574,PLAYER_EYE+.2,-630);run(p,.2);run(p,3,{strafe:-1});assert.ok(p.x>586,'naval gate admits the player');
+});
 test('gravity lands the player; single jump returns to the floor; double jump toggles flight',()=>{
  const p=new PlayerController();p.teleport(20,20,790);run(p,3);assert.ok(p.grounded);const floor=p.y;
  p.jumpDown(1000);p.jumpUp();run(p,.25);assert.ok(p.y>floor+.6);run(p,2);assert.ok(Math.abs(p.y-floor)<.001);

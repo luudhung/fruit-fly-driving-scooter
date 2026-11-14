@@ -3,7 +3,7 @@ import {districtProfile} from './district-economy.mjs';
 import {createVehicleRouter} from './vehicle-network.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
-import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED} from './government-map.mjs';
+import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED,militaryPerimeterBlocked} from './government-map.mjs';
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
 export const MAP_VERSION = 29;
@@ -522,6 +522,7 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
  return true;
 }
 export function blocked(p) {
+ if(militaryPerimeterBlocked(p))return true;
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
  if(atSea(p))return true;
  if((URBAN_FLOODS.some(f=>contains(f,p))||WATER.some(w=>contains(w,p,.25)))&&!onWaterCrossing(p))return true;
@@ -539,6 +540,7 @@ export function clearMetroAccessSegment(a,b) {
  for(let i=0;i<=n;i++){
   const t=i/n,p={x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:(a.y??1.1)+((b.y??1.1)-(a.y??1.1))*t};
   if(p.y<=2){if(blocked(p))return false;continue;}
+  if(militaryPerimeterBlocked(p))return false;
   if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return false;
   if(nearbyGeometry(buildingBins,p).some(building=>effectiveBuildingHeight(building)>p.y-1.25&&contains(building,p,.45)))return false;
  }

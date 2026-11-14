@@ -42,7 +42,7 @@ import {ResidentPhotoAlbum,type ResidentPhotoRecord} from "./city-photo-album.ts
 import {ResidentCamera} from "./resident-camera.ts";
 import {buildRiverBridges,buildSportsDistrict,updateBridgeLighting} from "./city-district.ts";
 import {CityMotion,type MotionPlan} from "./city-motion.ts";
-import {CitySky,skyLight,citySkyPalette,sunDirection} from "./city-sky.ts";
+import {CitySky,skyLight,citySkyPalette,cityFogRange,sunDirection} from "./city-sky.ts";
 import {INTERSECTIONS} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
@@ -808,7 +808,8 @@ async function fetchSnapshotOnce() {
 const host = $("world");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b8cf);
-scene.fog = new THREE.Fog(0x93b8cf, 520, 2400);
+const initialFog=cityFogRange();
+scene.fog = new THREE.Fog(0x93b8cf, initialFog.near, initialFog.far);
 
 let snapshotFetchPending=false;
 async function fetchSnapshot(){
@@ -1501,8 +1502,9 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   const palette=citySkyPalette(t,cloud,day);visualPalette=palette;
   scene.background=palette.horizon;
   (scene.fog as THREE.Fog).color.copy(palette.fog);
-  (scene.fog as THREE.Fog).near=420;
-  (scene.fog as THREE.Fog).far=2450;
+  const fogRange=cityFogRange(weather.precipitation||0,cloud);
+  (scene.fog as THREE.Fog).near=fogRange.near;
+  (scene.fog as THREE.Fog).far=fogRange.far;
   hemi.color.copy(palette.fill);hemi.groundColor.setHex(0x6b6754).lerp(new THREE.Color(0x29243b),night);
   hemi.intensity=.44+daylight*1.12;
   sun.intensity=daylight*2.45*(1-cloud*.52);sun.color.copy(palette.keyLight);
@@ -1605,6 +1607,7 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'west-river':[-350,105,-80,-Math.PI/2,-.55,68],
  'north-river':[-290,140,-450,-Math.PI,-.48,68],
  'army-yard':[710,8,-575,Math.PI,-.05,72],
+ 'army-gate':[695,4.2,-493,Math.PI,-.04,72],
  'army-base':[825,85,-490,-2.65,-.4,68],
  'naval-base':[540,55,-550,-1.85,-.3,68],
  'north-industry':[-650,135,-740,Math.PI,-.35,68],
