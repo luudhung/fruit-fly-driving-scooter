@@ -50,6 +50,7 @@ export class CivilizationWorld extends DurableObject {
     this.lastWallClockMs = Date.now();
     this.lastPersistMs = 0;
     this.storageStats = null;
+    this.nextAlarmAtMs = null;
     this.queue = Promise.resolve();
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
@@ -100,9 +101,9 @@ export class CivilizationWorld extends DurableObject {
     if (current == null || current < now - 2 * interval || current > now + interval + 1000) {
       const next = now + interval;
       await this.ctx.storage.setAlarm(next);
-      return next;
+      this.nextAlarmAtMs=next;return next;
     }
-    return current;
+    this.nextAlarmAtMs=current;return current;
   }
 
   async advanceTo(nowMs, reason = "request") {
@@ -157,7 +158,8 @@ export class CivilizationWorld extends DurableObject {
   async alarm() {
     return this.withLock(async () => {
       await this.ready;
-      await this.ctx.storage.setAlarm(Date.now() + this.alarmIntervalMs());
+      this.nextAlarmAtMs=Date.now()+this.alarmIntervalMs();
+      await this.ctx.storage.setAlarm(this.nextAlarmAtMs);
       try {
         await this.advanceTo(Date.now(), "alarm");
         await this.persistIfDue(false);
@@ -187,7 +189,34 @@ export class CivilizationWorld extends DurableObject {
     return this.withLock(async()=>{markNeuralCycleFailed(details);return getNeuralStatus();});
   }
 
+  readObservation(url) {
+    const nextAlarmAtMs=this.nextAlarmAtMs;
+    const advance={...(this.lastAdvance||{}),snapshotAgeSeconds:Math.max(0,(Date.now()-this.lastWallClockMs)/1000)};
+    if(url.pathname==='/api/civilization/neural'){
+      const status=getNeuralStatus(),freshFor=Math.max(120000,Number(status.intervalMs||1000)*3);
+      return json({...status,brains:neuralActors().map(f=>{
+        const fc=f.brain?.fullConnectome;
+        return {id:f.id,kind:f.kind||'resident',brainId:f.brain?.id,connected:Boolean(fc?.connected&&fc.fullConnectome&&Date.now()-Number(fc.lastSyncAt||0)<=freshFor),neurons:fc?.neurons||0,edges:fc?.edges||0,steps:fc?.neuralStepsTotal||0,spikesThisBatch:fc?.spikesThisBatch||0,lastSyncAt:fc?.lastSyncAt||0};
+      })});
+    }
+    if(url.pathname==='/health'){
+      const state=getRawState();
+      return json({ok:snapshotLooksUsable(state),service:'fruit-fly-civilization-cloudflare',runtime:'cloudflare-durable-object',worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,simulationStatus:state?'SYNTHETIC_CIVILIZATION_LIVE':'STARTING',population:state?.flies?.filter(f=>f.alive).length||0,simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),persistence:'DURABLE_OBJECT_SQLITE',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance,storage:this.storageStats,neural:getNeuralStatus()});
+    }
+    const payload=getState({observer:url.searchParams.get('view')==='observer',selectedId:url.searchParams.get('selected')});
+    payload.runtime={platform:'cloudflare-durable-object',persistence:'sqlite-gzip-chunks',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance};
+    return json(payload);
+  }
+
   async fetch(request) {
+    if(request.method==='OPTIONS')return new Response(null,{status:204,headers:corsHeaders()});
+    const url=new URL(request.url);
+    if(request.method==='GET'&&['/health','/api/civilization/state','/api/civilization/neural'].includes(url.pathname)){
+      await this.ready;
+      // A read is synchronous against the last complete JS step. It must not
+      // queue behind gzip/storage, force a save, advance time, or issue SQLite I/O.
+      return this.readObservation(url);
+    }
     return this.withLock(async () => {
       await this.ready;
 
@@ -197,56 +226,10 @@ export class CivilizationWorld extends DurableObject {
 
       const url = new URL(request.url);
       // Observing checkpoints does not force additional city decision work.
-      if(url.pathname==='/api/civilization/neural'){
-        const status=getNeuralStatus(),freshFor=Math.max(120000,Number(status.intervalMs||1000)*3);
-        return json({...status,brains:neuralActors().map(f=>{
-          const fc=f.brain?.fullConnectome;
-          return {id:f.id,kind:f.kind||'resident',brainId:f.brain?.id,connected:Boolean(fc?.connected&&fc.fullConnectome&&Date.now()-Number(fc.lastSyncAt||0)<=freshFor),neurons:fc?.neurons||0,edges:fc?.edges||0,steps:fc?.neuralStepsTotal||0,spikesThisBatch:fc?.spikesThisBatch||0,lastSyncAt:fc?.lastSyncAt||0};
-        })});
-      }
-
       // Observers read the world; the background alarm owns its cadence, independent of viewers.
       const observing=request.method==="GET";
       const advance=observing?{...(this.lastAdvance||{}),snapshotAgeSeconds:Math.max(0,(Date.now()-this.lastWallClockMs)/1000)}:await this.advanceTo(Date.now(),"request");
       const nextAlarmAtMs = await this.ensureAlarm();
-
-      if (url.pathname === "/health") {
-        await this.persistIfDue(false);
-        const state = getRawState();
-        return json({
-          ok: snapshotLooksUsable(state),
-          service: "fruit-fly-civilization-cloudflare",
-          runtime: "cloudflare-durable-object",
-          worldId: this.env.CIV_WORLD_ID || DEFAULT_WORLD_ID,
-          simulationStatus: state ? "SYNTHETIC_CIVILIZATION_LIVE" : "STARTING",
-          population: state?.flies?.filter((fly) => fly.alive).length || 0,
-          simulationAgeSeconds: Number(state?.simulationAgeSeconds || 0),
-          persistence: "DURABLE_OBJECT_SQLITE",
-          alarmIntervalMs: this.alarmIntervalMs(),
-          nextAlarmAtMs,
-          sampledCatchup: advance,
-          storage: this.storageStats,
-          neural:getNeuralStatus(),
-        });
-      }
-
-      if (url.pathname === "/api/civilization/state") {
-        await this.persistIfDue(false);
-        const payload = getState({observer:url.searchParams.get("view")==="observer",selectedId:url.searchParams.get("selected")});
-        payload.runtime = {
-          platform: "cloudflare-durable-object",
-          persistence: "sqlite-gzip-chunks",
-          alarmIntervalMs: this.alarmIntervalMs(),
-          nextAlarmAtMs,
-          sampledCatchup: advance,
-        };
-        if(url.searchParams.get('view')==='observer'){
-          // The map needs recent motion, not the complete movement history of 500 residents.
-          payload.flies=payload.flies.map(f=>({...f,movementTrace:(f.movementTrace||[]).slice(-8)}));
-          // The Workers HTTP layer negotiates compression once for the client.
-        }
-        return json(payload);
-      }
 
       if (url.pathname === "/api/civilization/mortality") {
         const report = mortalityReport();
