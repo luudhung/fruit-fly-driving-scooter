@@ -3,11 +3,11 @@ export const DISTRICT_PROFILES={
  main:{id:'main',name:'Main city',focus:'finance and company offices',wage:1.30,housing:1.35,property:1.40,food:1.20,living:1.20,pollution:.16,amenities:.96},
  europe:{id:'europe',name:'Tiểu khu châu Âu',focus:'public administration and military',wage:1.05,housing:1,property:1.08,food:1,living:1,pollution:.12,amenities:.87},
  north:{id:'north',name:'Thành phố phía Bắc',focus:'middle-income homes and high amenities',wage:1.06,housing:1.18,property:1.15,food:1.06,living:1.05,pollution:.10,amenities:.93},
- west:{id:'west',name:'Thành phố phía Tây',focus:'manufacturing, skilled trades and logistics',wage:.82,housing:.62,property:.62,food:.68,living:.72,pollution:.52,amenities:.70},
+ west:{id:'west',name:'Thành phố phía Tây',focus:'manufacturing, skilled trades and logistics',wage:.90,housing:.25,property:.22,food:.38,living:.42,pollution:.42,amenities:.86},
 };
 export function districtAt(point={}){
  const x=Number(point.x??point.homeX??0),z=Number(point.z??point.homeZ??0);
- if(z< -440&&x>=-470&&x<=100||z>=-1060&&z<=-960&&x>=-850&&x< -470)return 'north';
+ if(z< -570&&x>=-470&&x<=100||z>=-1060&&z<=-960&&x>=-850&&x< -470)return 'north';
  if(x< -440)return 'west';
  if(x>480)return 'europe';
  return 'main';

@@ -10,7 +10,7 @@ export const MOTORWAY_ACCESS_ROADS=[
  ...[-430,-310,-260,-80,50].map(x=>access(`RING-NORTH-${x}`,x,(north-1060)/2,12,-1060-north)),
  ...[160,180].map(z=>access(`RING-EAST-${z}`,(860+east)/2,z,east-860,12)),
  access('RING-EAST-INDUSTRY',(680+east)/2,-400,east-680,12),
- access('RING-SOUTH-WEST',-430,420,12,40),
+ access('RING-SOUTH-WEST',-520,420,12,40),
  ...[-310,-102,122,310].map(x=>access(x===122?'RING-SOUTH-CENTRAL':`RING-SOUTH-CITY-${x}`,x,420,12,40)),
  access('RING-SOUTH-EAST',500,340,12,200),
 ];

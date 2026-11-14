@@ -1,3 +1,5 @@
+import {militaryCrewPose,type MilitaryShip} from '../worker/military-life.mjs';
+import {cityRiverSurfaces,buildDistrictRiverInfrastructure} from './district-river-renderer.ts';
 import {spatialInstanceCells} from './spatial-instances.ts';
 import {CityFrameRenderer} from './city-frame-renderer.ts';
 import {subtractRects} from './surface-rectangles.ts';
@@ -61,7 +63,9 @@ import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
 
 const viewerBootStarted=performance.now();
+const militaryCrewShips=new Map<string,MilitaryShip>();
 type FlyState = {
+  militaryShipId?:string|null;militaryRank?:{id:string;name:string;level:number}|null;militaryCommanderId?:string|null;
   facilityEmployment?:{buildingId:string;shiftStart:number;wage:number;suspended?:boolean}|null;
   district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
   relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
@@ -552,7 +556,7 @@ function renderInspector(fly: FlyState | null) {
   flyAgeEl.textContent = `${fly.ageYears.toFixed(1)}y · ${fly.sex} · Gen ${fly.generation}`;
   flyActionEl.textContent = fly.action + (fly.mentalHealthCrisis ? " · crisis" : "");
   flyBrainEl.textContent = `${fly.brainDecision || fly.action} · ${Math.round((fly.brainConfidence ?? 0) * 100)}%`;
-  flyJobEl.textContent = fly.jobTitle || (fly.ageYears < 18 ? "child" : fly.ageYears > 75 ? "retired" : "unemployed");
+  flyJobEl.textContent = fly.militaryRank?`${fly.militaryRank.name}${fly.militaryCommanderId?' · đơn vị '+fly.militaryCommanderId:''}`:fly.jobTitle || (fly.ageYears < 18 ? "child" : fly.ageYears > 75 ? "retired" : "unemployed");
   const homeBuilding=BUILDINGS.find(building=>building.id===fly.housingUnitId);
   flyHomeEl.textContent=homeBuilding?.luxury
     ? `${homeBuilding.id} · ${fly.ownsHome?'sở hữu':'cư trú'} · giá căn hộ ${num(homeBuilding.purchaseValue||0)} H$`
@@ -615,6 +619,7 @@ function renderInspector(fly: FlyState | null) {
 function renderSnapshot(s: CivilizationSnapshot) {
   if(!presentationClock.accept(s.simulationAgeSeconds,performance.now(),s.timeScale||120))return;
   snapshot = s;
+  militaryCrewShips.clear();for(const ship of s.publicServices?.military?.ships||[])for(const id of ship.crewIds)militaryCrewShips.set(id,ship);
   snapshotReceivedAt=performance.now();
   const neuralLive = Boolean(s.neuralBridge?.allBrainsReady && s.neuralBridge?.independentDynamicState);
   const living=(s.flies||[]).filter(f=>f.alive);
@@ -948,12 +953,8 @@ cityRoot.add(ground);
 
 const cityWater=new CityWater();
 const waterMat=cityWater.material;
-const river = new THREE.Mesh(new THREE.PlaneGeometry(RIVER.w, RIVER.d), waterMat);
-river.rotation.x = -Math.PI / 2;
-river.position.set(RIVER.x, 0.03, RIVER.z);
-cityRoot.add(river);
-for(const piece of subtractRects([HARBOR],[RIVER])){
- const harbor=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),waterMat);harbor.rotation.x=-Math.PI/2;harbor.position.set(piece.x,.03,piece.z);cityRoot.add(harbor);
+for(const piece of cityRiverSurfaces()){
+ const surface=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),waterMat);surface.rotation.x=-Math.PI/2;surface.position.set(piece.x,.03,piece.z);cityRoot.add(surface);
 }
 
 const roadMat = createRoadMaterial(0x242a2e);
@@ -993,6 +994,7 @@ const trafficSignals=new TrafficSignals(cityRoot,INTERSECTIONS,graphics.trafficS
 function updateTrafficSignals(seconds:number){trafficSignals.update(seconds);}
 
 buildRiverBridges(cityRoot);
+buildDistrictRiverInfrastructure(cityRoot,streetLayout.sidewalks);
 buildSportsDistrict(cityRoot,makeCanvasSprite);
 
 // Central Park is a long protected Manhattan-style district with reservoirs, meadows and a highly visible wheel.
@@ -1390,6 +1392,7 @@ const MAX_RENDERED_FLIES = 180;
 const residentView=new SceneViewBudget({enterDistance:360,leaveDistance:410,frustumMargin:18,retainedMargin:35});
 let nextResidentViewAt=0;
 const flyVisuals = new Map<string, FlyVisual>();
+governmentVisuals.setMemberPositionSource(id=>{const v=flyVisuals.get(id);return v?.group.visible?v.current:null;});
 const residentBodies=new InstancedResidents(scene,640);
 const flyPickables=residentBodies.pickables;
 
@@ -1427,9 +1430,11 @@ function syncFlyMeshes(flies: FlyState[]) {
   const active = new Set<string>();
   residentView.setCamera(camera);
   const retained=new Set(flyVisuals.keys());
+  const crewClock=presentationClock.read(performance.now());
   const visible=selectViewBudget(flies,residentView,fly=>{
     if(!fly.alive||fly.onPlane||fly.heliPassenger||fly.onPrivateHelicopter||fly.onFireEngine||fly.onAmbulance||fly.taxiPassenger||fly.onTrain||fly.indoors||fly.traveling&&fly.transitMode==='car')return null;
-    return flyVisuals.get(fly.id)?.current||fly;
+    const vessel=fly.militaryShipId&&militaryCrewShips.get(fly.id);
+    return vessel?militaryCrewPose(crewClock,vessel,fly.id):flyVisuals.get(fly.id)?.current||fly;
   },fly=>fly.id,retained,MAX_RENDERED_FLIES);
   let newVisuals=0;
   for (const fly of visible) {
@@ -1597,6 +1602,11 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'westborough':[-280,300,460,-2.385,-.45,60],
  'khalifa':[180,120,-110,-2.782,-.11,52],
  'airport-ground':[-230,10,-400,Math.PI/2,-.14,68],
+ 'west-river':[-350,105,-80,-Math.PI/2,-.55,68],
+ 'north-river':[-290,140,-450,-Math.PI,-.48,68],
+ 'army-yard':[710,8,-575,Math.PI,-.05,72],
+ 'army-base':[825,85,-490,-2.65,-.4,68],
+ 'naval-base':[540,55,-550,-1.85,-.3,68],
  'north-industry':[-650,135,-740,Math.PI,-.35,68],
  'motorway-exit':[-1064,7,210,0,-.04,68],
 };
@@ -1758,6 +1768,8 @@ function animate(now = performance.now()) {
     const next=visual.route[0]||visual.target;
     visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
+    const vessel=latestFlyStates.get(id)?.militaryShipId&&militaryCrewShips.get(id);
+    if(vessel){const aboard=militaryCrewPose(gameNow,vessel,id);visual.current.set(aboard.x,aboard.y,aboard.z);visual.target.copy(visual.current);}
     visual.group.position.copy(visual.current);
     visitorVisuals.updateActor(id,visual.current);
     civicVisuals.updateActor(id,visual.current);

@@ -21,7 +21,50 @@ test('selection retains complete source data and bounds dense visible candidates
  const second=selectViewBudget([...items].reverse(),view,p=>p,p=>p.id,new Set(first.map(p=>p.id)),24);
  assert.deepEqual(second.map(p=>p.id),first.map(p=>p.id));
 });
+test('dense interest selection gives retained IDs a distance-sized hysteresis band',()=>{
+ const view=new SceneViewBudget();view.setCamera(camera());
+ const held={id:'held',x:0,y:2,z:-300},near={id:'new',x:0,y:2,z:-299};
+ assert.deepEqual(selectViewBudget([near,held],view,p=>p,p=>p.id,new Set(['held']),1).map(p=>p.id),['held']);
+ near.z=-290;
+ assert.deepEqual(selectViewBudget([near,held],view,p=>p,p=>p.id,new Set(['held']),1).map(p=>p.id),['new'],'a substantially nearer candidate still replaces a retained actor');
+});
 const driver=(id:string,x:number,z:number)=>({id,alive:true,vehicle:'car',x,y:1.1,z,vx:0,vz:0,traveling:false,transitMode:'walk',parkedCar:{x,z,heading:0}});
+test('camera motion and delayed snapshots retain a moving car at its displayed position',()=>{
+ const scene=new THREE.Scene(),renderer=new PersonalCars(scene),c=camera(0,-100,-200);renderer.setView(c);
+ const actor={...driver('FLY-1',0,-560),traveling:true,transitMode:'car',vz:20,trafficSignalPermit:true,motion:{at:0,speed:20,mode:'car',signalPermit:true,points:[{x:0,y:1.1,z:-250}]}};
+ renderer.sync([actor]);for(let i=0;i<4*60;i++)renderer.update(1/60);
+ assert.equal(renderer.stats.cached,1);
+ const bodies=scene.children.find((m):m is THREE.InstancedMesh=>m instanceof THREE.InstancedMesh&&m.geometry instanceof THREE.BoxGeometry)!;
+ const before=new THREE.Matrix4();bodies.getMatrixAt(0,before);assert.ok(before.elements[14]>-490);
+ c.position.z=0;c.lookAt(0,2,-100);
+ renderer.sync([{...actor,motion:{...actor.motion,at:120}}]);renderer.update(.13);
+ assert.equal(renderer.stats.cached,1,'authoritative position behind the displayed car must not evict it');
+ assert.equal(renderer.stats.created,1,'retained moving ID must keep its motion object');assert.equal(renderer.stats.reused,0);
+ const after=new THREE.Matrix4();bodies.getMatrixAt(0,after);assert.ok(after.elements[14]>=before.elements[14],'refresh must not reset the car backward');
+ c.position.x=2000;c.lookAt(2000,2,-100);renderer.update(.13);assert.equal(renderer.stats.cached,0,'a truly offscreen moving car still releases its visual');
+});
+test('parking and driving transitions use their new location and release removed IDs',()=>{
+ const renderer=new PersonalCars(new THREE.Scene());renderer.setView(camera());
+ const parked=driver('FLY-1',0,-40);renderer.sync([parked]);renderer.update(.13);assert.equal(renderer.stats.cached,1);
+ renderer.sync([{...parked,traveling:true,transitMode:'car',x:2000,z:-40}]);renderer.update(.13);assert.equal(renderer.stats.cached,0,'departing car cannot keep an obsolete visible parking point');
+ const moving={...parked,traveling:true,transitMode:'car'};renderer.sync([moving]);renderer.update(.13);assert.equal(renderer.stats.cached,1);
+ renderer.sync([{...parked,parkedCar:{x:2000,z:-40,heading:0}}]);renderer.update(.13);assert.equal(renderer.stats.cached,0,'parking away from view releases the old driving visual');
+ renderer.sync([moving]);renderer.update(.13);assert.equal(renderer.stats.cached,1);
+ renderer.sync([]);renderer.update(.13);assert.equal(renderer.stats.cached,0,'missing authoritative actors must not become ghosts');
+});
+test('a car leaving interest does not repeatedly restart from the same visible snapshot',()=>{
+ const scene=new THREE.Scene(),renderer=new PersonalCars(scene),c=camera();renderer.setView(c);
+ const actor={...driver('FLY-1',0,-470),traveling:true,transitMode:'car',vz:-20,trafficSignalPermit:true,motion:{at:0,speed:20,mode:'car',signalPermit:true,points:[{x:0,y:1.1,z:-800}]}};
+ renderer.sync([actor]);let left=false;
+ for(let i=0;i<8*60;i++){renderer.update(1/60);if(!renderer.stats.cached)left=true;if(left)assert.equal(renderer.stats.cached,0,'same stale snapshot must not restart an offscreen car');}
+ assert.equal(left,true);assert.equal(renderer.stats.created,1);assert.equal(renderer.stats.reused,0);
+ assert.equal(renderer.stats.dormant,1);assert.equal(renderer.stats.bodies,0);
+ c.position.z=-250;c.lookAt(0,2,-600);renderer.update(.13);assert.equal(renderer.stats.cached,1);assert.equal(renderer.stats.dormant,0);
+ const body=scene.children.find((m):m is THREE.InstancedMesh=>m instanceof THREE.InstancedMesh&&m.geometry instanceof THREE.BoxGeometry)!,matrix=new THREE.Matrix4();body.getMatrixAt(0,matrix);
+ assert.ok(matrix.elements[14]<-540,'returning camera resumes the retained prediction, not the old snapshot');
+ c.position.x=2000;c.lookAt(2000,2,-600);renderer.update(.13);assert.equal(renderer.stats.dormant,1);
+ renderer.sync([]);renderer.update(.13);assert.equal(renderer.stats.dormant,0,'removed authoritative IDs release dormant CPU state too');
+});
 test('vehicle streaming creates a bounded gradual cache, actually releases a distant view, and pools reused visuals',()=>{
  const scene=new THREE.Scene(),renderer=new PersonalCars(scene),c=camera();renderer.setView(c);
  const actors=Array.from({length:700},(_,i)=>driver(`FLY-${i}`,i%12-6,-45-Math.floor(i/12)*2)),before=JSON.stringify(actors);

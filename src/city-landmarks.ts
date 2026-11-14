@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
-import {AIRPORT,ISLAND,SEA,RIVER,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
+import {AIRPORT,ISLAND,SEA,RIVER,DISTRICT_RIVERS,MANSION,SKYLINE_PLOTS} from '../worker/city-map.mjs';
 import {createAirportGroundLayout,AIRPORT_SPARE_PLANE,AIRPORT_GROUND_LEVELS} from './airport-ground-layout.ts';
 import {subtractRects} from './surface-rectangles.ts';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
@@ -82,7 +82,7 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  sign(g,make,'HELI TOURS · SKYLINE FLIGHTS',pad.x,12,pad.z,44,1.6);
  // Ocean reaches the horizon; an elevated sand ellipse and smaller grass core form the island.
  const seaMaterial=new THREE.MeshStandardMaterial({color:0x176c91,roughness:.23,metalness:.25});
- for(const piece of subtractRects([SEA],[RIVER])){const sea=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),seaMaterial);sea.rotation.x=-Math.PI/2;sea.position.set(piece.x,.03,piece.z);g.add(sea);}
+ for(const piece of subtractRects([SEA],[RIVER,...DISTRICT_RIVERS])){const sea=new THREE.Mesh(new THREE.PlaneGeometry(piece.w,piece.d),seaMaterial);sea.rotation.x=-Math.PI/2;sea.position.set(piece.x,.03,piece.z);g.add(sea);}
  const sand=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,80),new THREE.MeshStandardMaterial({color:0xe4d3a0,roughness:1}));sand.scale.set(ISLAND.rx,.48,ISLAND.rz);sand.position.set(ISLAND.x,.31,ISLAND.z);g.add(sand);
  const grass=new THREE.Mesh(new THREE.CylinderGeometry(1,1,.12,64),new THREE.MeshStandardMaterial({color:0x6fa779,roughness:1}));grass.scale.set(ISLAND.rx-18,1,ISLAND.rz-17);grass.position.set(ISLAND.x,.61,ISLAND.z);g.add(grass);
  runway(ISLAND.runway,'09  HIA · HANSDREX ISLAND  27');

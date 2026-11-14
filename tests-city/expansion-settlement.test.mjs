@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {settleExpansionResidents,expansionSettlementPlan} from '../worker/expansion-settlement.mjs';
-import {RESIDENT_CAP,COMBINED_CAP} from '../worker/population-limits.mjs';
+import {RESIDENT_CAP,COMBINED_CAP,RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {freshState,restoreState,getState,getNeuralAgents,settleExpansionResidents as settleEngineExpansion,liquidMoneySupply} from '../worker/civilization-engine.mjs';
 import {BUILDINGS} from '../worker/city-map.mjs';
 
@@ -81,14 +81,14 @@ test('the real engine adds exactly 128 new district residents to an old checkpoi
  assert.equal(added.filter(f=>f.homeDistrict==='west'&&f.housingUnitId.startsWith('WEST-')).length,64);
  assert.ok(added.every(f=>{const b=BUILDINGS.find(b=>b.id===f.housingUnitId);return b&&f.x===b.x&&f.z===b.z&&f.indoors&&!f.traveling;}));
  assert.ok(Math.abs(liquidMoneySupply()-money-restored.expansionSettlement.externalCapital)<1e-6);
- const census=getState({observer:true});assert.equal(census.districts.airport.settlersAdded,64);assert.equal(census.districts.west.settlersAdded,64);
+ const census=getState({observer:true});assert.equal(census.districts.airport.settlersAdded,64+(restored.thousandSettlement?.north?.added||0));assert.equal(census.districts.west.settlersAdded,64+(restored.thousandSettlement?.west?.added||0));
  const ids=restored.flies.map(f=>f.id),balances=liquidMoneySupply(),again=restoreState(structuredClone(restored));
  assert.deepEqual(again.flies.map(f=>f.id),ids);assert.equal(settleEngineExpansion(),0);assert.equal(liquidMoneySupply(),balances);
 });
 
 test('the enlarged fresh population remains within each neural shard batch and the adaptive checkpoint write budget',()=>{
  const state=freshState(),agents=getNeuralAgents(),shards=Array(16).fill(0);
- assert.equal(state.flies.filter(f=>f.alive).length,728);assert.equal(agents.length,728);
+ assert.equal(state.flies.filter(f=>f.alive).length,RESIDENT_TARGET);assert.equal(agents.length,RESIDENT_TARGET);
  for(const agent of agents)shards[Number(agent.brain_id.replace(/\D/g,''))%16]++;
  assert.ok(Math.max(...shards)<=64);
  const intervalMs=Math.max(360000,Math.ceil(COMBINED_CAP*86400/60000)*1000);

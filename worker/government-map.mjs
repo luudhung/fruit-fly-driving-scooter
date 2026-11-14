@@ -5,24 +5,37 @@ export const GOVERNMENT_BUILDINGS=[
  {id:'military-base',name:'Riverside Army Barracks',x:710,z:-560,w:98,d:34,h:17,kind:'government'},
  {id:'military-hangar-west',name:'Army Aviation Hangar West',x:625,z:-665,w:42,d:30,h:13,kind:'government'},
  {id:'military-hangar-east',name:'Army Aviation Hangar East',x:795,z:-665,w:42,d:30,h:13,kind:'government'},
+ {id:'naval-command',name:'Riverside Naval Watch',x:502,z:-605,w:12,d:18,h:14,kind:'government'},
 ];
 export const GOVERNMENT_RESERVED=[
  {id:'white-house-gardens',x:-390,z:-306,w:58,d:50},
  {id:'police-courtyard',x:710,z:-300,w:56,d:48},
  {id:'army-grounds',x:710,z:-610,w:260,d:190},
  {id:'army-airfield',x:710,z:-735,w:260,d:26},
+ {id:'naval-quay',x:496,z:-595,w:32,d:104},
 ];
 export const GOVERNMENT_LOCATIONS=[
  ...GOVERNMENT_BUILDINGS.filter(b=>!b.id.startsWith('military-hangar')).map(b=>({id:b.id,name:b.name,x:b.x,z:b.z,type:'government'})),
  {id:'military-drill',name:'Riverside Army Drill Ground',x:710,z:-625,type:'public-duty'},
  {id:'military-airfield',name:'Army Aviation Apron',x:710,z:-690,type:'public-duty'},
+ {id:'military-naval-dock',name:'Riverside Naval Jetty',x:490,z:-560,type:'public-duty'},
 ];
 export const GOVERNMENT_ROADS=[
  {id:'GOVERNMENT-AVENUE',x:680,z:-372.5,w:9.5,d:265},
  {id:'BARRACKS-APPROACH',x:695,z:-505,w:30,d:9},
  {id:'WHITE-HOUSE-ARRIVAL',x:-410,z:-280,w:40,d:8},
+ {id:'NAVAL-ACCESS',x:585,z:-505,w:190,d:8},
+ {id:'NAVAL-SHORE',x:490,z:-567.5,w:8,d:125},
 ];
 export const MILITARY_AIRFIELD={runway:{x:710,z:-735,w:240,d:18},taxiwayZ:-709,stands:[{id:'ARMY-STAND-1',x:660,z:-690},{id:'ARMY-STAND-2',x:750,z:-690}]};
+/** Fixed river berths leave the navigable western channel open. Access stays on
+ * the European bank; the jetty and short gangways cross the water to each hull. */
+export const MILITARY_NAVAL_BASE={
+ dock:{x:490,z:-595,w:12,d:84},
+ berths:[{id:'ARMY-PATROL-1',x:458,z:-560,heading:0},{id:'ARMY-PATROL-2',x:458,z:-630,heading:0}],
+ access:{x:490,z:-505},
+ range:{x:800,z:-590,w:32,d:26},
+};
 export const PUBLIC_SERVICE_TARGETS={army:50,police:28};
 const mix=(a,b,t)=>a+(b-a)*t;
 /** A private, noncombat training circuit uses its own runway and timing. */

@@ -1,4 +1,4 @@
-import {BUILDINGS,ISLAND,WATER,BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
+import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
 import {FlightDoubleTap} from './flight-double-tap.ts';
 import {metroInterchangePaths} from './metro-interchanges.ts';
@@ -53,6 +53,10 @@ function support(x:number,z:number,max:number){
  let y=terrain(x,z);
  for(const bridge of BRIDGES)if(contains(bridge,{x,z})){
   const top=Math.abs(Math.abs(z-bridge.z)-6)<1.25?.34:.2;if(top<=max+EPS)y=Math.max(y,top);
+ }
+
+ for(const bridge of DISTRICT_BRIDGES)if(!bridge.motorway&&contains(bridge,{x,z})){
+  const across=bridge.axis==='x'?z-bridge.z:x-bridge.x,top=Math.abs(Math.abs(across)-(bridge.walkOffset||6.2))<1.25?.34:.2;if(top<=max+EPS)y=Math.max(y,top);
  }
 
  for(const s of metroSurfaceBins.get(metroCell(x,z))||[])y=Math.max(y,surfaceY(x,z,s.a,s.b,s.width,max));

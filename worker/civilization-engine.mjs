@@ -1,3 +1,4 @@
+import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
 import {createIndustrialEconomy} from './industrial-economy.mjs';
 import {migrateNorthIndustry} from './industry-relocation.mjs';
 import {DISTRICT_PROFILES,districtAt,districtProfile,districtHousingUtility,applyDistrictExposure} from './district-economy.mjs';
@@ -11,6 +12,7 @@ import {motorwaySpeedMultiplier} from './motorway.mjs';
 import {apartmentHouseholdCapacity,apartmentHasVacancy,occupiedHouseholdCount,normalizeHousingCapacities,housingOccupancy} from './housing-capacity.mjs';
 import {RESIDENT_CAP,RESIDENT_TARGET,NEW_DISTRICT_RESIDENTS} from './population-limits.mjs';
 import {settleExpansionResidents as applyExpansionSettlement} from './expansion-settlement.mjs';
+import {settleThousandResidents as applyThousandSettlement} from './thousand-settlement.mjs';
 import {isHospitalitySector,hospitalityPremises,hospitalityDemand,openHospitalityPremises,restoreHospitalityPremises,hospitalityReady,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
@@ -500,7 +502,7 @@ const urbanWorld=createUrbanWorld(cityServices);
 const sportsLuxury=createSportsLuxury(cityServices);
 const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
-const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld});
+const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld,recordViolation:recordLawViolation});
 const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
@@ -508,9 +510,9 @@ function syncDistrictHousingPrices(){
  const base=new Map(APARTMENTS.map(b=>[b.id,b]));
  const houses=new Map(HOUSE_LOTS.map(b=>[b.id,b]));for(const lot of state.housing.houseLots){const plot=houses.get(lot.id);if(plot)lot.baseValue=plot.baseValue;}
  for(const block of state.housing.apartmentBlocks){const plot=base.get(block.id);if(plot&&!plot.luxury){block.rent=plot.rent;block.purchaseValue=plot.purchaseValue;}}
- for(const hh of Object.values(state.housing.households))if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;
+ for(const hh of Object.values(state.housing.households)){if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;else if(hh.housingType==='house'&&houses.has(hh.unitId)&&districtAt(houses.get(hh.unitId))==='west')hh.monthlyHousingCost=Math.round(houses.get(hh.unitId).baseValue*.003);}
 }
-function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
+function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);publicServices.initializeCadre();urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
   if(f.industrialFreightDuty)return industrialEconomy.handleResident(f,clock);
@@ -1374,8 +1376,12 @@ function restoreState(persistedState) {
   applyWelfareRecovery();
   settleRiversideResidents();
   settleExpansionResidents();
+  syncDistrictHousingPrices();
+  settleThousandResidents();
   initCityServices();
   migrateMetroAccess();
+  const riverUpgrade=migrateDistrictRiverJourneys(state,{replanResident:(f,chosen)=>{if(f.metroLineId&&repairResidentMetroAccess(f))return;startJourney(f,chosen);}});
+  if(riverUpgrade.trucks)industrialEconomy.init();
   if(previousMapVersion<22){
     const movedLandmarks=BUILDINGS.filter(b=>Object.hasOwn(SKYLINE_PLOTS,b.id));
     for(const fly of neuralActors()){
@@ -1457,7 +1463,10 @@ function freshState() {
   state.welfare.recoveryVersion=WELFARE_VERSION;
   settleRiversideResidents();
   settleExpansionResidents();
+  syncDistrictHousingPrices();
+  settleThousandResidents();
   initCityServices();
+  migrateDistrictRiverJourneys(state);
   return s;
 }
 
@@ -1481,6 +1490,13 @@ function settleRiversideResidents(){
 
 function settleExpansionResidents(){
  return applyExpansionSettlement(state,{
+  createResident:()=>{const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);return fly;},
+  releaseHousingUnit,parkingPoint,liquidMoneySupply,emit,remember:brainRemember,
+ });
+}
+
+function settleThousandResidents(){
+ return applyThousandSettlement(state,{
   createResident:()=>{const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);return fly;},
   releaseHousingUnit,parkingPoint,liquidMoneySupply,emit,remember:brainRemember,
  });
@@ -4175,6 +4191,7 @@ function compactFly(f) {
     criminalRecordCount:Array.isArray(f.criminalRecord)?f.criminalRecord.length:0,
     sentence:f.sentence||null,
     capitalCharge:Boolean(f.capitalCharge),
+    militaryShipId:f.militaryShipId||null,militaryRank:f.militaryRank||null,militaryCommanderId:f.militaryCommanderId||null,weaponSkill:Number(f.professionSkills?.marksmanship||0),
     jobTitle: f.facilityEmployment ? `${state.urbanWorld?.buildings?.[f.facilityEmployment.buildingId]?.name||'Civic facility'} staff` : f.jobTitle,
     facilityEmployment:f.facilityEmployment?{...f.facilityEmployment}:null,
     partnerId: f.partnerId,
@@ -4296,7 +4313,7 @@ function motionPlan(f){
 function observerFly(f,selectedId){
  if(f.id===selectedId)return {...compactFly(f),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
  record.motion=motionPlan(f);
@@ -4372,8 +4389,8 @@ function getState(options={}) {
     mapVersion:MAP_VERSION,
     districtEconomy:Object.values(DISTRICT_PROFILES).map(profile=>({...profile,residents:living.filter(f=>districtAt({x:f.homeX,z:f.homeZ})===profile.id).length})),
     districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0},
-      airport:{residents:living.filter(f=>f.housingUnitId?.startsWith('AIRPORT-APT-')).length,settlersAdded:state.expansionSettlement?.airport?.added||0},
-      west:{residents:living.filter(f=>f.housingUnitId?.startsWith('WEST-')).length,settlersAdded:state.expansionSettlement?.west?.added||0}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),publicServices:publicServices.snapshot(),industrialEconomy:industrialEconomy.snapshot(),
+      airport:{residents:living.filter(f=>f.housingUnitId?.startsWith('AIRPORT-APT-')).length,settlersAdded:(state.expansionSettlement?.airport?.added||0)+(state.thousandSettlement?.north?.added||0)},
+      west:{residents:living.filter(f=>f.housingUnitId?.startsWith('WEST-')).length,settlersAdded:(state.expansionSettlement?.west?.added||0)+(state.thousandSettlement?.west?.added||0)}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),publicServices:publicServices.snapshot(),industrialEconomy:industrialEconomy.snapshot(),
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
     aviation:aviationSummary(),
@@ -4503,6 +4520,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,
+  publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,settleThousandResidents,
   attemptStartup,simulateEnterprises,startupReadiness,chooseStartupType,purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

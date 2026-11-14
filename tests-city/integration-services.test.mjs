@@ -1,3 +1,5 @@
+import {BUILDINGS} from '../worker/city-map.mjs';
+import {apartmentHouseholdCapacity} from '../worker/housing-capacity.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
@@ -42,6 +44,10 @@ test('an enterprise in unsafe premises cannot book export revenue or operating c
 
 test('a renter chooses a Riverside unit after arrival, preserving family wealth and starting a real route home',()=>{
  const s=freshState(),f=s.flies.find(f=>f.alive&&f.ageYears>=18&&!f.ownsHome&&f.homeX<400&&s.housing.households[f.householdId]?.members[0]===f.id),hh=s.housing.households[f.householdId];
+ // The 1,000-person settlement can fill the old European stock. Offer a real
+ // vacant block as a newly opened rental premise instead of assuming vacancies.
+ const available=BUILDINGS.find(b=>b.kind==='block'&&b.x>480&&!s.housing.apartmentBlocks.some(h=>h.id===b.id));assert.ok(available);
+ s.housing.apartmentBlocks.push({...available,capacity:apartmentHouseholdCapacity(available.h),rent:25,occupants:[],purchaseValue:25000});
  const old=hh.unitId,before=liquidMoneySupply(),oldBrain=f.brain.id;s.weather={condition:'clear',precipitation:0,wind:0};
  Object.assign(f,{currentLocationId:'riverside-homes',targetLocationId:'riverside-homes',x:650,z:120,traveling:false,indoors:false,action:'viewing a Riverside apartment',actionUntil:0,health:95,hunger:20,energy:90});
  tickFly(f,gameClock());

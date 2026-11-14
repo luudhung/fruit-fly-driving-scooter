@@ -1,3 +1,4 @@
+import {validateNeuralBatch} from '../../../worker/neural-batch-policy.mjs';
 import {DurableObject} from 'cloudflare:workers';
 import {parsePackedGraph,createNeuralState,runNeuralBatch,neuralSnapshotBytes} from './engine.mjs';
 import {COMBINED_CAP} from '../../../worker/population-limits.mjs';
@@ -74,9 +75,7 @@ export class FlyWireBrainShard extends DurableObject{
  withLock(fn){const p=this.queue.then(fn,fn);this.queue=p.catch(()=>{});return p;}
  async stepBatch(batch){return this.withLock(async()=>{
   await this.ready;
-  if(!Array.isArray(batch?.agents)||batch.agents.length>64||typeof batch.cycleId!=='string'||batch.cycleId.length>100)throw Error('Invalid neural batch');
-  const agents=batch.agents;
-  if(agents.some(a=>!/^BRAIN-\d{6,}$/.test(a.brain_id)))throw Error('Invalid brain identifier');
+  const agents=validateNeuralBatch(batch);
   const sql=this.ctx.storage.sql,graph=await loadGraph(sql,this.ctx.storage,this.env.NEURAL_ASSET_ORIGIN),outputs=[];
   const started=Date.now(),steps=Math.max(1,Math.min(256,Math.floor(batch.steps||128)));
   let computed=0;

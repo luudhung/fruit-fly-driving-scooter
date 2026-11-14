@@ -41,7 +41,8 @@ test('overhauls and generating modules require physical workers, charge existing
  for(const f of staff)Object.assign(f,{traveling:true,currentLocationId:'power',action:'working as power plant operator'});
  const initial=liquidMoneySupply();simulatePowerGrid(gameClock());assert.equal(plant.installedCapacity,185);assert.equal(plant.serviceSpending||0,0);assert.equal(plant.gridOnline,false);
  for(const f of staff.slice(0,6)){healthy(f);Object.assign(f,{traveling:false,indoors:true,currentLocationId:'power',action:'working as power plant operator',x:power().x,z:power().z});}
- for(let i=0;i<9;i++){s.simulationAgeSeconds+=3600;simulatePowerGrid(gameClock());}
+ // More households require more paid modules; allow one full operating day.
+ for(let i=0;i<24&&!plant.gridOnline;i++){s.simulationAgeSeconds+=3600;simulatePowerGrid(gameClock());}
  assert.ok(plant.maintenance>.9);assert.ok(plant.installedCapacity>185);assert.ok(plant.serviceSpending>0);assert.equal(plant.gridOnline,true);assert.ok(plant.assetLedger.every(a=>a.workers.length>0&&a.cost>0));assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-6);
  const cash=plant.cash,capacity=plant.installedCapacity,ledger=plant.assetLedger.length;simulatePowerGrid(gameClock());assert.equal(plant.cash,cash);assert.equal(plant.installedCapacity,capacity);assert.equal(plant.assetLedger.length,ledger);
  const owners=s.flies.map(f=>[f.id,f.brain.id]);restoreState(structuredClone(s));assert.deepEqual(getRawState().flies.map(f=>[f.id,f.brain.id]),owners);assert.equal(getRawState().utilities.powerPlant.installedCapacity,capacity);

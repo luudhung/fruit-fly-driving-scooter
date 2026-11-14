@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {GOVERNMENT_BUILDINGS,MILITARY_AIRFIELD,militaryAircraftPose,type MilitaryAircraft} from '../worker/government-map.mjs';
+import {GOVERNMENT_BUILDINGS,MILITARY_AIRFIELD,MILITARY_NAVAL_BASE,militaryAircraftPose,type MilitaryAircraft} from '../worker/government-map.mjs';
 import type {PublicServicesSnapshot} from '../worker/public-services.mjs';
+import {militaryShipPose,type MilitaryLifeSnapshot} from '../worker/military-life.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 type Part={geometry:THREE.BufferGeometry;material:THREE.Material};
 const cream=new THREE.MeshStandardMaterial({color:0xe6dfce,roughness:.85}),white=new THREE.MeshStandardMaterial({color:0xf0eee2,roughness:.8}),slate=new THREE.MeshStandardMaterial({color:0x475361,roughness:.9}),stone=new THREE.MeshStandardMaterial({color:0xb6b6a7,roughness:.95}),olive=new THREE.MeshStandardMaterial({color:0x697d68,roughness:.9}),wood=new THREE.MeshStandardMaterial({color:0x705c47,roughness:1}),grass=new THREE.MeshStandardMaterial({color:0x52765a,roughness:1}),asphalt=new THREE.MeshStandardMaterial({color:0x333d44,roughness:1}),paint=new THREE.MeshBasicMaterial({color:0xe6e5d6,toneMapped:false}),windows=new THREE.MeshBasicMaterial({color:0xffd8a4,toneMapped:false}),blue=new THREE.MeshBasicMaterial({color:0x2a4f76});
+type MilitaryMemberVisual={id:string;x?:number;y?:number;z?:number;indoors?:boolean;onPlane?:boolean;onTrain?:boolean;armed?:boolean};
+type MemberPosition={x:number;y:number;z:number};
+type MilitaryVisualState=Pick<MilitaryLifeSnapshot,'ships'|'shots'>;
 
 class ShapeBatch{
  parts:Part[]=[];
@@ -64,6 +68,40 @@ function hangar(x:number){
  for(const x of [-10,-5,0,5,10])b.box(stone,x,5.8,-15.2,.12,10.1,.16);
  b.finish(group);return group;
 }
+function navalWatch(){
+ const group=new THREE.Group(),b=new ShapeBatch();group.position.set(502,0,-605);
+ b.box(stone,0,3.2,0,12,6.4,18);b.box(slate,0,7,0,12.6,.7,18.6);
+ b.box(cream,0,9.5,-4,8,5,8);b.box(blue,0,10.2,.05,6.5,1.7,.1);b.box(slate,0,12.3,-4,8.6,.5,8.6);
+ b.column(stone,0,13,-4,.12,2);b.box(blue,1.2,13.6,-4,2.3,.8,.06);b.finish(group);return group;
+}
+function navalGrounds(){
+ const group=new THREE.Group(),b=new ShapeBatch(),{dock,berths,range}=MILITARY_NAVAL_BASE;
+ group.name='Riverside naval jetty and training range';
+ b.box(stone,dock.x,.45,dock.z,dock.w,.7,dock.d);
+ for(const berth of berths){
+  b.box(wood,476,.72,berth.z+12,28,.35,5);
+  b.parts.push({geometry:new THREE.BoxGeometry(12,.18,2).rotateZ(-Math.atan2(1.9,12)).translate(469,1.75,berth.z+12),material:stone});
+  for(const x of [466,478,490])b.column(slate,x,-.1,berth.z+12,.34,3);
+  for(const side of [-1,1])b.column(slate,490,.98,berth.z+side*9,.24,1.1);
+ }
+ b.box(stone,range.x,.13,range.z,range.w,.12,range.d);
+ // The range faces a dedicated earth backstop, away from the formation square.
+ b.box(wood,range.x+range.w/2-1,1.5,range.z,2,3,range.d);
+ for(const z of [-8,0,8]){b.box(paint,range.x+10,1.7,range.z+z,.15,2,1.4);b.box(blue,range.x+9.9,1.8,range.z+z,.04,.6,.6);}
+ b.finish(group);return group;
+}
+function patrolShip(){
+ const group=new THREE.Group(),b=new ShapeBatch();group.name='River patrol ship';
+ const hull=new THREE.BoxGeometry(12,3.6,48),vertices=hull.getAttribute('position');
+ for(let i=0;i<vertices.count;i++){if(vertices.getZ(i)>0)vertices.setX(i,vertices.getX(i)*.28);if(vertices.getY(i)<0)vertices.setX(i,vertices.getX(i)*.7);}
+ hull.computeVertexNormals();hull.translate(0,.7,0);b.parts.push({geometry:hull,material:slate});
+ b.box(stone,0,2.6,-3,10.2,.35,36);b.box(cream,0,4.7,-5,7.5,4,13);b.box(blue,0,5.2,1.55,6.5,1.1,.12);
+ b.box(slate,0,7,-6,8,.6,12);b.column(stone,0,10,-7,.22,6);b.box(slate,0,12.6,-7,6,.25,.5);
+ b.column(slate,0,3.5,11,1.7,1.6);b.box(slate,0,4,15,.3,.3,5.5);
+ b.column(stone,-2.2,4,-17,.45,2.2);b.column(stone,2.2,4,-17,.45,2.2);
+ for(const side of [-1,1])for(let z=-18;z<=12;z+=6)b.column(stone,side*4.3,3.25,z,.055,1.1);
+ b.finish(group);return group;
+}
 function grounds(){
  const group=new THREE.Group(),b=new ShapeBatch();
  b.box(grass,-390,.08,-306,58,.13,50);b.box(stone,-390,.17,-288.5,4,.1,19);
@@ -104,19 +142,56 @@ export class GovernmentDistrictRenderer{
  readonly root=new THREE.Group();
  private aircraft:THREE.Group[]=[];
  private fleet:MilitaryAircraft[]=[];
+ private readonly ships=new Map<string,THREE.Group>();
+ private military:MilitaryVisualState|undefined;
+ private members:MilitaryMemberVisual[]=[];
+ private memberPosition:((id:string)=>MemberPosition|null)|null=null;
+ private readonly helmets:THREE.InstancedMesh;
+ private readonly rifles:THREE.InstancedMesh;
+ private readonly shots:THREE.InstancedMesh;
+ private readonly dummy=new THREE.Object3D();
+ private readonly shotAxis=new THREE.Vector3(1,0,0);
+ private readonly shotDirection=new THREE.Vector3();
+ readonly stats={ships:0,armedMembers:0,shots:0};
  constructor(parent:THREE.Object3D,makeSign?:Sign){
-  parent.add(this.root);this.root.add(grounds());
-  for(const [id,group]of [['white-house',whiteHouse()],['police-hq',policeHeadquarters()],['military-base',barracks()],['military-hangar-west',hangar(625)],['military-hangar-east',hangar(795)]] as Array<[string,THREE.Group]>){
+  parent.add(this.root);this.root.add(grounds(),navalGrounds());
+  for(const [id,group]of [['white-house',whiteHouse()],['police-hq',policeHeadquarters()],['military-base',barracks()],['military-hangar-west',hangar(625)],['military-hangar-east',hangar(795)],['naval-command',navalWatch()]] as Array<[string,THREE.Group]>){
    this.buildings.set(id,group);this.root.add(group);
    if(makeSign){const b=GOVERNMENT_BUILDINGS.find(b=>b.id===id)!;const label=makeSign(b.name.toUpperCase(),25,id==='military-base'?1.7:1.1);label.position.set(0,Math.min(b.h+2,20),b.d/2+.3);group.add(label);}
   }
   const plane=aircraftGeometry();for(let i=0;i<2;i++){const clone=plane.clone();clone.userData.dynamicCity=true;clone.visible=false;this.root.add(clone);this.aircraft.push(clone);}
+  const ship=patrolShip();for(const berth of MILITARY_NAVAL_BASE.berths){const clone=ship.clone();clone.name=berth.id;clone.position.set(berth.x,0,berth.z);clone.rotation.y=berth.heading;clone.userData.dynamicCity=true;clone.visible=false;this.root.add(clone);this.ships.set(berth.id,clone);}
+  this.helmets=new THREE.InstancedMesh(new THREE.SphereGeometry(.25,6,4,0,Math.PI*2,0,Math.PI/2),olive,50);
+  this.rifles=new THREE.InstancedMesh(new THREE.BoxGeometry(.09,.12,.8),slate,50);
+  this.shots=new THREE.InstancedMesh(new THREE.BoxGeometry(1,.04,.04),new THREE.MeshBasicMaterial({color:0xffd581,toneMapped:false,transparent:true,opacity:.8,depthWrite:false}),32);
+  for(const [name,mesh]of [['Army member helmets',this.helmets],['Army member rifles',this.rifles],['Military exercise shot traces',this.shots]] as const){mesh.name=name;mesh.count=0;mesh.userData.dynamicCity=true;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);this.root.add(mesh);}
  }
- sync(snapshot:PublicServicesSnapshot|undefined){this.fleet=snapshot?.aircraft||[];}
+ setMemberPositionSource(source:(id:string)=>MemberPosition|null){this.memberPosition=source;}
+ sync(snapshot:PublicServicesSnapshot|undefined){this.fleet=snapshot?.aircraft||[];this.members=snapshot?.army?.members||[];this.military=(snapshot as PublicServicesSnapshot&{military?:MilitaryVisualState}|undefined)?.military;}
  update(gameNow:number){
   for(const [index,group]of this.aircraft.entries()){
    const plane=this.fleet[index];group.visible=Boolean(plane?.owned);if(!plane?.owned)continue;
    const pose=militaryAircraftPose(gameNow,plane);group.position.set(pose.x,pose.y,pose.z);group.rotation.y=pose.heading;
   }
+  this.stats.ships=0;for(const [id,ship]of this.ships){
+   const record=this.military?.ships?.find(s=>s.id===id);ship.visible=Boolean(record&&record.owned!==false);if(!ship.visible)continue;
+   const pose=militaryShipPose(gameNow,record!);ship.position.set(pose.x,pose.y,pose.z);ship.rotation.y=pose.heading;this.stats.ships++;
+  }
+  const d=this.dummy;let members=0;d.scale.set(1,1,1);d.rotation.set(0,0,0);
+  for(const member of this.members){
+   if(members>=50)break;if(!member.armed||member.indoors||member.onPlane||member.onTrain)continue;
+   const p=this.memberPosition?this.memberPosition(member.id):member;if(!p||!Number.isFinite(p.x)||!Number.isFinite(p.z)||p.y!==undefined&&!Number.isFinite(p.y))continue;
+   const x=p.x!,y=p.y??1.1,z=p.z!;
+   d.position.set(x,y+.65,z);d.updateMatrix();this.helmets.setMatrixAt(members,d.matrix);
+   d.position.set(x+.48,y+.05,z+.05);d.rotation.x=-.3;d.updateMatrix();this.rifles.setMatrixAt(members++,d.matrix);d.rotation.x=0;
+  }
+  this.helmets.count=this.rifles.count=members;this.stats.armedMembers=members;
+  let shots=0;for(const shot of this.military?.shots||[]){
+   if(shots>=32)break;const age=gameNow-shot.at;if(age<0||age>75)continue;
+   const {from,to}=shot,dx=to.x-from.x,dy=to.y-from.y,dz=to.z-from.z,length=Math.hypot(dx,dy,dz);if(!Number.isFinite(length)||length<.01)continue;
+   d.position.set((from.x+to.x)/2,(from.y+to.y)/2,(from.z+to.z)/2);d.quaternion.setFromUnitVectors(this.shotAxis,this.shotDirection.set(dx,dy,dz).normalize());d.scale.set(length,1,1);d.updateMatrix();this.shots.setMatrixAt(shots++,d.matrix);
+  }
+  this.shots.count=shots;this.stats.shots=shots;
+  for(const mesh of [this.helmets,this.rifles,this.shots]){mesh.visible=mesh.count>0;if(mesh.count)mesh.instanceMatrix.needsUpdate=true;}
  }
 }

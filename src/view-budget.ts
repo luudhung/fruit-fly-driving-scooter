@@ -35,11 +35,12 @@ export class SceneViewBudget{
  }
 }
 
-/** Distance rank is stable and slightly favours retained visuals at the budget boundary. */
+/** Existing IDs get eight metres of rank hysteresis at any viewing distance. */
 export function selectViewBudget<T>(items:readonly T[],view:SceneViewBudget,point:(item:T)=>ViewPoint|null,id:(item:T)=>string,retained:ReadonlySet<string>,limit:number):T[]{
  const candidates:Array<{item:T;score:number;id:string}>=[];
  for(const item of items){const p=point(item);if(!p)continue;const key=id(item),held=retained.has(key);if(!view.visible(p,held))continue;
-  candidates.push({item,id:key,score:view.distanceSquared(p)-(held?64:0)});
+  const distance=Math.sqrt(view.distanceSquared(p));
+  candidates.push({item,id:key,score:Math.max(0,distance-(held?8:0))});
  }
  candidates.sort((a,b)=>a.score-b.score||(a.id<b.id?-1:a.id>b.id?1:0));
  return candidates.slice(0,Math.max(0,limit)).map(c=>c.item);

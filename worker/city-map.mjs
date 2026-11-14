@@ -4,8 +4,9 @@ import {createVehicleRouter} from './vehicle-network.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED} from './government-map.mjs';
+import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 28;
+export const MAP_VERSION = 29;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -24,6 +25,10 @@ export const LUXURY_RESIDENCES = [
 ];
 export const SKYLINE_REDEVELOPMENTS = {'APT-34':'petronas','APT-49':'burj-khalifa','DOWNTOWN-2-8-1-0':'petronas-east'};
 export const WORLD_HALF = 1150;
+const districtTopology=districtRiverTopology(WORLD_HALF);
+export const DISTRICT_RIVERS=districtTopology.rivers;
+export const DISTRICT_BRIDGES=districtTopology.bridges;
+export const DISTRICT_PROMENADES=districtTopology.promenades;
 export const AIRPORT = {
  terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
  runway:{x:-180,z:-520,w:320,d:22}, apron:{x:-180,z:-443,w:140,d:65},
@@ -77,7 +82,7 @@ export const SPORTS_VENUES=[
  {id:'riverside-park',name:'Riverside Gardens',x:530,z:120,w:42,d:58},
 ];
 export const HARBOR={id:"hansdrex-harbor",x:120,z:420,w:560,d:90};
-export const WATER = [...PARK_PONDS,...AIRPORT_PARK_PONDS,RIVER,HARBOR];
+export const WATER = [...PARK_PONDS,...AIRPORT_PARK_PONDS,RIVER,HARBOR,...DISTRICT_RIVERS];
 export const AVENUES = [-310,-260,-210,-154,-102,-92,-50,-24,2,28,54,80,122,159,210,260,310];
 export const STREETS = [-340,-300,-260,-220,-180,-145,-116,-87,-58,-29,0,29,58,87,116,145,180,220,260,300,340];
 export const contains = (r,p,m=0) => Math.abs(r.x-p.x)<r.w/2+m && Math.abs(r.z-p.z)<r.d/2+m;
@@ -147,7 +152,7 @@ export const HARBOR_CAUSEWAYS=[
  {x:SOUTH_RING_EAST,z:(harborShore+eastLinkEnd)/2,w:16.5,d:eastLinkEnd-harborShore},
 ];
 export function onWaterCrossing(p){
- return BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p))||MOTORWAY_DECKS.some(deck=>contains(deck,p));
+ return BRIDGES.some(bridge=>contains(bridge,p))||DISTRICT_BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p))||MOTORWAY_DECKS.some(deck=>contains(deck,p));
 }
 export const UNDERPASSES=BRIDGES.flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
 export function underpassAt(p){return UNDERPASSES.find(t=>Math.abs(p.x-t.x)<=t.w/2+.2&&Math.abs(p.z-t.z)<t.halfLength);}
@@ -447,6 +452,9 @@ ROADS.push(...GOVERNMENT_ROADS.map(r=>({...r})));
 BUILDINGS.push(...INDUSTRIAL_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...INDUSTRIAL_LOCATIONS.map(l=>({...l})));
 ROADS.push(...INDUSTRIAL_ROADS.map(r=>({...r})));
+// Applied after append-only parcel generation so existing property IDs and
+// footprints stay exact while obsolete asphalt becomes a real canal.
+ROADS.splice(0,ROADS.length,...districtRiverRoads(ROADS,districtTopology));
 for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
 for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}
 
@@ -548,6 +556,11 @@ function rebuildWalkways(){
   else for(const side of [-1,1]){const offset=r.x===372?8:r.x===500?10.5:r.w/2+1.4;walks.push({a:{x:r.x+side*offset,z:r.z-r.d/2},b:{x:r.x+side*offset,z:r.z+r.d/2}});}
  }
  for(const bridge of BRIDGES)for(const side of [-1,1])walks.push({a:{x:bridge.x-bridge.w/2,z:bridge.z+side*6},b:{x:bridge.x+bridge.w/2,z:bridge.z+side*6}});
+ for(const bridge of DISTRICT_BRIDGES)if(!bridge.motorway)for(const side of [-1,1]){
+  const offset=side*bridge.walkOffset;
+  walks.push(bridge.axis==='x'?{a:{x:bridge.x-bridge.w/2,z:bridge.z+offset},b:{x:bridge.x+bridge.w/2,z:bridge.z+offset}}:{a:{x:bridge.x+offset,z:bridge.z-bridge.d/2},b:{x:bridge.x+offset,z:bridge.z+bridge.d/2}});
+ }
+ for(const path of DISTRICT_PROMENADES)walks.push(path.w>path.d?{a:{x:path.x-path.w/2,z:path.z},b:{x:path.x+path.w/2,z:path.z}}:{a:{x:path.x,z:path.z-path.d/2},b:{x:path.x,z:path.z+path.d/2}});
  for(const r of [...PARK_PATHS,...AIRPORT_PARK_PATHS])walks.push(r.w>r.d?{a:{x:r.x-r.w/2,z:r.z},b:{x:r.x+r.w/2,z:r.z}}:{a:{x:r.x,z:r.z-r.d/2},b:{x:r.x,z:r.z+r.d/2}});
  walkBins=indexRectangles(walks.map(w=>({x:(w.a.x+w.b.x)/2,z:(w.a.z+w.b.z)/2,w:Math.abs(w.a.x-w.b.x),d:Math.abs(w.a.z-w.b.z),a:w.a,b:w.b})),1.8);
 }
@@ -555,15 +568,15 @@ rebuildWalkways();
 // Small A* lattice: cached blocked cells, weighted sidewalks and exact segment validation.
 const STEP=2;
 const NAV_REGIONS=[
- {id:'city',minX:-440,maxX:380,minZ:-440,maxZ:410},
+ {id:'city',minX:-440,maxX:380,minZ:-560,maxZ:410},
  {id:'riverside',minX:480,maxX:WORLD_HALF-20,minZ:-WORLD_HALF+20,maxZ:450},
- {id:'airport',minX:-470,maxX:100,minZ:-1100,maxZ:-390},
+ {id:'airport',minX:-470,maxX:100,minZ:-1100,maxZ:-540},
  {id:'west',minX:-1120,maxX:-380,minZ:-440,maxZ:460},
  {id:'north-industry',minX:-850,maxX:-460,minZ:-1060,maxZ:-960},
 ].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
-const regionFor=p=>NAV_REGIONS[p.x>=-850&&p.x< -470&&p.z>=-1060&&p.z<=-960?4:p.x>430?1:p.z<-420&&p.x>=-470&&p.x<=100?2:p.x<-440?3:0];
-const AIRPORT_WALK_PORTALS=[{x:-423.85,z:-410},{x:56.15,z:-410}];
-const WEST_WALK_PORTALS=[{x:-410,z:-334.1},{x:-410,z:5.9},{x:-410,z:334.1}];
+const regionFor=p=>NAV_REGIONS[p.x>=-850&&p.x< -470&&p.z>=-1060&&p.z<=-960?4:p.x>430?1:p.z<-570&&p.x>=-470&&p.x<=100?2:p.x<-440?3:0];
+const AIRPORT_WALK_PORTALS=[{x:-373.8,z:-540},{x:56.2,z:-540}];
+const WEST_WALK_PORTALS=DISTRICT_BRIDGES.filter(b=>b.riverId==='west-city-river'&&!b.motorway).map(b=>({x:b.x+b.w/2,z:b.z+6.2}));
 const NORTH_INDUSTRY_PORTALS=[{x:-466,z:-1006.4}];
 const publicDistrictPortals=region=>region.id==='north-industry'?NORTH_INDUSTRY_PORTALS:region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
 function airportAirside(p){return contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4);}

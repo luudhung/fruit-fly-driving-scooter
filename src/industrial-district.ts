@@ -48,15 +48,21 @@ export class IndustrialDistrictRenderer{
  update(dt:number,gameNow:number,timeScale=120){
   const trucks=this.snapshotData?.trucks||[],active=new Set<string>();let count=0;
   for(const t of trucks.slice(0,MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT)){
-   if(this.camera&&!this.view.visible(t,this.motions.has(t.id),5))continue;
-   active.add(t.id);let motion=this.motions.get(t.id);if(!motion){motion=new CityMotion();this.motions.set(t.id,motion);}
-   motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});
+   let motion=this.motions.get(t.id);
+   active.add(t.id);
+   if(motion)motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});
+   // Retained trucks are displayed at their predicted position, not the older
+   // snapshot coordinate. Keep that same point for interest and its hysteresis.
+   if(this.camera&&!this.view.visible(motion??t,Boolean(motion),5))continue;
+   if(!motion){motion=new CityMotion();this.motions.set(t.id,motion);motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});}
    motion.advance(dt,gameNow,timeScale);
    const next={x:motion.targetX-motion.x,z:motion.targetZ-motion.z},heading=Math.hypot(next.x,next.z)>.05?Math.atan2(next.x,next.z):t.heading;
    this.dummy.position.set(motion.x,motion.y-1.1,motion.z);this.dummy.rotation.set(0,heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();
    for(const mesh of this.fleet)mesh.setMatrixAt(count,this.dummy.matrix);
    this.fleet[0]?.setColorAt(count,this.colors[(Number(t.id.split('-').at(-1))||0)%this.colors.length]);count++;
   }
+  // Keep only previously seen IDs still in the capped fleet. Dropping a hidden
+  // prediction would recreate it from the same old snapshot on the next frame.
   for(const id of this.motions.keys())if(!active.has(id))this.motions.delete(id);
   for(const mesh of this.fleet){mesh.count=count;mesh.instanceMatrix.needsUpdate=true;}
   if(this.fleet[0]?.instanceColor)this.fleet[0].instanceColor.needsUpdate=true;

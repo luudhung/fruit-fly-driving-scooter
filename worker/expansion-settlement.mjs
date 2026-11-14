@@ -1,7 +1,7 @@
 import {apartmentHouseholdCapacity,occupiedHouseholdCount} from './housing-capacity.mjs';
 import {RESIDENT_CAP,COMBINED_CAP,NEW_DISTRICT_RESIDENTS} from './population-limits.mjs';
 
-const DISTRICTS=[
+export const DISTRICT_SETTLEMENTS=[
  {id:'airport',apartmentPrefix:'AIRPORT-APT-',homeId:'airport-gardens-homes'},
  {id:'west',apartmentPrefix:'WEST-APT-',housePrefix:'WEST-HOUSE-',homeId:'west-gardens-homes'},
 ];
@@ -12,12 +12,12 @@ export function expansionSettlementPlan(state){
  if(state.expansionSettlement?.version>=1)return null;
  const living=state.flies.filter(f=>f.alive&&!f.departed).length;
  const visitors=(state.cityVisitors?.visitors||[]).filter(f=>f.alive&&!f.departed).length;
- const required=NEW_DISTRICT_RESIDENTS*DISTRICTS.length;
+ const required=NEW_DISTRICT_RESIDENTS*DISTRICT_SETTLEMENTS.length;
  if(living+required>RESIDENT_CAP||living+visitors+required>COMBINED_CAP)
   throw new Error('The two district settlements require capacity for 128 additional residents');
  const operational=id=>!state.urbanWorld?.buildings?.[id]||state.urbanWorld.buildings[id].stage==='operational';
  const plan=[];
- for(const district of DISTRICTS){
+ for(const district of DISTRICT_SETTLEMENTS){
   const homes=[];
   if(district.housePrefix){
    const houses=(state.housing?.houseLots||[]).filter(h=>h.id.startsWith(district.housePrefix)&&!h.ownerHouseholdId&&operational(h.id));

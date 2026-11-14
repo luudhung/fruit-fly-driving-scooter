@@ -11,8 +11,11 @@ const position=(f:Driver)=>!f.alive||!f.vehicle?.includes('car')?null:f.travelin
 
 /** Only a bounded nearby view creates motion objects or submits GPU instances. */
 export class PersonalCars{
- readonly stats={candidates:0,cached:0,created:0,reused:0,pooled:0,bodies:0,cabins:0,wheels:0,triangles:0};
+ readonly stats={candidates:0,cached:0,dormant:0,created:0,reused:0,pooled:0,bodies:0,cabins:0,wheels:0,triangles:0};
  private readonly cars=new Map<string,Car>();
+ // CPU-only checkpoints for previously visible moving IDs. They do not advance
+ // or submit instances offscreen, and disappear with their authoritative actor.
+ private readonly dormant=new Map<string,Car>();
  private readonly retained=new Set<string>();
  private readonly pool:Car[]=[];
  private readonly view=new SceneViewBudget();
@@ -67,12 +70,30 @@ export class PersonalCars{
   if(this.camera)this.view.setCamera(this.camera);
   for(const cell of this.parkingCells)cell.mesh.visible=this.view.visible(cell.point,false,114);
   this.retained.clear();for(const id of this.cars.keys())this.retained.add(id);
-  const selected=selectViewBudget(this.drivers,this.view,position,f=>f.id,this.retained,this.capacity),wanted=new Set(selected.map(f=>f.id));
+  const valid=new Set<string>();
+  const selected=selectViewBudget(this.drivers,this.view,f=>{
+   const authoritative=position(f);if(!authoritative)return null;
+   valid.add(f.id);
+   const sleeping=this.dormant.get(f.id);
+   if(sleeping){this.syncDriver(f,sleeping,false);if(sleeping.hasMotion&&sleeping.motion){sleeping.x=sleeping.motion.x;sleeping.y=sleeping.motion.y;sleeping.z=sleeping.motion.z;}}
+   const car=this.cars.get(f.id)||sleeping,driving=Boolean(f.traveling&&f.transitMode==='car');
+   // Interest must follow what the camera actually sees. A delayed snapshot can
+   // be up to eight seconds behind a predicted car; culling against it would
+   // discard a visible ID and restart its animation when the snapshot catches up.
+   return car&&car.driving===driving?car:authoritative;
+  },f=>f.id,this.retained,this.capacity),wanted=new Set(selected.map(f=>f.id));
   let changed=false;
-  for(const [id,car]of this.cars)if(!wanted.has(id)){this.cars.delete(id);car.motion=undefined;car.hasMotion=false;car.route.length=0;if(this.pool.length<32)this.pool.push(car);changed=true;}
+  for(const [id,car]of this.cars)if(!wanted.has(id)){
+   this.cars.delete(id);
+   if(valid.has(id)&&car.driving&&car.hasMotion)this.dormant.set(id,car);
+   else{car.motion=undefined;car.hasMotion=false;car.route.length=0;if(this.pool.length<32)this.pool.push(car);}
+   changed=true;
+  }
+  for(const [id,car]of this.dormant)if(!valid.has(id)||!car.driving){this.dormant.delete(id);car.motion=undefined;car.hasMotion=false;if(this.pool.length<32)this.pool.push(car);}
   let created=0;
   for(const f of selected){
    let car=this.cars.get(f.id),fresh=false;
+   if(!car&&this.dormant.has(f.id)){car=this.dormant.get(f.id)!;this.dormant.delete(f.id);this.cars.set(f.id,car);this.stats.reused++;changed=true;}
    if(!car){if(created>=12)continue;created++;fresh=true;
     car=this.pool.pop();if(car){this.stats.reused++;car.id=f.id;car.lastTrace=-1;car.motion=undefined;car.hasMotion=false;}
     else{car={id:f.id,color:new THREE.Color(),x:0,y:1.1,z:0,heading:0,pitch:0,targetX:0,targetY:1.1,targetZ:0,targetHeading:0,driving:false,lastTrace:-1,route:[],actor:{id:f.id,alive:true,transitMode:'car',x:0,y:1.1,z:0}};this.stats.created++;}
@@ -81,7 +102,7 @@ export class PersonalCars{
    this.syncDriver(f,car,fresh);
   }
   this.actors.length=0;for(const car of this.cars.values())this.actors.push(car.actor);
-  this.stats.candidates=this.drivers.length;this.stats.cached=this.cars.size;this.stats.pooled=this.pool.length;
+  this.stats.candidates=this.drivers.length;this.stats.cached=this.cars.size;this.stats.dormant=this.dormant.size;this.stats.pooled=this.pool.length;
   this.colorsDirty ||=changed;this.uploadDirty=true;this.indexAge=Infinity;this.selectionAge=0;this.dirty=false;
   let count=0;
   for(const incident of this.incidents.slice(-24))if(this.view.visible(incident))for(const side of [-1,1]){this.dummy.position.set(incident.x+side*.8,.59,incident.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.cones.setMatrixAt(count++,this.dummy.matrix);}
