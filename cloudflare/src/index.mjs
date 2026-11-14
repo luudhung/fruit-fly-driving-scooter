@@ -132,6 +132,12 @@ export class CivilizationWorld extends DurableObject {
     const ageBefore=Number(getRawState().simulationAgeSeconds||0);
     for (let index = 0; index < steps; index += 1) {
       await tick({ gameSeconds: gameSecondsPerStep, syncBrain: false,serialized:true });
+      // Each tick is atomic. Yield between completed ticks so observer events
+      // can run; awaiting an already-resolved tick only drains microtasks.
+      if (index + 1 < steps) {
+        if (typeof scheduler !== 'undefined' && typeof scheduler.wait === 'function') await scheduler.wait(0);
+        else await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
 
     this.lastWallClockMs = nowMs;
@@ -182,7 +188,9 @@ export class CivilizationWorld extends DurableObject {
   }
   async applyNeuralBatch(batch){
     await this.ready;
-    return this.withLock(async()=>{const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(true);return status;});
+    // Brain shards persist their own neural checkpoints. City progress follows
+    // the normal snapshot cadence instead of recompressing the city per batch.
+    return this.withLock(async()=>{const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(false);return status;});
   }
   async neuralCycleFailed(details){
     await this.ready;
