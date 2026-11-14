@@ -1,50 +1,41 @@
 import * as THREE from 'three';
 
-/** Sky and sun reflections are analytic: one surface pass, no reflection camera or render target. */
-export class CityWater {
- readonly material:THREE.ShaderMaterial;
- constructor(){
-  this.material=new THREE.ShaderMaterial({
-   uniforms:{uTime:{value:0},uDay:{value:1},uCloud:{value:0},uSky:{value:new THREE.Color(0x9cbdd6)},uHorizon:{value:new THREE.Color(0xc8d8df)},uSun:{value:new THREE.Vector3(-.7,.5,-.2)},uSunColor:{value:new THREE.Color(0xffd49f)}},
-   // The city renderer uses logarithmic depth. A custom shader must write the
-   // same depth encoding as the ground, otherwise the ground hides the river.
-   vertexShader:`
-    #include <common>
-    #include <logdepthbuf_pars_vertex>
-    varying vec3 vWorld;
-    void main(){
-     vec4 world=modelMatrix*vec4(position,1.);vWorld=world.xyz;
-     gl_Position=projectionMatrix*viewMatrix*world;
-     #include <logdepthbuf_vertex>
-    }`,
-   fragmentShader:`
-    #include <logdepthbuf_pars_fragment>
-    uniform float uTime,uDay,uCloud;uniform vec3 uSky,uHorizon,uSun,uSunColor;varying vec3 vWorld;
-    void main(){
-     #include <logdepthbuf_fragment>
-     vec2 p=vWorld.xz;
-     float a=p.x*.13+p.y*.071+uTime*.48,b=p.x*.047-p.y*.19-uTime*.37,c=p.x*.31+p.y*.23+uTime*.23;
-     vec3 normal=normalize(vec3(-.035*cos(a)-.017*cos(c),1.,-.043*cos(b)-.013*cos(c)));
-     vec3 viewDir=normalize(cameraPosition-vWorld),reflected=reflect(-viewDir,normal);
-     float fresnel=.16+.84*pow(1.-max(viewDir.y,0.),3.);
-     vec3 deep=mix(vec3(.025,.055,.105),vec3(.055,.19,.22),uDay);
-     vec3 sky=mix(uHorizon,uSky,smoothstep(0.,.7,max(reflected.y,0.)));
-     vec3 color=mix(deep,sky,fresnel*.78);
-     float sunVisible=smoothstep(-.03,.08,uSun.y)*(1.-uCloud*.85);
-     float reflection=pow(max(dot(reflected,normalize(uSun)),0.),180.);
-     float wideGlint=pow(max(dot(reflected,normalize(uSun)),0.),28.);
-     float ripples=.68+.32*sin(a*2.+sin(b)*1.6);
-     color+=uSunColor*(reflection*1.5+wideGlint*.16)*ripples*sunVisible;
-     color+=vec3(.025,.038,.045)*sin(a+b)*(.15+uDay*.85);
-     float distanceFade=smoothstep(900.,2500.,length(cameraPosition-vWorld));
-     color=mix(color,uHorizon,distanceFade*.75);
-     gl_FragColor=vec4(color,1.);
-     #include <tonemapping_fragment>
-     #include <colorspace_fragment>
-    }`,
-  });
+/** One painted ripple tile, baked once. Water has no clock, moving normals or reflection pass. */
+function rippleTexture(){
+ const size=256,data=new Uint8Array(size*size*4),tau=Math.PI*2;
+ for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+  const u=x/size,v=y/size;
+  const wave=Math.sin(tau*(v*18+Math.sin(tau*u*4)*.13))*.65+Math.sin(tau*(v*37-u*3))*.23;
+  const crest=Math.max(0,wave-.42),grain=((Math.imul(x+1,73856093)^Math.imul(y+1,19349663))>>>0)%17/255;
+  const shade=.67+crest*.34+grain,index=(y*size+x)*4;
+  data[index]=Math.round(196*shade);data[index+1]=Math.round(221*shade);data[index+2]=Math.round(225*shade);data[index+3]=255;
  }
- update(seconds:number,daylight:number,cloud:number,sky:THREE.Color,horizon:THREE.Color,sun:THREE.Vector3,sunColor:THREE.Color){
-  const u=this.material.uniforms;u.uTime.value=seconds%10000;u.uDay.value=daylight;u.uCloud.value=cloud;u.uSky.value.copy(sky);u.uHorizon.value.copy(horizon);u.uSun.value.copy(sun);u.uSunColor.value.copy(sunColor);
+ const texture=new THREE.DataTexture(data,size,size,THREE.RGBAFormat);
+ texture.name='Painted static river ripples';texture.colorSpace=THREE.SRGBColorSpace;
+ texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.magFilter=THREE.LinearFilter;
+ texture.minFilter=THREE.LinearMipmapLinearFilter;texture.generateMipmaps=true;texture.needsUpdate=true;
+ return texture;
+}
+export class CityWater{
+ readonly material:THREE.MeshBasicMaterial;
+ private lastDay=-1;private lastCloud=-1;private lastHorizon=-1;
+ constructor(){
+  this.material=new THREE.MeshBasicMaterial({map:rippleTexture(),color:0x4b8594,fog:true});
+  this.material.name='Static painted city water';
+  // Shared world-space UVs keep separate river rectangles and ponds continuous.
+  // The standard material retains the renderer's native reversed/logarithmic depth handling.
+  this.material.onBeforeCompile=shader=>{
+   shader.vertexShader=shader.vertexShader.replace('#include <uv_vertex>',`#include <uv_vertex>
+#ifdef USE_MAP
+ vMapUv=(modelMatrix*vec4(position,1.)).xz/64.;
+#endif`);
+  };
+  this.material.customProgramCacheKey=()=> 'static-painted-city-water-v1';
+ }
+ update(_seconds:number,daylight:number,cloud:number,_sky:THREE.Color,horizon:THREE.Color,_sun:THREE.Vector3,_sunColor:THREE.Color){
+  const day=Math.round(Math.min(1,Math.max(0,daylight))*100)/100,overcast=Math.round(Math.min(1,Math.max(0,cloud))*50)/50,hex=horizon.getHex();
+  if(day===this.lastDay&&overcast===this.lastCloud&&hex===this.lastHorizon)return;
+  this.lastDay=day;this.lastCloud=overcast;this.lastHorizon=hex;
+  this.material.color.setRGB(.035+day*.25,.065+day*.43,.10+day*.48).lerp(horizon,.035+overcast*.045);
  }
 }

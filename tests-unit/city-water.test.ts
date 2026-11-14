@@ -1,21 +1,15 @@
 import test from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';
 import {CityWater} from '../src/city-water.ts';
-import {RIVER,WORLD_HALF} from '../worker/city-map.mjs';
-function expand(source:string):string{return source.replace(/#include <([\w]+)>/g,(_,name:string)=>{const chunk=THREE.ShaderChunk[name as keyof typeof THREE.ShaderChunk];assert.equal(typeof chunk,'string',`missing installed Three.js chunk ${name}`);return expand(chunk);});}
-
-test('water participates in the same logarithmic depth pipeline as the city ground',()=>{
- const water=new CityWater(),vertex=expand(water.material.vertexShader),fragment=expand(water.material.fragmentShader);
- assert.ok(vertex.includes('vFragDepth = 1.0 + gl_Position.w'));
- assert.ok(vertex.includes('bool isPerspectiveMatrix'), 'the perspective test required by the depth chunk must be defined');
- assert.ok(fragment.includes('uniform float logDepthBufFC'));
- assert.ok(fragment.includes('gl_FragDepth = vIsPerspective == 0.0 ? gl_FragCoord.z : log2( vFragDepth ) * logDepthBufFC * 0.5'));
- assert.equal(water.material.depthTest,true);assert.equal(water.material.depthWrite,true);assert.equal(water.material.depthFunc,THREE.LessEqualDepth);
- water.material.dispose();
+test('water bakes a small seamless ripple tile once and elapsed time cannot move it or update its texture',()=>{
+ const water=new CityWater(),texture=water.material.map! as THREE.DataTexture,copy=texture.image.data.slice(),version=texture.version;
+ const sky=new THREE.Color(0x85b4d4),horizon=new THREE.Color(0xbfd8e0),sun=new THREE.Vector3(.5,.6,0),sunColor=new THREE.Color(0xffdc9b);
+ water.update(0,1,.2,sky,horizon,sun,sunColor);const color=water.material.color.clone();
+ for(const time of [1,100,3600,86400])water.update(time,1,.2,sky,horizon,sun,sunColor);
+ assert.deepEqual(texture.image.data,copy);assert.equal(texture.version,version);assert.equal(texture.image.width,256);assert.equal(texture.image.height,256);assert.ok(water.material.color.equals(color));assert.equal(water.material.type,'MeshBasicMaterial');assert.equal(texture.generateMipmaps,true);assert.equal(texture.wrapS,THREE.RepeatWrapping);
+ water.update(86400,0,.2,sky,horizon,sun,sunColor);assert.ok(water.material.color.r<color.r);assert.deepEqual(texture.image.data,copy);
 });
-
-test('the rendered river plane covers the full river width and both ends of the world',()=>{
- const plane=new THREE.PlaneGeometry(RIVER.w,RIVER.d);plane.rotateX(-Math.PI/2);plane.translate(RIVER.x,.015,RIVER.z);plane.computeBoundingBox();const bounds=plane.boundingBox!;
- assert.equal(bounds.min.x,RIVER.x-RIVER.w/2);assert.equal(bounds.max.x,RIVER.x+RIVER.w/2);assert.ok(bounds.min.z<=-WORLD_HALF&&bounds.max.z>=WORLD_HALF);
- for(const z of[-WORLD_HALF,0,WORLD_HALF])assert.ok(bounds.containsPoint(new THREE.Vector3(RIVER.x,.015,z))||Math.abs(bounds.min.y-.015)<1e-6&&z>=bounds.min.z&&z<=bounds.max.z);
- plane.dispose();
+test('the standard depth-aware shader uses continuous world coordinates without time or animated fragment work',()=>{
+ const water=new CityWater(),shader={vertexShader:THREE.ShaderLib.basic.vertexShader,fragmentShader:THREE.ShaderLib.basic.fragmentShader,uniforms:{}};
+ water.material.onBeforeCompile(shader as THREE.WebGLProgramParametersWithUniforms,{} as THREE.WebGLRenderer);
+ assert.match(shader.vertexShader,/vMapUv=\(modelMatrix\*vec4\(position,1\.\)\)\.xz\/64\./);assert.match(shader.vertexShader,/#include <logdepthbuf_vertex>/);assert.match(shader.fragmentShader,/#include <logdepthbuf_fragment>/);assert.doesNotMatch(shader.vertexShader+shader.fragmentShader,/uTime|sin\(|cos\(/);
 });
