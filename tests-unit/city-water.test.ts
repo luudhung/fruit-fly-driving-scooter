@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';
 import {CityWater} from '../src/city-water.ts';
 test('water bakes a small seamless ripple tile once and elapsed time cannot move it or update its texture',()=>{
- const water=new CityWater(),texture=water.material.map! as THREE.DataTexture,copy=texture.image.data.slice(),version=texture.version;
+ const water=new CityWater(),texture=water.material.map! as THREE.DataTexture,copy=texture.image.data!.slice(),version=texture.version;
  const sky=new THREE.Color(0x85b4d4),horizon=new THREE.Color(0xbfd8e0),sun=new THREE.Vector3(.5,.6,0),sunColor=new THREE.Color(0xffdc9b);
  water.update(0,1,.2,sky,horizon,sun,sunColor);const color=water.material.color.clone();
  for(const time of [1,100,3600,86400])water.update(time,1,.2,sky,horizon,sun,sunColor);
