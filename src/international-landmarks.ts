@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
 import {batchStaticMeshes} from './static-box-batches.ts';
 import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
@@ -23,7 +24,7 @@ export class InternationalLandmarks{
   this.sign=sign;
   this.root.name='International national infrastructure';parent.add(this.root);
   for(const b of [...NORTH_BUILDINGS,...HAWAII_COTTAGES,...BORDER_CUSTOMS_BUILDINGS] as CountryBuilding[]){
-   const g=b.id===NORTH_LANDMARK.id?this.auroraTower():this.premises(b);
+   const g=b.id===NORTH_LANDMARK.id?this.auroraTower():b.id===NORTH_FIRE_STATION.id?this.fireStation(b):this.premises(b);
    g.userData.buildingId=b.id;this.root.add(g);this.buildings.set(b.id,g);
   }
   this.stats.buildings=this.buildings.size;this.airport();this.farm();this.customs();this.armyPerimeter();
@@ -45,6 +46,25 @@ export class InternationalLandmarks{
   const doorHeight=Math.min(3.2,wallHeight-.25);
   this.box(g,0,doorHeight/2+.05,b.d/2+.06,Math.min(2.1,b.w-.3),doorHeight,.1,this.glass);
   if(!cottage&&b.kind!=='customs'&&b.kind!=='farm-service')this.label(g,b.name.toUpperCase(),0,height+2,0,Math.max(17,b.w));
+  batchStaticMeshes(g);return g;
+ }
+ private fireStation(b:CountryBuilding){
+  const g=new THREE.Group();g.name=b.name;g.position.set(b.x,0,b.z);
+  const red=new THREE.MeshStandardMaterial({color:0x9d3530,roughness:.8});
+  const trim=new THREE.MeshStandardMaterial({color:0xc8c5ac,roughness:.85});
+  // The two south-facing bays are actually open: engines come from the garage.
+  this.box(g,0,4.88,-b.d/2+.2,b.w,9.76,.4,this.stone);
+  for(const side of [-1,1])this.box(g,side*(b.w/2-.2),4.88,-.2,.4,9.76,b.d-.4,this.stone);
+  for(const x of [-16.5,0,16.5])this.box(g,x,2.8,b.d/2-.2,1,5.6,.4,red);
+  this.box(g,0,7.68,b.d/2-.2,b.w,4.16,.4,red);
+  this.box(g,0,9.88,0,b.w+.25,.24,b.d+.25,this.roof);
+  this.box(g,0,.04,0,b.w-.8,.08,b.d-.8,trim);
+  for(const x of [-10,-5,5,10])this.box(g,x,7.6,b.d/2+.035,2.4,1.4,.05,this.windows);
+  this.label(g,'NORTH CITY FIRE & RESCUE',0,11.9,0,32,1.5);
+  this.label(g,'ENGINE 1',-7,5.05,b.d/2+.2,9,.7);
+  this.label(g,'RESCUE',7,5.05,b.d/2+.2,9,.7);
+  // An apron ends before the existing sidewalk; no overlapping road surfaces.
+  this.box(g,0,.09,b.d/2+1.65,b.w,.1,3.1,trim);
   batchStaticMeshes(g);return g;
  }
  private auroraTower(){

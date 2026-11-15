@@ -92,6 +92,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   if(!f.traveling&&f.currentLocationId!==targetId&&dist(f,place)>16){releaseDuty(f);return false;}
   return true;
  }
+ function aviationReport(){const id=urbanWorld?.isUnavailable?.('military-base')?'military-airfield':'military-base';return urbanWorld?.isUnavailable?.(id)?null:loc(id);}
  function trainingTarget(f){
   const index=data().army.indexOf(f.id),point={x:683+(Math.max(0,index)%10)*6,z:-639+Math.floor(Math.max(0,index)/10)*6};
   return target(`ARMY-DRILL-${f.id}`,point,'Army training position');
@@ -157,7 +158,12 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    const branch=Object.keys(application).find(branch=>f.action===application[branch]||f.pendingAction===application[branch]);
    if(branch&&!f.traveling)apply(f,branch);return false;
   }
-  if(f.publicServiceRole==='army'&&!f.publicServiceDuty&&!f.traveling&&onShift(f,clock)&&Number(f.professionSkills?.aviation||0)>=.2&&Number(f.publicServiceTrainingHours||0)>=8&&data().aircraft.some(p=>p.owned&&!p.flight)){f.action='awaiting an aviation assignment at the barracks';f.sleeping=false;f.recoveringEnergy=false;f.actionUntil=now()+600;care(f,clock);return true;}
+  if(f.publicServiceRole==='army'&&!f.publicServiceDuty&&!f.traveling&&!f.onTrain&&!outsideCommitment(f)&&f.health>65&&f.energy>45&&f.hunger<65&&onShift(f,clock)&&Number(f.professionSkills?.aviation||0)>=.2&&Number(f.publicServiceTrainingHours||0)>=8&&data().aircraft.some(p=>p.owned&&!p.flight)){
+   const base=aviationReport();
+   if(!base)return false;
+   if(dist(f,base)>35)assignDuty(f,'aviation-standby',base.id,7200);
+   else{f.action='awaiting an aviation assignment at the barracks';f.sleeping=false;f.recoveringEnergy=false;f.actionUntil=now()+600;care(f,clock);return true;}
+  }
   if(outsideCommitment(f)||f.onPlane||f.health<35||f.energy<12||f.hunger>92){releaseDuty(f,true);return false;}
   let duty=f.publicServiceDuty;
   if(!duty){
@@ -182,7 +188,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    if(duty.arrivedAt===null){duty.arrivedAt=now();duty.until=now()+duty.duration;}
    if(f.publicServiceAttending)pay(f,elapsed);
    f.publicServiceAttending=true;f.indoors=duty.kind==='headquarters';f.sleeping=false;f.actionUntil=now()+600;
-   f.action=duty.kind==='guard'?'guarding the army gate':duty.kind==='range'?'practising at the army firing range':duty.kind==='formation'?'attending army formation':duty.kind==='naval-transfer'?'walking to a naval patrol vessel':duty.kind==='training'?'training with the army':duty.kind==='patrol'?'patrolling a public district':duty.kind==='pilot-transfer'?'boarding a military training aircraft':'working at police headquarters';
+   f.action=duty.kind==='guard'?'guarding the army gate':duty.kind==='range'?'practising at the army firing range':duty.kind==='formation'?'attending army formation':duty.kind==='naval-transfer'?'walking to a naval patrol vessel':duty.kind==='training'?'training with the army':duty.kind==='patrol'?'patrolling a public district':duty.kind==='pilot-transfer'?'boarding a military training aircraft':duty.kind==='aviation-standby'?'awaiting an aviation assignment at the barracks':'working at police headquarters';
    military.trainPresence(f,elapsed,duty.kind);
    if(['training','formation','range'].includes(duty.kind)&&elapsed>0&&now()>duty.arrivedAt){
     const hours=elapsed/3600;f.publicServiceTrainingHours=Number(f.publicServiceTrainingHours||0)+hours;data().trainingHours+=hours;
@@ -210,7 +216,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
    }
    if(plane.boardingPilotId){
     const f=alive(plane.boardingPilotId),point=loc(`MILITARY-BOARD-${plane.id}`);
-    const weather=raw().weather||{},closed=Number(clock.hour)<8||Number(clock.hour)>=18||Number(weather.precipitation||0)>.65||Number(weather.wind||0)>.72||weather.condition==='thunderstorm';
+    const weather=raw().weather||{},closed=Number(clock.hour)<8||Number(clock.hour)>=18||Number(weather.precipitation||0)>.65||Number(weather.wind||0)>.72||weather.condition==='thunderstorm'||Boolean(raw().internationalLife?.activeConflict);
     if(!f||f.publicServiceRole!=='army'||outsideCommitment(f)||!onShift(f,clock)||closed||now()-plane.boardingStartedAt>14400){if(f?.publicServiceDuty?.aircraftId===plane.id)releaseDuty(f);plane.boardingPilotId=null;plane.nextFlightAt=now()+1800;continue;}
     if(!f.traveling&&point&&dist(f,point)<12&&!d.aircraft.some(p=>p.flight)){
      if(Number(raw().treasury?.cash||0)<14)continue;
@@ -219,10 +225,11 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
     }
    }
   }
-  if(Number(clock.hour)<8||Number(clock.hour)>=18||now()<d.nextFlightAt||d.aircraft.some(p=>p.flight||p.boardingPilotId))return;
+  if(raw().internationalLife?.activeConflict||Number(clock.hour)<8||Number(clock.hour)>=18||now()<d.nextFlightAt||d.aircraft.some(p=>p.flight||p.boardingPilotId))return;
   const weather=raw().weather||{};if(Number(weather.precipitation||0)>.65||Number(weather.wind||0)>.72||weather.condition==='thunderstorm')return;
   const plane=d.aircraft.find(p=>p.owned&&!p.flight&&now()>=Number(p.nextFlightAt||0));if(!plane)return;
-  const pilot=roster('army').filter(f=>onShift(f,clock)&&!f.traveling&&!f.onPlane&&!outsideCommitment(f)&&f.health>65&&f.energy>45&&f.publicServiceTrainingHours>=8&&Number(f.professionSkills?.aviation||0)>=.2&&dist(f,loc('military-base'))<140).sort((a,b)=>Number(b.professionSkills.aviation)-Number(a.professionSkills.aviation)||a.id.localeCompare(b.id))[0];
+  const report=aviationReport();if(!report)return;
+  const pilot=roster('army').filter(f=>onShift(f,clock)&&!f.traveling&&!f.onPlane&&!outsideCommitment(f)&&f.health>65&&f.energy>45&&f.publicServiceTrainingHours>=8&&Number(f.professionSkills?.aviation||0)>=.2&&dist(f,report)<140).sort((a,b)=>Number(b.professionSkills.aviation)-Number(a.professionSkills.aviation)||a.id.localeCompare(b.id))[0];
   if(!pilot)return;
   releaseDuty(pilot);const stand=MILITARY_AIRFIELD.stands.find(p=>p.id===plane.standId),point=target(`MILITARY-BOARD-${plane.id}`,{x:stand.x,z:stand.z+6},'Military aircraft boarding');
   if(assignDuty(pilot,'pilot-transfer',point.id,7200)){pilot.publicServiceDuty.aircraftId=plane.id;plane.boardingPilotId=pilot.id;plane.boardingStartedAt=now();d.nextFlightAt=now()+3000;}

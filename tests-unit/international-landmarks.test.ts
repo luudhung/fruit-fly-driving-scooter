@@ -42,3 +42,8 @@ test('Aurora terrace caps own their visible top planes without glass or metal fa
  });
  assert.ok([...counts.values()].every(n=>n>=2));
 });
+
+
+test('North fire engine has a physically open south bay under its stable roof without decorative vehicle clones',()=>{
+ const scene=new InternationalLandmarks(new THREE.Group(),()=>new THREE.Sprite()),station=scene.buildings.get('north-firestation')!;station.updateMatrixWorld(true);const meshes:THREE.Object3D[]=[];station.traverse(o=>{if(o instanceof THREE.Mesh)meshes.push(o);});const ray=new THREE.Raycaster(new THREE.Vector3(173,2.5,-600),new THREE.Vector3(0,0,-1));const hits=ray.intersectObjects(meshes,false);assert.ok(hits.length);assert.ok(hits[0].distance>30,'open bay allows the actual engine to leave before the rear wall');let lights=0;station.traverse(o=>{if(o instanceof THREE.Light)lights++;});assert.equal(lights,0);
+});

@@ -10,7 +10,7 @@ function fixture(count=100,oldPolice=2){
  const events=[],memories=[],care=[],finances=[];
  const hooks={world:()=>state,random:()=>.4,neuralDrive:()=>.8,emit:(type,text,payload)=>events.push({type,...payload}),remember:(f,type,payload)=>memories.push({id:f.id,type,...payload}),startJourney:(f,chosen)=>{f.traveling=true;f.targetLocationId=chosen.id;f.action=chosen.action;f.routeWaypoints=[{x:LOCATIONS.find(l=>l.id===chosen.id).x,z:LOCATIONS.find(l=>l.id===chosen.id).z,mode:'walk'}];},moveFly:()=>{},needsAndActivities:f=>care.push(f.id),payAndFinance:f=>finances.push(f.id)};
  let service=createPublicServices(hooks);service.init();
- return{get s(){return state;},get service(){return service;},events,memories,care,finances,
+ return{get s(){return state;},get service(){return service;},hooks,events,memories,care,finances,
   place(f,id){const p=LOCATIONS.find(l=>l.id===id);Object.assign(f,{x:p.x,z:p.z,currentLocationId:id,targetLocationId:id,traveling:false});},
   restore(){state=JSON.parse(JSON.stringify(state));service=createPublicServices(hooks);service.init();},
   enlist(index,branch='army'){const f=state.flies[index];this.place(f,branch==='army'?'military-base':'police-hq');assert.equal(service.apply(f,branch),true);return f;}};
@@ -94,4 +94,12 @@ test('government parcels and private aviation stay clear of existing buildings, 
  const plane={id:'TEST',standId:MILITARY_AIRFIELD.stands[0].id,flight:{id:'FLIGHT',pilotId:'PILOT',departure:0,arrival:2400,paid:true}};
  for(let at=0;at<=2400;at+=30){const p=militaryAircraftPose(at,plane);assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y)&&Number.isFinite(p.z));assert.ok(p.x>500&&p.z<=-690);}
  assert.ok(ROADS.length>0);
+});
+
+test('qualified Hans pilots far from barracks receive an actual commute instead of waiting forever off site',()=>{
+ const t=fixture(10,0),pilot=t.enlist(0);Object.assign(pilot,{preferredWorkStart:8,publicServiceTrainingHours:8,x:140,z:-72.5,currentLocationId:'corner-shop',traveling:false,health:90,energy:90,hunger:20});pilot.professionSkills.aviation=.8;t.s.simulationAgeSeconds=9*3600;const before={x:pilot.x,z:pilot.z};t.service.handleResident(pilot,{hour:9});assert.equal(pilot.publicServiceDuty.kind,'aviation-standby');assert.equal(pilot.targetLocationId,'military-base');assert.equal(pilot.traveling,true);assert.deepEqual({x:pilot.x,z:pilot.z},before,'assignment cannot teleport a pilot');assert.ok(t.s.publicServices.aircraft.every(p=>!p.flight));
+});
+
+test('an unsafe barracks does not strand qualified pilots when the separate airfield remains operational',()=>{
+ const t=fixture(10,0),pilot=t.enlist(0);Object.assign(pilot,{preferredWorkStart:8,publicServiceTrainingHours:8,x:1086,z:-772,currentLocationId:'park',traveling:false,health:90,energy:90,hunger:20});pilot.professionSkills.aviation=.8;t.hooks.urbanWorld={isUnavailable:id=>id==='military-base'};t.restore();const f=t.s.flies.find(f=>f.id===pilot.id);t.s.simulationAgeSeconds=9*3600;t.service.handleResident(f,{hour:9});assert.equal(f.targetLocationId,'military-airfield');assert.equal(f.publicServiceDuty.kind,'aviation-standby');assert.equal(f.traveling,true);t.place(f,'military-airfield');t.service.tick(0,{hour:9});assert.ok(t.s.publicServices.aircraft.some(p=>p.boardingPilotId===f.id));
 });

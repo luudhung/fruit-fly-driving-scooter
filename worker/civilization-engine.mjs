@@ -516,10 +516,10 @@ const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isU
 const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld,recordViolation:recordLawViolation});
-const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld,countryAccount:id=>countries.countryAccount(id),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options)});
+const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld,freightProviders:()=>[countries.economy.freightProvider],countryAccount:id=>countries.countryAccount(id),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options)});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
 const nationalDefenseWorld=createNationalDefenseIntegration({...cityServices,urbanWorld,countryAccount:id=>countries.countryAccount(id)});
-nationalServices=createNationalServices({...cityServices,mayWork:(f,country,options)=>countries.mayWork(f,country,options),countryAccount:id=>countries.countryAccount(id),runwayAvailable:request=>regionalAviation.runwayAvailable(request)});
+nationalServices=createNationalServices({...cityServices,managesFireResponse:()=>urbanWorld.fireService.managesCountry('north-city'),mayWork:(f,country,options)=>countries.mayWork(f,country,options),countryAccount:id=>countries.countryAccount(id),runwayAvailable:request=>regionalAviation.runwayAvailable(request)});
 nationalDefense=createNationalDefense({...cityServices,...nationalDefenseWorld,international:countries,homeLocation:f=>({id:f.homeId,x:f.homeX??location(f.homeId).x,z:f.homeZ??location(f.homeId).z})});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
 function syncDistrictHousingPrices(){
