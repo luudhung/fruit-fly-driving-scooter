@@ -529,6 +529,7 @@ const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:reque
 const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),raceFlights:()=>northF1.charters(),requestRaceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,
  raceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),
+ schoolAccepting:id=>!urbanWorld.isUnavailable(id)&&(id==='school'||state.flies.some(f=>f.alive&&f.facilityEmployment?.buildingId===id)),
  schoolOpen:(id,clock)=>!urbanWorld.isUnavailable(id)&&Boolean(teacherAtSchool(id,clock)),
  studyAtSchool:(f,clock)=>educationTick(f,clock,activeGameStepSeconds),
 aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
@@ -2706,14 +2707,14 @@ function hiringReview(clock){
   return centralHiring;
 }
 function centralApplication(f,clock,offer,record=hiringReview(clock)){
-  if(f.citizenshipCountryId!=='hansdrex'||f.ageYears<19||f.ageYears>60||f.publicServiceRole||f.facilityEmployment||f.businessId||f.businessEmployeeOf||f.internationalWork||f.urbanTask||f.cityService||f.civicDuty||f.industrialFreightDuty||f.displacedFrom||f.energy<42||f.health<57||f.educationLevel<10||f.jobId&&(record.roles[f.jobId]||0)<=Number(LOCAL_JOB_FLOORS[f.jobId]??Infinity))return false;
-  return record.mainShare<MAIN_EMPLOYMENT_TARGET&&clock.hour>=9&&clock.hour<17&&(!offer||f.money+f.savings>=4);
+  if(f.citizenshipCountryId!=='hansdrex'||f.ageYears<19||f.ageYears>60||f.publicServiceRole||f.facilityEmployment||f.businessId||f.businessEmployeeOf||f.internationalWork||f.urbanTask||f.cityService||f.civicDuty||f.industrialFreightDuty||f.displacedFrom||f.energy<(offer?35:20)||f.health<52||f.educationLevel<10||f.jobId&&(record.roles[f.jobId]||0)<=Number(LOCAL_JOB_FLOORS[f.jobId]??Infinity))return false;
+  return record.mainShare<MAIN_EMPLOYMENT_TARGET&&clock.hour>=(offer?6:7)&&clock.hour<(offer?16:22)&&(!offer||f.money+f.savings>=4);
 }
 function addCentralApplication(f,clock,add){
   if(f.citizenshipCountryId!=='hansdrex'||f.jobId&&!(f.jobId in LOCAL_JOB_FLOORS)||!centralApplication(f,clock,true))return;
   const jobId=f.intelligence>.64?'central-technology':'central-finance';
   const job=JOBS.find(j=>j.id===jobId);
-  add(job.locationId,CENTRAL_RECRUITMENT,54+f.traits.ambition*48+Math.max(0,job.wage-Number(f.wage||0))*10);
+  add(job.locationId,CENTRAL_RECRUITMENT,116+f.traits.ambition*44+Math.max(0,job.wage-Number(f.wage||0))*12);
 }
 function finishCentralApplication(f,clock){
   if(f.traveling||f.action!==CENTRAL_RECRUITMENT)return;

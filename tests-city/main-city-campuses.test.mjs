@@ -42,3 +42,23 @@ test('North public-service assignments do not count as Hansdrex employment',asyn
  Object.assign(worker,{publicServiceCountryId:'hansdrex',nationalServiceRole:null,jobId:'military'});
  assert.equal(getState({view:'observer'}).hansdrexEmployment.total,1);
 });
+
+test('a Riverside worker takes an actual Main City offer after reaching the interview site',async()=>{
+ const {freshState,getState,productionAndRetail}=await import('../worker/civilization-engine.mjs');
+ const state=freshState(),office=LOCATIONS.find(s=>s.id==='office');
+ const residents=state.flies.filter(f=>f.alive).slice(0,10),candidate=residents.at(-1);
+ for(const f of state.flies)f.alive=residents.includes(f);
+ for(const f of residents)Object.assign(f,{citizenshipCountryId:'hansdrex',jobId:'riverside-office',jobTitle:'Riverside exchange clerk',businessId:null,businessEmployeeOf:null,internationalWork:null,publicServiceRole:null,publicServiceCountryId:null,facilityEmployment:null});
+ Object.assign(candidate,{ageYears:31,educationLevel:41,energy:51,health:90,x:office.x,z:office.z,traveling:true,indoors:false,urbanTask:null,industrialFreightDuty:null,cityService:null,civicDuty:null,displacedFrom:null,action:'interviewing for a Main City job',currentLocationId:office.id});
+ const before=getState({view:'observer'}).hansdrexEmployment;
+ assert.equal(before.jobs.europe,10);
+ productionAndRetail(candidate,{day:10,hour:14,minute:0});
+ assert.equal(candidate.jobId,'riverside-office');
+ candidate.traveling=false;candidate.indoors=true;
+ productionAndRetail(candidate,{day:10,hour:14,minute:0});
+ assert.equal(candidate.jobId,'central-finance');
+ const after=getState({view:'observer'}).hansdrexEmployment;
+ assert.equal(after.jobs.main,1);
+ assert.equal(after.jobs.europe,9);
+ assert.equal(after.total,before.total);
+});

@@ -8,7 +8,7 @@ const SPORTS_STOP_SECONDS=3600;
 const STUDY_NIGHTS=2,STUDY_TUITION=15,STUDY_COOLDOWN=18*DAY;
 const STUDY_ACTION='applying for exchange at ';
 const RACE_ACTION='booking a North City Grand Prix flight';
-const eligibleStudent=f=>f.alive&&f.kind!=='visitor'&&f.citizenshipCountryId===COUNTRY_IDS.north&&f.ageYears>=16&&f.ageYears<30&&!f.publicServiceRole&&!f.facilityEmployment&&!f.businessId&&!f.nationalServiceDuty&&!f.civicDuty;
+const eligibleStudent=f=>f.alive&&f.kind!=='visitor'&&f.citizenshipCountryId===COUNTRY_IDS.north&&f.ageYears>=16&&f.ageYears<35&&!f.publicServiceRole&&!f.facilityEmployment&&!f.businessId&&!f.nationalServiceDuty&&!f.civicDuty;
 
 function sportsDestination(id){
   let key=0;
@@ -27,7 +27,7 @@ export function regionalJourneyBudget(person,toId,{priceLevel=1}={}){
 
 
 /** Paid manifests and journeys share the existing world and existing residents. */
-export function createRegionalAviationSystem({world,startJourney,moveFly,aviationAdmission,requestAirClearance,schoolOpen=()=>false,studyAtSchool=()=>false,raceOffer=()=>null,attendRace=()=>false,weatherDanger=()=>0,needsAndActivities=()=>{},payAndFinance=()=>{},emit=()=>{},remember=()=>{}}){
+export function createRegionalAviationSystem({world,startJourney,moveFly,aviationAdmission,requestAirClearance,schoolOpen=()=>false,schoolAccepting=schoolOpen,studyAtSchool=()=>false,raceOffer=()=>null,attendRace=()=>false,weatherDanger=()=>0,needsAndActivities=()=>{},payAndFinance=()=>{},emit=()=>{},remember=()=>{}}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),people=()=>[...(raw().flies||[]),...(raw().cityVisitors?.visitors||[])];
  const data=()=>raw().regionalAviation||={version:1,ticketsSold:0,completedTrips:0,cancellations:0,flightsOperated:[],history:[],revenue:0,northSportsVisits:0};
  const account=id=>{raw().businesses||={};return raw().businesses[id]||={cash:0,inventory:0,sector:'air-transport'};};
@@ -183,19 +183,19 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    const venue=sportsDestination(f.id);
    add(venue.id,`visiting ${venue.name}`,14+Number(f.stress||0)*.4+Number(f.traits?.sociability||.5)*12);
   }
-  if(!f.alive||f.kind==='visitor'||f.ageYears<16||f.traveling||f.airTrip||f.countryAirTrip||f.onPlane||f.onTrain||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.urbanTask||f.civicDuty||f.health<65||f.energy<55||weatherDanger()>.25||clock.hour<6||clock.hour>17||now()-Number(f.lastCountryFlightAt??-8*DAY)<7*DAY)return;
+  if(!f.alive||f.kind==='visitor'||f.ageYears<16||f.traveling||f.airTrip||f.countryAirTrip||f.onPlane||f.onTrain||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.urbanTask||f.civicDuty||f.health<55||f.energy<36||weatherDanger()>.25||clock.hour<6||clock.hour>17)return;
   const origin=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f));if(!origin)return;
-  if(origin.id==='north'&&eligibleStudent(f)&&now()-Number(f.lastExchangeAt??-STUDY_COOLDOWN)>=STUDY_COOLDOWN&&clock.hour>=7&&clock.hour<14){
+  if(origin.id==='north'&&eligibleStudent(f)&&now()-Number(f.lastExchangeAt??-STUDY_COOLDOWN)>=STUDY_COOLDOWN&&clock.hour>=6&&clock.hour<15){
    const budget=regionalJourneyBudget(f,'city',{priceLevel:raw().centralBank?.priceLevel});
    const extra=tourismFares(raw().centralBank?.priceLevel).resortNight+STUDY_TUITION;
    if(wallet(f)>=budget.required+extra){
     const start=Math.floor((Number(f.traits?.ambition)||.5)*MAIN_SCHOOL_IDS.length);
     const order=MAIN_SCHOOL_IDS.map((_,i)=>MAIN_SCHOOL_IDS[(start+i)%MAIN_SCHOOL_IDS.length]);
-    const campus=order.find(id=>schoolOpen(id,clock));
-    if(campus)add(origin.locationId,STUDY_ACTION+campus,78+Number(f.traits?.ambition||.5)*37+Math.max(0,70-Number(f.educationLevel||0))*.2);
+    const campus=order.find(id=>schoolAccepting(id,clock));
+    if(campus)add(origin.locationId,STUDY_ACTION+campus,138+Number(f.traits?.ambition||.5)*40+Math.max(0,70-Number(f.educationLevel||0))*.2);
    }
   }
-  if(f.ageYears<18||wallet(f)<400)return;
+  if(f.ageYears<18||f.health<65||f.energy<55||wallet(f)<400||now()-Number(f.lastCountryFlightAt??-8*DAY)<7*DAY)return;
   if(origin.id!=='north'&&raceOffer(f)&&regionalJourneyBudget(f,'north',{priceLevel:raw().centralBank?.priceLevel}).affordable)add(origin.locationId,RACE_ACTION,96+Number(f.traits?.sociability||.5)*25);
   const destinations=COUNTRY_AIRPORTS.filter(p=>p.id!==origin.id);let hash=Math.floor(now()/DAY);for(const c of String(f.id))hash=(Math.imul(hash,31)+c.charCodeAt(0))>>>0;
   const score=8+Number(f.stress||0)*.2+Number(f.traits?.ambition||.5)*10+Number(f.traits?.sociability||.5)*8;
