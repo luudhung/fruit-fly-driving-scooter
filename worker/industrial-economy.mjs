@@ -15,7 +15,7 @@ const sourceId='industrial-raw-depot',escrowId='industrial-freight-escrow',suppl
 const launchAction='planning an industrial company',hireAction='applying for industrial work';
 
 /** Finite inputs, on-site labour, funded contracts and physical freight. No rendering or extra brains. */
-export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,urbanWorld,regionalDistribution=true,countryAccount,interceptMovement}){
+export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,urbanWorld,regionalDistribution=true,countryAccount,interceptMovement,freightProviders=()=>[]}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),loc=id=>LOCATIONS.find(l=>l.id===id);
  const treasuryFor=id=>countryAccount?countryAccount(countryAt(loc(id))||'hansdrex'):raw().treasury;
  let cachedState,cachedAt=-1,cachedLength=-1,actors=new Map();
@@ -36,7 +36,7 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  function spendResident(f,amount,to){if(Number(f.money||0)+Number(f.savings||0)+1e-7<amount)return false;const cash=Math.min(Number(f.money||0),amount);f.money-=cash;f.savings=Number(f.savings||0)-(amount-cash);to.cash=Number(to.cash||0)+amount;return true;}
  function refreshPlants(){const d=data();for(const p of allPlants()){const b=companies().find(b=>b.industrialPlantId===p.id);d.plants[p.id]={id:p.id,district:p.zone,zone:p.zone,sector:p.sector,businessId:b?.id||null,status:b?(unavailable(p.id)?'suspended':now()<b.openingAt?'fitting-out':'operating'):'vacant',capacity:p.capacity,wageOffer:b?.wageOffer||null,targetWorkers:b?.labourPlan?.targetWorkers||0,shifts:b?.labourPlan?.shifts||0,workers:b?.employees?.length||0,productionUnits:Number(b?.productionUnits||0),lastProducedAt:b?.lastProducedAt||null};}}
  const clothingRetail=createGarmentRetail({world,eligible,unavailable,account,transfer,spendResident,remember,emit,neuralDrive,committed,countryAccount});
- const regionalFreight=createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount,industrialOrders:()=>data().orders,finishIndustrialOrder:(o,cancel)=>finishOrder(o,cancel)});
+ const regionalFreight=createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount,industrialOrders:()=>data().orders,freightProviders,finishIndustrialOrder:(o,cancel)=>finishOrder(o,cancel)});
  function init(){
   migrateNorthIndustry(raw());syncDynamicPlants();
   const d=data();raw().enterprises||={};raw().nextEnterpriseId=Number(raw().nextEnterpriseId||1);for(const id of [sourceId,escrowId,supplierId,'industrial-fuel'])account(id);

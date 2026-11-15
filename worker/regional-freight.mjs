@@ -8,18 +8,23 @@ const GOODS=['fabric','grain','aggregate'],DAY=86400;
 const operatorId='regional-logistics',equipmentId='industrial-equipment-supplier',sourceId=REGIONAL_HUBS[0];
 /** Licensed intercity hauliers are transport agents, separate from resident-owned fleets.
  * The simulation persists finite cargo, paid consignments and physical road journeys. */
-export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount,industrialOrders=()=>[],finishIndustrialOrder=()=>false}){
+export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount,industrialOrders=()=>[],finishIndustrialOrder=()=>false,freightProviders=()=>[]}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),location=id=>LOCATIONS.find(l=>l.id===id);
  const data=()=>raw().regionalFreight||={version:1,trucks:[],stocks:{},unitCosts:{},jobs:[],nextJobId:1,nextDispatchAt:now(),nextExportAt:now(),delivered:0,exports:0,exportRevenue:0,feesPaid:0,procurement:0,cancelled:0};
  const stock=id=>id===sourceId?raw().industrialEconomy.rawStock:(data().stocks[id]||={fabric:0,grain:0,aggregate:0});
  const business=id=>account(id===sourceId?sourceId:`regional-warehouse-${id}`);
  function unitCost(id,product){if(id===sourceId)return 2;const distance=Math.hypot(location(sourceId).x-location(id).x,location(sourceId).z-location(id).z);return Number(data().unitCosts?.[id]?.[product])||2+(24+distance*.012)/48;}
  function inputSource(product,destination){const site=location(destination);if(!site)return null;const id=REGIONAL_HUBS.filter(id=>Number(stock(id)?.[product]||0)>=4).sort((a,b)=>Math.hypot(location(a).x-site.x,location(a).z-site.z)-Math.hypot(location(b).x-site.x,location(b).z-site.z))[0];return id?{locationId:id,sellerId:id===sourceId?sourceId:`regional-warehouse-${id}`,unitPrice:id===sourceId?2:Math.ceil(unitCost(id,product)*1.12*100)/100}:null;}
- const sourceOrder=job=>industrialOrders().find(o=>o.id===job.industrialOrderId);
- function claimIndustrialOrders(){const d=data();for(const o of industrialOrders().filter(o=>!o.paid&&o.phase==='queued')){if(d.jobs.filter(j=>!j.paid).length>=REGIONAL_TRUCK_LIMIT)break;if(d.jobs.some(j=>j.industrialOrderId===o.id&&!j.paid))continue;
-   const job={id:`REGIONAL-INDUSTRIAL-${o.id}`,industrialOrderId:o.id,from:o.sourceLocationId,to:o.destinationId,product:o.product,quantity:o.quantity,price:o.quantity*o.unitPrice,fee:o.fee,exported:false,createdAt:now(),deadline:o.deadline,phase:'queued',paid:false};d.jobs.push(job);o.phase='brokered';o.carrierId=operatorId;
-  }}
- function settleIndustrial(job,cancelled=false){const o=sourceOrder(job);if(o&&!o.paid)finishIndustrialOrder(o,cancelled);const complete=o?.phase==='complete';
+ const providers=()=>[{id:'industrial',orders:industrialOrders,settle:finishIndustrialOrder},...freightProviders()];
+ const brokered=job=>Boolean(job.industrialOrderId||job.sourceOrderId);
+ const providerFor=job=>providers().find(p=>p.id===(job.providerId||'industrial'));
+ const sourceOrder=job=>providerFor(job)?.orders().find(o=>o.id===(job.sourceOrderId||job.industrialOrderId));
+ function claimBrokeredOrders(){const d=data(),pending=providers().flatMap(provider=>provider.orders().filter(o=>!o.paid&&o.phase==='queued').map(order=>({provider,order}))).sort((a,b)=>a.order.createdAt-b.order.createdAt);
+  for(const {provider,order:o}of pending){if(d.jobs.filter(j=>!j.paid).length>=REGIONAL_TRUCK_LIMIT)break;if(d.jobs.some(j=>(j.providerId||'industrial')===provider.id&&(j.sourceOrderId||j.industrialOrderId)===o.id&&!j.paid))continue;
+   const job={id:`REGIONAL-${provider.id.toUpperCase()}-${o.id}`,providerId:provider.id,sourceOrderId:o.id,...(provider.id==='industrial'?{industrialOrderId:o.id}:{}),from:o.sourceLocationId,to:o.destinationId,product:o.product,quantity:o.quantity,price:o.quantity*o.unitPrice,fee:o.fee,exported:false,createdAt:now(),deadline:o.deadline,phase:'queued',paid:false};d.jobs.push(job);o.phase='brokered';o.carrierId=operatorId;
+  }
+ }
+ function settleBrokered(job,cancelled=false){const o=sourceOrder(job);if(o&&!o.paid)providerFor(job)?.settle(o,cancelled);const complete=o?.phase==='complete';
   if(complete&&!o.regionalCrewSettled){transfer(account(operatorId),account('regional-haul-crews'),job.fee*.65);o.regionalCrewSettled=true;}
   job.paid=true;job.phase=complete?'complete':'cancelled';job.completedAt=now();if(complete){data().feesPaid+=job.fee;data().delivered++;}else data().cancelled++;
  }
@@ -71,12 +76,12 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   const job={id:`REGIONAL-CARGO-${d.nextJobId++}`,from,to,product,quantity:qty,price,fee,exported,createdAt:now(),deadline:now()+DAY*2,phase:'queued',paid:false};d.jobs.push(job);return job;
  }
  function cancel(job){
-  if(job.paid)return;if(job.industrialOrderId){settleIndustrial(job,true);return;}stock(job.from)[job.product]+=job.quantity;
+  if(job.paid)return;if(brokered(job)){settleBrokered(job,true);return;}stock(job.from)[job.product]+=job.quantity;
   if(!job.exported)transfer(account('regional-freight-escrow'),business(job.to),job.price+job.fee);
   job.paid=true;job.phase='cancelled';job.completedAt=now();data().cancelled++;
  }
  function finish(job){
-  if(job.paid)return;if(job.industrialOrderId){settleIndustrial(job);return;}
+  if(job.paid)return;if(brokered(job)){settleBrokered(job);return;}
   if(job.exported){
    // Foreign buyers pay only after real cargo arrives at the northern forwarding warehouse.
    business(job.from).cash+=job.price;account(operatorId).cash+=job.fee;
@@ -110,21 +115,21 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
  function tick(seconds){
   const d=data();if(!d.funded)return;
   if(now()>=d.nextDispatchAt){d.nextDispatchAt=now()+180;demand();}
-  claimIndustrialOrders();
+  claimBrokeredOrders();
   let departures=0;
   for(const t of d.trucks)if(!t.jobId&&now()>=t.nextDispatchAt&&departures<3){
    const job=d.jobs.filter(j=>j.phase==='queued').sort((a,b)=>Math.hypot(location(a.from).x-t.x,location(a.from).z-t.z)-Math.hypot(location(b.from).x-t.x,location(b.from).z-t.z))[0];if(!job)break;
-   if(!route(t,job.from))continue;t.returning=false;t.returnParking=null;t.jobId=job.id;t.phase='collecting';job.phase='collecting';job.truckId=t.id;if(job.industrialOrderId){const o=sourceOrder(job);if(o){o.phase='collecting';o.truckId=t.id;o.carrierId=operatorId;}}departures++;
+   if(!route(t,job.from))continue;t.returning=false;t.returnParking=null;t.jobId=job.id;t.phase='collecting';job.phase='collecting';job.truckId=t.id;if(brokered(job)){const o=sourceOrder(job);if(o){o.phase='collecting';o.truckId=t.id;o.carrierId=operatorId;}}departures++;
   }
   const index=createVehicleIndex([...raw().flies,...raw().industrialEconomy.trucks,...d.trucks]);
   const occupied=new Set(d.trucks.map(t=>t.returnParking?.id).filter(Boolean));
   for(const t of d.trucks){
    const job=d.jobs.find(j=>j.id===t.jobId);if(!job||job.paid){if(t.jobId)Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,routeWaypoints:[]});if(returnToDepot(t,occupied)){moveTruck(t,seconds,index);if(!t.traveling){t.locationId=t.returnDepotId;t.returning=false;t.phase='parked';t.motionSpeed=0;}}continue;}
-   if(job.industrialOrderId&&(!sourceOrder(job)||sourceOrder(job).paid)){settleIndustrial(job);Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,returnParking:null});continue;}
+   if(brokered(job)&&(!sourceOrder(job)||sourceOrder(job).paid)){settleBrokered(job);Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,returnParking:null});continue;}
    if(now()>job.deadline||unavailable(job.from)||unavailable(job.to)){cancel(job);Object.assign(t,{jobId:null,traveling:false,motionSpeed:0,phase:'parked',nextDispatchAt:now()+600});continue;}
    if(t.waitUntil>now())continue;
    if(t.phase==='loading'){
-    if(!route(t,job.to,job.from)){cancel(job);continue;}t.phase='delivering';job.phase='delivering';if(job.industrialOrderId){const o=sourceOrder(job);if(o)o.phase='delivering';}
+    if(!route(t,job.to,job.from)){cancel(job);continue;}t.phase='delivering';job.phase='delivering';if(brokered(job)){const o=sourceOrder(job);if(o)o.phase='delivering';}
    }else if(t.phase==='unloading'){
     finish(job);Object.assign(t,{jobId:null,phase:'parked',nextDispatchAt:now()+240+(Number(t.id.split('-').at(-1))%6)*90});continue;
    }
