@@ -27,3 +27,18 @@ test('retirees value quiet and clean air, while young sociable residents can pre
  assert.ok(districtProfile(central).housing>districtProfile(europe).housing);
  assert.ok(districtProfile(central).pollution>districtProfile(europe).pollution);
 });
+
+test('North public-service assignments do not count as Hansdrex employment',async()=>{
+ process.env.CIV_INITIAL_POPULATION='12';
+ const {freshState,getState}=await import('../worker/civilization-engine.mjs');
+ const state=freshState(),workers=state.flies.filter(f=>f.alive&&f.publicServiceRole);
+ const north=workers.find(f=>f.publicServiceCountryId==='north-city');
+ const city=workers.find(f=>f.publicServiceCountryId!=='north-city'&&f.publicServiceRole==='army');
+ const worker=north||city;
+ assert.ok(worker);
+ for(const f of state.flies)f.alive=f===worker;
+ Object.assign(worker,{publicServiceCountryId:'north-city',nationalServiceRole:'army',publicServiceRole:'army',jobId:'north-military'});
+ assert.equal(getState({view:'observer'}).hansdrexEmployment.total,0);
+ Object.assign(worker,{publicServiceCountryId:'hansdrex',nationalServiceRole:null,jobId:'military'});
+ assert.equal(getState({view:'observer'}).hansdrexEmployment.total,1);
+});

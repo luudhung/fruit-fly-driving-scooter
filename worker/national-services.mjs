@@ -4,7 +4,8 @@ const NORTH=COUNTRY_IDS.north,DAY=86400,roles=['army','police','medical','fire',
 // A paid trainer uses its own dry apron bay, outside all passenger stands.
 export const NORTH_TRAINING_STAND=Object.freeze({x:-933,z:-880});
 export const NORTH_SERVICE_TARGETS=Object.freeze({army:20,police:10,medical:4,fire:4,education:2});
-const stations={army:'north-army',police:'north-police',medical:'north-hospital',fire:'north-firestation',education:'north-school'};
+export const NORTH_PUBLIC_WORKSITES=Object.freeze({army:'north-army',police:'north-police',medical:'north-hospital',fire:'north-firestation',education:'north-school'});
+const stations=NORTH_PUBLIC_WORKSITES;
 const jobs={army:'north-military',police:'north-police',medical:'north-medical',fire:'north-fire',education:'north-teacher'};
 const wages={army:6.4,police:6.2,medical:7,fire:6.8,education:6.5};
 const essential=new Set(['doctor','hospital-central','hospital-east','school','power','power-evening','power-night','grid-dispatch','firefighter','paramedic','transit','pilot','police','military',...Object.values(jobs)]);

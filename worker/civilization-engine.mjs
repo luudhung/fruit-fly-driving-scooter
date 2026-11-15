@@ -7,7 +7,7 @@ import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} fr
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
 import {createInternationalLife} from './international-life.mjs';
 import {migrateCountryMetroJourneys} from './country-metro-migration.mjs';
-import {createNationalServices} from './national-services.mjs';
+import {createNationalServices,NORTH_PUBLIC_WORKSITES} from './national-services.mjs';
 import {createNationalDefense} from './national-defense.mjs';
 import {createNationalDefenseIntegration,tourHelicopterFlightId} from './national-defense-integration.mjs';
 import {applyNationalResidences,ownsCountryHome} from './country-migration.mjs';
@@ -2673,12 +2673,16 @@ function simulateEnterprises(clock) {
 
 function residentWorkplace(f){
   const business=state.enterprises?.[f.businessId||f.businessEmployeeOf];
+  if(f.publicServiceCountryId==='north-city'){
+    const id=NORTH_PUBLIC_WORKSITES[f.nationalServiceRole||f.publicServiceRole];
+    return id?location(id):null;
+  }
   if(f.publicServiceRole==='army')return location('military-base');
   if(f.publicServiceRole==='police')return location('police');
   const id=f.facilityEmployment?.buildingId||f.internationalWork?.locationId||business?.locationId||JOBS.find(j=>j.id===f.jobId)?.locationId;
   return id?LOCATIONS.find(l=>l.id===id)||BUILDINGS.find(b=>b.id===id):null;
 }
-function hansdrexWorkforce(people,clock){
+function hansdrexWorkforce(people,clock,includeRoles=false){
   const jobs={main:0,europe:0,west:0,north:0},roles={};
   let inboundMorning=0;
   for(const f of people){
@@ -2687,17 +2691,17 @@ function hansdrexWorkforce(people,clock){
     if(!site||economicCountryAt(site)!=='hansdrex')continue;
     const district=districtAt(site);
     jobs[district]++;
-    if(f.jobId)roles[f.jobId]=(roles[f.jobId]||0)+1;
+    if(includeRoles&&f.jobId)roles[f.jobId]=(roles[f.jobId]||0)+1;
     if(district==='main'&&clock.hour>=5&&clock.hour<11&&f.traveling&&f.targetLocationId===site.id&&districtAt({x:f.homeX,z:f.homeZ})!=='main')inboundMorning++;
   }
   const total=Object.values(jobs).reduce((sum,count)=>sum+count,0);
-  return {jobs,roles,total,mainShare:total?jobs.main/total:0,mainTarget:MAIN_EMPLOYMENT_TARGET,inboundMorning};
+  return {jobs,total,mainShare:total?jobs.main/total:0,mainTarget:MAIN_EMPLOYMENT_TARGET,inboundMorning,...(includeRoles?{roles}:{})};
 }
 let centralHiringState=null,centralHiringHour=-1,centralHiring=null;
 function hiringReview(clock){
   const hour=Math.floor(state.simulationAgeSeconds/3600);
   if(centralHiringState!==state||hour!==centralHiringHour){
-    centralHiringState=state;centralHiringHour=hour;centralHiring=hansdrexWorkforce(state.flies,clock);
+    centralHiringState=state;centralHiringHour=hour;centralHiring=hansdrexWorkforce(state.flies,clock,true);
   }
   return centralHiring;
 }
