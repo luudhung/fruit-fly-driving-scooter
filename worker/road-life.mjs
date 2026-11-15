@@ -1,7 +1,8 @@
+import {readyToDrive} from './life-skills.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {PARKING_SPACES,parkingPoint,LOCATIONS,onIsland} from './city-map.mjs';
 const clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,Number.isFinite(n)?n:a));
-const ownsCar=f=>String(f.vehicle||'').includes('car');
+const ownsCar=f=>readyToDrive(f)&&String(f.vehicle||'').includes('car');
 export function ensureDrivingMemory(f){
  const b=f.brain;b.driving=b.driving||{carefulValue:.15,recklessValue:-.12,experiences:0,fines:0,damageEvents:0,style:'careful',lastDecisionTrip:null,lastObservedAt:0};return b.driving;
 }

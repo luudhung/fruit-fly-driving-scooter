@@ -98,7 +98,9 @@ test('a burned home is rebuilt on its lot using one shared household payment tha
 });
 
 test('a war damaged North building uses only its country treasury and still needs real delivery, labor and inspection',()=>{
- const t=setup(),b=BUILDINGS.find(b=>b.id==='north-school');t.s.businesses['treasury:north-city']={cash:30000};t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ const t=setup(),b=BUILDINGS.find(b=>b.id==='north-school');t.s.businesses['treasury:north-city']={cash:30000};
+ t.s.businesses['north-civic-materials']={cash:0,inventory:250};
+ for(const f of t.s.flies)Object.assign(f,{x:130,z:-907,citizenshipCountryId:'north-city'});t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
  const damage={buildingId:b.id,projectileId:'WAR-REPAIR-1',damage:48,fire:false,countryId:'north-city',fundingAccountId:'treasury:north-city',conflictId:'WAR-1'},hans=t.s.treasury.cash,funds=supply(t.s);
  assert.equal(t.urban.applyWarDamage(damage),true);assert.equal(t.urban.applyWarDamage(damage),false);assert.equal(t.s.urbanWorld.buildings[b.id].health,52);
  const north=t.s.businesses['treasury:north-city'].cash,p=t.urban.fundWarRepair(b.id);assert.ok(p);assert.equal(p.funding.accountId,'treasury:north-city');assert.equal(t.s.businesses['treasury:north-city'].cash,north-p.budget);assert.equal(t.s.treasury.cash,hans);assert.equal(p.progress,0);
@@ -114,4 +116,22 @@ test('war home repair never charges its household and an unfunded country cannot
  const t=setup(),b=t.target,f=t.s.flies[0];t.s.housing.households.hh={id:'hh',unitId:b.id,members:[f.id]};f.housingUnitId=b.id;const wallet=f.money+f.savings;
  t.urban.applyWarDamage({buildingId:b.id,projectileId:'HOME-WAR',damage:40,fire:false,countryId:'hansdrex',fundingAccountId:'treasury'});const p=t.urban.fundWarRepair(b.id);assert.ok(p);assert.equal(p.funding.accountId,'treasury');assert.equal(f.money+f.savings,wallet);
  const north=BUILDINGS.find(b=>b.id==='north-school');t.s.businesses['treasury:north-city']={cash:0};const hans=t.s.treasury.cash;t.urban.applyWarDamage({buildingId:north.id,projectileId:'NO-NORTH-BUDGET',damage:48,fire:false,countryId:'north-city',fundingAccountId:'treasury:north-city'});assert.equal(t.urban.fundWarRepair(north.id),null);assert.equal(t.s.urbanWorld.buildings[north.id].recovery.status,'awaiting national funds');assert.equal(t.s.treasury.cash,hans);assert.equal(t.s.businesses['treasury:north-city'].cash,0);
+});
+
+test('damaged customs and North barracks receive matching country budgets even when Hans works are full',()=>{
+ const t=setup(),north=t.s.businesses['treasury:north-city']={cash:30000};
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ const barracks=BUILDINGS.find(b=>b.id==='north-army'),northBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-W'),hansBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-E');
+ for(const b of [barracks,northBooth,hansBooth])t.s.urbanWorld.buildings[b.id]={...b,health:4,stage:'collapsed'};
+ const hansPlots=BUILDINGS.filter(b=>b.x>530&&b.z>0&&b.kind==='apartment').slice(0,5);
+ assert.equal(hansPlots.length,5);
+ for(const b of hansPlots){t.s.urbanWorld.buildings[b.id]={...b,health:10,stage:'collapsed'};assert.ok(t.urban.submitProject(b.id));}
+ const hans=t.s.treasury.cash,budget=north.cash;t.step();
+ const projects=t.s.urbanWorld.projects.filter(p=>[barracks.id,northBooth.id].includes(p.buildingId));
+ assert.equal(projects.length,2);
+ assert.ok(projects.every(p=>p.funding.accountId==='treasury:north-city'));
+ assert.equal(t.s.treasury.cash,hans);
+ assert.ok(north.cash<budget);
+ assert.ok(t.s.businesses['north-civic-materials'].inventory>=projects[0].materialsRequired);
+ assert.ok(!t.s.urbanWorld.projects.some(p=>p.buildingId===hansBooth.id));
 });

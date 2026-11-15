@@ -187,7 +187,7 @@ type FlyState = CountryPerson & {
   wanted?: boolean;
   arrested?: boolean;
   professionSkills?: Record<string, number>;
-  intelligence?: number; learningRate?: number; educationLevel?: number; knowledge?: Record<string,number>; teacherId?: string|null; schoolDays?: number;
+  intelligence?: number; learningRate?: number; educationLevel?: number; lifeSkills?: string[]; knowledge?: Record<string,number>; teacherId?: string|null; schoolDays?: number;
   chronotype?: string; preferredWorkStart?: number; preferredWorkHours?: number; workMinutesToday?: number;
   partyId?: string | null; ideology?: Record<string,number> | null; politicalInterest?: number;
 };
@@ -213,7 +213,9 @@ type WeatherState = {
   sunset?: { active?: boolean; quality?: number };
 };
 
+type NationalSummary = {residents:number;working:number;traveling:number;indoors:number;students:number;graduates:number;fires:number;projects:number};
 type CivilizationSnapshot = {
+  mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
   international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
   nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
   nationalServices?:Parameters<NationalDefenseRenderer['sync']>[1];
@@ -252,7 +254,7 @@ type CivilizationSnapshot = {
   welfare?:{birthGrantPerChild:number;essentialMealPrice:number;populationTarget?:number;immigrationThreshold?:number};
   parkLeisure?:{passengers:number;completedRides:number};
   aviation?:{fares:{roundTrip:number;oneWay:number;resortNight:number;helicopter:number;beachActivity:number};seats:number;heliSeats:number;nextCityFlight:{departure:number};nextIslandFlight:{departure:number};weatherClosed:boolean;passengers:number;holidaymakers:number;completedHolidays:number;helicopterGuests:number;legacyFlights?:Flight[]};
-  regionalAviation?:Parameters<RegionalAviationRenderer['sync']>[0];
+  regionalAviation?:Parameters<RegionalAviationRenderer['sync']>[0]&{northSportsVisits?:number};
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -671,6 +673,17 @@ function renderSnapshot(s: CivilizationSnapshot) {
   population.textContent = `${num(living.length)} flies`;
   generation.textContent = num(s.generation);
   speed.textContent = "1s = 2m";
+  for(const id of ['hansdrex','north-city'] as const){
+    const board=document.getElementById(`${id}-stats`);
+    const data=s.mainlandStats?.[id], nation=s.international?.countries?.find(c=>c.id===id);
+    if(board&&nation){
+      const sportsVisits=id==='north-city'&&s.regionalAviation?.northSportsVisits!=null?`${num(s.regionalAviation.northSportsVisits)} lượt khách Hansdrex tới khu thể thao`:'';
+      const finances=`Ngân sách ${num(nation.cash??0)} H$ · Trợ cấp sinh ${num(nation.populationPolicy?.birthGrant??0)} H$`;
+      const residents=`${num(data?.residents??nation.residents??0)} cư dân${data?` · ${num(data.working)} có việc`:''}`;
+      board.textContent=[residents,finances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('
+');
+    }
+  }
   const activity=document.getElementById("city-activity");if(activity)activity.textContent=s.activity?`${s.activity.working} working · ${s.activity.traveling} traveling · ${s.activity.indoors} indoors`:"Awaiting activity telemetry";
   const transit=document.getElementById("transit-activity");if(transit)transit.textContent=s.transit?`${s.transit.passengers} aboard · ${s.transit.waiting} waiting · ${s.transit.completedTrips} completed trips${s.roadTraffic?` · ${s.roadTraffic.drivingCars} ô tô đang chạy · ${s.roadTraffic.parkedCars} đỗ sát lề`:""}`:"Awaiting transit telemetry";
   births.textContent = num(s.births);

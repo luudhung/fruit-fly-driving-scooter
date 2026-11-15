@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createFireService,emergencyCountrySegment} from '../worker/fire-service.mjs';
 import {createNorthFireDepot,NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {BUILDINGS,LOCATIONS,entrance,pedestrianRoute} from '../worker/city-map.mjs';
-import {countryAt} from '../worker/country-map.mjs';
+import {BORDER_CHECKPOINTS,borderDirection,countryAt} from '../worker/country-map.mjs';
 const location=id=>LOCATIONS.find(p=>p.id===id),role=(f)=>f.nationalServiceRole;
 function setup({northBudget=10000}={}){
  let s={emergencyServicesEnabled:true,simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{'treasury:north-city':{cash:northBudget}},treasury:{cash:20000},totalTransactions:0,nationalServices:{rosters:{fire:[],medical:[]},fireWaterUsed:0},urbanWorld:{fires:[],buildings:{},floods:[]},cityVisitors:{visitors:[]}};
@@ -11,7 +11,12 @@ function setup({northBudget=10000}={}){
  const person=(id,x,z)=>({id,brain:{id:`BRAIN-${id}`,weights:[.3,.8]},alive:true,ageYears:30,health:95,energy:95,hunger:10,thirst:10,stress:5,money:100,savings:500,x,y:1.1,z,traveling:false,indoors:true,currentLocationId:'firestation',jobId:null,traits:{empathy:.8},professionSkills:{}});
  for(let i=0;i<22;i++)s.flies.push(person(`H-${i}`,830,-200));
  for(const job of ['fire','medical'])for(let i=0;i<4;i++){const home=job==='fire'?NORTH_FIRE_STATION:location('north-hospital'),f=person(`N-${job}-${i}`,home.x,home.z);Object.assign(f,{citizenshipCountryId:'north-city',publicServiceCountryId:'north-city',publicServiceRole:job,nationalServiceRole:job,jobId:`north-${job}`,publicServicePayrollManaged:true,preferredWorkStart:0,preferredWorkHours:8,currentLocationId:home.id,nationalServiceDuty:{kind:job,targetId:home.id}});s.flies.push(f);s.nationalServices.rosters[job].push(f.id);}
- function journey(f,q){journeyRequests.push({flyId:f.id,...q});f.action=q.action;f.targetLocationId=q.id;const p=location(q.id);if(!p)return;if(!f.traveling&&f.currentLocationId===q.id&&Math.hypot(f.x-p.x,f.z-p.z)<32)return;f.routeWaypoints=pedestrianRoute(f,p);f.routeIndex=0;f.traveling=Boolean(f.routeWaypoints.length);f.indoors=false;}
+ function journey(f,q){journeyRequests.push({flyId:f.id,...q});f.action=q.action;f.targetLocationId=q.id;const p=location(q.id);if(!p)return;if(!f.traveling&&f.currentLocationId===q.id&&Math.hypot(f.x-p.x,f.z-p.z)<32)return;const country=countryAt(p),origin=countryAt(f);
+ if(country!==origin){
+  const port=BORDER_CHECKPOINTS.find(b=>b.id==='NORTH-CITY-BRIDGE-3'),dir=borderDirection(port,country,'walk');
+  f.routeWaypoints=[...pedestrianRoute(f,dir.queuePoint),{...dir.admissionPoint,stage:'border-entry',portId:port.id},...pedestrianRoute(dir.admissionPoint,p)];
+ }else f.routeWaypoints=pedestrianRoute(f,p);
+ f.routeIndex=0;f.traveling=Boolean(f.routeWaypoints.length);f.indoors=false;}
  function walk(f){if(!f.traveling)return;let distance=2.5;while(distance>1e-6&&f.traveling){const p=f.routeWaypoints[f.routeIndex];if(!p){f.traveling=false;f.currentLocationId=f.targetLocationId;break;}const len=Math.hypot(p.x-f.x,p.z-f.z),step=Math.min(len,distance);if(len>.001){f.x+=(p.x-f.x)/len*step;f.z+=(p.z-f.z)/len*step;}distance-=step;if(len<=step+.001){f.routeIndex++;if(f.routeIndex>=f.routeWaypoints.length){f.traveling=false;f.currentLocationId=f.targetLocationId;}}}}
  const factory=()=>createFireService({world:()=>s,depots:[createNorthFireDepot({world:()=>s})],emit:(type,text,payload)=>events.push({type,...payload}),startJourney:journey,moveFly:walk,needsAndActivities:()=>needs++});
  let service=factory();service.init();
@@ -67,4 +72,21 @@ test('North staff may physically return from Hans to their depot without replaci
 test('an old Hans engine already abroad cancels its foreign job and physically retreats once through an official crossing',()=>{
  const t=setup(),e=t.s.urbanWorld.fireService.engines[0],crew=t.s.flies.filter(f=>f.jobId==='firefighter').slice(0,3),fire=t.fire('OLD-FOREIGN');Object.assign(e,{x:50,z:-600,phase:'enroute',incidentId:fire.id,crewIds:crew.map(f=>f.id),route:[{x:50,z:-700,mode:'car'}],routeIndex:0,traveling:true,paidForCall:true,pickup:{x:110,z:-850}});fire.engineId=e.id;for(const f of crew)Object.assign(f,{x:50,z:-600,traveling:false,indoors:false,onFireEngine:true,fireEngineDuty:{vehicleId:e.id,kind:'fire',phase:'riding'}});
  const before=[e.x,e.z];t.service.init();assert.deepEqual([e.x,e.z],before,'migration cannot teleport the engine');assert.equal(e.incidentId,null);assert.equal(e.repatriating,true);assert.notEqual(fire.engineId,e.id);let enteredHans=false,steps=0;for(;steps<700&&e.phase!=='idle';steps++){const old={x:e.x,z:e.z};t.step();assert.ok(Math.hypot(e.x-old.x,e.z-old.z)<=70,'physical movement is bounded');if(countryAt(e)==='hansdrex')enteredHans=true;else assert.equal(enteredHans,false,'retreat never crosses back into North');}assert.ok(enteredHans,JSON.stringify({phase:e.phase,x:e.x,z:e.z,blocked:e.blocked,route:e.route,crewIds:e.crewIds}));assert.equal(e.phase,'idle');assert.equal(e.x,830);assert.equal(e.repatriating,false);
+});
+
+test('a stranded Hans fire engine near customs collects a crew member walking from Hans and drives home',()=>{
+ const t=setup(),e=t.s.urbanWorld.fireService.engines[0],crew=t.s.flies.find(f=>f.jobId==='firefighter');
+ Object.assign(crew,{x:806,z:-112.22,indoors:false,traveling:false});
+ Object.assign(e,{x:46.3,z:-576,phase:'gathering-return',repatriating:true,crewIds:[crew.id],pickup:{x:46.3,z:-576}});
+ crew.fireEngineDuty={vehicleId:e.id,kind:'fire',phase:e.phase};
+ t.restore();const saved=t.s.urbanWorld.fireService.engines[0],driver=t.s.flies.find(f=>f.id===crew.id);
+ let crossedOnFoot=false;
+ for(let i=0;i<1300&&saved.phase!=='idle';i++){
+  t.step();
+  if(countryAt(driver)==='north-city'&&!driver.onFireEngine)crossedOnFoot=true;
+ }
+ assert.ok(crossedOnFoot,'crew retrieves the vehicle through pedestrian customs');
+ assert.equal(saved.phase,'idle');
+ assert.equal(saved.x,830);
+ assert.equal(saved.completedTrips,1);
 });

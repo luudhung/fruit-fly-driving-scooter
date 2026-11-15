@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
 import {batchStaticMeshes} from './static-box-batches.ts';
-import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
+import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,NORTH_WHITE_HOUSE,NORTH_SPORTS_PARK,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 /** Immutable national premises. Dynamic people, vehicles and crop stocks stay in the simulation. */
 export class InternationalLandmarks{
@@ -27,7 +27,7 @@ export class InternationalLandmarks{
    const g=b.id===NORTH_LANDMARK.id?this.auroraTower():b.id===NORTH_FIRE_STATION.id?this.fireStation(b):this.premises(b);
    g.userData.buildingId=b.id;this.root.add(g);this.buildings.set(b.id,g);
   }
-  this.stats.buildings=this.buildings.size;this.airport();this.farm();this.customs();this.armyPerimeter();
+  this.stats.buildings=this.buildings.size;this.airport();this.farm();this.customs();this.armyPerimeter();this.sportsPark();
  }
  private box(g:THREE.Group,x:number,y:number,z:number,w:number,h:number,d:number,m:THREE.Material){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);g.add(mesh);return mesh;}
  private label(g:THREE.Group,text:string,x:number,y:number,z:number,w:number,h=1.1){const s=this.sign(text,w,h);s.position.set(x,y,z);g.add(s);}
@@ -44,7 +44,13 @@ export class InternationalLandmarks{
   }else this.box(g,0,height-roofHeight/2,0,b.w+.25,roofHeight,b.d+.25,this.roof);
   for(const side of [-1,1])for(let x=-b.w/2+2.5;x<b.w/2-1;x+=4)for(let y=2.2;y<height-1;y+=3.2)this.box(g,x,y,side*(b.d/2+.035),1.25,1.5,.05,this.windows);
   const doorHeight=Math.min(3.2,wallHeight-.25);
-  this.box(g,0,doorHeight/2+.05,b.d/2+.06,Math.min(2.1,b.w-.3),doorHeight,.1,this.glass);
+  if(b.kind!=='customs')this.box(g,0,doorHeight/2+.05,b.d/2+.06,Math.min(2.1,b.w-.3),doorHeight,.1,this.glass);
+  if(b.id===NORTH_WHITE_HOUSE.id){
+   for(const x of [-9,-5.4,-1.8,1.8,5.4,9])this.box(g,x,4.6,b.d/2+1.15,.76,8.6,.76,this.stone);
+   this.box(g,0,9.12,b.d/2+1.3,21,.5,3.2,this.stone);
+   for(let i=0;i<3;i++)this.box(g,0,.1+i*.13,b.d/2+1.5-i*.36,21,.2+i*.26,4-i*.72,this.stone);
+  }
+  if(b.kind==='customs')this.label(g,b.name.toUpperCase(),0,3.7,0,9,.75);
   if(!cottage&&b.kind!=='customs'&&b.kind!=='farm-service')this.label(g,b.name.toUpperCase(),0,height+2,0,Math.max(17,b.w));
   batchStaticMeshes(g);return g;
  }
@@ -120,6 +126,62 @@ export class InternationalLandmarks{
    this.label(g,'NORTH CITY ↔ HANSDREX · PASSPORT CONTROL',p.bounds.x,9,p.bounds.z,p.motorway?54:38,1.4);
   }
   batchStaticMeshes(g);this.root.add(g);
+ }
+ private sportsPark(){
+  const park=NORTH_SPORTS_PARK,g=new THREE.Group();
+  g.name=park.name;
+  const turf=new THREE.MeshStandardMaterial({color:0x53793e,roughness:1});
+  const fairway=new THREE.MeshStandardMaterial({color:0x81a653,roughness:1});
+  const green=new THREE.MeshStandardMaterial({color:0x94bb5b,roughness:1});
+  const sand=new THREE.MeshStandardMaterial({color:0xc7b17a,roughness:1});
+  const court=new THREE.MeshStandardMaterial({color:0x315e85,roughness:.9});
+  const net=new THREE.MeshStandardMaterial({color:0x343e49,roughness:1});
+  const flag=new THREE.MeshBasicMaterial({color:0xf8984b});
+  this.box(g,park.x,.03,park.z,park.w,.06,park.d,turf);
+  for(let i=0;i<6;i++){
+   const x=park.golf.x-73+(i%3)*73,z=park.golf.z-54+Math.floor(i/3)*108;
+   this.box(g,x,.077,z,35,.025,87,fairway).rotation.y=i%2?.13:-.13;
+   this.box(g,x+(i%2?5:-5),.095,z-40,22,.025,19,green).rotation.y=.18;
+   this.box(g,x+16,.1,z-30,11,.025,8,sand).rotation.y=-.35;
+   this.box(g,x,.094,z+40,10,.03,8,green);
+   this.box(g,x,1,z-40,.12,1.8,.12,this.paint);
+   this.box(g,x+.47,1.8,z-40,.9,.45,.055,flag);
+  }
+  const lines=(x:number,z:number,w:number,d:number,y:number)=>{
+   for(const side of [-1,1]){
+    this.box(g,x+side*w/2,y,z,.16,.012,d,this.paint);
+    this.box(g,x,y,z+side*d/2,w,.012,.16,this.paint);
+   }
+  };
+  for(const c of park.tennis){
+   this.box(g,c.x,.09,c.z,c.w,.07,c.d,court);
+   lines(c.x,c.z,11,24,.14);
+   for(const side of [-1,1]){
+    this.box(g,c.x,.14,c.z+side*6.4,8.2,.012,.15,this.paint);
+    this.box(g,c.x+side*4.1,.14,c.z,.14,.012,24,this.paint);
+   }
+   this.box(g,c.x,.14,c.z,.14,.012,12.8,this.paint);
+   this.box(g,c.x,.57,c.z,12,.82,.045,net);
+   this.box(g,c.x,.98,c.z,12,.09,.08,this.paint);
+  }
+  const f=park.football;
+  this.box(g,f.x,.085,f.z,f.w,.055,f.d,fairway);
+  lines(f.x,f.z,43,70,.13);
+  this.box(g,f.x,.13,f.z,43,.012,.16,this.paint);
+  for(const side of [-1,1]){
+   lines(f.x,f.z+side*30,18,10,.134);
+   for(const dx of [-3.7,3.7])this.box(g,f.x+dx,1.4,f.z+side*35,.16,2.55,.16,this.paint);
+   this.box(g,f.x,2.65,f.z+side*35,7.5,.16,.16,this.paint);
+  }
+  for(let i=0;i<32;i++){
+   const angle=i*Math.PI/16;
+   this.box(g,f.x+Math.cos(angle)*6,.13,f.z+Math.sin(angle)*6,1.2,.012,.16,this.paint).rotation.y=-angle-Math.PI/2;
+  }
+  this.box(g,park.gate.x,.085,-620,3,.07,35,this.stone);
+  this.box(g,-702,.07,-638,290,.055,3.5,this.stone);
+  this.label(g,'AIRPORT SPORTS PARK',park.gate.x,4,-619,35,1.35);
+  batchStaticMeshes(g);
+  this.root.add(g);
  }
  private armyPerimeter(){
   const g=new THREE.Group(),a=NORTH_MILITARY;g.name='North army perimeter';

@@ -1,8 +1,14 @@
 import {ISLAND} from './city-map.mjs';
-import {COUNTRY_AIRPORTS,countryAt} from './country-map.mjs';
+import {COUNTRY_AIRPORTS,COUNTRY_IDS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares} from './aviation.mjs';
 import {visitorArrivalPose,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
+const SPORTS_STOP_SECONDS=3600;
+function sportsDestination(id){
+  let key=0;
+  for(const digit of String(id))key=(key*31+digit.charCodeAt(0))>>>0;
+  return NORTH_SPORTS_PARK.activities[key%NORTH_SPORTS_PARK.activities.length];
+}
 const hotelFor={city:'hotel',north:'north-hotel',island:'island-resort'};
 
 /** Quote the actual return fare, both entry visas and protected essential cash. */
@@ -17,7 +23,7 @@ export function regionalJourneyBudget(person,toId,{priceLevel=1}={}){
 /** Paid manifests and journeys share the existing world and existing residents. */
 export function createRegionalAviationSystem({world,startJourney,moveFly,aviationAdmission,requestAirClearance,weatherDanger=()=>0,needsAndActivities=()=>{},payAndFinance=()=>{},emit=()=>{},remember=()=>{}}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),people=()=>[...(raw().flies||[]),...(raw().cityVisitors?.visitors||[])];
- const data=()=>raw().regionalAviation||={version:1,ticketsSold:0,completedTrips:0,cancellations:0,flightsOperated:[],history:[],revenue:0};
+ const data=()=>raw().regionalAviation||={version:1,ticketsSold:0,completedTrips:0,cancellations:0,flightsOperated:[],history:[],revenue:0,northSportsVisits:0};
  const account=id=>{raw().businesses||={};return raw().businesses[id]||={cash:0,inventory:0,sector:'air-transport'};};
  const occupancy=flight=>people().filter(f=>f.alive&&[f.countryAirTrip?.outbound?.id,f.countryAirTrip?.inbound?.id,f.airTrip?.outbound?.id,f.airTrip?.inbound?.id].includes(flight.id)).length;
  function charge(f,amount,to){if(wallet(f)<amount)return false;const cash=Math.min(f.money||0,amount);f.money=Number(f.money||0)-cash;f.savings=Number(f.savings||0)-(amount-cash);to.cash+=amount;f.expensesLifetime=Number(f.expensesLifetime||0)+amount;raw().totalTransactions=Number(raw().totalTransactions||0)+1;return true;}
@@ -90,9 +96,24 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    return true;
   }
   if(t.phase==='visiting'){
+   const visitingSports=t.from==='city'&&t.to==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex;
+   const venue=visitingSports?sportsDestination(f.id):null;
+   if(venue&&!f.traveling&&f.currentLocationId===venue.id&&Math.hypot(f.x-venue.x,f.z-venue.z)<18&&t.northSportsArrivedAt==null){
+    t.northSportsArrivedAt=now();
+    data().northSportsVisits=Number(data().northSportsVisits||0)+1;
+    remember(f,'north_sports_visit',{tripId:t.outbound.id,locationId:venue.id});
+   }
+
    if(!f.traveling&&f.currentLocationId===t.hotelId){const room=hotels()[t.hotelId]?.rooms?.[f.id];if(room)room.checkedIn=true;}
    if(now()>=t.inbound.departure-AVIATION.checkInSeconds){const airport=airportById(t.to);if(!f.traveling&&f.currentLocationId===airport.locationId){t.phase='inbound-wait';return handleResident(f,clock);}if(now()>=t.inbound.departure)delayReturn(f,t);if(!f.traveling||f.targetLocationId!==airport.locationId)startJourney?.(f,{id:airport.locationId,action:'checking in for the reserved return flight'});}
-   else if(!f.traveling){const hungry=Number(f.hunger||0)>45,target=hungry?(t.to==='island'?'island-resort':t.to==='north'?'north-market':'market'):t.to==='island'?'island-beach':t.to==='north'?'airport-park':'park';if(f.currentLocationId!==target)startJourney?.(f,{id:target,action:hungry?'going to a real holiday meal':'visiting the destination country on a paid holiday'});else if(!hungry)f.energy=Math.min(100,Number(f.energy||50)+.5);}
+   else if(!f.traveling){
+    const hungry=Number(f.hunger||0)>55;
+    const sportsStop=venue&&(t.northSportsArrivedAt==null||now()-t.northSportsArrivedAt<SPORTS_STOP_SECONDS);
+    const destination=hungry?({island:'island-resort',north:'north-market',city:'market'}[t.to])
+      :sportsStop?venue.id:({island:'island-beach',north:'airport-park',city:'park'}[t.to]);
+    if(f.currentLocationId!==destination)startJourney?.(f,{id:destination,action:hungry?'going to a real holiday meal':sportsStop?`visiting ${venue.name}`:'visiting the destination country on a paid holiday'});
+    else if(!hungry)f.energy=Math.min(100,Number(f.energy||50)+.5);
+   }
    moveFly?.(f);care(f,clock);
    // The paid island room includes board, but every onsite meal uses existing
    // resort stock. City/North guests buy meals through needsAndActivities.
@@ -109,10 +130,19 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function tick(){init();for(const f of people())if(f.countryAirTrip&&!f.alive||f.kind==='visitor'&&(f.countryAirTrip||f.countryFlightPlan))handleResident(f,{hour:now()%DAY/3600});for(const record of snapshot().flights)if(now()>=record.departure&&now()<record.arrival&&!data().flightsOperated.includes(record.id)){data().flightsOperated.push(record.id);data().flightsOperated=data().flightsOperated.slice(-96);const airline=account('regional-air'),fuel=account('vehicle-showroom'),cost=Math.min(24,airline.cash);airline.cash-=cost;fuel.cash+=cost;}}
  function runwayAvailable({airportId,departure,arrival}){const external=(raw().cityVisitors?.airportTraffic?.flights||[]).filter(f=>(f.airportId||'city')===airportId);return visitorRunwaySlot(departure,arrival-departure,external,airportId)===departure;}
  function addChoices(f,clock,add){
+  if(f.alive&&f.citizenshipCountryId===COUNTRY_IDS.north&&countryAt(f)===COUNTRY_IDS.north&&!f.traveling&&!f.onPlane&&!f.onTrain&&!f.countryAirTrip&&f.energy>55&&f.hunger<45&&clock.hour>=9&&clock.hour<=17&&weatherDanger()<.25){
+   const venue=sportsDestination(f.id);
+   add(venue.id,`visiting ${venue.name}`,14+Number(f.stress||0)*.4+Number(f.traits?.sociability||.5)*12);
+  }
   if(!f.alive||f.kind==='visitor'||f.ageYears<18||f.traveling||f.airTrip||f.countryAirTrip||f.onPlane||f.onTrain||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.urbanTask||f.civicDuty||f.health<65||f.energy<55||wallet(f)<400||weatherDanger()>.25||clock.hour<6||clock.hour>17||now()-Number(f.lastCountryFlightAt??-8*DAY)<7*DAY)return;
   const origin=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f));if(!origin)return;
   const destinations=COUNTRY_AIRPORTS.filter(p=>p.id!==origin.id);let hash=Math.floor(now()/DAY);for(const c of String(f.id))hash=(Math.imul(hash,31)+c.charCodeAt(0))>>>0;
-  const destination=destinations[hash%destinations.length];add(origin.locationId,`regional holiday to ${destination.id}`,8+Number(f.stress||0)*.2+Number(f.traits?.ambition||.5)*10+Number(f.traits?.sociability||.5)*8);
+  const score=8+Number(f.stress||0)*.2+Number(f.traits?.ambition||.5)*10+Number(f.traits?.sociability||.5)*8;
+  const northSports=origin.id==='city'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex&&regionalJourneyBudget(f,'north',{priceLevel:raw().centralBank?.priceLevel}).affordable;
+  const destination=destinations[hash%destinations.length];
+  if(!northSports||destination.id!=='north')add(origin.locationId,`regional holiday to ${destination.id}`,score);
+  if(northSports&&hash%4!==0)add(origin.locationId,'regional holiday to north',score+24);
+
  }
  return{init,book,request,handleResident,addChoices,tick,snapshot,runwayAvailable};
 }

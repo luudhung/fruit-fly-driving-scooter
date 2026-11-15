@@ -1,3 +1,4 @@
+import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
@@ -1618,7 +1619,7 @@ function replenishResidents(target,reason) {
   const before=state.flies.filter(f=>f.alive).length;
   const arrivals=[];
   for(let count=before;count<Math.min(target,MAX_POPULATION);count++){
-    const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);state.flies.push(fly);arrivals.push(fly);
+    const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);fly.lifeSkillsOnboarding=true;state.flies.push(fly);arrivals.push(fly);
   }
   const added=state.flies.filter(f=>f.alive).length-before;
   if(added){
@@ -2015,13 +2016,27 @@ function ensureAcademyTeacher(force=false){
   });
   return current;
 }
-function educationTick(fly,clock){
+function localSchool(fly){
+  return financialHomeCountry(fly)==='north-city'?'north-school':fly.homeX>480?'riverside-school':'school';
+}
+function educationTick(fly,clock,elapsed){
   ensureCognitiveProfile(fly);
-  if(fly.ageYears<5||fly.ageYears>=18)return;
-  if(!["school","riverside-school"].includes(fly.currentLocationId)||!String(fly.action||"").includes("studying"))return;
-  const schoolId=fly.currentLocationId;
-  const teacher=schoolId==="school"?ensureAcademyTeacher():state.flies.find(f=>f.alive&&f.jobId==="riverside-school");
-  const teacherPresent=teacher&&!teacher.traveling&&teacher.indoors&&teacher.currentLocationId===schoolId&&(String(teacher.action||"").includes("teaching")||String(teacher.action||"").startsWith("working"));
+  if(fly.ageYears<5){
+    if(!fly.indoors||fly.currentLocationId!==fly.homeId||!fly.parents?.length)return;
+    const guardian=fly.parents.some(id=>state.flies.some(f=>f.id===id&&f.alive&&f.indoors&&!f.traveling&&f.currentLocationId===fly.homeId&&f.householdId===fly.householdId));
+    const completed=lifeSkillsLesson(fly,{now:state.simulationAgeSeconds,elapsed,schoolId:fly.homeId,supervised:guardian,earlyCare:true});
+    if(completed)brainRemember(fly,'life_skills_lesson',{subject:completed,locationId:fly.homeId});
+    return;
+  }
+  if(fly.ageYears>=18&&(!fly.lifeSkillsOnboarding||fly.lifeSkills?.graduatedAt))return;
+  const schoolId=localSchool(fly);
+  if(fly.currentLocationId!==schoolId||!fly.indoors||!String(fly.action||'').includes('studying'))return;
+  const teacher=schoolId==='school'?ensureAcademyTeacher():schoolId==='north-school'
+    ? nationalServices.roster('education').find(f=>!f.traveling&&f.nationalServiceDuty?.targetId===schoolId&&Math.hypot(f.x-fly.x,f.z-fly.z)<40)
+    : state.flies.find(f=>f.alive&&f.jobId==='riverside-school');
+  const teacherPresent=Boolean(teacher&&!teacher.traveling&&(schoolId==='north-school'||teacher.indoors&&teacher.currentLocationId===schoolId&&(String(teacher.action||'').includes('teaching')||String(teacher.action||'').startsWith('working'))));
+  const completed=lifeSkillsLesson(fly,{now:state.simulationAgeSeconds,elapsed,schoolId,supervised:teacherPresent});
+  if(completed)brainRemember(fly,'life_skills_lesson',{teacherId:teacher.id,subject:completed,locationId:schoolId});
   const teacherSkill=teacher?Number(teacher.professionSkills?.teaching||0.65):0.35;
   const boost=(teacherPresent?1.35:0.72)*(0.65+teacherSkill*0.45)*(0.55+fly.learningRate*0.55);
   fly.educationLevel=clamp(fly.educationLevel+0.0018*boost,0,100);
@@ -2033,7 +2048,7 @@ function educationTick(fly,clock){
   if(fly.lastEducationDay!==clock.day){
     fly.lastEducationDay=clock.day;fly.schoolDays+=1;fly.teacherId=teacher?.id||null;
     brainRemember(fly,"school_day",{teacherId:fly.teacherId,educationLevel:fly.educationLevel});
-    if(brainRand(fly)<0.16)emit("school",`${fly.id} attended Hansdrex Academy with teacher ${fly.teacherId||"independent study"}.`,{flyId:fly.id,teacherId:fly.teacherId});
+    if(brainRand(fly)<0.16)emit("school",`${fly.id} attended ${location(schoolId).name} with teacher ${fly.teacherId||"independent study"}.`,{flyId:fly.id,teacherId:fly.teacherId});
   }
   if(teacherPresent){
     teacher.professionSkills.teaching=clamp(Number(teacher.professionSkills.teaching||0)+0.000002,0,1);
@@ -2057,7 +2072,7 @@ function nearestTransitStation(x, z) {
 
 function chooseTravelMode(fly,dest){
  if(onIsland(fly)||onIsland(dest))return{mode:"walk",metro:null,route:pedestrianRoute(fly,dest)};
- const distance=Math.hypot(dest.x-fly.x,dest.z-fly.z),danger=weatherDanger(),car=String(fly.vehicle||'').includes('car'),thrifty=Number(fly.traits?.thrift||0)>=.76;
+ const distance=Math.hypot(dest.x-fly.x,dest.z-fly.z),danger=weatherDanger(),car=readyToDrive(fly)&&String(fly.vehicle||'').includes('car'),thrifty=Number(fly.traits?.thrift||0)>=.76;
  const drive=()=>{
   const park=roadLife.destination(fly,dest),at=fly.traveling&&fly.transitMode==='car'?{x:fly.x,z:fly.z}:fly.parkedCar;
   const route=buildRoadRoute(fly,dest,'car',at,park);
@@ -2067,7 +2082,7 @@ function chooseTravelMode(fly,dest){
  const metro=distance>34?planMetroRoute(fly,dest):null;
  if(metro&&(fly.transitPass||fly.money+fly.savings>=metro.fare)&&(thrifty||distance>80||!car))return{mode:'metro',metro,route:metro.waypoints};
  if(car&&distance>45&&fly.money+fly.savings>.3&&danger<.94){const plan=drive();if(plan)return plan;}
- if(fly.vehicle==='scooter'&&distance>35&&distance<170&&danger<.42)return{mode:'scooter',metro:null,route:buildRoadRoute(fly,dest,'scooter',fly.parkedCar,roadLife.destination(fly,dest))};
+ if(readyToDrive(fly)&&fly.vehicle==='scooter'&&distance>35&&distance<170&&danger<.42)return{mode:'scooter',metro:null,route:buildRoadRoute(fly,dest,'scooter',fly.parkedCar,roadLife.destination(fly,dest))};
  return{mode:'walk',metro:null,route:buildPedestrianRoute(fly,dest)};
 }
 
@@ -2628,6 +2643,9 @@ function brainChooseAction(fly, clock) {
     if(urbanWorld.isUnavailable(id,fly))return;
     const site=id===fly.homeId?{x:fly.homeX,z:fly.homeZ}:LOCATIONS.find(l=>l.id===id)||BUILDINGS.find(l=>l.id===id);
     if(site){const toCountry=economicCountryAt(site),cost=countries.travelCost(fly,toCountry);if(cost.closed||!cost.affordable)return;const fromCountry=economicCountryAt(fly);if(fromCountry!==toCountry&&[fromCountry,toCountry].includes('hawaii')&&!regionalJourneyBudget(fly,toCountry==='hawaii'?'island':toCountry==='north-city'?'north':'city',{priceLevel:state.centralBank?.priceLevel}).affordable)return;utility-=cost.entryFee*.4;}
+    const courses=fly.lifeSkills?.completed;
+    if(courses?.includes('home')&&id===fly.homeId)utility+=Math.max(0,55-Number(fly.energy||0))*.12;
+    if(courses?.includes('nutrition')&&/eating|meal|food/.test(action))utility+=Math.max(0,Number(fly.hunger||0)-25)*.12;
     const learned = Number(brain.memory.locationReward[id] || 0) * 4;
     const novelty = brain.dynamic.curiosity * brain.plasticity.noveltyBias * brainRange(fly, -1.2, 2.4);
     const noise = brainRange(fly, -2.5, 2.5);
@@ -2758,15 +2776,16 @@ function brainChooseAction(fly, clock) {
     add("park", "smoke break", 42 + fly.stress * 0.5 + brain.plasticity.riskBias * 8);
   }
 
-  if(age>=5&&age<18){
+  if(age>=5&&(age<18||fly.lifeSkillsOnboarding&&!fly.lifeSkills?.graduatedAt)){
     const teacherQuality=teacher?Number(teacher.professionSkills?.teaching||0.7):0.4;
     const schoolWindow=circularHourInWindow(clock.hour,fly.chronotype==="early"?7:fly.chronotype==="late"?10:8,8);
     const familyEducation=fly.parents?.length
       ? fly.parents.map((id)=>state.flies.find((p)=>p.id===id)).filter(Boolean).reduce((a,p)=>a+Number(p.educationLevel||40),0)/Math.max(1,fly.parents.length)/100
       : 0.5;
     if(schoolWindow){
-      add(economicCountryAt(fly)==='north-city'?'north-school':fly.homeX>480?"riverside-school":"school",economicCountryAt(fly)==='north-city'?'studying at North City Community School':"studying at Hansdrex Academy",
-        82+teacherQuality*18+fly.learningRate*14+familyEducation*10+brain.dynamic.curiosity*12-fly.stress*0.14-fly.sleepDebt*0.12);
+      const schoolId=localSchool(fly);
+      add(schoolId,`studying practical skills at ${location(schoolId).name}`,
+        (fly.lifeSkillsOnboarding&&!fly.lifeSkills?.graduatedAt?106:82)+teacherQuality*18+fly.learningRate*14+familyEducation*10+brain.dynamic.curiosity*12-fly.stress*0.14-fly.sleepDebt*0.12);
     }
     if(!schoolWindow && fly.energy>35 && (brain.dynamic.curiosity+fly.intelligence)>1.0){
       add("library","self-studying after hours",32+fly.intelligence*16+brain.dynamic.curiosity*20);
@@ -2889,7 +2908,7 @@ function residentGroundTravelPlan(fly,dest,mode){
   const preview=countries.planJourney(fly,dest,{mode:mode==='walk'?'walk':'car'});
   if(!preview.allowed||preview.airportRequired)return {...preview,route:[]};
   let plan=mode==='walk'?{mode:'walk',route:buildPedestrianRoute(fly,dest)}:
-    mode==='car'&&String(fly.vehicle||'').includes('car')?{mode:'car',route:buildRoadRoute(fly,dest,'car',fly.parkedCar,roadLife.destination(fly,dest))}:chooseTravelMode(fly,dest);
+    mode==='car'&&readyToDrive(fly)&&String(fly.vehicle||'').includes('car')?{mode:'car',route:buildRoadRoute(fly,dest,'car',fly.parkedCar,roadLife.destination(fly,dest))}:chooseTravelMode(fly,dest);
   const internationalMetro=plan.metro&&(plan.route||plan.metro.waypoints||[]).some(p=>economicCountryAt(p)!==from);
   if(internationalMetro)plan={mode:'walk',route:[]};
   if(foreign&&(plan.mode==='walk'||plan.mode==='metro'||!plan.route?.some(p=>p.mode==='car'||p.mode==='scooter'))){
@@ -3274,7 +3293,7 @@ function productionAndRetail(fly, clock, gameSeconds=activeGameStepSeconds) {
       if(fly.lastWorkEventDay!==clock.day){fly.lastWorkEventDay=clock.day;brainRemember(fly,"shift_started",{job:fly.jobTitle,locationId:workLoc});if(brainRand(fly)<0.25)emit("work",`${fly.id} started work as ${fly.jobTitle||"worker"} on a self-chosen schedule.`,{flyId:fly.id,jobTitle:fly.jobTitle,start:fly.preferredWorkStart});}
     }
   }
-  educationTick(fly,clock);
+  educationTick(fly,clock,gameSeconds);
 
   if (fly.jobId === "farm" && fly.currentLocationId === "farm" && String(fly.action).startsWith("working")) {
     state.businesses.farm.inventory += 0.08 * (0.5 + fly.traits.ambition);
@@ -3866,6 +3885,7 @@ function completePregnancy(fly) {
   for (let i = 0; i < litter && state.flies.filter((f) => f.alive).length < MAX_POPULATION; i += 1) {
     const child = createFly(state.flies.length, [fly, father]);
     inheritHousehold(child, fly);
+    child.lifeSkillsOnboarding=true;
     state.flies.push(child);
     fly.children.push(child.id);
     father.children.push(child.id);
@@ -4505,6 +4525,7 @@ function compactFly(f) {
     intelligence: Number((f.intelligence||0).toFixed(3)),
     learningRate: Number((f.learningRate||0).toFixed(3)),
     educationLevel: Number((f.educationLevel||0).toFixed(2)),
+    lifeSkills:f.lifeSkills?.completed||[],
     knowledge: f.knowledge||{},
     teacherId: f.teacherId||null,
     schoolDays: Number(f.schoolDays||0),
@@ -4545,6 +4566,28 @@ function visitorSnapshot(options){
  data.visitors=cityVisitors.visitors().map(f=>({...observerFly(f,options.selectedId),kind:'visitor',taxiPassenger:Boolean(f.taxiPassenger),departAt:f.departAt,hotelId:f.hotelId}));
  return data;
 }
+function mainlandStats(living){
+  const make=()=>({residents:0,working:0,traveling:0,indoors:0,students:0,graduates:0,fires:0,projects:0});
+  const result={hansdrex:make(),'north-city':make()};
+  for(const f of living){
+    const nation=result[financialHomeCountry(f)];if(!nation)continue;
+    nation.residents++;
+    if(f.traveling)nation.traveling++;
+    if(f.indoors)nation.indoors++;
+    if(f.jobId||f.businessId||f.businessEmployeeOf||f.facilityEmployment)nation.working++;
+    if(f.ageYears>=5&&f.ageYears<18||f.lifeSkillsOnboarding&&!f.lifeSkills?.graduatedAt)nation.students++;
+    if(f.lifeSkills?.graduatedAt)nation.graduates++;
+  }
+  const urban=state.urbanWorld;
+  for(const [rows,key] of [[urban?.fires,'fires'],[urban?.projects,'projects']]){
+    for(const row of rows||[]){
+      if(row.containedAt||['complete','cancelled'].includes(row.stage))continue;
+      const b=urban.buildings[row.buildingId];
+      const nation=result[b?.countryId||economicCountryAt(b)];if(nation)nation[key]++;
+    }
+  }
+  return result;
+}
 function getState(options={}) {
   const living = state.flies.filter((f) => f.alive);
   const housingCounts=housingOccupancy(state.housing,living);
@@ -4553,6 +4596,7 @@ function getState(options={}) {
   const selected = options.selectedId?neuralActors().find(f=>f.id===options.selectedId)||living[0]||null:living[0]||null;
   return {
     authoritative: true,
+    mainlandStats:mainlandStats(living),
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
     modelDisclosure: "Each living fly is assigned the complete 139,255-neuron, 15,091,983-edge FlyWire LIF graph. Shared topology is packed losslessly; membrane voltage, refractory and synaptic states and spikes are checkpointed independently per brain. Actual neural activity biases city decisions and movement through a synthetic sensory/behavior interface. The neuralBridge reports measured connection and step counters; disconnected or stale brains are not counted as running. Neural batches are CPU-budgeted and are not biological real time. The model remains an approximate LIF and city model, not a validated biological city simulation.",
     worldId: WORLD_ID,

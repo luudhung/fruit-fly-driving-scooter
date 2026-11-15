@@ -60,7 +60,6 @@
     .bottom{position:fixed;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);width:min(820px,calc(100vw - 28px));pointer-events:none}
     .notice{padding:10px 12px;border-radius:14px;font-size:9px;line-height:1.45;color:rgba(236,245,241,.64)}
     .notice b{color:#fff}
-    .hint{position:fixed;z-index:8;left:50%;bottom:78px;transform:translateX(-50%);max-width:700px;width:calc(100vw - 60px);text-align:center;padding:9px 12px;border-radius:10px;background:rgba(8,18,16,.7);font:700 9px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.7);pointer-events:none}
     .mobile-controls{display:none;position:fixed;z-index:12;inset:0;pointer-events:none;touch-action:none}
     .mobile-pad,.mobile-altitude{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));display:grid;gap:var(--touch-gap);pointer-events:none}
     .mobile-pad{left:max(16px,env(safe-area-inset-left));grid-template-columns:repeat(3,var(--touch-size));grid-template-areas:". up ." "left down right"}
@@ -68,7 +67,7 @@
     .mobile-control{pointer-events:auto;width:var(--touch-size);height:var(--touch-size);border-radius:calc(var(--touch-size)*.27);border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.34);backdrop-filter:blur(5px);color:rgba(255,255,255,.72);font:900 calc(var(--touch-size)*.38)/1 system-ui;box-shadow:0 6px 18px rgba(0,0,0,.12);touch-action:none;user-select:none;-webkit-user-select:none}
     body.show-city-log .left{display:block!important}body.show-city-log .left .card:not(#events-card){display:none}body.show-city-log #events-card{display:block}body.show-city-log .events{max-height:55dvh}
     .mobile-control[data-key="KeyQ"]{visibility:hidden}body.player-flying .mobile-control[data-key="KeyQ"]{visibility:visible}
-    body.scenic-view .left,body.scenic-view .right,body.scenic-view .hint,body.scenic-view #mobile-inspector-toggle{display:none}
+    body.scenic-view .left,body.scenic-view .right,body.scenic-view #mobile-inspector-toggle{display:none}
     .mobile-control:active,.mobile-control.active{background:rgba(255,255,255,.20);color:#fff;transform:scale(.96)}
     .mobile-control[data-key="KeyW"]{grid-area:up}.mobile-control[data-key="KeyA"]{grid-area:left}.mobile-control[data-key="KeyS"]{grid-area:down}.mobile-control[data-key="KeyD"]{grid-area:right}
     body.player-driving .mobile-pad{position:static;display:contents}
@@ -82,7 +81,7 @@
     .mobile-inspector-toggle{display:none;position:fixed;right:18px;top:74px;z-index:14;border:1px solid rgba(255,255,255,.18);background:rgba(8,18,16,.55);backdrop-filter:blur(5px);color:rgba(255,255,255,.82);border-radius:14px;padding:10px 12px;font:800 11px/1 system-ui;letter-spacing:.08em}
     @media(max-width:980px),(pointer:coarse){
       .settings-menu{position:fixed;top:calc(var(--toolbar-bottom,126px) + 8px);left:auto;right:14px;width:min(320px,calc(100vw - 28px));max-height:calc(100dvh - var(--toolbar-bottom,126px) - 150px);overflow-y:auto}
-      .hint{display:none}.mobile-controls{display:block}.mobile-inspector-toggle{display:block}
+      .mobile-controls{display:block}.mobile-inspector-toggle{display:block}
       .right{display:block;position:fixed;top:118px;right:12px;bottom:110px;width:min(86vw,340px);z-index:13;overflow:auto;transform:translateX(calc(100% + 28px));transition:transform .22s ease;pointer-events:none}
       body.mobile-inspector-open .right{transform:translateX(0);pointer-events:auto}
       .right .card{background:rgba(8,18,16,.94);box-shadow:0 12px 32px rgba(0,0,0,.24)}
@@ -144,7 +143,6 @@
       </div>
     </div>
   </div>
-  <div class="hint">WASD / ARROWS WALK · SPACE JUMP · DOUBLE-TAP SPACE / ↟ TO FLY · HOLD TO RISE · SHIFT / Q / − TO DESCEND · DOUBLE-TAP W FOR 2× SPEED · CTRL SPRINT · DRAG LOOK · F FOLLOW · C CITY VIEW</div>
 
   <aside class="left">
     <section class="card" id="aviation-card">
@@ -152,8 +150,12 @@
       <div class="legend" style="padding-top:10px"><span id="aviation-board">Connecting to departures…</span><br><span id="aviation-fares">Island flights, full-board resort and airport helicopter tours.</span><br>Residents buy their own tickets and keep an essential-spending reserve. Camera: tap ▲ twice and hold for 4× speed.</div>
     </section>
     <section class="card" id="city-card">
-      <div class="head"><span>Hansdrex City</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
+      <div class="head"><span>Thống kê thành phố</span><button class="panel-toggle" data-panel="city-card" type="button">−</button></div>
       <div class="legend" style="padding-top:10px"><span id="city-activity">Connecting to city…</span><br><span id="transit-activity">Connecting to transit…</span><br><span id="urban-activity"></span><br><span id="visitor-activity"></span><br><span id="sports-activity"></span><br><span id="civic-activity"></span><br><span id="private-family-activity"></span><br><span id="riverside-residents"></span><br><span id="public-service-activity"></span><br><span id="industry-activity"></span></div>
+      <div class="stats">
+        <div class="stat"><span>Hansdrex</span><b id="hansdrex-stats" style="font-size:11px;line-height:1.65;white-space:pre-line">—</b></div>
+        <div class="stat"><span>North City</span><b id="north-city-stats" style="font-size:11px;line-height:1.65;white-space:pre-line">—</b></div>
+      </div>
       <div class="legend" id="district-economy" style="white-space:pre-line;padding-top:10px"></div>
       <div class="stats">
         <div class="stat"><span>World age</span><b id="world-age">—</b></div>
@@ -166,7 +168,7 @@
         <div class="stat"><span>Deaths · since city began</span><b id="deaths">—</b></div>
         <div class="stat" style="grid-column:1/-1"><span>Public support · live policy</span><b id="welfare-policy" style="font-size:11px;line-height:1.5">—</b></div>
         <div class="stat"><span>Food reserve</span><b id="food">—</b></div>
-        <div class="stat"><span>Hansdrex Dollar supply</span><b id="money">—</b></div>
+        <div class="stat"><span>Tổng cung H$ · toàn thế giới</span><b id="money">—</b></div>
         <div class="stat"><span>Inflation</span><b id="inflation">—</b></div>
         <div class="stat"><span>Employed</span><b id="employed">—</b></div>
         <div class="stat"><span>President</span><b id="president">—</b></div>

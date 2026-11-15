@@ -86,6 +86,24 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  }
  function duty(f,e,phase){f.fireEngineDuty={vehicleId:e.id,kind:e.kind,phase};f.roadDuty=false;f.mobilityShopping=false;f.sleeping=false;f.actionUntil=0;}
  function releaseCrew(f,e){if(!f||f.fireEngineDuty?.vehicleId!==e.id)return;f.fireEngineDuty=null;f.onFireEngine=false;f.onAmbulance=false;if(f.urbanTask?.engineId===e.id)f.urbanTask=null;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;f.actionUntil=now()+600;f.action='returned from an emergency response';}
+ function recoveryPickup(e,id){
+  return Boolean(e?.repatriating&&e.phase==='gathering-return'&&id===`EMERGENCY-PICKUP-${e.id}`);
+ }
+ function validCrewRoute(e,f,commuting){
+  const own=countryFor(e),origin=countryAt(f),destination=recoveryPickup(e,f.targetLocationId)?countryAt(e):own;
+  const allowCrossing=commuting||recoveryPickup(e,f.targetLocationId)&&origin!==destination;
+  let at=f,entered=origin===destination;
+  for(const point of (f.routeWaypoints||[]).slice(f.routeIndex||0)){
+   const from=countryAt(at),to=countryAt(point);
+   if(allowCrossing&&from!==to){
+    const port=BORDER_CHECKPOINTS.find(p=>p.id===point.portId&&p.modes.includes('walk'));
+    if(entered||from!==origin||to!==destination||point.stage!=='border-entry'||!port)return false;
+    entered=true;
+   }else if(!emergencyCountrySegment(allowCrossing?from:e.repatriating?origin:own,at,point))return false;
+   at=point;
+  }
+  return !allowCrossing||entered;
+ }
  function requestJourney(f,id,action,mode){
   if(f.onTrain||f.onPlane||f.onPrivateHelicopter||f.heliPassenger)return false;
   if(startJourney){
@@ -93,10 +111,14 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    // National crews report on the ground. Selecting a new metro transfer here
    // can strand the only two available responders while a fire grows.
    if(depotFor(e||{})&&e.phase==='loading'&&id===e.homeLocationId&&!mode)mode='walk';
-   startJourney(f,{id,action,mode});if(e&&f.traveling){let at=f,entered=countryAt(f)===own,valid=true;for(const p of (f.routeWaypoints||[]).slice(f.routeIndex||0)){
-    if(commuting){const a=countryAt(at),b=countryAt(p);if(entered&&b!==own||!entered&&![origin,own].includes(b)||a===b&&!emergencyCountrySegment(a,at,p)){valid=false;break;}if(b===own)entered=true;}
-    else if(!emergencyCountrySegment(e.repatriating?origin:own,at,p)){valid=false;break;}at=p;
-   }if(!valid){f.traveling=false;f.routeWaypoints=[];f.emergencyRouteWait='awaiting a domestic emergency route or lawful staff return';}}
+   // A stranded legacy vehicle can be collected on foot via immigration.
+   // This exception does not authorize a new foreign rescue assignment.
+   if(recoveryPickup(e,id))mode='walk';
+   startJourney(f,{id,action,mode});
+   if(e&&f.traveling&&!validCrewRoute(e,f,commuting)){
+    f.traveling=false;f.routeWaypoints=[];
+    f.emergencyRouteWait='awaiting a domestic emergency route or lawful staff return';
+   }
    return;
   }
   const p=loc(id);if(!p)return;f.routeWaypoints=pedestrianRoute(f,p);f.routeIndex=0;f.targetLocationId=id;f.traveling=Boolean(f.routeWaypoints.length);f.action=action;
@@ -244,7 +266,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    const p=alive(e.patientId);if(!p){clearPatient(e);returnRoute(e);return;}if(!p.traveling&&p.currentLocationId===e.hospitalId){p.health=Math.min(65,p.health+8);p.stress=cap(p.stress-8);remember(p,'ambulance_hospital_arrival',{vehicleId:e.id,hospitalId:e.hospitalId});data().hospitalDeliveries++;clearPatient(e,'admitted for emergency treatment');returnRoute(e);}return;
   }
   if(e.phase==='gathering-return'){
-   const atPickup=e.crewIds.filter(id=>{const f=alive(id);return f&&!f.traveling&&(f.currentLocationId===`EMERGENCY-PICKUP-${e.id}`||dist(f,e.pickup||e)<6);});
+   const atPickup=e.crewIds.filter(id=>{const f=alive(id);return f&&!f.traveling&&countryAt(f)===countryAt(e)&&dist(f,e.pickup||e)<6;});
    if(atPickup.length===e.crewIds.length||(atPickup.length&&now()-Number(e.gatherStartedAt||0)>=3600)){
     for(const id of e.crewIds)if(!atPickup.includes(id))releaseCrew(alive(id),e);
     e.crewIds=atPickup;board(e,e.crewIds);returnRoute(e);

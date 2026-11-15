@@ -37,7 +37,22 @@ export const NORTH_MILITARY_WALLS=[
 export const NORTH_GUARD_POSTS=[{id:'NORTH-GATE-W',x:264,z:-974},{id:'NORTH-GATE-E',x:276,z:-974}];
 export function northMilitaryPerimeterBlocked(p,margin=0){return NORTH_MILITARY_WALLS.some(b=>Math.abs(p.x-b.x)<b.w/2+margin&&Math.abs(p.z-b.z)<b.d/2+margin);}
 const facility=(id,name,x,z,w,d,h,type)=>({id,name,x,z,w,d,h,type,kind:'country-service',countryId:COUNTRY_IDS.north});
+export const NORTH_WHITE_HOUSE=facility('north-white-house','North City White House',-487,-745,42,30,13,'government');
+export const NORTH_MATERIALS_YARD=facility('north-materials-yard','North City Construction Depot',197,-963,20,10,8,'job');
+export const NORTH_SPORTS_PARK={
+ id:'north-sports-park',name:'North City Airport Sports Park',x:-696,z:-745,w:300,d:250,
+ gate:{x:-550,z:-609},clubhouse:facility('north-sports-club','Airport Sports Clubhouse',-563,-631,24,16,7,'leisure'),
+ golf:{x:-728,z:-745,w:226,d:208},
+ tennis:Array.from({length:4},(_,i)=>({x:-586+(i%2)*20,z:-796+Math.floor(i/2)*39,w:17,d:34})),
+ football:{x:-588,z:-701,w:48,d:76},
+ activities:[
+  {id:'north-golf',name:'North Airport Golf',type:'social',x:-713,z:-648},
+  {id:'north-tennis',name:'North Airport Tennis',type:'social',x:-550,z:-765},
+  {id:'north-football',name:'North Airport Football',type:'social',x:-552,z:-687},
+ ],
+};
 export const NORTH_BUILDINGS=[
+ NORTH_WHITE_HOUSE,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK.clubhouse,
  facility('north-airport','North City International Airport',-908,-820,36,64,10,'transit'),
  facility('north-police','North City Police',110,-1042,24,20,12,'law'),
  facility('north-hospital','North City General Hospital',110,-978,24,24,15,'health'),
@@ -52,13 +67,15 @@ export const NORTH_BUILDINGS=[
  {id:'north-farm-barn',name:'North City Farm Store and Packing House',x:260,z:-938,w:54,d:8,h:8,kind:'farm-service',countryId:COUNTRY_IDS.north},
  NORTH_LANDMARK,
 ];
-export const NORTH_LOCATIONS=[...NORTH_BUILDINGS.map(b=>({id:b.id,name:b.name,type:b.type||'job',x:b.x,z:b.z})),{id:NORTH_FARM.id,name:NORTH_FARM.name,type:'production',...NORTH_FARM.gate},{id:'north-drill',name:'North City Formation Ground',type:'public-duty',x:270,z:-995}];
+export const NORTH_LOCATIONS=[...NORTH_SPORTS_PARK.activities,...NORTH_BUILDINGS.map(b=>({id:b.id,name:b.name,type:b.type||'job',x:b.x,z:b.z})),{id:NORTH_FARM.id,name:NORTH_FARM.name,type:'production',...NORTH_FARM.gate},{id:NORTH_SPORTS_PARK.id,name:NORTH_SPORTS_PARK.name,type:'social',...NORTH_SPORTS_PARK.gate},{id:'north-drill',name:'North City Formation Ground',type:'public-duty',x:270,z:-995}];
 export const NORTH_ROADS=[
  {id:'NORTH-AIRPORT-AVENUE',x:-880,z:-870,w:9.5,d:160},
  {id:'NORTH-AIRPORT-BOULEVARD',x:-655,z:-950,w:450,d:9},
  ...[-950,-600].map(z=>({id:`NORTH-EAST-CROSS-STREET-${z}`,x:215,z,w:330,d:9})),
  ...[130,374].map(x=>({id:`NORTH-FARM-AVENUE-${x}`,x,z:-835,w:9.5,d:470})),
  {id:'NORTH-CIVIC-NORTH-STREET',x:90,z:-1070,w:80,d:9},
+ {id:'NORTH-PRESIDENTIAL-WAY',x:-461,z:-721,w:62,d:8},
+ {id:'NORTH-SPORTS-LINK',x:-537,z:-600,w:34,d:8},
  {id:'NORTH-FIRE-ACCESS',x:155,z:-640,w:50,d:9},
 ];
 // Cottages host existing seasonal workers and guests; they do not seed new citizens.
@@ -73,4 +90,16 @@ export const BORDER_CHECKPOINTS=[bridge('NORTH-CITY-BRIDGE-1',-520,-570,'z',16),
 export const COUNTRY_BORDER_PORTS=BORDER_CHECKPOINTS;
 export function borderDirection(port,toCountryId,mode='car'){return (mode==='walk'?port.walkDirections:port.directions)?.[toCountryId]||null;}
 export const BORDER_CUSTOMS_DECKS=BORDER_CHECKPOINTS.map(p=>({id:`${p.id}-CUSTOMS-DECK`,x:p.bounds.x,z:p.bounds.z,w:p.axis==='z'?(p.motorway?46:24):24,d:p.axis==='x'?(p.motorway?46:24):24}));
-export const BORDER_CUSTOMS_BUILDINGS=BORDER_CHECKPOINTS.flatMap(p=>[-1,1].map(side=>({id:`${p.id}-CUSTOMS-${side<0?'W':'E'}`,name:'International Border Customs',x:p.bounds.x+(p.axis==='z'?side*(p.motorway?21:10):0),z:p.bounds.z+(p.axis==='x'?side*(p.motorway?21:10):0),w:2.4,d:4,h:3,kind:'customs'})));
+// Stable building IDs. West-side booths belong to North, east-side booths to
+// Hansdrex, and each footprint sits entirely inside its own country.
+export const BORDER_CUSTOMS_BUILDINGS=BORDER_CHECKPOINTS.flatMap(port=>[-1,1].map(side=>{
+ const north=side<0,countryId=north?COUNTRY_IDS.north:COUNTRY_IDS.hansdrex;
+ const offset=port.motorway?20:10;
+ return {
+  id:`${port.id}-CUSTOMS-${north?'W':'E'}`,
+  name:north?'North City Customs':'Hansdrex Customs',
+  x:port.bounds.x+(port.axis==='z'?side*offset:side*8),
+  z:port.bounds.z+(port.axis==='x'?side*offset:side*8),
+  w:2.4,d:4,h:3,kind:'customs',countryId
+ };
+}));
