@@ -24,6 +24,12 @@ test('public fleet and real employee roster initialize once and stay bounded acr
  const t=setup(),snapshot=t.service.snapshot();assert.equal(snapshot.engines.length,3);assert.equal(snapshot.ambulances.length,2);assert.equal(snapshot.roster.length,15);assert.equal(new Set(snapshot.roster.map(f=>f.id)).size,15);const ids=snapshot.roster.map(f=>f.id),before=money(t.s);
  t.restore();assert.deepEqual(t.service.snapshot().roster.map(f=>f.id),ids);assert.equal(t.service.snapshot().engines.length,3);assert.equal(money(t.s),before);
 });
+test('recruitment and dispatch preserve an ongoing household care appointment',()=>{
+ const t=setup(),lost=t.s.flies.find(f=>f.jobId==='firefighter'),caregiver=t.s.flies.find(f=>!f.jobId),appointment={id:'SOCIAL-CARE-1',kind:'care',targetId:'HOUSEHOLD-MEMBER',expiresAt:10800,onsiteSeconds:600};
+ lost.alive=false;caregiver.socialTask=structuredClone(appointment);const career=caregiver.jobId;t.restore();
+ const saved=t.s.flies.find(f=>f.id===caregiver.id);assert.equal(saved.jobId,career);assert.deepEqual(saved.socialTask,appointment);assert.ok(!t.service.snapshot().roster.some(f=>f.id===saved.id));
+ const responder=t.s.flies.find(f=>f.alive&&f.jobId==='firefighter');responder.socialTask=structuredClone(appointment);const e=t.service.dispatchFire(t.fire(),t.clock());assert.ok(e);assert.ok(!e.crewIds.includes(responder.id));assert.deepEqual(responder.socialTask,appointment);
+});
 test('fire crew gathers in the garage, drives physically, deploys and brings the engine back',()=>{
  const t=setup(),fire=t.fire(),before=money(t.s),e=t.service.dispatchFire(fire,t.clock());assert.ok(e);assert.equal(e.phase,'loading');assert.equal(e.x,830);assert.equal(e.crewIds.length,3);assert.ok(e.crewIds.every(id=>t.s.flies.find(f=>f.id===id).jobId==='firefighter'));assert.equal(t.s.urbanWorld.fireService.operatingCosts,0);
  t.step();assert.equal(e.phase,'pullout');assert.ok(e.crewIds.every(id=>t.s.flies.find(f=>f.id===id).onFireEngine));t.step();assert.ok(e.x>830&&e.x<850,'engine actually leaves its bay');
