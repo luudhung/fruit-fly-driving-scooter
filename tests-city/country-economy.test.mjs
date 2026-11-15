@@ -63,3 +63,11 @@ test('farm employment keeps off-shift ordinary life free, while a real upcoming 
 test('a hungry onsite farmer can leave for a finite meal without losing employment or collecting work wages',()=>{
  const t=fixture(),f=t.f;assert.equal(t.service.economy.applyJob(f),true);const pin=LOCATIONS.find(p=>p.id===f.internationalWork.locationId);Object.assign(f,{x:pin.x,z:pin.z,currentLocationId:pin.id,hunger:95});const money=f.money;assert.equal(t.service.economy.handleResident(f,{hour:8}),false);t.s.simulationAgeSeconds+=1800;t.service.economy.tick(1800,{hour:8});assert.equal(t.service.economy.handleResident(f,{hour:8}),false);assert.equal(f.money,money);assert.ok(f.internationalWork);assert.equal(t.s.internationalEconomy.planted,0);
 });
+
+
+test('a cargo order queued for two days gets its own real boarding window, retained across restore, before a genuine boarding timeout',()=>{
+ const t=fixture({moveFly:()=>{}}),f=t.f;assert.equal(t.service.economy.applyJob(f),true);const pin=LOCATIONS.find(p=>p.id===f.internationalWork.locationId);Object.assign(f,{x:pin.x,z:pin.z,currentLocationId:pin.id});const d=t.s.internationalEconomy;d.nextDecisionAt=Infinity;const source=t.s.businesses['north-market'];source.inventory=80;source.cash=500;const before=total(t.s);
+ const order=t.service.economy.requestShipment({sellerId:'north-market',buyerId:'farm:north-city',sourceLocationId:'north-market',destinationId:'north-farm',product:'seed grain',quantity:20,unitPrice:2});assert.ok(order);t.s.simulationAgeSeconds=2*86400;t.service.economy.tick(120,{hour:8});const truck=d.trucks.find(t=>t.orderId===order.id);assert.ok(truck?.boarding);assert.equal(truck.boardingStartedAt,2*86400);assert.equal(order.paid,false);assert.equal(f.internationalFreightDuty.orderId,order.id);
+ t.s.simulationAgeSeconds+=120;t.restore();const restored=t.s.internationalEconomy.orders.find(o=>o.id===order.id),boarding=t.s.internationalEconomy.trucks.find(t=>t.orderId===order.id);t.service.economy.tick(120,{hour:8});assert.equal(restored.paid,false);assert.equal(boarding.boardingStartedAt,2*86400);assert.equal(restored.phase,'collecting');
+ t.s.simulationAgeSeconds=3*86400+1;t.service.economy.tick(120,{hour:8});assert.equal(restored.phase,'cancelled');assert.equal(t.s.businesses['north-market'].inventory,80);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
