@@ -41,7 +41,7 @@ export const NORTH_WHITE_HOUSE=facility('north-white-house','North City White Ho
 export const NORTH_MATERIALS_YARD=facility('north-materials-yard','North City Construction Depot',197,-963,20,10,8,'job');
 export const NORTH_SPORTS_PARK={
  id:'north-sports-park',name:'North City Airport Sports Park',x:-696,z:-745,w:300,d:250,
- gate:{x:-550,z:-609},clubhouse:facility('north-sports-club','Airport Sports Clubhouse',-563,-631,24,16,7,'leisure'),
+ gate:{x:-550,z:-609},clubhouse:facility('north-sports-club','Airport Sports Club and Lodge',-563,-631,24,16,9,'hotel'),
  golf:{x:-728,z:-745,w:226,d:208},
  tennis:Array.from({length:4},(_,i)=>({x:-586+(i%2)*20,z:-796+Math.floor(i/2)*39,w:17,d:34})),
  football:{x:-588,z:-701,w:48,d:76},

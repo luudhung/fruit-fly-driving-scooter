@@ -23,7 +23,7 @@ test('an unaffordable foreign journey preserves the indoor pose and a poor hungr
 });
 
 test('tiny waypoint snaps and forged river shortcuts cannot charge through blocked geometry or bypass entry funds',()=>{
- const {s,f}=fixture(),before=liquidMoneySupply();Object.assign(f,{x:58.2,z:-569.7,targetX:58.6,targetZ:-570.1,transitMode:'walk',traveling:true,routeWaypoints:[{x:58.6,z:-570.1,mode:'walk'}],routeIndex:0});assert.equal(clearSegment(f,{x:f.targetX,z:f.targetZ}),false);const pose=[f.x,f.z];moveFly(f);assert.deepEqual([f.x,f.z],pose);assert.equal(f.money,200);assert.equal(f.countryEntryReceipts,undefined);close(liquidMoneySupply(),before);
+ const {s,f}=fixture(),before=liquidMoneySupply();Object.assign(f,{x:62.3,z:-569.7,targetX:62.7,targetZ:-570.1,transitMode:'walk',traveling:true,routeWaypoints:[{x:62.7,z:-570.1,mode:'walk'}],routeIndex:0});assert.equal(clearSegment(f,{x:f.targetX,z:f.targetZ}),false);const pose=[f.x,f.z];moveFly(f);assert.deepEqual([f.x,f.z],pose);assert.equal(f.money,200);assert.equal(f.countryEntryReceipts,undefined);close(liquidMoneySupply(),before);
  Object.assign(f,{x:56.2,z:-569.7,targetX:56.2,targetZ:-570.1,traveling:true,routeWaypoints:[{x:56.2,z:-570.1,mode:'walk'}],money:0,savings:0});assert.ok(clearSegment(f,{x:f.targetX,z:f.targetZ}));moveFly(f);assert.deepEqual([f.x,f.z],[56.2,-569.7]);assert.equal(f.traveling,false);assert.equal(f.countryEntryReceipts,undefined);
 });
 

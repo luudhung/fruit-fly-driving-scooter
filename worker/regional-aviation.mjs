@@ -39,7 +39,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function book(f,toId,{staySeconds=DAY,hotelId}={}){
   init();const from=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f)),to=airportById(toId);
   if(!f.alive||f.countryAirTrip||f.airTrip||f.onPlane||f.onTrain||f.traveling||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.taxiJobId||f.urbanTask||!from||!to||from.id===to.id||f.currentLocationId!==from.locationId||Math.hypot(f.x-from.terminal.x,f.z-from.terminal.z)>55||weatherDanger()>.3)return false;
-  const outbound=nextRegionalFlight(now(),from.id,to.id),inbound=nextRegionalFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),hotel=hotelId||hotelFor[to.id],cost=fares.roundTrip+fares.resortNight;
+  const outbound=nextRegionalFlight(now(),from.id,to.id),inbound=nextRegionalFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),hotel=hotelId||(from.id==='city'&&to.id==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex?NORTH_SPORTS_PARK.clubhouse.id:hotelFor[to.id]),cost=fares.roundTrip+fares.resortNight;
   const budget=regionalJourneyBudget(f,to.id,{priceLevel:raw().centralBank?.priceLevel}),visas=budget.visaReserve;
   if(!budget.affordable||!availableSeat(outbound)||!availableSeat(inbound))return false;
   const rooms=hotels(),h=rooms[hotel]||={id:hotel,capacity:to.id==='island'?24:16,rooms:{},pricePerNight:fares.resortNight};h.rooms||={};
@@ -105,7 +105,13 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    }
 
    if(!f.traveling&&f.currentLocationId===t.hotelId){const room=hotels()[t.hotelId]?.rooms?.[f.id];if(room)room.checkedIn=true;}
-   if(now()>=t.inbound.departure-AVIATION.checkInSeconds){const airport=airportById(t.to);if(!f.traveling&&f.currentLocationId===airport.locationId){t.phase='inbound-wait';return handleResident(f,clock);}if(now()>=t.inbound.departure)delayReturn(f,t);if(!f.traveling||f.targetLocationId!==airport.locationId)startJourney?.(f,{id:airport.locationId,action:'checking in for the reserved return flight'});}
+   const airport=airportById(t.to);
+   const sportsLodge=t.hotelId===NORTH_SPORTS_PARK.clubhouse.id;
+   const walkLead=sportsLodge?Math.min(14*3600,Math.hypot(f.x-airport.gate.x,f.z-airport.gate.z)*Number(raw().timeScale||120)/2.5*1.35):0;
+   // Preserve the longer return buffer after the traveller starts moving.
+   const returningToGate=Boolean(sportsLodge&&t.northSportsReturning);
+   if(returningToGate||now()>=t.inbound.departure-AVIATION.checkInSeconds-walkLead){
+    if(sportsLodge)t.northSportsReturning=true;if(!f.traveling&&f.currentLocationId===airport.locationId){t.phase='inbound-wait';return handleResident(f,clock);}if(now()>=t.inbound.departure)delayReturn(f,t);if(!f.traveling||f.targetLocationId!==airport.locationId)startJourney?.(f,{id:airport.locationId,action:'checking in for the reserved return flight'});}
    else if(!f.traveling){
     const hungry=Number(f.hunger||0)>55;
     const sportsStop=venue&&(t.northSportsArrivedAt==null||now()-t.northSportsArrivedAt<SPORTS_STOP_SECONDS);

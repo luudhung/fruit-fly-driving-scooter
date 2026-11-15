@@ -1619,7 +1619,7 @@ function replenishResidents(target,reason) {
   const before=state.flies.filter(f=>f.alive).length;
   const arrivals=[];
   for(let count=before;count<Math.min(target,MAX_POPULATION);count++){
-    const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);fly.lifeSkillsOnboarding=true;state.flies.push(fly);arrivals.push(fly);
+    const fly=createFly(state.flies.length);seedSocioeconomicProfile(fly);if(reason==='city population support policy')fly.lifeSkillsOnboarding=true;state.flies.push(fly);arrivals.push(fly);
   }
   const added=state.flies.filter(f=>f.alive).length-before;
   if(added){
@@ -2017,7 +2017,7 @@ function ensureAcademyTeacher(force=false){
   return current;
 }
 function localSchool(fly){
-  return financialHomeCountry(fly)==='north-city'?'north-school':fly.homeX>480?'riverside-school':'school';
+  return economicCountryAt(fly)==='north-city'?'north-school':fly.homeX>480?'riverside-school':'school';
 }
 function educationTick(fly,clock,elapsed){
   ensureCognitiveProfile(fly);
