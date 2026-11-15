@@ -8,11 +8,31 @@ const GOODS=['fabric','grain','aggregate'],DAY=86400;
 const operatorId='regional-logistics',equipmentId='industrial-equipment-supplier',sourceId=REGIONAL_HUBS[0];
 /** Licensed intercity hauliers are transport agents, separate from resident-owned fleets.
  * The simulation persists finite cargo, paid consignments and physical road journeys. */
-export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount}){
+export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount,industrialOrders=()=>[],finishIndustrialOrder=()=>false}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),location=id=>LOCATIONS.find(l=>l.id===id);
- const data=()=>raw().regionalFreight||={version:1,trucks:[],stocks:{},jobs:[],nextJobId:1,nextDispatchAt:now(),nextExportAt:now(),delivered:0,exports:0,exportRevenue:0,feesPaid:0,procurement:0,cancelled:0};
+ const data=()=>raw().regionalFreight||={version:1,trucks:[],stocks:{},unitCosts:{},jobs:[],nextJobId:1,nextDispatchAt:now(),nextExportAt:now(),delivered:0,exports:0,exportRevenue:0,feesPaid:0,procurement:0,cancelled:0};
  const stock=id=>id===sourceId?raw().industrialEconomy.rawStock:(data().stocks[id]||={fabric:0,grain:0,aggregate:0});
  const business=id=>account(id===sourceId?sourceId:`regional-warehouse-${id}`);
+ function unitCost(id,product){if(id===sourceId)return 2;const distance=Math.hypot(location(sourceId).x-location(id).x,location(sourceId).z-location(id).z);return Number(data().unitCosts?.[id]?.[product])||2+(24+distance*.012)/48;}
+ function inputSource(product,destination){const site=location(destination);if(!site)return null;const id=REGIONAL_HUBS.filter(id=>Number(stock(id)?.[product]||0)>=4).sort((a,b)=>Math.hypot(location(a).x-site.x,location(a).z-site.z)-Math.hypot(location(b).x-site.x,location(b).z-site.z))[0];return id?{locationId:id,sellerId:id===sourceId?sourceId:`regional-warehouse-${id}`,unitPrice:id===sourceId?2:Math.ceil(unitCost(id,product)*1.12*100)/100}:null;}
+ const sourceOrder=job=>industrialOrders().find(o=>o.id===job.industrialOrderId);
+ function claimIndustrialOrders(){const d=data();for(const o of industrialOrders().filter(o=>!o.paid&&o.phase==='queued')){if(d.jobs.filter(j=>!j.paid).length>=REGIONAL_TRUCK_LIMIT)break;if(d.jobs.some(j=>j.industrialOrderId===o.id&&!j.paid))continue;
+   const job={id:`REGIONAL-INDUSTRIAL-${o.id}`,industrialOrderId:o.id,from:o.sourceLocationId,to:o.destinationId,product:o.product,quantity:o.quantity,price:o.quantity*o.unitPrice,fee:o.fee,exported:false,createdAt:now(),deadline:o.deadline,phase:'queued',paid:false};d.jobs.push(job);o.phase='brokered';o.carrierId=operatorId;
+  }}
+ function settleIndustrial(job,cancelled=false){const o=sourceOrder(job);if(o&&!o.paid)finishIndustrialOrder(o,cancelled);const complete=o?.phase==='complete';
+  if(complete&&!o.regionalCrewSettled){transfer(account(operatorId),account('regional-haul-crews'),job.fee*.65);o.regionalCrewSettled=true;}
+  job.paid=true;job.phase=complete?'complete':'cancelled';job.completedAt=now();if(complete){data().feesPaid+=job.fee;data().delivered++;}else data().cancelled++;
+ }
+ function returnToDepot(t,occupied){
+  if(!t.returnParking){const country=countryAt(t),home=REGIONAL_HUBS.filter(id=>countryAt(location(id))===country).sort((a,b)=>Math.hypot(location(a).x-t.x,location(a).z-t.z)-Math.hypot(location(b).x-t.x,location(b).z-t.z))[0];if(!home)return false;const parking=parkingPoint(INDUSTRIAL_LOADING_BAYS[home]||location(home),occupied);if(!parking)return false;t.returnParking={...parking};t.returnDepotId=home;}
+  if(t.returnParking.id)occupied.add(t.returnParking.id);
+  if(Math.hypot(t.x-t.returnParking.x,t.z-t.returnParking.z)<.8){t.returning=false;t.traveling=false;t.phase='parked';t.motionSpeed=0;return false;}
+  if(t.returning&&t.traveling)return true;
+  const points=roadPath(t,t.returnParking,t.returnDepotId,t.returnDepotId),country=countryAt(t);if(!points.length||points.some(p=>countryAt(p)!==country))return false;
+  const distance=points.reduce((n,p,i)=>n+Math.hypot(p.x-(points[i-1]||t).x,p.z-(points[i-1]||t).z),0),fuel=distance*.004,crew=distance*.002;if(account(operatorId).cash+1e-8<fuel+crew)return false;
+  transfer(account(operatorId),account('industrial-fuel'),fuel);transfer(account(operatorId),account('regional-haul-crews'),crew);data().emptyReturnCosts=Number(data().emptyReturnCosts||0)+fuel+crew;
+  Object.assign(t,{returning:true,phase:'returning',routeWaypoints:points,routeIndex:0,traveling:true,motionSpeed:0,lastProgressAt:now(),routeDestination:t.returnDepotId});return true;
+ }
  function init(){
   const d=data();account(operatorId);account('regional-freight-escrow');account('regional-haul-crews');
   const treasuryFor=id=>countryAccount?countryAccount(countryAt(location(id))||'hansdrex'):raw().treasury;
@@ -51,18 +71,18 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   const job={id:`REGIONAL-CARGO-${d.nextJobId++}`,from,to,product,quantity:qty,price,fee,exported,createdAt:now(),deadline:now()+DAY*2,phase:'queued',paid:false};d.jobs.push(job);return job;
  }
  function cancel(job){
-  if(job.paid)return;stock(job.from)[job.product]+=job.quantity;
+  if(job.paid)return;if(job.industrialOrderId){settleIndustrial(job,true);return;}stock(job.from)[job.product]+=job.quantity;
   if(!job.exported)transfer(account('regional-freight-escrow'),business(job.to),job.price+job.fee);
   job.paid=true;job.phase='cancelled';job.completedAt=now();data().cancelled++;
  }
  function finish(job){
-  if(job.paid)return;
+  if(job.paid)return;if(job.industrialOrderId){settleIndustrial(job);return;}
   if(job.exported){
    // Foreign buyers pay only after real cargo arrives at the northern forwarding warehouse.
    business(job.from).cash+=job.price;account(operatorId).cash+=job.fee;
    raw().externalTrade||={exports:0,imports:0};raw().externalTrade.exports+=job.price+job.fee;data().exports+=job.quantity;data().exportRevenue+=job.price+job.fee;
   }else{
-   transfer(account('regional-freight-escrow'),business(job.from),job.price);transfer(account('regional-freight-escrow'),account(operatorId),job.fee);stock(job.to)[job.product]+=job.quantity;
+   transfer(account('regional-freight-escrow'),business(job.from),job.price);transfer(account('regional-freight-escrow'),account(operatorId),job.fee);const count=Number(stock(job.to)[job.product]||0);data().unitCosts||={};data().unitCosts[job.to]||={};data().unitCosts[job.to][job.product]=(count*unitCost(job.to,job.product)+job.price+job.fee)/(count+job.quantity);stock(job.to)[job.product]+=job.quantity;
   }
   transfer(account(operatorId),account('regional-haul-crews'),job.fee*.65);transfer(account(operatorId),account('industrial-fuel'),job.fee*.15);
   const lease=Object.values(raw().enterprises||{}).find(b=>b.industrial&&b.locationId===job.to&&b.status==='operating');if(lease&&account(operatorId).cash>=2)transfer(account(operatorId),lease,2);
@@ -75,6 +95,9 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
    if(d.jobs.filter(j=>!j.paid).length>=REGIONAL_TRUCK_LIMIT)break;
    if(stock(to)[product]+pending(to,product)<240&&stock(sourceId)[product]>=48&&business(to).cash>=130)order(sourceId,to,product,48);
   }
+  // Sovereign warehouses replenish only stock sold to real local factories.
+  // Rebuying already-full warehouses would burn their finite working cash.
+  if(countryAccount)return;
   if(now()<d.nextExportAt)return;d.nextExportAt=now()+180;
   // Real wholesale export demand keeps warehouse-to-warehouse flows active even
   // while new resident factories are still fitting out. No cargo is manufactured here.
@@ -87,18 +110,21 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
  function tick(seconds){
   const d=data();if(!d.funded)return;
   if(now()>=d.nextDispatchAt){d.nextDispatchAt=now()+180;demand();}
+  claimIndustrialOrders();
   let departures=0;
   for(const t of d.trucks)if(!t.jobId&&now()>=t.nextDispatchAt&&departures<3){
    const job=d.jobs.filter(j=>j.phase==='queued').sort((a,b)=>Math.hypot(location(a.from).x-t.x,location(a.from).z-t.z)-Math.hypot(location(b.from).x-t.x,location(b.from).z-t.z))[0];if(!job)break;
-   if(!route(t,job.from))continue;t.jobId=job.id;t.phase='collecting';job.phase='collecting';job.truckId=t.id;departures++;
+   if(!route(t,job.from))continue;t.returning=false;t.returnParking=null;t.jobId=job.id;t.phase='collecting';job.phase='collecting';job.truckId=t.id;if(job.industrialOrderId){const o=sourceOrder(job);if(o){o.phase='collecting';o.truckId=t.id;o.carrierId=operatorId;}}departures++;
   }
   const index=createVehicleIndex([...raw().flies,...raw().industrialEconomy.trucks,...d.trucks]);
+  const occupied=new Set(d.trucks.map(t=>t.returnParking?.id).filter(Boolean));
   for(const t of d.trucks){
-   const job=d.jobs.find(j=>j.id===t.jobId);if(!job||job.paid){if(t.jobId)Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,routeWaypoints:[]});continue;}
+   const job=d.jobs.find(j=>j.id===t.jobId);if(!job||job.paid){if(t.jobId)Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,routeWaypoints:[]});if(returnToDepot(t,occupied)){moveTruck(t,seconds,index);if(!t.traveling){t.locationId=t.returnDepotId;t.returning=false;t.phase='parked';t.motionSpeed=0;}}continue;}
+   if(job.industrialOrderId&&(!sourceOrder(job)||sourceOrder(job).paid)){settleIndustrial(job);Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,returnParking:null});continue;}
    if(now()>job.deadline||unavailable(job.from)||unavailable(job.to)){cancel(job);Object.assign(t,{jobId:null,traveling:false,motionSpeed:0,phase:'parked',nextDispatchAt:now()+600});continue;}
    if(t.waitUntil>now())continue;
    if(t.phase==='loading'){
-    if(!route(t,job.to,job.from)){cancel(job);continue;}t.phase='delivering';job.phase='delivering';
+    if(!route(t,job.to,job.from)){cancel(job);continue;}t.phase='delivering';job.phase='delivering';if(job.industrialOrderId){const o=sourceOrder(job);if(o)o.phase='delivering';}
    }else if(t.phase==='unloading'){
     finish(job);Object.assign(t,{jobId:null,phase:'parked',nextDispatchAt:now()+240+(Number(t.id.split('-').at(-1))%6)*90});continue;
    }
@@ -113,5 +139,5 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   d.jobs=[...d.jobs.filter(j=>!j.paid),...d.jobs.filter(j=>j.paid).slice(-32)];
  }
  function snapshot(){const d=data();return{fleet:d.trucks.length,driving:d.trucks.filter(t=>t.traveling).length,delivered:d.delivered,exports:d.exports,feesPaid:d.feesPaid,stocks:Object.fromEntries(REGIONAL_HUBS.map(id=>[id,{...stock(id)}])),trucks:d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,motionSpeed:t.traveling?t.motionSpeed:0,driverId:null,orderId:t.jobId||null,routeWaypoints:t.traveling?t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12):[],at:now()}))};}
- return{init,tick,snapshot};
+ return{init,tick,snapshot,inputSource};
 }
