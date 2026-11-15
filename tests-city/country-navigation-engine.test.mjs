@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {freshState,restoreState,startJourney,moveFly,chooseDestination,countries,liquidMoneySupply} from '../worker/civilization-engine.mjs';
-import {LOCATIONS,clearSegment,METRO_LINES} from '../worker/city-map.mjs';
+import {freshState,restoreState,startJourney,moveFly,chooseDestination,countries,liquidMoneySupply,maybeRoamInsidePark} from '../worker/civilization-engine.mjs';
+import {LOCATIONS,clearSegment,METRO_LINES,PARK} from '../worker/city-map.mjs';
 import {countryAt,BORDER_CHECKPOINTS,borderDirection} from '../worker/country-map.mjs';
 const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
 function point(id,x,z){let p=LOCATIONS.find(p=>p.id===id);if(p)Object.assign(p,{x,z});else LOCATIONS.push(p={id,x,z,type:'country-test',name:id});return p;}
@@ -54,4 +54,25 @@ test('North children choose their actual domestic school without paying a foreig
 
 test('a known unfunded island journey preserves the indoor position and never starts an unpaid airport loop',()=>{
  const {f}=fixture();Object.assign(f,{indoors:true,currentLocationId:'office',x:0,z:0,money:200,savings:0});const before=[f.x,f.y,f.z,f.indoors,f.currentLocationId,f.routeWaypoints];assert.equal(startJourney(f,{id:'island-beach',action:'visiting Hawaii'}),false);assert.deepEqual([f.x,f.y,f.z,f.indoors,f.currentLocationId,f.routeWaypoints],before);assert.equal(f.countryFlightPlan,undefined);assert.equal(f.money,200);
+});
+
+
+test('park wandering needs actual attendance and cannot pull a poor North resident across a foreign border from a stale label',()=>{
+ const {s,f}=fixture();Object.assign(f,{x:-386,z:-570.52,currentLocationId:'park',targetLocationId:'park',money:0,savings:16,citizenshipCountryId:'north-city',countryPresence:{countryId:'north-city',entryId:'HOME'},lastParkRoamAt:-10000});
+ const pose=[f.x,f.y,f.z],route=f.routeWaypoints,total=liquidMoneySupply();assert.equal(maybeRoamInsidePark(f),false);assert.deepEqual([f.x,f.y,f.z],pose);assert.equal(f.routeWaypoints,route);assert.equal(f.traveling,false);close(liquidMoneySupply(),total);
+ Object.assign(f,{x:PARK.x,z:PARK.z,currentLocationId:'park',energy:0,hunger:100});assert.equal(maybeRoamInsidePark(f),false,'exhausted hungry residents do not start another leisure loop');
+});
+
+test('a poor domestic North journey walks away from a bridge without a false fifty-dollar border touch',()=>{
+ for(const mode of ['walk','car']){
+  const {s,f}=fixture();Object.assign(f,{x:-374,z:-570.2166384238858,money:0,savings:8,citizenshipCountryId:'north-city',countryPresence:{countryId:'north-city',entryId:'HOME'},currentLocationId:null,vehicle:mode==='car'?'compact car':null,parkedCar:{x:-510,z:-1003.95,heading:-Math.PI/2}});
+  const total=liquidMoneySupply();assert.equal(startJourney(f,{id:'INDUSTRY-north-4',action:'commuting within North',mode}),true);assert.ok(f.routeWaypoints.every(p=>countryAt(p)==='north-city'),'the domestic itinerary never touches Hansdrex');
+  finish(s,f,1600);assert.equal(f.currentLocationId,'INDUSTRY-north-4');assert.equal(f.countryTravelDenied,null);assert.equal(f.countryEntryReceipts,undefined);assert.equal(f.money,0);close(f.savings,mode==='car'?7.7:8);close(liquidMoneySupply(),total);
+ }
+});
+
+test('a denied legacy park trip releases its stale location and can physically return to its North home without visa money',()=>{
+ const {s,f}=fixture();Object.assign(f,{x:-386,z:-570.5220686915084,currentLocationId:'park',targetLocationId:'park',money:0,savings:16,citizenshipCountryId:'north-city',countryPresence:{countryId:'north-city',entryId:'HOME'},homeId:'airport-gardens-homes',homeX:-340,homeZ:-692,traveling:true,targetX:-386,targetZ:-570,routeIndex:0,routeWaypoints:[{x:-386,z:-570,mode:'walk',stage:'park-roam'},{x:-386,z:-550,mode:'walk',stage:'park-roam'}]});
+ const pose=[f.x,f.y,f.z],total=liquidMoneySupply();moveFly(f);assert.equal(f.traveling,false);assert.equal(f.currentLocationId,null);assert.equal(f.indoors,false);assert.equal(f.countryTravelDenied.reason,'insufficient funds for entry visa');assert.deepEqual([f.x,f.y,f.z],pose);assert.equal(maybeRoamInsidePark(f),false);
+ assert.equal(startJourney(f,{id:f.homeId,action:'sleeping',mode:'walk'}),true);finish(s,f);assert.equal(f.currentLocationId,f.homeId);assert.equal(f.indoors,true);assert.equal(f.sleeping,true);assert.equal(countryAt(f),'north-city');assert.equal(f.countryEntryReceipts,undefined);close(liquidMoneySupply(),total);
 });

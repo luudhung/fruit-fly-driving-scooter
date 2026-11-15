@@ -2902,6 +2902,20 @@ function residentGroundTravelPlan(fly,dest,mode){
     }
     plan={mode:'walk',route};
   }else if(internationalMetro)plan={mode:'walk',route:buildPedestrianRoute(fly,dest)};
+  if(!foreign&&from==='north-city'&&plan.route?.length){
+    // The street graph can attach a North-side bridge walker to the exact
+    // border, then reverse north again. Remove that collinear dead-end touch;
+    // it is not an actual foreign visit and must not demand a second visa.
+    const route=[];
+    for(let i=0;i<plan.route.length;i++){
+      const p=plan.route[i],a=route.at(-1)||fly,b=plan.route[i+1];
+      const boundary=Math.abs(p.z+570)<1e-7||Math.abs(p.x-430)<1e-7;
+      if(boundary&&b&&economicCountryAt(p)!==from&&economicCountryAt(a)===from&&economicCountryAt(b)===from&&
+         p.mode==='walk'&&b.mode==='walk'&&Math.abs((p.x-a.x)*(b.z-p.z)-(p.z-a.z)*(b.x-p.x))<1e-6&&clearSegment(a,b))continue;
+      route.push(p);
+    }
+    plan={...plan,route};
+  }
   return {...plan,allowed:true};
 }
 function startJourney(fly,chosen) {
@@ -3014,6 +3028,9 @@ function residentCountryAdmission(fly,next){
   }else{
     fly.countryTravelDenied={at:state.simulationAgeSeconds,reason,countryId:economicCountryAt(next)};
     fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.targetX=fly.x;fly.targetZ=fly.z;fly.pendingAction=null;
+    // A failed trip is outdoors at the border, not still inside its old park
+    // or workplace. Keeping that stale label restarts remote park wandering.
+    fly.currentLocationId=null;fly.indoors=false;fly.sleeping=false;
     fly.action='remaining locally until lawful entry is available';fly.actionUntil=state.simulationAgeSeconds+120;
   }
   return false;
@@ -4038,7 +4055,9 @@ function parkRoamTarget(fly,park=PARK){
 function maybeRoamInsidePark(fly){
   if(!fly.alive||fly.traveling||fly.socialTask||!['park','airport-park'].includes(fly.currentLocationId)||fly.wheelRideUntil>state.simulationAgeSeconds)return false;
   if(state.simulationAgeSeconds-Number(fly.lastParkRoamAt||0)<480)return false;
-  const locationId=fly.currentLocationId,target=parkRoamTarget(fly,locationId==='airport-park'?AIRPORT_PARK:PARK);
+  const locationId=fly.currentLocationId,park=locationId==='airport-park'?AIRPORT_PARK:PARK;
+  if(!contains(park,fly)||economicCountryAt(fly)!==economicCountryAt(park)||fly.sleeping||fly.recoveringEnergy||Number(fly.energy??100)<25||Number(fly.hunger||0)>70||Number(fly.thirst||0)>75)return false;
+  const target=parkRoamTarget(fly,park);
   const route=buildPedestrianRoute({x:fly.x,z:fly.z},target);
   if(route.length<2)return false;
   fly.lastParkRoamAt=state.simulationAgeSeconds;
