@@ -6,18 +6,20 @@ const sign=(text:string)=>{const sprite=new THREE.Sprite();sprite.userData.text=
 const write=(sprite:THREE.Sprite,text:string)=>{sprite.userData.text=text;};
 const setup=()=>new MetroRenderer(new THREE.Group(),sign,write,3);
 
-test('a view budget hides distant infrastructure and trains, then restores current physical poses when approaching',()=>{
+test('rail infrastructure remains visible from across the map while nearby trains resume their current poses',()=>{
  const renderer=setup(),camera=new THREE.PerspectiveCamera(68,1,.1,7000);
  camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.setView(camera);renderer.update(45);
  assert.ok(renderer.stats.visibleChunks>0&&renderer.stats.visibleChunks<renderer.stats.totalChunks);
- assert.ok(renderer.stats.visibleStaticInstances<renderer.stats.totalStaticInstances*.6);
+ const closeTrains=renderer.stats.visibleTrains;assert.ok(closeTrains>0);
+ camera.position.set(-260,1100,-850);camera.lookAt(-260,10,-700);renderer.update(45.18);
+ assert.ok(renderer.stats.visibleChunks>0);assert.equal(renderer.stats.visibleTrains,0);
  const all=renderer.stats.totalStaticInstances;
- camera.position.set(20000,100,20000);camera.lookAt(21000,100,21000);renderer.update(45.2);
+ camera.position.set(20000,100,20000);camera.lookAt(21000,100,21000);renderer.update(45.37);
  assert.equal(renderer.stats.visibleChunks,0);assert.equal(renderer.stats.visibleStaticInstances,0);assert.equal(renderer.stats.visibleTrains,0);
- camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.update(45.4);
+ camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.update(45.6);
  assert.equal(renderer.stats.totalStaticInstances,all);assert.ok(renderer.stats.visibleChunks>0);
  for(const train of renderer.trains.filter(t=>t.group.visible)){
-  const line=METRO_LINES[train.lineIndex],pose=trainStates(line,45.4).find(p=>p.id===train.id)!;
+  const line=METRO_LINES[train.lineIndex],pose=trainStates(line,45.6).find(p=>p.id===train.id)!;
   assert.ok(train.group.position.distanceTo(new THREE.Vector3(pose.x,pose.y,pose.z))<1e-8);
  }
 });

@@ -24,6 +24,7 @@ export const NORTH_SPORTS_PARK:CountryRect&{id:string;name:string;gate:CountryPo
 export const NORTH_BUILDINGS:CountryBuilding[];
 export const NORTH_LOCATIONS:Array<CountryPoint&{id:string;name:string;type:string}>;
 export const NORTH_ROADS:Array<CountryRect&{id:string}>;
+export const HAWAII_APARTMENTS:CountryBuilding[];
 export const HAWAII_COTTAGES:CountryBuilding[];
 export const HAWAII_ROADS:Array<CountryRect&{id:string}>;
 export type BorderDirection={queuePoint:CountryPoint;admissionPoint:CountryPoint};

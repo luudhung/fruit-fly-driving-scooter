@@ -1,3 +1,4 @@
+import {SpaceportRenderer,type SpaceProgramView} from './spaceport-renderer.ts';
 import {CountryUI,type CountrySnapshot,type CountryPerson} from './country-ui.ts';
 import {NationalDefenseRenderer} from './national-defense-renderer.ts';
 import {InternationalLandmarks} from './international-landmarks.ts';
@@ -215,6 +216,7 @@ type WeatherState = {
 
 type NationalSummary = {residents:number;working:number;traveling:number;indoors:number;students:number;graduates:number;fires:number;projects:number};
 type CivilizationSnapshot = {
+  spaceProgram?:SpaceProgramView|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
   international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
   nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
@@ -682,6 +684,12 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const residents=`${num(data?.residents??nation.residents??0)} cư dân${data?` · ${num(data.working)} có việc`:''}`;
       board.textContent=[residents,finances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
+  }
+  const space=document.getElementById('spaceworks-activity');
+  if(space&&s.spaceProgram){
+    const program=s.spaceProgram,mission=program.active;
+    const status=mission?(s.simulationAgeSeconds<mission.departure?'Đếm ngược':'Đang phóng'):'Chuẩn bị';
+    space.textContent=`Hansdrex Spaceworks · ${num(program.employees)} nhân viên · ${num(program.missions)} nhiệm vụ · ${status}`;
   }
   const activity=document.getElementById("city-activity");if(activity)activity.textContent=s.activity?`${s.activity.working} working · ${s.activity.traveling} traveling · ${s.activity.indoors} indoors`:"Awaiting activity telemetry";
   const transit=document.getElementById("transit-activity");if(transit)transit.textContent=s.transit?`${s.transit.passengers} aboard · ${s.transit.waiting} waiting · ${s.transit.completedTrips} completed trips${s.roadTraffic?` · ${s.roadTraffic.drivingCars} ô tô đang chạy · ${s.roadTraffic.parkedCars} đỗ sát lề`:""}`:"Awaiting transit telemetry";
@@ -1222,6 +1230,8 @@ const empireRoot=buildHansdrexEmpire(cityRoot,makeCanvasSprite);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 const internationalVisuals=new InternationalLandmarks(cityRoot,makeCanvasSprite);
+const spaceportVisuals=new SpaceportRenderer(cityRoot,makeCanvasSprite);
+for(const [id,group] of spaceportVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 for(const [id,group]of internationalVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 
 const heliPadCenter=new THREE.Vector3(AIRPORT.helipad.x,AIRPORT.helipad.y,AIRPORT.helipad.z);
@@ -1830,6 +1840,7 @@ function animate(now = performance.now()) {
   personalCars.update(dt,gameNow,Math.max(1,snapshot?.timeScale||120));
   urbanVisuals.update(dt,gameNow);
   sportsVisuals.update(dt,gameNow);
+  spaceportVisuals.update(gameNow,snapshot?.spaceProgram);
   governmentVisuals.update(gameNow);
   industrialVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   visitorVisuals.update(dt,gameNow);

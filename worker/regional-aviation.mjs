@@ -1,5 +1,5 @@
 import {ISLAND} from './city-map.mjs';
-import {COUNTRY_AIRPORTS,COUNTRY_IDS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
+import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares} from './aviation.mjs';
 import {visitorArrivalPose,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
@@ -39,10 +39,17 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function book(f,toId,{staySeconds=DAY,hotelId}={}){
   init();const from=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f)),to=airportById(toId);
   if(!f.alive||f.countryAirTrip||f.airTrip||f.onPlane||f.onTrain||f.traveling||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.taxiJobId||f.urbanTask||!from||!to||from.id===to.id||f.currentLocationId!==from.locationId||Math.hypot(f.x-from.terminal.x,f.z-from.terminal.z)>55||weatherDanger()>.3)return false;
-  const outbound=nextRegionalFlight(now(),from.id,to.id),inbound=nextRegionalFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),hotel=hotelId||(from.id==='city'&&to.id==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex?NORTH_SPORTS_PARK.clubhouse.id:hotelFor[to.id]),cost=fares.roundTrip+fares.resortNight;
+  const outbound=nextRegionalFlight(now(),from.id,to.id),inbound=nextRegionalFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),defaultHotel=hotelId||(from.id==='city'&&to.id==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex?NORTH_SPORTS_PARK.clubhouse.id:hotelFor[to.id]),cost=fares.roundTrip+fares.resortNight;
   const budget=regionalJourneyBudget(f,to.id,{priceLevel:raw().centralBank?.priceLevel}),visas=budget.visaReserve;
   if(!budget.affordable||!availableSeat(outbound)||!availableSeat(inbound))return false;
-  const rooms=hotels(),h=rooms[hotel]||={id:hotel,capacity:to.id==='island'?24:16,rooms:{},pricePerNight:fares.resortNight};h.rooms||={};
+  const rooms=hotels();
+  let hotel=defaultHotel,capacity=to.id==='island'?24:16;
+  const full=h=>h?.closed||h?.rooms&&!h.rooms[f.id]&&Object.keys(h.rooms).length>=h.capacity;
+  if(to.id==='island'&&!hotelId&&full(rooms[hotel])){
+   const apartment=HAWAII_APARTMENTS.find(b=>!full(rooms[b.id]));
+   if(apartment){hotel=apartment.id;capacity=apartment.capacity;}
+  }
+  const h=rooms[hotel]||={id:hotel,capacity,rooms:{},pricePerNight:fares.resortNight};h.rooms||={};
   if(h.closed||!h.rooms[f.id]&&Object.keys(h.rooms).length>=h.capacity)return false;
   for(const leg of [outbound,inbound])if(!clearLeg(leg,from.countryId))return false;
   if(!charge(f,cost,account('regional-flight-escrow')))return false;

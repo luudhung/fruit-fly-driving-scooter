@@ -1,3 +1,4 @@
+import {createSpaceProgram} from './space-program.mjs';
 import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
@@ -63,6 +64,8 @@ const planMetroRoute=planNetworkMetroRoute;
 
 
 const JOBS = [
+  {id:'spaceworks-engineer',locationId:'spaceworks-assembly',title:'Spaceworks assembly engineer',wage:8.2,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
+  {id:'spaceworks-operations',locationId:'spaceworks-control',title:'Spaceworks mission controller',wage:8.6,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
   {id:'military',locationId:'military-base',title:'army service member',wage:6.6,shiftStart:0,shiftEnd:8,publicOnly:true},
   {id:'firefighter',locationId:'firestation',title:'firefighter',wage:4.8,shiftStart:0,shiftEnd:24},
   {id:'paramedic',locationId:'hospital-central',title:'paramedic',wage:5.2,shiftStart:0,shiftEnd:24},
@@ -511,6 +514,7 @@ const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tou
 const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney,isWorkCommitted});
 const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted};
 const urbanWorld=createUrbanWorld(cityServices);
+const spaceProgram=createSpaceProgram({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f)});
 const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
 const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
 const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
@@ -2653,6 +2657,7 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
+  spaceProgram.addChoices(fly,clock,add);
   countries.addChoices(fly,clock,add);nationalServices.addChoices(fly,clock,add);nationalDefense.addChoices(fly,clock,add);regionalAviation.addChoices(fly,clock,add);
   urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);industrialEconomy.addChoices(fly,clock,add);
   if(age>=21&&state.housing.households[fly.householdId]?.members?.[0]===fly.id&&!fly.ownsHome&&fly.money+fly.savings>100){
@@ -3294,6 +3299,7 @@ function productionAndRetail(fly, clock, gameSeconds=activeGameStepSeconds) {
     }
   }
   educationTick(fly,clock,gameSeconds);
+  spaceProgram.finishApplication(fly);
 
   if (fly.jobId === "farm" && fly.currentLocationId === "farm" && String(fly.action).startsWith("working")) {
     state.businesses.farm.inventory += 0.08 * (0.5 + fly.traits.ambition);
@@ -3323,8 +3329,9 @@ function payAndFinance(fly, clock=gameClock()) {
       if(workedHours>=1){
         const base=fly.wage*workedHours*districtProfile(location(salaryJob.locationId)).wage;
         const bonus=base*fly.traits.ambition*randRange(0,0.14);
-        const countryId=financialLocationCountry(salaryJob.locationId),account=financialCountryAccount(countryId),gross=base+bonus,available=Math.max(0,Number(account.cash||0)),paid=Math.min(gross,available),tax=paid*0.07,net=paid-tax;
-        account.cash-=paid;account.spending=Number(account.spending||0)+paid;account.taxRevenue=Number(account.taxRevenue||0)+tax;account.cash+=tax;
+        const countryId=financialLocationCountry(salaryJob.locationId),account=salaryJob.employerId&&state.businesses[salaryJob.employerId]||financialCountryAccount(countryId),gross=base+bonus,available=Math.max(0,Number(account.cash||0)),paid=Math.min(gross,available),tax=paid*0.07,net=paid-tax;
+        account.cash-=paid;account.spending=Number(account.spending||0)+paid;const taxAccount=salaryJob.employerId?financialCountryAccount(countryId):account;
+        taxAccount.taxRevenue=Number(taxAccount.taxRevenue||0)+tax;taxAccount.cash+=tax;
         fly.wageArrears=Number(fly.wageArrears||0)+gross-paid;
         fly.money+=net;fly.salaryEarnedToday+=net;fly.salaryLifetime+=net;fly.happiness=clamp(fly.happiness+(paid>=gross?2.5:-2));state.totalTransactions+=1;
         emit("salary",`${fly.id} earned ${net.toFixed(1)} ${CURRENCY_CODE} after tax for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,countryId,amount:net,hours:workedHours,tax});
@@ -4597,6 +4604,7 @@ function getState(options={}) {
   return {
     authoritative: true,
     mainlandStats:mainlandStats(living),
+    spaceProgram:spaceProgram.snapshot(),
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
     modelDisclosure: "Each living fly is assigned the complete 139,255-neuron, 15,091,983-edge FlyWire LIF graph. Shared topology is packed losslessly; membrane voltage, refractory and synaptic states and spikes are checkpointed independently per brain. Actual neural activity biases city decisions and movement through a synthetic sensory/behavior interface. The neuralBridge reports measured connection and step counters; disconnected or stale brains are not counted as running. Neural batches are CPU-budgeted and are not biological real time. The model remains an approximate LIF and city model, not a validated biological city simulation.",
     worldId: WORLD_ID,
@@ -4730,7 +4738,7 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
-      for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
+      for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy],['spaceProgram',spaceProgram]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
       vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;

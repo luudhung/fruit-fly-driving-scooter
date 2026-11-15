@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import {NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
+import {createNorthGolfCourse} from './north-golf-course.ts';
 import {batchStaticMeshes} from './static-box-batches.ts';
-import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,NORTH_WHITE_HOUSE,NORTH_SPORTS_PARK,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
+import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,NORTH_WHITE_HOUSE,NORTH_SPORTS_PARK,HAWAII_APARTMENTS,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 /** Immutable national premises. Dynamic people, vehicles and crop stocks stay in the simulation. */
 export class InternationalLandmarks{
@@ -23,7 +24,7 @@ export class InternationalLandmarks{
  constructor(parent:THREE.Group,sign:Sign){
   this.sign=sign;
   this.root.name='International national infrastructure';parent.add(this.root);
-  for(const b of [...NORTH_BUILDINGS,...HAWAII_COTTAGES,...BORDER_CUSTOMS_BUILDINGS] as CountryBuilding[]){
+  for(const b of [...NORTH_BUILDINGS,...HAWAII_COTTAGES,...HAWAII_APARTMENTS,...BORDER_CUSTOMS_BUILDINGS] as CountryBuilding[]){
    const g=b.id===NORTH_LANDMARK.id?this.auroraTower():b.id===NORTH_FIRE_STATION.id?this.fireStation(b):this.premises(b);
    g.userData.buildingId=b.id;this.root.add(g);this.buildings.set(b.id,g);
   }
@@ -45,6 +46,12 @@ export class InternationalLandmarks{
   for(const side of [-1,1])for(let x=-b.w/2+2.5;x<b.w/2-1;x+=4)for(let y=2.2;y<height-1;y+=3.2)this.box(g,x,y,side*(b.d/2+.035),1.25,1.5,.05,this.windows);
   const doorHeight=Math.min(3.2,wallHeight-.25);
   if(b.kind!=='customs')this.box(g,0,doorHeight/2+.05,b.d/2+.06,Math.min(2.1,b.w-.3),doorHeight,.1,this.glass);
+  if(b.kind==='resort-apartment'){
+   for(let y=3.05;y<height-.8;y+=3.2){
+    this.box(g,0,y,b.d/2+.45,b.w-2,.2,.9,this.stone);
+    this.box(g,0,y+.43,b.d/2+.83,b.w-2,.12,.14,this.metal);
+   }
+  }
   if(b.id===NORTH_WHITE_HOUSE.id){
    for(const x of [-9,-5.4,-1.8,1.8,5.4,9])this.box(g,x,4.6,b.d/2+1.15,.76,8.6,.76,this.stone);
    this.box(g,0,9.12,b.d/2+1.3,21,.5,3.2,this.stone);
@@ -130,23 +137,10 @@ export class InternationalLandmarks{
  private sportsPark(){
   const park=NORTH_SPORTS_PARK,g=new THREE.Group();
   g.name=park.name;
-  const turf=new THREE.MeshStandardMaterial({color:0x53793e,roughness:1});
   const fairway=new THREE.MeshStandardMaterial({color:0x81a653,roughness:1});
-  const green=new THREE.MeshStandardMaterial({color:0x94bb5b,roughness:1});
-  const sand=new THREE.MeshStandardMaterial({color:0xc7b17a,roughness:1});
   const court=new THREE.MeshStandardMaterial({color:0x315e85,roughness:.9});
   const net=new THREE.MeshStandardMaterial({color:0x343e49,roughness:1});
-  const flag=new THREE.MeshBasicMaterial({color:0xf8984b});
-  this.box(g,park.x,.03,park.z,park.w,.06,park.d,turf);
-  for(let i=0;i<6;i++){
-   const x=park.golf.x-73+(i%3)*73,z=park.golf.z-54+Math.floor(i/3)*108;
-   this.box(g,x,.077,z,35,.025,87,fairway).rotation.y=i%2?.13:-.13;
-   this.box(g,x+(i%2?5:-5),.095,z-40,22,.025,19,green).rotation.y=.18;
-   this.box(g,x+16,.1,z-30,11,.025,8,sand).rotation.y=-.35;
-   this.box(g,x,.094,z+40,10,.03,8,green);
-   this.box(g,x,1,z-40,.12,1.8,.12,this.paint);
-   this.box(g,x+.47,1.8,z-40,.9,.45,.055,flag);
-  }
+  g.add(createNorthGolfCourse(park.golf.x,park.golf.z));
   const lines=(x:number,z:number,w:number,d:number,y:number)=>{
    for(const side of [-1,1]){
     this.box(g,x+side*w/2,y,z,.16,.012,d,this.paint);

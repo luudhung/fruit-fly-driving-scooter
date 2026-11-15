@@ -86,3 +86,14 @@ test('regional airport walks, gates, flight and immigration continue resident ca
  s.simulationAgeSeconds=trip.outbound.departure+300;air.handleResident(f,{hour:7});air.handleResident(f,{hour:7});assert.equal(f.onPlane,true);assert.equal(calls.needs,4);
  s.simulationAgeSeconds=trip.outbound.arrival+180;air.handleResident(f,{hour:7});air.handleResident(f,{hour:7});assert.equal(calls.needs,5,'disembarkation and immigration must also continue care');assert.equal(calls.finance,5);assert.equal(f.hunger,5);
 });
+
+test('Hawaii seasonal apartments offer real room capacity when the main resort is full',()=>{
+ const t=fixture('city'),f=t.s.flies[0];
+ t.s.cityVisitors.hotels['island-resort']={id:'island-resort',capacity:1,rooms:{existing:{visitorId:'existing'}}};
+ assert.ok(t.air.book(f,'island'));
+ const trip=f.countryAirTrip;
+ assert.match(trip.hotelId,/^HAWAII-APT-/);
+ assert.ok(t.s.cityVisitors.hotels[trip.hotelId].rooms[f.id]);
+ assert.equal(t.s.cityVisitors.hotels['island-resort'].rooms[f.id],undefined);
+ assert.equal(t.s.businesses['regional-flight-escrow'].cash,trip.cost);
+});

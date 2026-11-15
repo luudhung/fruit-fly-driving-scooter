@@ -80,7 +80,23 @@ export const NORTH_ROADS=[
 ];
 // Cottages host existing seasonal workers and guests; they do not seed new citizens.
 export const HAWAII_COTTAGES=[[-70,835],[-20,835],[30,835],[-70,885],[-20,885],[30,885],[-70,935],[-20,935],[30,935],[250,865],[300,865],[250,915],[294,915]].map(([x,z],i)=>({id:`HAWAII-COTTAGE-${i+1}`,name:'Hawaii Seasonal Cottage',x,z,w:10,d:12,h:6,kind:'resort-cottage',countryId:COUNTRY_IDS.hawaii,capacity:4,seasonal:true,primaryResidence:false}));
-export const HAWAII_ROADS=[{id:'HAWAII-SOUTH-AVENUE',x:65,z:877.5,w:7,d:165},... [810,860,910].map(z=>({id:`HAWAII-COTTAGE-STREET-${z}`,x:10,z,w:180,d:6})),{id:'HAWAII-COTTAGE-STREET-960',x:25,z:960,w:130,d:6},{id:'HAWAII-EAST-RESORT-STREET',x:235,z:845,w:7,d:100},{id:'HAWAII-RESORT-PROMENADE',x:150,z:800,w:170,d:5}];
+export const HAWAII_APARTMENTS=[
+ {id:'HAWAII-APT-PALMS',name:'Palms Court Apartments',x:111,z:880,w:23,d:17,h:14,capacity:10},
+ {id:'HAWAII-APT-COVE',name:'Cove View Apartments',x:160,z:896,w:24,d:18,h:17,capacity:14},
+ {id:'HAWAII-APT-HARBOR',name:'Harbor View Apartments',x:200,z:908,w:25,d:18,h:20,capacity:18},
+].map(b=>({...b,kind:'resort-apartment',countryId:COUNTRY_IDS.hawaii,seasonal:true,primaryResidence:false}));
+export const HAWAII_ROADS=[
+ {id:'HAWAII-SOUTH-AVENUE',x:65,z:877.5,w:7,d:165},
+ ...[810,910].map(z=>({id:`HAWAII-COTTAGE-STREET-${z}`,x:10,z,w:180,d:6})),
+ {id:'HAWAII-COTTAGE-STREET-860',x:77.5,z:860,w:315,d:6},
+ {id:'HAWAII-COTTAGE-STREET-960',x:25,z:960,w:130,d:6},
+ {id:'HAWAII-EAST-RESORT-STREET',x:235,z:862.5,w:7,d:135},
+ {id:'HAWAII-RESORT-PROMENADE',x:150,z:800,w:170,d:5},
+ {id:'HAWAII-SOUTH-LOOP',x:150,z:930,w:170,d:7},
+ {id:'HAWAII-RESIDENCE-AVENUE',x:132,z:895,w:6,d:70},
+ {id:'HAWAII-COVE-ACCESS',x:210,z:884,w:50,d:6},
+];
+
 const bridge=(id,x,z,axis,width,motorway=false)=>{
  const direction=(to,offset)=>axis==='z'?{queuePoint:{x:x+to*offset,z:z+to*10},admissionPoint:{x:x+to*offset,z:z-to*10}}:{queuePoint:{x:x+to*10,z:z-to*offset},admissionPoint:{x:x-to*10,z:z-to*offset}};
  const north=direction(1,2.6),hans=direction(-1,2.6);

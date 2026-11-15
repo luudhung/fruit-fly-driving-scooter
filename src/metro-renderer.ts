@@ -29,7 +29,8 @@ export class MetroRenderer{
  private readonly counts=new Map<string,number>();
  private readonly chunks:THREE.InstancedMesh[]=[];
  private readonly signs:THREE.Sprite[]=[];
- private readonly view=new SceneViewBudget({enterDistance:700,leaveDistance:780,frustumMargin:25,retainedMargin:40});
+ private readonly view=new SceneViewBudget({enterDistance:380,leaveDistance:444,frustumMargin:25,retainedMargin:40});
+ private readonly staticView=new SceneViewBudget({enterDistance:Infinity,leaveDistance:Infinity,frustumMargin:16,retainedMargin:30});
  private camera:THREE.Camera|null=null;
  private viewAt=-Infinity;
  private readonly trainById=new Map<string,Train>();
@@ -141,8 +142,8 @@ export class MetroRenderer{
  private trainLabel(train:Train){this.writeSign(train.label,`${metroDirectionLabel(METRO_LINES[train.lineIndex],train.direction||1)} · ${this.counts.get(train.id)||0} KHÁCH`);}
  update(seconds:number){
   if(this.camera&&(seconds-this.viewAt>=.15||seconds<this.viewAt)){
-   this.view.setCamera(this.camera);this.viewAt=seconds;let visible=0,signs=0,instances=0;
-   for(const chunk of this.chunks){const sphere=chunk.boundingSphere!;chunk.visible=this.view.visible(sphere.center,chunk.visible,sphere.radius);if(chunk.visible){visible++;instances+=chunk.count;}}
+   this.view.setCamera(this.camera);this.staticView.setCamera(this.camera);this.viewAt=seconds;let visible=0,signs=0,instances=0;
+   for(const chunk of this.chunks){const sphere=chunk.boundingSphere!;chunk.visible=this.staticView.visible(sphere.center,chunk.visible,sphere.radius);if(chunk.visible){visible++;instances+=chunk.count;}}
    for(const sign of this.signs){const distance=Math.sqrt(this.view.distanceSquared(sign.position));sign.material.opacity=THREE.MathUtils.clamp((220-distance)/60,0,1);sign.visible=distance<220&&this.view.visible(sign.position,sign.visible,5);if(sign.visible)signs++;}
    this.stats.visibleChunks=visible;this.stats.visibleSigns=signs;this.stats.visibleStaticInstances=instances;
   }

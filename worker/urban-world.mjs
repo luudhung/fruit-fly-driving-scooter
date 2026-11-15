@@ -1,4 +1,5 @@
-import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
+import {SPACEPORT} from './spaceport-map.mjs';
+import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MILITARY,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {CIVIC_FACILITY_CATALOG,facilitySpec,isNonResidentialUsage,nationalDevelopmentDemand,civicFacilities,DEVELOPMENT_REVIEW_INTERVAL} from './civic-development.mjs';
 import {createCivicFacilityOperations} from './civic-facilities.mjs';
@@ -272,7 +273,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   report('construction_contract',`${payerId||'City recovery fund'} commissioned ${kind} at ${buildingId}.`,{buildingId,projectId:project.id,budget:cost});return project;
  }
  function developmentContext(national=false){
-  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,NORTH_SPORTS_PARK].filter(Boolean);
+  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,NORTH_SPORTS_PARK,NORTH_MILITARY,SPACEPORT].filter(Boolean);
   return {bounds:{minX:national?-cityGeometry.WORLD_HALF+20:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES,...GOVERNMENT_RESERVED,...INDUSTRIAL_RESERVED,...protectedLand],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
  }
  function develop(lot,ownerId){
