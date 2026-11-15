@@ -71,3 +71,14 @@ test('a cargo order queued for two days gets its own real boarding window, retai
  t.s.simulationAgeSeconds+=120;t.restore();const restored=t.s.internationalEconomy.orders.find(o=>o.id===order.id),boarding=t.s.internationalEconomy.trucks.find(t=>t.orderId===order.id);t.service.economy.tick(120,{hour:8});assert.equal(restored.paid,false);assert.equal(boarding.boardingStartedAt,2*86400);assert.equal(restored.phase,'collecting');
  t.s.simulationAgeSeconds=3*86400+1;t.service.economy.tick(120,{hour:8});assert.equal(restored.phase,'cancelled');assert.equal(t.s.businesses['north-market'].inventory,80);assert.ok(Math.abs(total(t.s)-before)<1e-6);
 });
+
+
+test('more than thirty-two real work ticks cultivate finite stock in bounded cohorts and no seed matures before its full growth time',()=>{
+ const t=fixture(),f=t.f;assert.equal(t.service.economy.applyJob(f),true);const pin=LOCATIONS.find(p=>p.id===f.internationalWork.locationId);Object.assign(f,{x:pin.x,z:pin.z,currentLocationId:pin.id,hunger:0});let d=t.s.internationalEconomy;d.stock.seeds=24;d.nextDecisionAt=Infinity;const before=total(t.s);
+ for(let i=0;i<180;i++){t.s.simulationAgeSeconds+=120;t.service.economy.tick(120,{hour:8});t.service.economy.handleResident(f,{hour:8});}
+ assert.ok(Math.abs(d.planted-24)<1e-8);assert.ok(d.stock.seeds<1e-8);assert.ok(d.crops.length<=2);assert.equal(d.harvested,0);assert.ok(Math.abs(d.crops.reduce((n,l)=>n+l.remaining,0)-96)<1e-8);for(const lot of d.crops)assert.ok(lot.readyAt>=lot.lastPlantedAt+86400);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+ // Legacy checkpoints had no cohort key. Resume them without new seed,
+ // accelerated maturity, duplicate output or an extra wage payment.
+ for(const lot of d.crops)delete lot.plantingWindow;const maturity=d.crops.map(l=>l.readyAt);t.restore();d=t.s.internationalEconomy;t.service.economy.tick(0,{hour:8});assert.deepEqual(d.crops.map(l=>l.readyAt),maturity);assert.ok(Math.abs(d.planted-24)<1e-8);
+ t.s.simulationAgeSeconds=Math.min(...maturity)-1;t.service.economy.tick(120,{hour:8});assert.equal(d.harvested,0);t.s.simulationAgeSeconds+=1800;t.service.economy.tick(1800,{hour:8});assert.ok(d.harvested>0);assert.ok(d.stock.vegetables>0);assert.ok(d.harvested<=96);assert.ok(d.crops.length<=32);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
