@@ -14,7 +14,7 @@ function strategy(seed,laps){
  return [{lap:0,compound:'hard'},{lap:Math.floor(laps*.52),compound:'medium'},{lap:Math.floor(laps*.84),compound:'soft'}];
 }
 
-export function planF1Motion(circuit,{startAt,timeScale,laps,pace,seed,gridGap=0}){
+export function planF1Motion(circuit,{startAt,timeScale,laps,pace,seed,gridGap=0,pitBoxProgress=circuit.pit?.box}){
  const segments=[],pit=circuit.pit,stints=pit?strategy(seed,laps):[{lap:0,compound:'medium'}];
  const startProgress=-gridGap/circuit.lapLength;
  let time=startAt,compound=stints[0].compound,age=0,stops=0;
@@ -34,10 +34,10 @@ export function planF1Motion(circuit,{startAt,timeScale,laps,pace,seed,gridGap=0
   const enter=lap+pit.enter,exit=lap+pit.exit;
   road(lap,enter,wear);
   const pitTime=pit.length*timeScale/(F1_TARGET_SPEED*.24);
-  add(pitTime*pit.box,enter,enter,wear,{pitFrom:0,pitTo:pit.box,pitPhase:'entry'});
-  add(timeScale*(2.1+seed*1.2),enter,enter,wear,{pitFrom:pit.box,pitTo:pit.box,pitPhase:'changing tyres'});
+  add(pitTime*pitBoxProgress,enter,enter,wear,{pitFrom:0,pitTo:pitBoxProgress,pitPhase:'entry'});
+  add(timeScale*(2.1+seed*1.2),enter,enter,wear,{pitFrom:pitBoxProgress,pitTo:pitBoxProgress,pitPhase:'changing tyres'});
   compound=stop.compound;age=0;wear=0;stops++;
-  add(pitTime*(1-pit.box),enter,exit,wear,{pitFrom:pit.box,pitTo:1,pitPhase:'exit'});
+  add(pitTime*(1-pitBoxProgress),enter,exit,wear,{pitFrom:pitBoxProgress,pitTo:1,pitPhase:'exit'});
   road(exit,lap+1,wear);age++;
  }
  return {segments,finishedAt:time,stops};

@@ -1,7 +1,7 @@
 import {pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {COUNTRY_IDS,NORTH_AIRPORT,countryAt} from './country-map.mjs';
 import {readyToDrive} from './life-skills.mjs';
-import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS} from './north-f1-map.mjs';
+import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_PIT_BOXES} from './north-f1-map.mjs';
 import {F1_TARGET_SPEED,planF1Motion,f1MotionWindow,sampleF1Motion} from './north-f1-motion.mjs';
 import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 
@@ -361,8 +361,9 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   drivers.sort((a,b)=>rating(b.f,e.id)-rating(a.f,e.id));
   e.cars=drivers.map(({f,team},i)=>{
    const gridGap=Math.floor(i/2)*8+2,seed=signature(e.id+f.id+'tyres'),pace=.94+rating(f,e.id)*.19;
-   const motion=planF1Motion(NORTH_F1_CIRCUIT,{startAt:e.greenAt,timeScale:Number(raw().timeScale||120),laps:NORTH_F1_RULES.laps,pace,seed,gridGap});
-   return {id:`${e.id}-CAR-${i+1}`,teamId:team.id,driverId:f.id,color:team.color,lane:i%2?1.65:-1.65,...motion};
+   const pitBox=d.teams.indexOf(team)*2+team.drivers.indexOf(f.id);
+   const motion=planF1Motion(NORTH_F1_CIRCUIT,{startAt:e.greenAt,timeScale:Number(raw().timeScale||120),laps:NORTH_F1_RULES.laps,pace,seed,gridGap,pitBoxProgress:NORTH_F1_PIT_BOXES[pitBox].progress});
+   return {id:`${e.id}-CAR-${i+1}`,teamId:team.id,driverId:f.id,color:team.color,pitBox,lane:i%2?1.65:-1.65,...motion};
   });
   e.endsAt=Math.max(...e.cars.map(c=>c.finishedAt));
   emit('north_f1_start',`The North City Grand Prix started under the lights with ${drivers.length} drivers.`,{raceId:e.id,grid:drivers.length});
@@ -418,7 +419,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    cars:e.cars.filter(c=>c.retiredAt==null&&now()<c.finishedAt+240).map(c=>{
     const motion=f1MotionWindow(c.segments,now()),sample=sampleF1Motion(motion,now());
     const segment=motion[0];
-    return {id:c.id,teamId:c.teamId,driverId:c.driverId,color:c.color,lane:c.lane,lapsPerSecond:(segment.progressTo-segment.progressFrom)/(segment.end-segment.start),
+    return {id:c.id,teamId:c.teamId,driverId:c.driverId,color:c.color,lane:c.lane,pitBox:c.pitBox,lapsPerSecond:(segment.progressTo-segment.progressFrom)/(segment.end-segment.start),
      progressAt:now(),...sample,motion};
    })};
   const history=d.history.at(-1)||null;

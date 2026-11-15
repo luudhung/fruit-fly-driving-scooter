@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {NORTH_F1_BUILDINGS,NORTH_F1_CIRCUIT,NORTH_F1_PIT_POINTS,NORTH_F1_PIT_WIDTH,northF1PitPose,northF1Pose,type NorthF1Point} from '../worker/north-f1-map.mjs';
+import {NORTH_F1_CIRCUIT,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS,NORTH_F1_PIT_APRON,NORTH_F1_PIT_BOXES,NORTH_F1_PIT_BOX_LENGTH,NORTH_F1_PIT_BOX_WIDTH,NORTH_F1_PIT_POINTS,NORTH_F1_PIT_WIDTH,northF1RacePose,northF1Pose,type NorthF1Point} from '../worker/north-f1-map.mjs';
 import {sampleF1Motion,type F1MotionSegment} from '../worker/north-f1-motion.mjs';
 
 const ROAD_LEVEL=.248;
@@ -8,7 +8,7 @@ const PIT_LEVEL=.263;
 
 type Audience={total:number;visitors:number;hansdrex:number;north:number};
 type ShuttlePoint=NorthF1Point&{y:number;at:number;mode:string};
-type RaceCar={progress?:number;id:string;teamId:string;driverId:string;color:number;lane:number;motion:F1MotionSegment[]};
+type RaceCar={progress?:number;id:string;teamId:string;driverId:string;color:number;lane:number;pitBox?:number;motion:F1MotionSegment[]};
 export type NorthF1View={
  teams:{id:string;name:string;color:number;drivers:string[]}[];
  activeRace?:{startsAt:number;endsAt:number;totalLaps:number;cars:RaceCar[];audience:Audience}|null;
@@ -63,6 +63,8 @@ export class NorthF1Renderer {
  private readonly crowd:THREE.InstancedMesh;
  private readonly tmp=new THREE.Object3D();
  private readonly color=new THREE.Color();
+ private readonly seats:{x:number;y:number;z:number;yaw:number}[]=[];
+ private readonly legacyPitBoxes=new Map<string,number>();
  private crowdCount=-1;
  private data:NorthF1View|null=null;
 
@@ -75,9 +77,16 @@ export class NorthF1Renderer {
   const grandstandRoof=new THREE.MeshStandardMaterial({color:0x20343c,roughness:.68,metalness:.24});
   this.root.add(new THREE.Mesh(ribbon(points,width,ROAD_LEVEL),asphalt));
   this.root.add(new THREE.Mesh(ribbon(NORTH_F1_PIT_POINTS,NORTH_F1_PIT_WIDTH,PIT_LEVEL,0,false),asphalt));
-  for(const side of [-1,1]){
-   this.root.add(new THREE.Mesh(ribbon(points,.16,ROAD_LEVEL+.013,side*(width/2-.35)),finish(0xe1e4df)));
-   this.root.add(new THREE.Mesh(ribbon(NORTH_F1_PIT_POINTS,.12,PIT_LEVEL+.013,side*3.25,false),finish(0xc5d6dd)));
+  const apron=NORTH_F1_PIT_APRON;
+  const apronMesh=new THREE.Mesh(new THREE.PlaneGeometry(apron.w,apron.d).rotateX(-Math.PI/2),asphalt);
+  apronMesh.position.set(apron.x,PIT_LEVEL-.005,apron.z);this.root.add(apronMesh);
+  const boundaryPaint=finish(0xc5d6dd);
+  for(const side of [-1,1])this.root.add(new THREE.Mesh(ribbon(points,.16,ROAD_LEVEL+.013,side*(width/2-.35)),boundaryPaint));
+  this.root.add(new THREE.Mesh(ribbon(NORTH_F1_PIT_POINTS,.12,PIT_LEVEL+.013,-3.25,false),boundaryPaint));
+  // The garage-side edge opens over the apron. Continue the edge paint only
+  // before and after the parking row so it cannot cut through its boxes.
+  for(const segment of [NORTH_F1_PIT_POINTS.slice(0,4),NORTH_F1_PIT_POINTS.slice(4)]){
+   this.root.add(new THREE.Mesh(ribbon(segment,.12,PIT_LEVEL+.013,3.25,false),boundaryPaint));
   }
   const lamps:THREE.BufferGeometry[]=[],poles:THREE.BufferGeometry[]=[],red:THREE.BufferGeometry[]=[],white:THREE.BufferGeometry[]=[];
   const barriers:THREE.BufferGeometry[]=[],finishDark:THREE.BufferGeometry[]=[];
@@ -124,9 +133,12 @@ export class NorthF1Renderer {
    const p=northF1Pose(-i*.00165,i%2?3:-3);
    white.push(box(2.05,.018,.15).rotateY(p.yaw).translate(p.x,ROAD_LEVEL+.021,p.z));
   }
-  for(let i=0;i<10;i++){
-   const x=-680+i*8.4,z=-896.85;
-   white.push(box(.12,.018,2.4,x-2.8,PIT_LEVEL+.023,z),box(.12,.018,2.4,x+2.8,PIT_LEVEL+.023,z),box(5.6,.018,.12,x,PIT_LEVEL+.023,z+1.2));
+  for(const {x,z} of NORTH_F1_PIT_BOXES){
+   white.push(box(2.1,.014,.10,x,PIT_LEVEL+.014,z-2));
+   const y=PIT_LEVEL+.023,halfWidth=NORTH_F1_PIT_BOX_WIDTH/2,halfLength=NORTH_F1_PIT_BOX_LENGTH/2;
+   for(const side of [-1,1])white.push(box(NORTH_F1_PIT_BOX_LENGTH,.014,.10,x,y,z+side*halfWidth));
+   white.push(box(.12,.014,NORTH_F1_PIT_BOX_WIDTH,x+halfLength,y,z));
+   red.push(box(.18,.014,.64,x-halfLength,y,z));
   }
   for(const side of [-1,1])poles.push(box(.48,7.3,.55,-740,3.65,-915+side*8.65));
   poles.push(box(.70,1.45,17.8,-740,7.45,-915));
@@ -143,45 +155,64 @@ export class NorthF1Renderer {
   addBatch(this.root,finishDark,finish(0x1a2632));
   addBatch(this.root,barriers,concrete);addBatch(this.root,poles,metal);
   addBatch(this.root,lamps,finish(0xe2f5ff));addBatch(this.root,red,finish(0xca4550));addBatch(this.root,white,finish(0xffeddd));
-  for(const building of NORTH_F1_BUILDINGS){
+  const standSeats=[];
+  for(const building of [...NORTH_F1_GRANDSTANDS,NORTH_F1_GARAGES]){
    const group=new THREE.Group();
-   const {w,d,h}=building;
-   group.name=building.name;group.position.set(building.x,0,building.z);this.root.add(group);
+   const yaw='yaw'in building&&typeof building.yaw==='number'?building.yaw:null;
+   const angle=yaw??0;
+   const rotated=Math.abs(Math.sin(angle))>.5;
+   const w=rotated?building.d:building.w,d=rotated?building.w:building.d,h=building.h;
+   group.name=building.name;group.position.set(building.x,0,building.z);group.rotation.y=angle;this.root.add(group);
    this.buildings.set(building.id,group);
    const lighting:THREE.BufferGeometry[]=[],stairs:THREE.BufferGeometry[]=[],frame:THREE.BufferGeometry[]=[],roof:THREE.BufferGeometry[]=[];
-   if(building.id.includes('garages')){
+   if(yaw===null){
     stairs.push(box(w,h*.88,d,0,h*.44));
     roof.push(box(w+.8,.42,d+.8,0,h*.9));
-    for(let i=0;i<10;i++){
-     const x=(i-4.5)*w/10;
-     frame.push(box(w/10-1.05,h*.38,.14,x,h*.24,-d/2-.08));
-     lighting.push(box(w/10-1.65,.16,.18,x,h*.46,-d/2-.12));
+    for(let team=0;team<NORTH_F1_PIT_BOXES.length;team+=2){
+     const doors=NORTH_F1_PIT_BOXES.slice(team,team+2);
+     for(const stall of doors){
+      const x=stall.x-building.x;
+      frame.push(box(w/20-.65,h*.38,.14,x,h*.24,-d/2-.08));
+      lighting.push(box(w/20-.85,.16,.18,x,h*.46,-d/2-.12));
+     }
     }
     lighting.push(box(w*.94,.2,.19,0,h*.72,-d/2-.12));
    }else{
-    const facing=building.id.includes('waterfront')?1:-1;
-    for(let row=0;row<7;row++){
-     const y=.58+row*.56,z=facing*(d*.39-row*d*.112);
+    const rows=7,columns=Math.floor((w-3)/1.5),seats=[];
+    for(let row=0;row<rows;row++){
+     const y=.58+row*.56,z=d*.39-row*d*.112;
      stairs.push(box(w,.60,d*.125,0,y,z));
-     lighting.push(box(w*.97,.068,.095,0,y+.36,z+facing*d*.065));
+     lighting.push(box(w*.97,.068,.095,0,y+.36,z+d*.065));
     }
-    for(let i=0;i<9;i++){
-     const x=(i-4)*w/9;frame.push(box(.4,h-1,.4,x,(h-1)/2,-facing*d*.42));
+    for(let col=0;col<columns;col++)for(let row=0;row<rows;row++){
+     const x=(col-(columns-1)/2)*1.5,z=d*.39-row*d*.112;
+     seats.push({x:building.x+x*Math.cos(yaw)+z*Math.sin(yaw),y:.95+row*.56,z:building.z-x*Math.sin(yaw)+z*Math.cos(yaw),yaw});
     }
-    roof.push(box(w+1,.35,d*.73,0,h-.72,-facing*d*.15));
-    lighting.push(box(w,.22,.16,0,h-.96,facing*d*.21));
+    standSeats.push(seats);
+    const supports=Math.max(4,Math.floor(w/13));
+    for(let i=0;i<supports;i++){
+     const x=(i-(supports-1)/2)*w/supports;frame.push(box(.4,h-1,.4,x,(h-1)/2,-d*.42));
+    }
+    roof.push(box(w+1,.35,d*.62,0,h-.72,-d*.19));
+    lighting.push(box(w,.22,.16,0,h-.96,d*.12));
    }
    addBatch(group,stairs,concrete);addBatch(group,frame,metal);addBatch(group,roof,grandstandRoof);addBatch(group,lighting,finish(0xb7eeff));
    const label=sign(building.name,18,9);
    (label.material as THREE.SpriteMaterial).depthTest=true;
    label.position.set(0,h+1.7,0);group.add(label);
   }
+  // Distribute the same audience across all stands while respecting each footprint.
+  for(let i=0;this.seats.length<NORTH_F1_CIRCUIT.capacity;i++){
+   const band=standSeats.flatMap(seats=>seats[i]?[seats[i]]:[]);
+   if(!band.length)break;
+   this.seats.push(...band.slice(0,NORTH_F1_CIRCUIT.capacity-this.seats.length));
+  }
   const bodyParts=[box(1.36,.44,3.1,0,.39),box(.68,.38,3.7,0,.44),box(1.68,.08,.46,0,.27,1.7),box(1.58,.11,.22,0,.79,-1.64)];
   const wheels=[box(.7,.22,.88,0,.61,-.32),...[-1,1].flatMap(x=>[-1,1].map(z=>box(.36,.52,.61,x*.77,.30,z*1.17)))];
   const vehicleShape=(parts:THREE.BoxGeometry[])=>{const geometry=mergeGeometries(parts)!;parts.forEach(p=>p.dispose());return geometry;};
   this.body=new THREE.InstancedMesh(vehicleShape(bodyParts),new THREE.MeshLambertMaterial({color:0xffffff,emissive:0x556679,emissiveIntensity:.14}),20);
   this.dark=new THREE.InstancedMesh(vehicleShape(wheels),new THREE.MeshStandardMaterial({color:0x121920,roughness:.84}),20);
-  this.crowd=new THREE.InstancedMesh(new THREE.BoxGeometry(.36,.66,.32),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.82}),900);
+  this.crowd=new THREE.InstancedMesh(new THREE.BoxGeometry(.36,.66,.32),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.82}),NORTH_F1_CIRCUIT.capacity);
   const bus=vehicleShape([box(2.8,2.6,8.2,0,1.38),box(2.94,.45,8.24,0,.68),box(2.82,.50,8.25,0,2.05)]);
   this.shuttle=new THREE.InstancedMesh(bus,new THREE.MeshLambertMaterial({color:0x3e90b9,emissive:0x275065,emissiveIntensity:.28}),4);
   this.pitCrews=new THREE.InstancedMesh(new THREE.BoxGeometry(.32,.72,.29),new THREE.MeshLambertMaterial({color:0xffb748,emissive:0x915b21,emissiveIntensity:.24}),60);
@@ -190,7 +221,11 @@ export class NorthF1Renderer {
   }
  }
 
- sync(data:NorthF1View|null|undefined){this.data=data||null;}
+ sync(data:NorthF1View|null|undefined){
+  this.data=data||null;
+  this.legacyPitBoxes.clear();
+  data?.teams.forEach((team,index)=>team.drivers.forEach((id,slot)=>this.legacyPitBoxes.set(id,index*2+slot)));
+ }
  update(gameNow:number,camera:THREE.Camera){
   const cx=camera.position.x+655,cz=camera.position.z+770;
   const near=cx*cx+cz*cz<850*850;
@@ -201,7 +236,8 @@ export class NorthF1Renderer {
    for(const car of active.cars){
     const sample=sampleF1Motion(car.motion,gameNow);
     if(!sample)continue;
-    const pose=sample.pit==null?northF1Pose(sample.progress,car.lane):northF1PitPose(sample.pit,car.lane*.26);
+    const pitBox=car.pitBox??this.legacyPitBoxes.get(car.driverId)??0;
+    const pose=northF1RacePose(sample,car.lane,pitBox,car.pitBox==null);
     this.tmp.position.set(pose.x,pose.y,pose.z);this.tmp.rotation.set(0,pose.yaw,0);this.tmp.updateMatrix();
     this.body.setMatrixAt(count,this.tmp.matrix);this.dark.setMatrixAt(count,this.tmp.matrix);
     this.body.setColorAt(count,this.color.setHex(car.color));
@@ -216,13 +252,12 @@ export class NorthF1Renderer {
   if(crew)this.pitCrews.instanceMatrix.needsUpdate=true;
   this.updateShuttles(gameNow,near);
   if(count){this.body.instanceMatrix.needsUpdate=true;this.dark.instanceMatrix.needsUpdate=true;if(this.body.instanceColor)this.body.instanceColor.needsUpdate=true;}
-  const audience=near?Math.min(900,Math.max(0,this.data?.trackCrowd?.total||0)):0;
+  const audience=near?Math.min(NORTH_F1_CIRCUIT.capacity,this.seats.length,Math.max(0,this.data?.trackCrowd?.total||0)):0;
   if(audience===this.crowdCount)return;
   this.crowdCount=audience;this.crowd.count=audience;this.tmp.rotation.set(0,0,0);
   for(let i=0;i<audience;i++){
-   const main=i%4!==0,stand=NORTH_F1_BUILDINGS[main?0:2],n=main?i-Math.floor(i/4)-1:Math.floor(i/4);
-   const row=n%7,col=Math.floor(n/7),facing=main?-1:1;
-   this.tmp.position.set(stand.x-stand.w*.46+col*(main?1.37:2.2),.95+row*.56,stand.z+facing*(stand.d*.39-row*stand.d*.112));
+   const seat=this.seats[i];
+   this.tmp.position.set(seat.x,seat.y,seat.z);this.tmp.rotation.y=seat.yaw;
    this.tmp.updateMatrix();this.crowd.setMatrixAt(i,this.tmp.matrix);
    this.color.setHSL((i*.6180339)%1,.42,.54+i%3*.09);this.crowd.setColorAt(i,this.color);
   }

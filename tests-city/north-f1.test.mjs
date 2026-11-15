@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createNorthF1,NORTH_F1_RULES} from '../worker/north-f1.mjs';
-import {NORTH_F1_CIRCUIT,northF1PitPose,northF1Pose} from '../worker/north-f1-map.mjs';
+import {NORTH_F1_CIRCUIT,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS,NORTH_F1_PIT_APRON,NORTH_F1_PIT_BOXES,NORTH_F1_PIT_BOX_LENGTH,NORTH_F1_PIT_BOX_WIDTH,northF1PitPose,northF1Pose,northF1RacePose} from '../worker/north-f1-map.mjs';
 import {F1_TARGET_SPEED,planF1Motion,sampleF1Motion} from '../worker/north-f1-motion.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
 
@@ -34,6 +34,19 @@ test('North GP professional field has ten real teams, twenty local drivers, a si
  step(event.startsAt);
  assert.equal(system.snapshot().activeRace.cars.length,20);
  assert.equal(NORTH_F1_RULES.laps,62);
+ assert.equal(new Set(state.northF1.event.cars.map(c=>c.pitBox)).size,20);
+ for(const c of state.northF1.event.cars){
+  const box=NORTH_F1_PIT_BOXES[c.pitBox];
+  assert.equal(system.snapshot().teams[box.teamIndex].drivers[box.driverIndex],c.driverId);
+  for(const stop of c.segments.filter(s=>s.pitPhase==='changing tyres')){
+   const sample=sampleF1Motion(c.segments,(stop.start+stop.end)/2);
+   const pose=northF1RacePose(sample,c.lane,c.pitBox);
+   assert.ok(Math.hypot(pose.x-box.x,pose.z-box.z)<.01);
+   const savedPose=northF1RacePose({progress:sample.progress,pit:.43},c.lane,c.pitBox,true);
+   assert.ok(Math.hypot(savedPose.x-box.x,savedPose.z-box.z)<.01,'old running races align without replacing their timings');
+  }
+ }
+
  const car=state.northF1.event.cars[0],stop=car.segments.find(s=>s.pitPhase==='changing tyres');
  assert.ok(stop.end>stop.start);
  const position=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
@@ -140,4 +153,27 @@ test('North City circuit has a continuous main track, a separate pit lane and a 
   assert.ok(onNorthF1Track(p));
   assert.ok(![...BUILDINGS,...WATER].some(b=>Math.abs(p.x-b.x)<b.w/2+5&&Math.abs(p.z-b.z)<b.d/2+5));
  }
+});
+
+
+test('all seven North City grandstands face a clear track and each painted pit box fits on the apron',async()=>{
+ const {BUILDINGS,ROADS,WATER,contains,overlaps,pedestrianRoute}=await import('../worker/city-map.mjs');
+ const {NORTH_SPORTS_PARK}=await import('../worker/country-map.mjs');
+ const occupied=[...BUILDINGS,...ROADS,...WATER,NORTH_SPORTS_PARK.golf,NORTH_SPORTS_PARK.football,...NORTH_SPORTS_PARK.tennis];
+ const track=Array.from({length:800},(_,i)=>northF1Pose(i/800));
+ assert.equal(NORTH_F1_GRANDSTANDS.length,7);
+ for(const stand of NORTH_F1_GRANDSTANDS){
+  assert.ok(!occupied.some(land=>land.id!==stand.id&&overlaps(land,stand,.5)),stand.id);
+  assert.ok(track.some(p=>{
+   const dx=p.x-stand.x,dz=p.z-stand.z;
+   return Math.hypot(dx,dz)<65&&dx*Math.sin(stand.yaw)+dz*Math.cos(stand.yaw)>Math.hypot(dx,dz)*.7;
+  }),`${stand.name} should face a nearby part of the track`);
+ }
+ assert.ok(!occupied.some(land=>land.id!==NORTH_F1_GARAGES.id&&overlaps(land,NORTH_F1_GARAGES,.5)));
+ for(let i=0;i<NORTH_F1_PIT_BOXES.length;i++){
+  const current=NORTH_F1_PIT_BOXES[i];
+  for(const side of [-1,1])for(const end of [-1,1])assert.ok(contains(NORTH_F1_PIT_APRON,{x:current.x+end*NORTH_F1_PIT_BOX_LENGTH/2,z:current.z+side*NORTH_F1_PIT_BOX_WIDTH/2}));
+  if(i>0)assert.ok(current.x-NORTH_F1_PIT_BOXES[i-1].x>NORTH_F1_PIT_BOX_LENGTH);
+ }
+ assert.ok(pedestrianRoute(NORTH_F1_CIRCUIT.spectator,NORTH_F1_CIRCUIT.paddock).length>=2);
 });

@@ -4,13 +4,21 @@ export const NORTH_F1_CHARTER_STANDS=[
  {id:'NORTH-CHARTER-1',x:-950,z:-754},
  {id:'NORTH-CHARTER-2',x:-950,z:-886},
 ];
-export const NORTH_F1_BUILDINGS=[
- {id:'north-f1-main-stand',name:'International Grandstand',x:-690,z:-936,w:142,d:11,h:10,kind:'race-venue',countryId:'north-city'},
- {id:'north-f1-team-garages',name:'North City Grand Prix Pit Building',x:-694,z:-879,w:122,d:14,h:11,kind:'race-venue',countryId:'north-city'},
- {id:'north-f1-waterfront-stand',name:'Waterfront Grandstand',x:-750,z:-623,w:108,d:13,h:8,kind:'race-venue',countryId:'north-city'},
+const venue=(id,name,x,z,w,d,h)=>({id:'north-f1-'+id,name,x,z,w,d,h,kind:'race-venue',countryId:'north-city'});
+const stand=(id,name,x,z,w,d,h,yaw=0)=>({...venue(id,name,x,z,w,d,h),yaw});
+export const NORTH_F1_GRANDSTANDS=[
+ stand('main-stand','International Grandstand',-690,-936,142,11,10),
+ stand('waterfront-stand','Waterfront Grandstand',-750,-623,108,13,8),
+ stand('turn-one-stand','Turn One Grandstand',-486,-894,45,11,7,Math.PI),
+ stand('city-stand','City Chicane Grandstand',-462,-850,11,45,7,Math.PI/2),
+ stand('sports-stand','Sports Park Grandstand',-556,-658,11,36,7,Math.PI/2),
+ stand('river-bend-stand','River Bend Grandstand',-884,-651,11,47,7,Math.PI/2),
+ stand('airport-stand','Airport Straight Grandstand',-895,-725,11,52,7,Math.PI/2),
 ];
+export const NORTH_F1_GARAGES=venue('team-garages','North City Grand Prix Pit Building',-637.5,-879,100,14,11);
+export const NORTH_F1_BUILDINGS=[...NORTH_F1_GRANDSTANDS,NORTH_F1_GARAGES];
 const spectator={id:'north-f1-grandstand',name:'North City Grand Prix Fan Plaza',type:'social',x:-586,z:-938};
-const paddock={id:'north-f1-paddock',name:'North City Grand Prix Paddock',type:'job',x:-622,z:-879};
+const paddock={id:'north-f1-paddock',name:'North City Grand Prix Paddock',type:'job',x:-622,z:-866};
 export const NORTH_F1_LOCATIONS=[spectator,paddock];
 export const NORTH_F1_ACCESS_ROADS=[
  {id:'NORTH-F1-FAN-PLAZA',x:-586,z:-940,w:7,d:20},
@@ -53,7 +61,7 @@ const reservation=(a,b)=>{
  return {x:(a.x+b.x)/2,z:(a.z+b.z)/2,w:Math.abs(b.x-a.x)+padding*2,d:Math.abs(b.z-a.z)+padding*2};
 };
 export const NORTH_F1_RESERVED=[
- ...raceFacilities,
+ ...raceFacilities,...NORTH_F1_BUILDINGS,
  ...bends.map(([x,z],i)=>{
   const [px,pz]=bends.at(i-1);
   return reservation({x,z},{x:px,z:pz});
@@ -68,8 +76,8 @@ for(let i=0;i<samples.length;i++){
 }
 // Pit entry peels away after the starting line and rejoins before Turn 1.
 export const NORTH_F1_PIT_POINTS=Object.freeze([
- {x:-727,z:-915},{x:-717,z:-912},{x:-698,z:-900},{x:-683,z:-898},
- {x:-592,z:-898},{x:-577,z:-901},{x:-552,z:-915},
+ {x:-727,z:-915},{x:-717,z:-912},{x:-698,z:-900},{x:-686,z:-898},
+ {x:-589,z:-898},{x:-577,z:-901},{x:-552,z:-915},
 ]);
 export const NORTH_F1_PIT_WIDTH=7;
 const pitEdges=[];
@@ -78,6 +86,18 @@ for(let i=1;i<NORTH_F1_PIT_POINTS.length;i++){
  const a=NORTH_F1_PIT_POINTS[i-1],b=NORTH_F1_PIT_POINTS[i],length=Math.hypot(b.x-a.x,b.z-a.z);
  pitEdges.push({a,b,length,at:pitLength,dx:(b.x-a.x)/length,dz:(b.z-a.z)/length});pitLength+=length;
 }
+const pitStraight=pitEdges.find(edge=>edge.a.z===-898&&edge.b.z===-898);
+const garageFront=NORTH_F1_GARAGES.z-NORTH_F1_GARAGES.d/2;
+export const NORTH_F1_PIT_APRON={x:NORTH_F1_GARAGES.x,z:(garageFront-899)/2,w:NORTH_F1_GARAGES.w,d:garageFront+899};
+export const NORTH_F1_PIT_BOX_WIDTH=2.9;
+export const NORTH_F1_PIT_BOX_LENGTH=4.55;
+const bayWidth=NORTH_F1_GARAGES.w/10;
+export const NORTH_F1_PIT_BOXES=Array.from({length:20},(_,index)=>{
+ const teamIndex=Math.floor(index/2),driverIndex=index%2;
+ const x=NORTH_F1_GARAGES.x+(teamIndex-4.5+(driverIndex?.25:-.25))*bayWidth;
+ const z=-894.65;
+ return {teamIndex,driverIndex,x,z,progress:(pitStraight.at+x-pitStraight.a.x)/pitLength,side:z-pitStraight.a.z};
+});
 export const NORTH_F1_CIRCUIT=Object.freeze({
  id:NORTH_F1_ID,name:'North City Waterfront Grand Prix',width:16,lapLength,
  points:Object.freeze(samples),spectator,paddock,capacity:900,pit:Object.freeze({enter:13/lapLength,box:.43,exit:188/lapLength,length:pitLength}),
@@ -108,4 +128,20 @@ export function northF1PitPose(fraction,side=0){
  const meters=Math.min(1,Math.max(0,fraction))*pitLength;
  const e=pitEdges.find(edge=>meters<edge.at+edge.length)||pitEdges.at(-1),delta=meters-e.at;
  return {x:e.a.x+e.dx*delta-e.dz*side,y:.27,z:e.a.z+e.dz*delta+e.dx*side,yaw:Math.atan2(e.dx,e.dz)};
+}
+
+/** The plan uses the painted box's longitudinal coordinate. Its lateral offset
+ * grows near the box, leaving a separate through lane beside the stopped car. */
+export function northF1RacePose(sample,lane,pitBoxIndex,legacy=false){
+ if(sample.pit==null)return northF1Pose(sample.progress,lane);
+ const box=NORTH_F1_PIT_BOXES[pitBoxIndex];
+ if(!box)return northF1PitPose(sample.pit,lane*.26);
+ const fraction=legacy?(sample.pit<=.43
+  ? sample.pit*box.progress/.43
+  : box.progress+(sample.pit-.43)*(1-box.progress)/.57):sample.pit;
+ const steer=Math.max(0,1-Math.abs(fraction-box.progress)*pitLength/7);
+ const merge=Math.max(0,1-Math.min(fraction,1-fraction)*pitLength/10);
+ const pose=northF1PitPose(fraction,box.side*steer*steer*(3-2*steer));
+ pose.z+=lane*merge*merge;
+ return pose;
 }
