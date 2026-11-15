@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
 import {batchStaticMeshes} from './static-box-batches.ts';
 import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
@@ -65,6 +66,8 @@ export class InternationalLandmarks{
   this.box(g,a.runway.x,.19,a.runway.z,.25,.025,a.runway.d-16,this.paint);
   for(const z of [a.runway.z-a.runway.d/2+10,a.runway.z+a.runway.d/2-10])for(let x=-7;x<=7;x+=3.5)this.box(g,a.runway.x+x,.2,z,1.1,.025,8,this.paint);
   for(const p of a.stands){this.box(g,p.x,.19,p.z,12,.02,.22,this.paint);this.box(g,p.x,.19,p.z,.22,.02,15,this.paint);}
+  for(const side of [-1,1]){this.box(g,NORTH_TRAINING_STAND.x+side*5,.19,NORTH_TRAINING_STAND.z,.12,.02,12,this.paint);this.box(g,NORTH_TRAINING_STAND.x,.19,NORTH_TRAINING_STAND.z+side*6,10,.02,.12,this.paint);}
+  this.label(g,'TRAINING',NORTH_TRAINING_STAND.x,.8,NORTH_TRAINING_STAND.z,10,.8);
   this.box(g,-974,.13,-820,8,.1,230,this.road);this.box(g,-987,.13,-900,26,.1,8,this.road);
   this.label(g,'NORTH CITY INTERNATIONAL · NCI',a.terminal.x,16,a.terminal.z,a.terminal.d*.8,1.8);
   batchStaticMeshes(g);this.root.add(g);
