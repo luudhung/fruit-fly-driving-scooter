@@ -1,4 +1,5 @@
-import {ROADS,BUILDINGS,WATER,PARK,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,METRO_LINES,metroTrackPoints,contains} from './city-map.mjs';
+import {bridgeFurnitureLayout} from './bridge-rail-layout.mjs';
+import {ROADS,BUILDINGS,WATER,PARK,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,METRO_LINES,metroTrackPoints,contains,WALKWAYS,roadTravelY,clearSegment} from './city-map.mjs';
 import {INTERSECTIONS} from './traffic.mjs';
 
 /** Actual renderer world coordinates, independent of vehicle/road rules. Low pavement,
@@ -69,24 +70,9 @@ for(const line of METRO_LINES)for(const direction of [1,-1]){
   }
  }
 }
-for(const b of DISTRICT_BRIDGES)if(!b.motorway)for(const side of [-1,1]){const horizontal=b.axis==='x',edge=side*((horizontal?b.d:b.w)/2-.25);box(`district-bridge-rail:${b.id}:${side}`,b.x+(horizontal?0:edge),b.z+(horizontal?edge:0),horizontal?b.w:.12,horizontal?.12:b.d,.28,1.58);}
-for(const bridge of BRIDGES){
- const main=bridge.z===0,steps=main?32:20,half=bridge.w/2,side=bridge.d/2-.6,rise=main?36:14;
- for(let i=0;i<=Math.floor(bridge.w/20);i++)for(const sign of [-1,1]){
-  circle(`bridge-lamp:${bridge.z}:${i}:${sign}`,bridge.x-half+i*20,bridge.z+sign*7.35,.09,.3,3.1);
- }
- for(const sign of [-1,1]){
-  const z=bridge.z+sign*side;
-  box(`bridge-rail:${bridge.z}:${sign}`,bridge.x,z,bridge.w,.6,.9,1.5);
-  for(let i=0;i<steps;i+=2){
-   const t=i/steps,x=bridge.x-half+bridge.w*t,top=2.6+rise*Math.sin(Math.PI*t);
-   circle(`bridge-suspender:${bridge.z}:${sign}:${i}`,x,z,.12,1.2,top);
-  }
-  for(const end of [-1,1]){
-   box(`bridge-pier:${bridge.z}:${sign}:${end}`,bridge.x+end*(half+4),z+sign*3.5,main?5:3,4,0,main?12:5);
-  }
- }
-}
+const bridgeFurniture=bridgeFurnitureLayout({bridges:BRIDGES,districtBridges:DISTRICT_BRIDGES,roads:ROADS,walks:WALKWAYS,roadHeight:roadTravelY,clearWalk:clearSegment});
+for(const p of [...bridgeFurniture.districtRails,...bridgeFurniture.archRails,...bridgeFurniture.archPiers])box(p.id,p.x,p.z,p.w,p.d,p.minY,p.maxY);
+for(const p of [...bridgeFurniture.archLamps,...bridgeFurniture.archHangers])circle(p.id,p.x,p.z,p.radius,p.minY,p.maxY);
 for(const z of [-282,-242,-202,-162,-122,-82,-52])for(const x of [-43,73]){
  circle(`park-lamp:${x}:${z}`,x,z-2,.09,0,3);
 }

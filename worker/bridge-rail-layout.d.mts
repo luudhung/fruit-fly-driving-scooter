@@ -1,0 +1,15 @@
+export type BridgeAxis='x'|'z';
+export type BridgeRect=Readonly<{x:number;z:number;w:number;d:number}>;
+export type BridgeAccess=BridgeRect&{axis:BridgeAxis;kind:'road'|'walk'};
+export type BridgeWalk={a:{x:number;z:number};b:{x:number;z:number}};
+export type BridgeAccessFilter=(access:BridgeAccess,point:{x:number;z:number})=>boolean;
+export function bridgeAccessCorridors(roads:readonly BridgeRect[],walks:readonly BridgeWalk[],walkWidth?:number):BridgeAccess[];
+export function bridgeAccessAtGrade(access:BridgeAccess,point:{x:number;z:number},roadHeight:(p:{x:number;z:number},axis:BridgeAxis)=>number,clearWalk:(a:{x:number;z:number},b:{x:number;z:number})=>boolean):boolean;
+export function bridgeRailPieces(rail:BridgeRect,axis:BridgeAxis,accesses:readonly BridgeAccess[],options?:{clearance?:number;accept?:BridgeAccessFilter}):BridgeRect[];
+export function bridgeRailPosts(pieces:readonly BridgeRect[],axis:BridgeAxis,spacing?:number,inset?:number):Array<{x:number;z:number}>;
+export function bridgeAccessOverlaps(rect:BridgeRect,accesses:readonly BridgeAccess[],accept?:BridgeAccessFilter,clearance?:number,parallelAxis?:BridgeAxis):boolean;
+export type BridgeRail=BridgeRect&{id:string;minY:number;maxY:number;bridgeZ?:number;bridgeId?:string;side:number;axis?:BridgeAxis};
+export type BridgeRoundFurniture={id:string;bridgeZ:number;side:number;index:number;x:number;z:number;radius:number;minY:number;maxY:number};
+export type BridgePier=BridgeRect&{id:string;bridgeZ:number;side:number;minY:number;maxY:number};
+export type BridgeFurnitureLayout={districtRails:BridgeRail[];districtPosts:Array<{id:string;bridgeId:string;side:number;x:number;z:number}>;archRails:BridgeRail[];archCurbs:Array<BridgeRect&{bridgeZ:number}>;archHangers:BridgeRoundFurniture[];archPiers:BridgePier[];archLamps:BridgeRoundFurniture[]};
+export function bridgeFurnitureLayout(options:{bridges:readonly BridgeRect[];districtBridges:readonly(BridgeRect&{id:string;axis:BridgeAxis;motorway?:boolean})[];roads:readonly BridgeRect[];walks:readonly BridgeWalk[];roadHeight:(p:{x:number;z:number},axis:BridgeAxis)=>number;clearWalk:(a:{x:number;z:number},b:{x:number;z:number})=>boolean}):BridgeFurnitureLayout;

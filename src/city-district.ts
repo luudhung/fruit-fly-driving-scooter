@@ -1,6 +1,8 @@
+import {bridgeFurnitureLayout} from './bridge-rail-layout.ts';
 import {createRoadMaterial} from './road-lighting.ts';
 import * as THREE from 'three';
-import {BRIDGES,SPORTS_VENUES} from '../worker/city-map.mjs';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+import {BRIDGES,DISTRICT_BRIDGES,SPORTS_VENUES,ROADS,WALKWAYS,roadTravelY,clearSegment} from '../worker/city-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const steel=new THREE.MeshStandardMaterial({color:0x657b86,roughness:.55,metalness:.5});
 const concrete=new THREE.MeshStandardMaterial({color:0xa7aaa5,roughness:.9});
@@ -12,27 +14,33 @@ function block(root:THREE.Group,w:number,h:number,d:number,x:number,y:number,z:n
 /** All arch members share geometry and a draw call, rather than one mesh per steel bar. */
 export function buildRiverBridges(root:THREE.Group){
  const beam=new THREE.CylinderGeometry(1,1,1,6),up=new THREE.Vector3(0,1,0),dummy=new THREE.Object3D();
+ const furniture=bridgeFurnitureLayout({bridges:BRIDGES,districtBridges:DISTRICT_BRIDGES,roads:ROADS,walks:WALKWAYS,roadHeight:roadTravelY,clearWalk:clearSegment});
+ const rails:Array<{x:number;z:number;w:number;d:number}>=[];root.userData.archBridgeRails=rails;
  for(const bridge of BRIDGES){
   const main=bridge.z===0,rise=main?36:14,steps=main?32:20,half=bridge.w/2,side=bridge.d/2-.6;
   block(root,bridge.w,.5,bridge.d,bridge.x,-.12,bridge.z,createRoadMaterial(0x424b50,.9));
+  const curbParts:THREE.BufferGeometry[]=[];
   for(const sideSign of [-1,1]){
    block(root,bridge.w,.16,2.4,bridge.x,.26,bridge.z+sideSign*6,new THREE.MeshStandardMaterial({color:0xd0c6ad,roughness:.95}));
-   block(root,bridge.w,.4,.16,bridge.x,.4,bridge.z+sideSign*4.65,concrete);
+   for(const p of furniture.archCurbs.filter(p=>p.bridgeZ===bridge.z&&Math.sign(p.z-bridge.z)===sideSign))curbParts.push(new THREE.BoxGeometry(p.w,.4,p.d).translate(p.x,.4,p.z));
   }
+  const curbGeometry=mergeGeometries(curbParts);if(curbGeometry)root.add(new THREE.Mesh(curbGeometry,concrete));for(const p of curbParts)p.dispose();
   const bars:Array<{a:THREE.Vector3;b:THREE.Vector3;r:number}>=[];
   const add=(ax:number,ay:number,az:number,bx:number,by:number,bz:number,r=.22)=>bars.push({a:new THREE.Vector3(ax,ay,az),b:new THREE.Vector3(bx,by,bz),r});
   const arch=(t:number)=>2.6+rise*Math.sin(Math.PI*t);
   for(const direction of [-1,1]){
    const z=bridge.z+direction*side;
-   add(bridge.x-half,1.2,z,bridge.x+half,1.2,z,.3);
+   const protectedRail=furniture.archRails.filter(p=>p.bridgeZ===bridge.z&&p.side===direction);rails.push(...protectedRail);
+   for(const p of protectedRail)add(p.x-p.w/2,1.2,z,p.x+p.w/2,1.2,z,.3);
    for(let i=0;i<steps;i++){
     const a=i/steps,b=(i+1)/steps,x=bridge.x-half+bridge.w*a,next=bridge.x-half+bridge.w*b;
     add(x,arch(a),z,next,arch(b),z,main?.42:.28);
     add(x,arch(a)+2.1,z,next,arch(b)+2.1,z,main?.26:.18);
     add(x,arch(a),z,next,arch(b)+2.1,z,.14);
-    if(i%2===0){add(x,1.2,z,x,arch(a),z,.12);if(arch(a)>=14.5)add(x,arch(a),bridge.z-side,x,arch(a),bridge.z+side,.18);}
+    if(i%2===0&&arch(a)>=14.5)add(x,arch(a),bridge.z-side,x,arch(a),bridge.z+side,.18);
    }
-   for(const x of [bridge.x-half-4,bridge.x+half+4])block(root,main?5:3,main?12:5,4,x,main?6:2.5,z+direction*3.5,concrete);
+   for(const p of furniture.archHangers.filter(p=>p.bridgeZ===bridge.z&&p.side===direction))add(p.x,p.minY,p.z,p.x,p.maxY,p.z,p.radius);
+   for(const p of furniture.archPiers.filter(p=>p.bridgeZ===bridge.z&&p.side===direction))block(root,p.w,p.maxY-p.minY,p.d,p.x,(p.minY+p.maxY)/2,p.z,concrete);
   }
   const mesh=new THREE.InstancedMesh(beam,steel,bars.length);
   bars.forEach(({a,b,r},i)=>{const delta=b.clone().sub(a);dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,delta.clone().normalize());dummy.scale.set(r,delta.length(),r);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});root.add(mesh);
@@ -43,7 +51,7 @@ export function buildRiverBridges(root:THREE.Group){
   const ribbonGeo=new THREE.BufferGeometry();ribbonGeo.setAttribute('position',new THREE.Float32BufferAttribute(ribbon,3));const glow=new THREE.LineBasicMaterial({color:0xffd19a,transparent:true,depthWrite:false,toneMapped:false});bridgeLights.push(glow);root.add(new THREE.LineSegments(ribbonGeo,glow));
   const count=(Math.floor(bridge.w/20)+1)*2,posts=new THREE.InstancedMesh(new THREE.CylinderGeometry(.065,.09,2.8,5),steel,count),bulbMaterial=new THREE.MeshBasicMaterial({color:0xffe1a1,toneMapped:false,transparent:true});bridgeLights.push(bulbMaterial);
   const bulbs=new THREE.InstancedMesh(new THREE.SphereGeometry(.22,6,4),bulbMaterial,count);let lampIndex=0;
-  for(let i=0;i<=Math.floor(bridge.w/20);i++)for(const sign of [-1,1]){dummy.position.set(bridge.x-half+i*20,1.7,bridge.z+sign*7.35);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();posts.setMatrixAt(lampIndex,dummy.matrix);dummy.position.y=3.15;dummy.updateMatrix();bulbs.setMatrixAt(lampIndex++,dummy.matrix);}root.add(posts,bulbs);
+  for(const p of furniture.archLamps.filter(p=>p.bridgeZ===bridge.z)){dummy.position.set(p.x,(p.minY+p.maxY)/2,p.z);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();posts.setMatrixAt(lampIndex,dummy.matrix);dummy.position.y=3.15;dummy.updateMatrix();bulbs.setMatrixAt(lampIndex++,dummy.matrix);}posts.count=bulbs.count=lampIndex;root.add(posts,bulbs);
 
  }
 }

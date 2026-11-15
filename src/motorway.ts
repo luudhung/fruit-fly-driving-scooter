@@ -1,3 +1,5 @@
+import {bridgeAccessCorridors,bridgeAccessAtGrade,bridgeRailPieces} from './bridge-rail-layout.ts';
+import {ROADS,WALKWAYS,roadTravelY,clearSegment} from '../worker/city-map.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {MOTORWAY,MOTORWAY_ROADS,MOTORWAY_ACCESS_ROADS,MOTORWAY_DECKS,motorwayMedianBlocked} from '../worker/motorway.mjs';
@@ -68,6 +70,8 @@ function signAtlas(plans:MotorwaySignPlan[]){
 /** The entire ring uses a handful of shared meshes; there are no real lights. */
 export function buildMotorway(root:THREE.Object3D,makeSign?:(text:string,width:number,height:number)=>THREE.Sprite){
  const group=new THREE.Group();group.name='Hansdrex ring motorway';root.add(group);
+ const accesses=bridgeAccessCorridors(ROADS,WALKWAYS),accept=(access:Parameters<typeof bridgeAccessAtGrade>[0],point:{x:number;z:number})=>bridgeAccessAtGrade(access,point,roadTravelY,clearSegment);
+ const guardrails:Array<{x:number;z:number;w:number;d:number}>=[];group.userData.guardrails=guardrails;
  const layers=new Map<string,{material:THREE.Material;parts:THREE.BufferGeometry[]}>();
  const asphalt=createRoadMaterial(0x252c34),concrete=new THREE.MeshStandardMaterial({color:0xa9b0ac,roughness:.95}),paint=new THREE.MeshBasicMaterial({color:0xe6e7d6,toneMapped:false}),yellow=new THREE.MeshBasicMaterial({color:0xd9b853,toneMapped:false}),steel=new THREE.MeshStandardMaterial({color:0x80949d,roughness:.7,metalness:.3});
  const add=(key:string,material:THREE.Material,x:number,y:number,z:number,w:number,h:number,d:number)=>{
@@ -95,8 +99,7 @@ export function buildMotorway(root:THREE.Object3D,makeSign?:(text:string,width:n
    }
    for(let along=start+35;along<end-35;along+=28){
     const x=horizontal?along:road.x+sign*16,z=horizontal?road.z+sign*16:along;
-    const opening=MOTORWAY_ACCESS_ROADS.some(r=>Math.hypot(Math.max(0,Math.abs(x-r.x)-r.w/2),Math.max(0,Math.abs(z-r.z)-r.d/2))<12);
-    if(!opening)add('rail',steel,x,.65,z,horizontal?25:.12,.24,horizontal?.12:25);
+    for(const p of bridgeRailPieces({x,z,w:horizontal?25:.12,d:horizontal?.12:25},horizontal?'x':'z',accesses,{accept})){guardrails.push(p);add('rail',steel,p.x,.65,p.z,p.w,.24,p.d);}
    }
   }
  }

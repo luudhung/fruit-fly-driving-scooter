@@ -33,11 +33,17 @@ export class InternationalLandmarks{
  private premises(b:CountryBuilding){
   const g=new THREE.Group();g.position.set(b.x,0,b.z);g.name=b.name;
   const cottage=b.kind==='resort-cottage',height=b.h;
-  this.box(g,0,height/2,0,b.w,height,b.d,this.stone);
-  this.box(g,0,height-.1,0,b.w+.25,.2,b.d+.25,this.roof);
-  if(cottage){const r=new THREE.Mesh(new THREE.ConeGeometry(Math.min(b.w,b.d)*.62,2.2,4),this.roof);r.rotation.y=Math.PI/4;r.position.y=height-1.1;g.add(r);}
+  // The roof owns the outside top surface. Walls stop underneath it so two
+  // differently coloured faces never compete for the same depth value.
+  const roofHeight=cottage?2.2:.24,wallHeight=height-roofHeight;
+  this.box(g,0,wallHeight/2,0,b.w,wallHeight,b.d,this.stone);
+  if(cottage){
+   const r=new THREE.Mesh(new THREE.ConeGeometry((b.w+.4)/Math.SQRT2,roofHeight,4),this.roof);
+   r.rotation.y=Math.PI/4;r.scale.z=(b.d+.4)/(b.w+.4);r.position.y=height-roofHeight/2;g.add(r);
+  }else this.box(g,0,height-roofHeight/2,0,b.w+.25,roofHeight,b.d+.25,this.roof);
   for(const side of [-1,1])for(let x=-b.w/2+2.5;x<b.w/2-1;x+=4)for(let y=2.2;y<height-1;y+=3.2)this.box(g,x,y,side*(b.d/2+.035),1.25,1.5,.05,this.windows);
-  this.box(g,0,1.8,b.d/2+.06,2.1,3.2,.1,this.glass);
+  const doorHeight=Math.min(3.2,wallHeight-.25);
+  this.box(g,0,doorHeight/2+.05,b.d/2+.06,Math.min(2.1,b.w-.3),doorHeight,.1,this.glass);
   if(!cottage&&b.kind!=='customs'&&b.kind!=='farm-service')this.label(g,b.name.toUpperCase(),0,height+2,0,Math.max(17,b.w));
   batchStaticMeshes(g);return g;
  }
@@ -45,11 +51,11 @@ export class InternationalLandmarks{
   const b=NORTH_LANDMARK,g=new THREE.Group();g.name=b.name;g.position.set(b.x,0,b.z);
   const bounds=[0,18,46,74,102,130,154,173,184],widths=[18,16.2,14.4,12.6,10.6,8.6,6.6,4.2];
   for(let i=0;i<widths.length;i++){
-   const bottom=bounds[i],top=bounds[i+1],w=widths[i],depth=w*.82;
-   this.box(g,0,(bottom+top)/2,0,w,top-bottom,depth,this.glass);
+   const bottom=bounds[i],top=bounds[i+1],w=widths[i],depth=w*.82,shaftHeight=top-bottom-.48,shaftCenter=bottom+shaftHeight/2;
+   this.box(g,0,shaftCenter,0,w,shaftHeight,depth,this.glass);
    for(const side of [-1,1]){
-    this.box(g,side*(w/2-.18),(bottom+top)/2,0,.28,top-bottom,depth+.1,this.metal);
-    this.box(g,0,(bottom+top)/2,side*(depth/2+.05),.3,top-bottom,.14,this.copper);
+    this.box(g,side*(w/2-.18),shaftCenter,0,.28,shaftHeight,depth+.1,this.metal);
+    this.box(g,0,shaftCenter,side*(depth/2+.05),.3,shaftHeight,.14,this.copper);
    }
    this.box(g,0,top-.24,0,w+.12,.48,depth+.12,this.copper);
    for(let y=bottom+2;y<top-1;y+=3)for(const side of [-1,1])for(let x=-w/2+1.4;x<w/2-1;x+=2.5)this.box(g,x,y,side*(depth/2+.04),.7,1.2,.04,this.windows);

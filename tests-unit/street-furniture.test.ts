@@ -1,9 +1,11 @@
+import {buildDistrictRiverInfrastructure} from '../src/district-river-renderer.ts';
+import {playerCarClear} from '../src/player-car.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {STREET_COLLIDERS,streetCollidersNear,signalPolePose,SIGNAL_POLE_PLACEMENT_ISSUES,type StreetCollider} from '../worker/street-furniture.mjs';
 import {INTERSECTIONS} from '../worker/traffic.mjs';
-import {ROADS,BUILDINGS,contains} from '../worker/city-map.mjs';
+import {ROADS,BUILDINGS,contains,roadTravelY,BRIDGES,DISTRICT_BRIDGES} from '../worker/city-map.mjs';
 import {TrafficSignals} from '../src/traffic-signals.ts';
 import {MetroRenderer} from '../src/metro-renderer.ts';
 import {buildRiverBridges} from '../src/city-district.ts';
@@ -90,4 +92,26 @@ test('only obstructed base poles move to clear nearby corners, with stable cache
   const key=`${pose.x},${pose.z}`;assert.ok(!used.has(key));used.add(key);
  }
  assert.equal(used.size,INTERSECTIONS.length*2);
+});
+
+
+test('each clipped district bar has one matching collider and no invisible collider closes its road opening',()=>{
+ const root=new THREE.Group(),g=buildDistrictRiverInfrastructure(root),segments=g.userData.bridgeRails as Array<{id:string;x:number;z:number;w:number;d:number}>,physical=named('district-bridge-rail:');assert.equal(segments.length,physical.length);
+ for(const p of segments){const c=physical.find(c=>c.id===p.id);assert.ok(c);assert.ok(close(c.x,p.x)&&close(c.z,p.z)&&close(c.w!,p.w)&&close(c.d!,p.d));assert.equal(c.minY,.28);assert.equal(c.maxY,1.58);}
+ // Audit actual merged box vertices, independently of the construction metadata.
+ const metal=(g.children[1] as THREE.Mesh).geometry.getAttribute('position');
+ for(let i=0;i<metal.count;i+=24){let loX=Infinity,hiX=-Infinity,loZ=Infinity,hiZ=-Infinity,loY=Infinity,hiY=-Infinity;for(let j=i;j<i+24;j++){loX=Math.min(loX,metal.getX(j));hiX=Math.max(hiX,metal.getX(j));loZ=Math.min(loZ,metal.getZ(j));hiZ=Math.max(hiZ,metal.getZ(j));loY=Math.min(loY,metal.getY(j));hiY=Math.max(hiY,metal.getY(j));}
+  assert.ok(physical.some(c=>loX>=c.x-c.w!/2-1e-4&&hiX<=c.x+c.w!/2+1e-4&&loZ>=c.z-c.d!/2-1e-4&&hiZ<=c.z+c.d!/2+1e-4&&loY>=c.minY-1e-4&&hiY<=c.maxY+1e-4),'every rendered bar/post belongs to its matching physical segment');
+ }
+ for(const x of [-380,50])for(let offset=-14;offset<=14;offset+=.5)assert.equal(playerCarClear(x+offset,-600,Math.PI/2,.2),true,`car must turn through North bank junction ${x},${offset}`);
+ for(const b of DISTRICT_BRIDGES.filter(b=>!b.motorway)){const across=b.axis==='x'?{x:b.x,z:b.z+b.d/2-.25}:{x:b.x+b.w/2-.25,z:b.z};assert.ok(streetCollidersNear(across.x,across.z,.2).some(c=>c.id.startsWith(`district-bridge-rail:${b.id}:`)),'midwater guard remains physical');}
+});
+
+test('every shortened main rail and raised hanger has the same rendered and colliding extent, while parallel lamps remain present',()=>{
+ const root=new THREE.Group();buildRiverBridges(root);const records=transforms(root),rails=records.filter(v=>v.geometry instanceof THREE.CylinderGeometry&&close(v.geometry.parameters.radiusTop,1)&&close(v.scale.x,.3)&&close(v.position.y,1.2)),hangers=records.filter(v=>v.geometry instanceof THREE.CylinderGeometry&&close(v.geometry.parameters.radiusTop,1)&&close(v.scale.x,.12));
+ assert.equal(rails.length,named('bridge-rail:').length);for(const c of named('bridge-rail:'))assert.ok(rails.some(v=>matches(c,v.position)&&close(v.scale.y,c.w!)&&close(c.d!,v.scale.x*2)));
+ assert.equal(hangers.length,named('bridge-suspender:').length);for(const c of named('bridge-suspender:'))assert.ok(hangers.some(v=>matches(c,v.position)&&close(v.scale.y,c.maxY-c.minY)&&close(v.scale.x,c.radius!)));
+ assert.ok(named('bridge-lamp:').length>=BRIDGES.length*14,'own parallel footway cannot remove all bridge lamps');
+ assert.equal(playerCarClear(372,7.35,0,roadTravelY({x:372,z:7.35},'z')-.9),true,'an underpass car remains below the preserved upper rail');
+ for(const b of BRIDGES)for(const sign of [-1,1])assert.equal(playerCarClear(364,b.z+sign*7.4,0,.2),true,'the actual west-bank sidewalk entrance also admits a car without an invisible guard');
 });

@@ -26,7 +26,7 @@ export const COUNTRY_AIRPORTS=[
 export const COUNTRY_AIRPORT_ALIASES={airport:'city','north-airport':'north','island-airport':'island',hawaii:'island'};
 export const NORTH_AIRPORT=COUNTRY_AIRPORTS[1];
 export const NORTH_FARM={id:'north-farm',locationId:'north-farm',name:'North City Rice and Vegetable Cooperative',ownerCountryId:COUNTRY_IDS.north,kind:'farm',x:260,z:-790,w:230,d:280,capacity:40,gate:{x:138,z:-790},crops:['rice','vegetables'],fields:[{id:'north-rice-west',crop:'rice',x:202,z:-860,w:98,d:116},{id:'north-rice-east',crop:'rice',x:318,z:-860,w:98,d:116},{id:'north-vegetables-west',crop:'vegetables',x:202,z:-720,w:98,d:116},{id:'north-vegetables-east',crop:'vegetables',x:318,z:-720,w:98,d:116}]};
-export const NORTH_LANDMARK={id:'north-aurora-tower',name:'North City Aurora Tower',x:-216,z:-904,w:18,d:18,h:196,kind:'landmark',countryId:COUNTRY_IDS.north,capacity:16,rent:40,purchaseValue:240000,officeCapacity:24};
+export const NORTH_LANDMARK={id:'north-aurora-tower',name:'North City Aurora Tower',x:-198,z:-970,w:18,d:18,h:196,kind:'landmark',countryId:COUNTRY_IDS.north,capacity:16,rent:40,purchaseValue:240000,officeCapacity:24};
 export const NORTH_MILITARY={id:'north-army-compound',x:270,z:-1020,w:180,d:100,drill:{x:270,z:-995,w:80,d:36},gate:{x:270,z:-961}};
 /** One physical perimeter for AI, the player and static presentation. */
 export const NORTH_MILITARY_WALLS=[

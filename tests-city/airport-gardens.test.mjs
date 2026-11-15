@@ -27,7 +27,7 @@ test('Airport Gardens has genuine apartment capacity around a three-quarter-size
   assert.equal(overlaps(home,AIRPORT.apron,25),false);
  }
  assert.ok(ROADS.every(road=>!overlaps(road,AIRPORT_PARK)),'roads go around the park');
- assert.ok(BUILDINGS.every(building=>building.id===NORTH_LANDMARK.id||!overlaps(building,AIRPORT_PARK)),'only the approved small Aurora terrace occupies parkland');
+ assert.ok(BUILDINGS.every(building=>!overlaps(building,AIRPORT_PARK)),'every building, including Aurora, stays outside parkland');
  assert.ok(AIRPORT_PARK_PATHS.length>=6);assert.ok(AIRPORT_PARK_PONDS.length>=1);
  const gate=LOCATIONS.find(l=>l.id==='airport-park');assert.ok(gate&&contains(AIRPORT_PARK,gate));
 });

@@ -1,3 +1,4 @@
+import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
 import {createInternationalLife} from './international-life.mjs';
@@ -528,6 +529,7 @@ function syncDistrictHousingPrices(){
  for(const hh of Object.values(state.housing.households)){if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;else if(hh.housingType==='house'&&houses.has(hh.unitId)&&districtAt(houses.get(hh.unitId))==='west')hh.monthlyHousingCost=Math.round(houses.get(hh.unitId).baseValue*.003);}
 }
 function initCityServices(){
+ relocateNorthTower(state);
  syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);publicServices.initializeCadre();urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();regionalAviation.init();civicConflict.init();residentRelationships.init();publicServices.init();
  if(!state.nationalResidenceMigration?.version){
   const beforeIds=new Set(state.flies.map(f=>f.id)),moneyBefore=liquidMoneySupply();

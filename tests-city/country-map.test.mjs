@@ -6,7 +6,7 @@ import {mapLegacyMetroStation,migrateCountryMetroJourneys} from '../worker/count
 const northHome=()=>map.entrance(map.BUILDINGS.find(b=>b.id.startsWith('AIRPORT-APT-')));
 const validate=route=>{assert.ok(route.length>1);for(let i=1;i<route.length;i++)assert.ok(map.clearSegment(route[i-1],route[i]));};
 test('three continuous countries preserve the 750/250 population contract, primary homes and exact doubled island area',()=>{
- assert.equal(map.MAP_VERSION,30);assert.deepEqual(COUNTRIES.map(c=>c.initialResidents),[750,250,0]);
+ assert.equal(map.MAP_VERSION,31);assert.deepEqual(COUNTRIES.map(c=>c.initialResidents),[750,250,0]);
  assert.equal(countryAt({x:-800,z:-700}),COUNTRY_IDS.north);assert.equal(countryAt({x:700,z:-700}),COUNTRY_IDS.hansdrex);assert.equal(countryAt({x:-800,z:0}),COUNTRY_IDS.hansdrex);assert.equal(countryAt(map.ISLAND),COUNTRY_IDS.hawaii);
  assert.equal(countryForHome('AIRPORT-APT-0-0-0-0',{x:0,z:0}),COUNTRY_IDS.north);assert.equal(countryForHome('WEST-HOUSE-1-1-1'),COUNTRY_IDS.hansdrex);
  assert.equal(map.ISLAND.rx*map.ISLAND.rz,205*135*2);assert.equal(map.BUILDINGS.some(b=>b.id==='hansdrex-mansion'),false);assert.equal('MANSION' in map,false);
@@ -16,7 +16,7 @@ test('three continuous countries preserve the 750/250 population contract, prima
 });
 test('North has a land-side international airport, all basic services, a rice/vegetable farm and its own Empire-height landmark',()=>{
  assert.equal(COUNTRY_AIRPORTS.length,3);assert.ok(COUNTRY_AIRPORTS.every(p=>countryAt(p.gate)===p.countryId));
- assert.equal(NORTH_LANDMARK.h,map.BUILDINGS.find(b=>b.id==='empire').h);assert.ok(map.contains(map.AIRPORT_PARK,NORTH_LANDMARK));
+ assert.equal(NORTH_LANDMARK.h,map.BUILDINGS.find(b=>b.id==='empire').h);assert.ok(!map.contains(map.AIRPORT_PARK,NORTH_LANDMARK));
  assert.ok(NORTH_FARM.crops.includes('rice')&&NORTH_FARM.crops.includes('vegetables'));assert.equal(NORTH_FARM.ownerCountryId,COUNTRY_IDS.north);
  for(const b of NORTH_BUILDINGS){assert.equal(countryAt(b),COUNTRY_IDS.north);validate(map.pedestrianRoute(northHome(),map.entrance(b)));}
  validate(map.pedestrianRoute(northHome(),NORTH_AIRPORT.gate));validate(map.pedestrianRoute(northHome(),NORTH_FARM.gate));
