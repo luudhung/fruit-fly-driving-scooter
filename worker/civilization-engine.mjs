@@ -1,5 +1,6 @@
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {createSpaceProgram} from './space-program.mjs';
+import {createNorthF1} from './north-f1.mjs';
 import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
@@ -523,9 +524,11 @@ const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember
 const urbanWorld=createUrbanWorld(cityServices);
 const spaceProgram=createSpaceProgram({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f)});
 const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
+const northF1=createNorthF1({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),northAccount:()=>countries.countryAccount('north-city'),lawfulPresence:(f,id)=>countries.lawfulPresence(f,id),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),travelCost:(f,id)=>countries.travelCost(f,id)});
 const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
-const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
+const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),raceFlights:()=>northF1.charters(),requestRaceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,
+ raceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),
  schoolOpen:(id,clock)=>!urbanWorld.isUnavailable(id)&&Boolean(teacherAtSchool(id,clock)),
  studyAtSchool:(f,clock)=>educationTick(f,clock,activeGameStepSeconds),
 aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
@@ -562,6 +565,7 @@ function specialActivity(f,clock){
   if(nationalDefense.handleResident(f,clock))return true;
   if(regionalAviation.handleResident(f,clock))return true;
   if(countries.handleResident(f,clock))return true;
+  if(northF1.handleResident(f,clock))return true;
   if(nationalServices.handleResident(f,clock))return true;
   if(f.industrialFreightDuty)return industrialEconomy.handleResident(f,clock);
   if(residentRelationships.handleResident(f,clock))return true;
@@ -2127,7 +2131,7 @@ function liquidMoneySupply() {
   const residents=neuralActors().reduce((sum,f)=>sum+Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0)),0);
   const fixedBusinesses=Object.values(state.businesses||{}).reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
   const enterprises=Object.values(state.enterprises||{}).filter((b)=>b.status==="operating").reduce((sum,b)=>sum+Math.max(0,Number(b.cash||0)),0);
-  return residents+fixedBusinesses+enterprises+Math.max(0,Number(state.treasury?.cash||0))+Math.max(0,Number(state.utilities?.powerPlant?.cash||0))+Math.max(0,Number(state.bank?.reserves||0));
+  return residents+fixedBusinesses+enterprises+northF1.liquidCash()+Math.max(0,Number(state.treasury?.cash||0))+Math.max(0,Number(state.utilities?.powerPlant?.cash||0))+Math.max(0,Number(state.bank?.reserves||0));
 }
 
 function ensurePoliticalProfile(fly) {
@@ -2740,6 +2744,7 @@ function brainChooseAction(fly, clock) {
 
   addCentralApplication(fly,clock,add);
   spaceProgram.addChoices(fly,clock,add);
+  northF1.addChoices(fly,clock,add);
   countries.addChoices(fly,clock,add);nationalServices.addChoices(fly,clock,add);nationalDefense.addChoices(fly,clock,add);regionalAviation.addChoices(fly,clock,add);
   urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);industrialEconomy.addChoices(fly,clock,add);
   if(age>=21&&state.housing.households[fly.householdId]?.members?.[0]===fly.id&&!fly.ownsHome&&fly.money+fly.savings>100){
@@ -4685,6 +4690,7 @@ function getState(options={}) {
     authoritative: true,
     mainlandStats:mainlandStats(living),
     spaceProgram:spaceProgram.snapshot(),
+    northF1:northF1.snapshot(),
     simulationStatus: "SYNTHETIC_CIVILIZATION_LIVE",
     modelDisclosure: "Each living fly is assigned the complete 139,255-neuron, 15,091,983-edge FlyWire LIF graph. Shared topology is packed losslessly; membrane voltage, refractory and synaptic states and spikes are checkpointed independently per brain. Actual neural activity biases city decisions and movement through a synthetic sensory/behavior interface. The neuralBridge reports measured connection and step counters; disconnected or stale brains are not counted as running. Neural batches are CPU-budgeted and are not biological real time. The model remains an approximate LIF and city model, not a validated biological city simulation.",
     worldId: WORLD_ID,
@@ -4819,7 +4825,7 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
-      for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy],['spaceProgram',spaceProgram]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
+      for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['northF1',northF1],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy],['spaceProgram',spaceProgram]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
       vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;
@@ -4872,6 +4878,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  countries,nationalServices,nationalDefense,regionalAviation,publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,settleThousandResidents,
+  countries,nationalServices,nationalDefense,regionalAviation,publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,northF1,neuralActors,settleRiversideResidents,settleExpansionResidents,settleThousandResidents,
   attemptStartup,simulateEnterprises,startupReadiness,chooseStartupType,purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

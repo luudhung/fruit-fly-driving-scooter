@@ -1,3 +1,4 @@
+import {NorthF1Renderer,type NorthF1View} from './north-f1-renderer.ts';
 import {buildCivicFacility} from './civic-facility-renderer.ts';
 import {MAIN_SCHOOL_CAMPUSES} from '../worker/education-map.mjs';
 import {SpaceportRenderer,type SpaceProgramView} from './spaceport-renderer.ts';
@@ -219,6 +220,7 @@ type WeatherState = {
 type NationalSummary = {residents:number;working:number;traveling:number;indoors:number;students:number;graduates:number;fires:number;projects:number};
 type CivilizationSnapshot = {
   spaceProgram?:SpaceProgramView|null;
+  northF1?:NorthF1View|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
   international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
   nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
@@ -688,7 +690,12 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const workforce=id==='hansdrex'?s.hansdrexEmployment:null;
       const jobs=workforce?`Main City · ${num(workforce.mainShare*100,1)}% việc làm (mục tiêu ${num(workforce.mainTarget*100)}%) · ${num(workforce.inboundMorning)} người đang đi làm vào trung tâm sáng nay`:'';
       const exchanges=id==='hansdrex'&&s.regionalAviation?`5 trường Main City · ${num(s.regionalAviation.exchangeStudents??0)} học viên North City đã vào lớp`:'';
-      board.textContent=[residents,finances,jobs,exchanges,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
+      const f1=id==='north-city'?s.northF1:null;
+      const leader=f1?.activeRace?Math.min(f1.activeRace.totalLaps,1+Math.floor(Math.max(0,...f1.activeRace.cars.map(c=>c.progress??0)))):0;
+      const race=f1?f1.activeRace?`Grand Prix · vòng ${leader}/${f1.activeRace.totalLaps} · ${num(f1.activeRace.cars.length)} xe đang đua · ${num(f1.trackCrowd?.total??0)} khán giả đã vào sân`
+        :`Grand Prix · ${num(f1.races)} cuộc đua · kỳ tới ngày ${Math.floor(f1.nextAt/86400)} lúc ${flightTime(f1.nextAt)}`:'';
+      const raceFinances=f1?`Doanh thu vé Grand Prix ${num(f1.revenue)} H$ · ${num(f1.charterArrivals)} khách charter đã tới / ${num(f1.charterDepartures)} đã về`:'';
+      board.textContent=[residents,finances,jobs,exchanges,race,raceFinances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
   }
   const space=document.getElementById('spaceworks-activity');
@@ -787,6 +794,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   }
   if(s.cityVisitors){visitorVisuals.sync(s.cityVisitors,actors);visitorAircraft.sync(s.cityVisitors.airportTraffic?.flights);photoAlbum.sync(s.cityVisitors.photos||[]);}
   regionalAircraft.sync(s.regionalAviation);
+  northF1Visuals.sync(s.northF1);
   nationalDefenseVisuals.sync(s.nationalDefense,s.nationalServices);
   countryUI.sync(s);
   updateSocietyBoard(s);
@@ -1238,6 +1246,8 @@ const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 const internationalVisuals=new InternationalLandmarks(cityRoot,makeCanvasSprite);
 const spaceportVisuals=new SpaceportRenderer(cityRoot,makeCanvasSprite);
 for(const [id,group] of spaceportVisuals.buildings)urbanVisuals.registerBuilding(id,group);
+const northF1Visuals=new NorthF1Renderer(cityRoot,makeCanvasSprite);
+for(const [id,group] of northF1Visuals.buildings)urbanVisuals.registerBuilding(id,group);
 for(const campus of MAIN_SCHOOL_CAMPUSES){
   const group=buildCivicFacility(campus);
   if(!group)continue;
@@ -1679,6 +1689,8 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'north-aurora':[-110,90,-785,-2.42,.30,62],
  'north-airport':[-830,95,-705,-2.69,-.4,66],
  'north-farm':[80,95,-675,2.15,-.35,66],
+ 'north-grand-prix':[-1010,415,-600,2.025,-.845,58],
+ 'north-grand-prix-pit':[-753,33,-975,.547,-.252,57],
  'north-industry':[-650,135,-740,Math.PI,-.35,68],
  'motorway-exit':[-1064,7,210,0,-.04,68],
 };
@@ -1854,6 +1866,7 @@ function animate(now = performance.now()) {
   urbanVisuals.update(dt,gameNow);
   sportsVisuals.update(dt,gameNow);
   spaceportVisuals.update(gameNow,snapshot?.spaceProgram);
+  northF1Visuals.update(gameNow,camera);
   governmentVisuals.update(gameNow);
   industrialVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   visitorVisuals.update(dt,gameNow);

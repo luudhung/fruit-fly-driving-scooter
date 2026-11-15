@@ -1,6 +1,7 @@
 import {bridgeFurnitureLayout} from './bridge-rail-layout.mjs';
 import {ROADS,BUILDINGS,WATER,PARK,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,METRO_LINES,metroTrackPoints,contains,WALKWAYS,roadTravelY,clearSegment} from './city-map.mjs';
 import {INTERSECTIONS} from './traffic.mjs';
+import {onNorthF1Track} from './north-f1-map.mjs';
 
 /** Actual renderer world coordinates, independent of vehicle/road rules. Low pavement,
  * crosswalk paint and traversable curbs deliberately are not vertical obstacles.
@@ -9,7 +10,7 @@ import {INTERSECTIONS} from './traffic.mjs';
 const signalPoses=new Map(),signalIssues=[],reservedSignals=[];
 const signalKey=(j,axis)=>`${j.x},${j.z}:${axis}`;
 const originalSignalPose=(j,axis)=>({x:j.x+(axis==='ns'?6.4:-6.4),z:j.z+(axis==='ns'?6.2:-6.2)});
-const signalPoseLegal=p=>!ROADS.some(r=>contains(r,p,.15))&&!BUILDINGS.some(b=>contains(b,p,.4));
+const signalPoseLegal=p=>!onNorthF1Track(p,.4)&&!ROADS.some(r=>contains(r,p,.15))&&!BUILDINGS.some(b=>contains(b,p,.4));
 const baseSignals=INTERSECTIONS.flatMap(j=>['ns','ew'].map(axis=>({j,axis,original:originalSignalPose(j,axis)})));
 // Reserve every already-correct pole first. A moved signal must not land on its
 // neighbour's existing pole at the pair of closely spaced western avenues.
@@ -63,7 +64,7 @@ for(const line of METRO_LINES)for(const direction of [1,-1]){
    if(WATER.some(w=>contains(w,{x:sx,z:sz},4)))continue;
    const offset=[6.4,-6.4].find(side=>{
     const p={x:sx+px*side,z:sz+pz*side};
-    return !ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1);
+    return !onNorthF1Track(p,.75)&&!ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1);
    });
    if(offset===undefined)continue;
    box(`metro:${line.id}:${direction}:${i}:${d}`,sx+px*offset,sz+pz*offset,.72,.72,0,line.height-.55);

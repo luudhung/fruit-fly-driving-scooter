@@ -3,6 +3,7 @@ import {ROADS,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,BUILDINGS,WORLD_HALF,contains
 import {PLAYER_EYE} from './player-controller.ts';
 import {streetCollidersNear} from '../worker/street-furniture.mjs';
 import {motorwaySpeedMultiplier,motorwayMedianBlocked} from '../worker/motorway.mjs';
+import {onNorthF1Track} from '../worker/north-f1-map.mjs';
 
 export const CAR_HALF_WIDTH=.93,CAR_HALF_LENGTH=2.1;
 /** East-facing curb space on the main-city approach, before the west-bank underpass. */
@@ -40,7 +41,7 @@ export function cityCarGround(x:number,z:number,previous:number){
  return Math.abs(ground-previous)<=.24?ground:null;
 }
 function pavedAtLevel(p:{x:number;z:number},ground:number,margin=0){
- return ROADS.some(r=>contains(r,p,margin)&&!(ground<-.5&&r.w>r.d&&BRIDGES.some(b=>contains(b,p))));
+ return ground>=0&&onNorthF1Track(p,margin)||ROADS.some(r=>contains(r,p,margin)&&!(ground<-.5&&r.w>r.d&&BRIDGES.some(b=>contains(b,p))));
 }
 const cityWorld:CarWorld={clear:cityCarClear,ground:cityCarGround};
 /** Player wheels may climb low pavement, while buildings, water and street furniture stay solid. */
@@ -71,6 +72,7 @@ export function playerCarGround(x:number,z:number,previous:number){
  if(floor>-.1){
   if(bridge&&Math.abs(z-bridge.z)>4.45)floor=Math.abs(Math.abs(z-bridge.z)-4.65)<.15?.66:.40;
   else if(DISTRICT_BRIDGES.some(b=>!b.motorway&&contains(b,p)&&Math.abs(b.axis==='x'?z-b.z:x-b.x)>b.roadWidth/2+.25))floor=.34;
+  else if(onNorthF1Track(p))floor=.25;
   else if(!ROADS.some(r=>contains(r,p))&&ROADS.some(r=>contains(r,p,3)))floor=.30;
  }
  return Math.max(previous-.08,Math.min(previous+.08,floor));

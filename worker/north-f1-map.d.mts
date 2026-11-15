@@ -1,0 +1,16 @@
+export type NorthF1Point={x:number;z:number};
+export type NorthF1Location=NorthF1Point&{id:string;name:string;type:string};
+export type NorthF1Rect=NorthF1Point&{w:number;d:number};
+export type NorthF1Building=NorthF1Rect&{id:string;name:string;h:number;kind:string;countryId:string};
+export const NORTH_F1_ID:string;
+export const NORTH_F1_CHARTER_STANDS:Array<NorthF1Point&{id:string}>;
+export const NORTH_F1_BUILDINGS:NorthF1Building[];
+export const NORTH_F1_LOCATIONS:NorthF1Location[];
+export const NORTH_F1_ACCESS_ROADS:Array<NorthF1Rect&{id:string}>;
+export const NORTH_F1_RESERVED:NorthF1Rect[];
+export const NORTH_F1_CIRCUIT:Readonly<{id:string;name:string;width:number;lapLength:number;points:readonly NorthF1Point[];spectator:NorthF1Location;paddock:NorthF1Location;capacity:number;pit:Readonly<{enter:number;box:number;exit:number;length:number}>}>;
+export function northF1Pose(progress:number,lane?:number):NorthF1Point&{y:number;yaw:number};
+export function onNorthF1Track(p:NorthF1Point,margin?:number):boolean;
+export const NORTH_F1_PIT_POINTS:readonly NorthF1Point[];
+export const NORTH_F1_PIT_WIDTH:number;
+export function northF1PitPose(fraction:number,side?:number):NorthF1Point&{y:number;yaw:number};

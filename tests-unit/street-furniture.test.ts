@@ -1,3 +1,4 @@
+import {onNorthF1Track} from '../worker/north-f1-map.mjs';
 import {buildDistrictRiverInfrastructure} from '../src/district-river-renderer.ts';
 import {playerCarClear} from '../src/player-car.ts';
 import test from 'node:test';
@@ -85,10 +86,10 @@ test('only obstructed base poles move to clear nearby corners, with stable cache
  for(const j of INTERSECTIONS)for(const axis of ['ns','ew'] as const){
   const original={x:j.x+(axis==='ns'?6.4:-6.4),z:j.z+(axis==='ns'?6.2:-6.2)},pose=signalPolePose(j,axis);
   assert.equal(signalPolePose(j,axis),pose);assert.ok(Object.isFrozen(pose));
-  const obstructed=ROADS.some(r=>contains(r,original,.15))||BUILDINGS.some(b=>contains(b,original,.4));
+  const obstructed=onNorthF1Track(original,.4)||ROADS.some(r=>contains(r,original,.15))||BUILDINGS.some(b=>contains(b,original,.4));
   if(obstructed){assert.ok(Math.hypot(pose.x-original.x,pose.z-original.z)<=20);assert.ok(Math.hypot(pose.x-j.x,pose.z-j.z)<=20);}
   else assert.deepEqual(pose,original);
-  assert.ok(!ROADS.some(r=>contains(r,pose,.15)));assert.ok(!BUILDINGS.some(b=>contains(b,pose,.4)));
+  assert.ok(!onNorthF1Track(pose,.4));assert.ok(!ROADS.some(r=>contains(r,pose,.15)));assert.ok(!BUILDINGS.some(b=>contains(b,pose,.4)));
   const key=`${pose.x},${pose.z}`;assert.ok(!used.has(key));used.add(key);
  }
  assert.equal(used.size,INTERSECTIONS.length*2);

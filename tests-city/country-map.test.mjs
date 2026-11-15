@@ -6,7 +6,7 @@ import {mapLegacyMetroStation,migrateCountryMetroJourneys} from '../worker/count
 const northHome=()=>map.entrance(map.BUILDINGS.find(b=>b.id.startsWith('AIRPORT-APT-')));
 const validate=route=>{assert.ok(route.length>1);for(let i=1;i<route.length;i++)assert.ok(map.clearSegment(route[i-1],route[i]));};
 test('three continuous countries preserve the 750/250 population contract, primary homes and exact doubled island area',()=>{
- assert.equal(map.MAP_VERSION,34);assert.deepEqual(COUNTRIES.map(c=>c.initialResidents),[750,250,0]);
+ assert.equal(map.MAP_VERSION,35);assert.deepEqual(COUNTRIES.map(c=>c.initialResidents),[750,250,0]);
  assert.equal(countryAt({x:-800,z:-700}),COUNTRY_IDS.north);assert.equal(countryAt({x:700,z:-700}),COUNTRY_IDS.hansdrex);assert.equal(countryAt({x:-800,z:0}),COUNTRY_IDS.hansdrex);assert.equal(countryAt(map.ISLAND),COUNTRY_IDS.hawaii);
  assert.equal(countryForHome('AIRPORT-APT-0-0-0-0',{x:0,z:0}),COUNTRY_IDS.north);assert.equal(countryForHome('WEST-HOUSE-1-1-1'),COUNTRY_IDS.hansdrex);
  assert.equal(map.ISLAND.rx*map.ISLAND.rz,205*135*2);assert.equal(map.BUILDINGS.some(b=>b.id==='hansdrex-mansion'),false);assert.equal('MANSION' in map,false);

@@ -1,5 +1,6 @@
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
+import {NORTH_F1_RESERVED} from './north-f1-map.mjs';
 import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MILITARY,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {CIVIC_FACILITY_CATALOG,facilitySpec,isNonResidentialUsage,nationalDevelopmentDemand,civicFacilities,DEVELOPMENT_REVIEW_INTERVAL} from './civic-development.mjs';
@@ -278,7 +279,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   report('construction_contract',`${payerId||'City recovery fund'} commissioned ${kind} at ${buildingId}.`,{buildingId,projectId:project.id,budget:cost});return project;
  }
  function developmentContext(national=false){
-  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,NORTH_SPORTS_PARK,NORTH_MILITARY,SPACEPORT].filter(Boolean);
+  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,NORTH_SPORTS_PARK,NORTH_MILITARY,SPACEPORT,...NORTH_F1_RESERVED].filter(Boolean);
   return {bounds:{minX:national?-cityGeometry.WORLD_HALF+20:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES,...GOVERNMENT_RESERVED,...INDUSTRIAL_RESERVED,...protectedLand],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
  }
  function develop(lot,ownerId){
@@ -328,7 +329,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    const spec=facilitySpec(need.type),owners=spec.funding==='resident'?eligible.filter(f=>wealth(f)>1800).sort((a,b)=>(Number(b.traits?.ambition??.5)+Number(b.professionSkills?.construction||0)+Math.min(.5,wealth(b)/50000))-(Number(a.traits?.ambition??.5)+Number(a.professionSkills?.construction||0)+Math.min(.5,wealth(a)/50000))||a.id.localeCompare(b.id)).slice(0,4):[null];
    if(!owners.length)continue;
    const payer=spec.funding==='resident'?null:fundingSource(spec.funding);if(payer&&Number(payer.cash||0)<estimate(spec)*2+1000||spec.funding!=='resident'&&!payer)continue;
-   const roads=ROADS.filter(r=>!r.motorway&&!r.motorwayAccess&&!r.id?.startsWith('SPACEWORKS-')&&(Math.abs(r.x)>440||r.z<-440));if(!roads.length)continue;
+   const roads=ROADS.filter(r=>!r.motorway&&!r.motorwayAccess&&!r.id?.startsWith('SPACEWORKS-')&&!r.id?.startsWith('NORTH-F1-')&&(Math.abs(r.x)>440||r.z<-440));if(!roads.length)continue;
    for(let i=0;i<48&&attempts<144;i++,attempts++){
     const cursor=++u().growthCursor,hash=n=>{let v=Math.imul(n^0x9e3779b9,0x85ebca6b);v^=v>>>13;return(v>>>0)/4294967296;};
     const anchor=roads[Math.floor(hash(cursor)*roads.length)],horizontal=anchor.w>anchor.d,side=hash(cursor+53)<.5?-1:1,gap=(horizontal?spec.d:spec.w)/2+MIN_ALLEY+7;
