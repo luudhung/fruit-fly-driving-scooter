@@ -81,7 +81,7 @@ export const NORTH_ROADS=[
 // Cottages host existing seasonal workers and guests; they do not seed new citizens.
 export const HAWAII_COTTAGES=[[-70,835],[-20,835],[30,835],[-70,885],[-20,885],[30,885],[-70,935],[-20,935],[30,935],[250,865],[300,865],[250,915],[294,915]].map(([x,z],i)=>({id:`HAWAII-COTTAGE-${i+1}`,name:'Hawaii Seasonal Cottage',x,z,w:10,d:12,h:6,kind:'resort-cottage',countryId:COUNTRY_IDS.hawaii,capacity:4,seasonal:true,primaryResidence:false}));
 export const HAWAII_APARTMENTS=[
- {id:'HAWAII-APT-PALMS',name:'Palms Court Apartments',x:111,z:880,w:23,d:17,h:14,capacity:10},
+ {id:'HAWAII-APT-PALMS',name:'Palms Court Apartments',x:89,z:880,w:18,d:17,h:14,capacity:10},
  {id:'HAWAII-APT-COVE',name:'Cove View Apartments',x:160,z:896,w:24,d:18,h:17,capacity:14},
  {id:'HAWAII-APT-HARBOR',name:'Harbor View Apartments',x:200,z:908,w:25,d:18,h:20,capacity:18},
 ].map(b=>({...b,kind:'resort-apartment',countryId:COUNTRY_IDS.hawaii,seasonal:true,primaryResidence:false}));
