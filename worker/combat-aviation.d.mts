@@ -1,0 +1,9 @@
+export type CombatPoint={x:number;y:number;z:number};
+export type CombatPose=CombatPoint&{heading:number;phase:string;airborne:boolean};
+export type CombatFlight={id:string;conflictId:string;operatorId:string;departure:number;liftAt:number;releaseAt:number;returnAt:number;approachAt:number;arrival:number;cruiseHeight:number;bombLoad:number;released:number[];target:{id:string;x:number;z:number};returning?:{at:number;from:CombatPoint;arrivesAt:number;reason:string}};
+export type CombatAircraft={id:string;padId:string;pad:CombatPoint;countryId:string;owned:boolean;bombs:number;sorties:number;procurementPaid:number;destroyed:boolean;flight:CombatFlight|null;lastConflictId?:string;pose?:CombatPose|null};
+export type CombatAviationSnapshot={aircraft:CombatAircraft[];sorties:number;bombsReleased:number;procurementPaid:number};
+export const COMBAT_AIRCRAFT_PRICE:number,COMBAT_BOMB_PRICE:number,COMBAT_SORTIE_FUEL:number;
+export const COMBAT_AIRCRAFT_PADS:ReadonlyArray<CombatPoint&{id:string;countryId:string;facilityId:string}>;
+export function combatAircraftPose(now:number,aircraft:CombatAircraft):CombatPose|null;
+export function createCombatAviation(hooks:any):{tick(conflict:any):void;getAircraft():any[];crash(id:string,details:any):boolean;onPeace():void;predict(id:string,at:number):CombatPose|null;snapshot():CombatAviationSnapshot};
