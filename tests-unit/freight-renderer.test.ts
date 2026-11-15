@@ -34,3 +34,9 @@ test('a truck leaving interest does not repeatedly restart from the same visible
  assert.equal(fleet[0].count,1);const matrix=new THREE.Matrix4();fleet[0].getMatrixAt(0,matrix);assert.ok(matrix.elements[14]<-1045,'returning camera resumes the checkpoint rather than the stale snapshot');
  view.sync(snapshot([]));view.update(1/60,962);assert.ok(fleet.every(m=>m.count===0));view.dispose();
 });
+
+test('two actual farm carriers fit beside the complete forty-truck industrial fleet in the same three batches',()=>{
+ const root=new THREE.Group(),view=new IndustrialDistrictRenderer(root),trucks=[...Array.from({length:2},(_,i)=>truck(`NORTH-FARM-TRUCK-${i+1}`)),...Array.from({length:40},(_,i)=>truck(`REGIONAL-FREIGHT-${i+1}`))];
+ view.sync(snapshot(trucks));view.update(1/60,0,120);const fleet=root.children.filter(c=>c instanceof THREE.InstancedMesh) as THREE.InstancedMesh[];
+ assert.equal(fleet.length,3);assert.ok(fleet.every(m=>m.count===42),'new farm trucks must not hide two existing freight vehicles');view.dispose();
+});

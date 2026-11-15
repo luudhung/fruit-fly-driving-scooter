@@ -1,5 +1,5 @@
 import {AIRPORT} from './city-map.mjs';
-import {AVIATION, nextFlight} from './aviation.mjs';
+import {AVIATION,nextFlight,nextRegionalFlight,airportById} from './aviation.mjs';
 
 export const VISITOR_STANDS = Array.from({length:4}, (_, index) => ({
  id:`INTL-${index+1}`, x:-225+index*30, z:-443,
@@ -15,11 +15,17 @@ export const VISITOR_TAXIWAY_Z = -474;
 export const MIN_VISITOR_PASSENGERS = 10;
 export const VISITOR_ARRIVAL_STAGGER = 36;
 const taxiExit = direction => runway.x + direction*128;
+export function visitorStands(airportId='city'){
+ if(airportId==='city')return VISITOR_STANDS.slice(0,2);
+ const airport=airportById(airportId);return airport?.stands.slice(0,2).map(p=>({...p}))||[];
+}
+export function visitorAirport(flight){return airportById(flight.airportId||'city')||airportById('city');}
+const flightStand=flight=>flight.arrivalStand||(flight.airportId&&flight.airportId!=='city'?visitorStands(flight.airportId):VISITOR_STANDS).find(p=>p.id===flight.standId);
 
 // A short, durable pedestrian itinerary, separate from the public street graph:
 // aircraft door -> portable stairs -> apron -> terminal -> immigration -> exit.
 export function visitorArrivalPath(flight,index=0,timeScale=120) {
- const stand=VISITOR_STANDS.find(p=>p.id===flight.standId);
+ const stand=flightStand(flight);
  if(!stand)return [];
  const speed=1.8/Math.max(1,timeScale),path=[];
  let at=Number(flight.disembarkAt??flight.parkedAt)+120+index*VISITOR_ARRIVAL_STAGGER;
@@ -30,6 +36,13 @@ export function visitorArrivalPath(flight,index=0,timeScale=120) {
  };
  add(stand.x-1.4,3.4,stand.z+4,'disembarking');
  add(stand.x-6,1.1,stand.z+4,'disembarking');
+ if(flight.airportId&&flight.airportId!=='city'){
+  const airport=visitorAirport(flight);
+  add(airport.terminal.x-airport.terminal.w/2-2,1.1,stand.z+4,'apron');
+  add(airport.terminal.x,1.1,airport.terminal.z,'immigration');
+  add(airport.terminal.x,1.1,airport.terminal.z,'immigration',420);
+  add(airport.gate.x,1.1,airport.gate.z,'complete');return path;
+ }
  add(stand.x-6,1.1,-414,'apron');
  add(AIRPORT.terminal.x,1.1,-403,'apron');
  add(AIRPORT.terminal.x,1.1,AIRPORT.terminal.z,'immigration');
@@ -49,18 +62,23 @@ export function visitorArrivalPose(now,flight,index=0,timeScale=120) {
   phase:a.phase,indoors:a.phase==='immigration',onPlane:false,next:b};
 }
 
-export function visitorRunwaySlot(earliest, duration, flights) {
+export function visitorRunwaySlot(earliest, duration, flights,airportId='city') {
  let start = earliest;
  for (;;) {
   // Island flights reserve their entire visible operation, including airport taxi.
   const after = start + duration + SEPARATION;
   const occupied = [];
-  for(const airport of ['city','island']){
+  for(const airport of airportId==='city'?['city','island']:[]){
    let flight = nextFlight(start-AVIATION.flightSeconds-SEPARATION,airport,0);
    while(flight.departure < after){
     occupied.push([flight.departure,flight.arrival]);
     flight = nextFlight(flight.departure+1,airport,0);
    }
+  }
+  for(const from of ['city','north','island'])for(const to of ['city','north','island']){
+   if(from===to||from!==airportId&&to!==airportId||from==='city'&&to==='island'||from==='island'&&to==='city')continue;
+   let flight=nextRegionalFlight(start-AVIATION.flightSeconds-SEPARATION,from,to,0);
+   while(flight&&flight.departure<after){occupied.push([flight.departure,flight.arrival]);flight=nextRegionalFlight(flight.departure+1,from,to,0);}
   }
   for(const f of flights){
    occupied.push([f.inboundAt,f.parkedAt]);
@@ -89,6 +107,12 @@ function holdPose(now, flight) {
 function flightPath(stand, flight, outbound) {
  const {sector,direction}=flight;
  const [farX,farY,farZ]=FAR[sector]||FAR.north;
+ if(flight.airportId&&flight.airportId!=='city'){
+  const airport=visitorAirport(flight),r=airport.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=cross+(vertical?26:46),point=(time,a,c,y=3)=>vertical?[time,c,y,a]:[time,a,y,c],entry=along-direction*half,exit=along+direction*half,standAlong=vertical?stand.z:stand.x;
+  if(outbound)return[[0,stand.x,3,stand.z],point(140,standAlong,taxi),point(330,entry,taxi),point(460,entry,cross),point(625,exit,cross,4),point(815,exit+direction*190,cross,115),[OUTBOUND_SECONDS,farX,farY,farZ]];
+  const start=flight.hold?holdPose(flight.inboundAt,flight):{x:farX,y:farY,z:farZ};
+  return[[0,start.x,start.y,start.z],point(330,entry-direction*190,cross,63),point(VISITOR_TOUCHDOWN_SECONDS,entry,cross),point(690,exit,cross),point(820,exit,taxi),point(950,standAlong,taxi),[INBOUND_SECONDS,stand.x,3,stand.z]];
+ }
  const threshold=runway.x-direction*136;
  const exit=taxiExit(direction), entry=taxiExit(-direction), z=runway.z;
  if(outbound)return [
@@ -106,7 +130,7 @@ function flightPath(stand, flight, outbound) {
 export function visitorAircraftPose(now, flight) {
  if(now<flight.inboundAt)return flight.hold?holdPose(now,flight):null;
  if(flight.exitAt!=null&&now>=flight.exitAt)return null;
- const stand=VISITOR_STANDS.find(p=>p.id===flight.standId);
+ const stand=flightStand(flight);
  if(!stand)return null;
  const outbound=flight.outboundAt!=null&&now>=flight.outboundAt;
  if(!outbound&&now>=flight.parkedAt)return {...stand,y:3,heading:0,phase:'parked'};

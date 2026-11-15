@@ -1,3 +1,4 @@
+import {hasCountryCommitment} from './country-commitments.mjs';
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES} from './city-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
@@ -5,9 +6,9 @@ export const EMERGENCY_RULES={engines:3,ambulances:2,firefighters:9,paramedics:6
 const DAY=86400,dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),loc=id=>LOCATIONS.find(l=>l.id===id);
 const essential=new Set(['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','hospital-central','hospital-east']);
 const cap=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number(n)||0));
-const busy=f=>f.industrialFreightDuty||f.publicServiceDuty||f.fireEngineDuty||f.ambulanceDuty||f.urbanTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested;
+const busy=(f,now)=>hasCountryCommitment(f,now)||f.industrialFreightDuty||f.publicServiceDuty||f.fireEngineDuty||f.ambulanceDuty||f.urbanTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested;
 /** Bounded public fleets. The server persists routes/tasks; the browser alone animates vehicles/lights. */
-export function createFireService({world,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{}}){
+export function createFireService({world,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),enabled=()=>Boolean(raw().emergencyServicesEnabled&&loc('firestation'));
  const people=()=>[...(raw().flies||[]),...(raw().cityVisitors?.visitors||[]).filter(f=>f.alive&&!f.departed)];
  const actor=id=>(raw().flies||[]).find(f=>f.id===id)||(raw().cityVisitors?.visitors||[]).find(f=>f.id===id),alive=id=>{const f=actor(id);return f?.alive?f:null;};
@@ -31,11 +32,11 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  }
  function recruit(force=false){
   const d=data();if(!force&&now()<d.nextRecruitAt)return;d.nextRecruitAt=now()+3600;
-  d.roster=d.roster.filter(id=>{const f=alive(id);return f&&f.ageYears>=18&&f.ageYears<76&&['firefighter','paramedic'].includes(f.jobId);});
+  d.roster=d.roster.filter(id=>{const f=alive(id);return f&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.ageYears>=18&&f.ageYears<76&&['firefighter','paramedic'].includes(f.jobId);});
   for(const [role,target]of [['firefighter',EMERGENCY_RULES.firefighters],['paramedic',EMERGENCY_RULES.paramedics]]){
-   for(const f of raw().flies||[])if(f.alive&&f.jobId===role&&f.ageYears>=18&&f.ageYears<76&&!d.roster.includes(f.id))d.roster.push(f.id);
+   for(const f of raw().flies||[])if(f.alive&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role&&f.ageYears>=18&&f.ageYears<76&&!d.roster.includes(f.id))d.roster.push(f.id);
    const current=()=>d.roster.filter(id=>alive(id)?.jobId===role).length;
-   const candidates=(raw().flies||[]).filter(f=>f.alive&&f.ageYears>=21&&f.ageYears<66&&f.health>60&&!busy(f)&&!d.roster.includes(f.id)&&!essential.has(f.jobId)&&!f.businessId&&!f.businessEmployeeOf).sort((a,b)=>Number(Boolean(a.jobId))-Number(Boolean(b.jobId))||Number(b.professionSkills?.emergencyCare||b.professionSkills?.fireSafety||0)-Number(a.professionSkills?.emergencyCare||a.professionSkills?.fireSafety||0)||a.id.localeCompare(b.id));
+   const candidates=(raw().flies||[]).filter(f=>f.alive&&f.ageYears>=21&&f.ageYears<66&&f.health>60&&!busy(f,now())&&!isWorkCommitted(f)&&!d.roster.includes(f.id)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!essential.has(f.jobId)&&!f.businessId&&!f.businessEmployeeOf).sort((a,b)=>Number(Boolean(a.jobId))-Number(Boolean(b.jobId))||Number(b.professionSkills?.emergencyCare||b.professionSkills?.fireSafety||0)-Number(a.professionSkills?.emergencyCare||a.professionSkills?.fireSafety||0)||a.id.localeCompare(b.id));
    for(const f of candidates){if(current()>=target)break;const index=current();f.jobId=role;f.jobTitle=role==='firefighter'?'firefighter':'paramedic';f.wage=4.8;f.preferredWorkStart=(index%3)*8;f.preferredWorkHours=8;f.emergencyStationId=role==='firefighter'?'firestation':index%2?'riverside-clinic':'hospital-central';f.professionSkills||={};f.professionSkills[role==='firefighter'?'fireSafety':'emergencyCare']=Math.max(.7,Number(f.professionSkills[role==='firefighter'?'fireSafety':'emergencyCare']||0));d.roster.push(f.id);remember(f,'emergency_service_job',{role,stationId:f.emergencyStationId});emit('emergency_hire',`${f.id} joined the public ${role==='firefighter'?'fire brigade':'ambulance service'}.`,{flyId:f.id,role});}
   }
  }
@@ -43,7 +44,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  function atGarage(f,e){const home=loc(e.homeLocationId);return f&&!f.traveling&&home&&dist(f,home)<32;}
  function staff(engine,clock){
   const role=engine.kind==='fire'?'firefighter':'paramedic',home=loc(engine.homeLocationId);
-  return data().roster.map(alive).filter(f=>f&&f.jobId===role&&!busy(f)&&f.health>40&&f.energy>12&&f.hunger<88)
+  return data().roster.map(alive).filter(f=>f&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role&&!busy(f,now())&&f.health>40&&f.energy>12&&f.hunger<88)
    .sort((a,b)=>Number(atGarage(b,engine))-Number(atGarage(a,engine))||dist(a,home)-dist(b,home)||Number(onShift(b,clock.hour))-Number(onShift(a,clock.hour)));
  }
  function driveAccess(from,target){

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_PLANTS,INDUSTRIAL_ZONES,INDUSTRIAL_LOADING_BAYS,MAX_FREIGHT_TRUCKS} from '../worker/industry-map.mjs';
 import type {IndustrialSnapshot} from '../worker/industrial-economy.mjs';
+const FLEET_CAPACITY=MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT+2;
 const brick=new THREE.MeshStandardMaterial({color:0x836957,roughness:1}),concrete=new THREE.MeshStandardMaterial({color:0xb1aca0,roughness:1}),roof=new THREE.MeshStandardMaterial({color:0x536470,roughness:.8}),dark=new THREE.MeshStandardMaterial({color:0x25343d,roughness:.9}),glass=new THREE.MeshBasicMaterial({color:0xb6cbd1}),marking=new THREE.MeshBasicMaterial({color:0xd5be69,toneMapped:false});
 type Layer={material:THREE.Material;parts:THREE.BufferGeometry[]};
 class Batch{
@@ -41,13 +42,13 @@ export class IndustrialDistrictRenderer{
  constructor(root:THREE.Object3D,sign?:(text:string,width:number,height:number)=>THREE.Sprite){
   for(const site of INDUSTRIAL_BUILDINGS){const g=factory(site);this.buildings.set(site.id,g);root.add(g);if(sign){const label=sign(site.name,site.w*.85,3);label.position.set(0,site.h*.82,0);g.add(label);this.signs.push(label);}}
   if(sign)for(const zone of Object.values(INDUSTRIAL_ZONES)){const first=INDUSTRIAL_PLANTS.find(p=>p.zone===zone.id)!;const label=sign(zone.name,70,5);label.position.set(0,34,-25);this.buildings.get(first.id)!.add(label);this.signs.push(label);}
-  const bays=new Batch();for(const p of Object.values(INDUSTRIAL_LOADING_BAYS)){for(const side of [-1,1]){bays.box(marking,p.x+side*3.3,.21,p.z,.12,.015,2.6);bays.box(marking,p.x,.21,p.z+side*1.3,6.7,.015,.12);}}bays.finish(root);const template=truckGeometry();template.traverse(o=>{if(o instanceof THREE.Mesh){const mesh=new THREE.InstancedMesh(o.geometry,o.material,MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(mesh);this.fleet.push(mesh);}});
+  const bays=new Batch();for(const p of Object.values(INDUSTRIAL_LOADING_BAYS)){for(const side of [-1,1]){bays.box(marking,p.x+side*3.3,.21,p.z,.12,.015,2.6);bays.box(marking,p.x,.21,p.z+side*1.3,6.7,.015,.12);}}bays.finish(root);const template=truckGeometry();template.traverse(o=>{if(o instanceof THREE.Mesh){const mesh=new THREE.InstancedMesh(o.geometry,o.material,FLEET_CAPACITY);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(mesh);this.fleet.push(mesh);}});
  }
  setView(camera:THREE.Camera){this.camera=camera;this.view.setCamera(camera);}
  sync(data:IndustrialSnapshot){this.snapshotData=data||null;}
  update(dt:number,gameNow:number,timeScale=120){
   const trucks=this.snapshotData?.trucks||[],active=new Set<string>();let count=0;
-  for(const t of trucks.slice(0,MAX_FREIGHT_TRUCKS+REGIONAL_TRUCK_LIMIT)){
+  for(const t of trucks.slice(0,FLEET_CAPACITY)){
    let motion=this.motions.get(t.id);
    active.add(t.id);
    if(motion)motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});

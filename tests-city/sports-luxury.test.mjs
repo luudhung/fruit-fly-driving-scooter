@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSportsLuxury,privateHelipads,privateHelicopterPose,helicopterNetWorth,SPORTS_RULES} from '../worker/sports-luxury.mjs';
 import {BUILDINGS,LOCATIONS,clearSegment} from '../worker/city-map.mjs';
+import {createInternationalLife} from '../worker/international-life.mjs';
 function setup(count=18){
  let s={simulationAgeSeconds:0,businesses:{},totalTransactions:0,weather:{condition:'clear',wind:0,precipitation:0},centralBank:{priceLevel:1},flies:Array.from({length:count},(_,i)=>({id:`FLY-${i+1}`,alive:true,ageYears:30,money:1000+i*100,savings:10000+i*200,homeEquity:0,businessEquity:0,debt:0,health:90,energy:90,happiness:50,stress:50,loneliness:50,x:0,y:1.1,z:0,traits:{sociability:.7,ambition:.8}}))};
  const events=[],memories=[];const factory=()=>createSportsLuxury({world:()=>s,random:()=>.3,emit:(type,text,payload)=>events.push({type,text,...payload}),remember:(f,type,payload)=>memories.push({id:f.id,type,...payload}),needsAndActivities:()=>{},payAndFinance:()=>{}});
@@ -10,6 +11,23 @@ function setup(count=18){
 }
 const supply=s=>s.flies.reduce((a,f)=>a+f.money+f.savings,0)+Object.values(s.businesses).reduce((a,b)=>a+b.cash,0);
 const putAtPad=(s,h)=>{const pad=privateHelipads().find(p=>p.id===h.padId),f=s.flies.find(f=>f.id===h.ownerId),loc=LOCATIONS.find(l=>l.id===pad.locationId);Object.assign(f,{x:loc.x,z:loc.z,currentLocationId:pad.locationId,action:'taking a private helicopter',traveling:false,indoors:true});return f;};
+
+test('a lawful new private booking gets a real flight permit and pays the destination visa once at actual landing',()=>{
+ const t=setup();t.s.treasury={cash:10000};for(const f of t.s.flies)f.citizenshipCountryId='hansdrex';
+ const international=createInternationalLife({world:()=>t.s,redistribute:false,nationalEconomy:false});international.init();
+ const system=createSportsLuxury({world:()=>t.s,random:()=>.3,emit:()=>{},remember:()=>{},needsAndActivities:()=>{},payAndFinance:()=>{},requestAirClearance:international.requestAirClearance,aviationAdmission:international.aviationAdmission});system.init();
+ const h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),before=f.money+f.savings;f.countryPresence={countryId:'hansdrex',entryId:'HOME'};
+ assert.equal(system.beginPrivate(f,'PAD-island-resort'),true);const flight=h.flight,permit=t.s.internationalLife.airClearances[flight.id];assert.equal(permit.legacy,false);assert.ok(permit.countries.includes('hawaii'));assert.equal(f.money+f.savings,before);
+ const hawaii=international.countryAccount('hawaii').cash;system.handleResident(f,t.at(flight.departure));assert.equal(f.money+f.savings,before-flight.cost);system.handleResident(f,t.at(flight.arrival));assert.equal(f.money+f.savings,before-flight.cost-50);assert.equal(international.countryAccount('hawaii').cash,hawaii+50);assert.equal(f.countryPresence.countryId,'hawaii');system.handleResident(f,t.at(flight.arrival));assert.equal(international.countryAccount('hawaii').cash,hawaii+50);
+});
+
+test('a denied private airspace permit cannot confirm a new journey or take passenger money',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],f=putAtPad(t.s,h),before=f.money+f.savings,system=createSportsLuxury({world:()=>t.s,random:()=>.3,emit:()=>{},remember:()=>{},requestAirClearance:()=>({allowed:false,reason:'closed airspace'})});system.init();assert.equal(system.beginPrivate(f,'PAD-island-resort'),false);assert.equal(h.flight,null);assert.equal(f.privateFlight,undefined);assert.equal(f.money+f.savings,before);
+});
+
+test('destroyed private aircraft retain inherited titles but cannot fly, move roofs or regenerate condition through maintenance',()=>{
+ const t=setup(),h=t.s.sportsLuxury.helicopters[0],old=t.s.flies.find(f=>f.id===h.ownerId),heir=t.s.flies[0];Object.assign(h,{destroyed:true,destroyedAt:100,condition:0,nextTripAt:Number.MAX_SAFE_INTEGER,padId:'PAD-petronas'});old.children=[heir.id];old.alive=false;const before=heir.money+heir.savings;t.system.tick(120,t.at(4000));assert.equal(h.ownerId,heir.id);assert.equal(h.condition,0);assert.equal(h.flight,null);assert.equal(h.nextTripAt,Number.MAX_SAFE_INTEGER);assert.equal(heir.money+heir.savings,before);assert.equal(t.system.beginPrivate(heir,'PAD-island-resort'),false);t.restore();t.system.tick(120,t.at(86400));assert.equal(t.s.sportsLuxury.helicopters[0].condition,0);assert.equal(t.system.snapshot().helicopters[0].destroyed,true);
+});
 
 test('iconic spires never receive helipads; retired aircraft move without losing ownership or charging families',()=>{
  const t=setup(),pads=privateHelipads(),icons=['toronto','empire','burj-khalifa','petronas','petronas-east'];

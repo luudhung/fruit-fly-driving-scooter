@@ -5,6 +5,10 @@ import {BUILDINGS,LOCATIONS,APARTMENTS,SKYLINE_REDEVELOPMENTS} from '../worker/c
 import {hospitalityDemand,hospitalityPremises,hospitalityReady,syncHospitalityHotels,purchaseHospitalityMeal,diningVenues} from '../worker/hospitality-enterprises.mjs';
 
 function founder(state,sector){
+ // Four existing hotels now span two countries. Exercise real demand below the
+ // 80-visitor shared admission bound instead of assuming the old 40-room supply.
+ state.cityVisitors.capacity=80;
+ if(sector==='hotel')state.cityVisitors.airportTraffic.unmetGuests=30;
  const f=state.flies.find(f=>f.ageYears>=25&&f.ageYears<60&&!f.businessId);
  Object.assign(f,{money:20000,savings:10000,currentLocationId:'bank',traveling:false,stress:0,creditScore:850,bankLoan:0,debt:0});
  Object.assign(f.traits,{ambition:1,risk:1,thrift:.8});f.brain.plasticity.persistence=1;
@@ -61,7 +65,7 @@ test('resident restaurant meals require real on-site staff and pay once for real
 });
 
 test('empty hotel supply and competing restaurants dampen autonomous startup demand',()=>{
- const s=freshState();s.cityVisitors.airportTraffic.unmetGuests=30;
+ const s=freshState();s.cityVisitors.capacity=80;s.cityVisitors.airportTraffic.unmetGuests=30;
  const demand=hospitalityDemand(s,'hotel');s.cityVisitors.hotels.extra={capacity:100,rooms:{}};
  assert.ok(hospitalityDemand(s,'hotel')<demand);
  const food=hospitalityDemand(s,'food');for(let i=0;i<30;i++)s.enterprises[`COMP-${i}`]={status:'operating',sector:'food',hospitality:true};

@@ -1,5 +1,6 @@
+import {NORTH_MILITARY_WALLS} from '../worker/country-map.mjs';
 import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
-import {mansionBoxes,mansionFloors,type MansionBox} from './mansion-layout.ts';
+type CollisionBox={x:number;y:number;z:number;w:number;h:number;d:number};
 import {FlightDoubleTap} from './flight-double-tap.ts';
 import {metroInterchangePaths} from './metro-interchanges.ts';
 import {MILITARY_PERIMETER_WALLS} from '../worker/government-map.mjs';
@@ -7,14 +8,14 @@ export const PLAYER_EYE=1.7;
 const RADIUS=.32,HEIGHT=1.78,STEP=.29,EPS=.0001;
 export type PlayerInput={forward:number;strafe:number;yaw:number;sprint:number;ascend:boolean;descend:boolean};
 // Rebuild only after an authoritative geometry revision (collapse, clearing, new construction).
-const cellSize=24,bins=new Map<string,MansionBox[]>(),empty:MansionBox[]=[];
+const cellSize=24,bins=new Map<string,CollisionBox[]>(),empty:CollisionBox[]=[];
 let collisionRevision=-1;
 function refreshUrbanCollision(){
  if(collisionRevision===urbanGeometryRevision)return;
  collisionRevision=urbanGeometryRevision;bins.clear();
- const citySolids:MansionBox[]=BUILDINGS.filter(b=>b.kind!=='mansion'&&effectiveBuildingHeight(b)>0).map(b=>({...b,h:effectiveBuildingHeight(b),y:effectiveBuildingHeight(b)/2,color:0,solid:true}));
- const perimeterSolids:MansionBox[]=MILITARY_PERIMETER_WALLS.map(b=>({...b,y:b.h/2,color:0,solid:true}));
- const solids=[...citySolids,...perimeterSolids,...mansionBoxes.filter(b=>b.solid)];
+ const citySolids:CollisionBox[]=BUILDINGS.filter(b=>effectiveBuildingHeight(b)>0).map(b=>({...b,h:effectiveBuildingHeight(b),y:effectiveBuildingHeight(b)/2,color:0,solid:true}));
+ const perimeterSolids:CollisionBox[]=[...MILITARY_PERIMETER_WALLS,...NORTH_MILITARY_WALLS].map(b=>({...b,y:b.h/2,color:0,solid:true}));
+ const solids=[...citySolids,...perimeterSolids];
  for(const b of solids)for(let x=Math.floor((b.x-b.w/2-RADIUS)/cellSize);x<=Math.floor((b.x+b.w/2+RADIUS)/cellSize);x++)for(let z=Math.floor((b.z-b.d/2-RADIUS)/cellSize);z<=Math.floor((b.z+b.d/2+RADIUS)/cellSize);z++){
   const key=`${x},${z}`;if(!bins.has(key))bins.set(key,[]);bins.get(key)!.push(b);
  }
@@ -64,7 +65,6 @@ function support(x:number,z:number,max:number){
  for(const s of metroSurfaceBins.get(metroCell(x,z))||[])y=Math.max(y,surfaceY(x,z,s.a,s.b,s.width,max));
  for(const g of metroPlatformBins.get(metroCell(x,z))||[]){const top=g.platform.y-.9;if(top<=max+EPS&&Math.abs(x-g.platform.x)<(g.axis==='x'?g.platformLength/2:1.6)&&Math.abs(z-g.platform.z)<(g.axis==='x'?1.6:g.platformLength/2))y=Math.max(y,top);}
  for(const pad of rooftopPads)if(pad.y<=max+EPS&&Math.hypot(x-pad.x,z-pad.z)<(pad.radius||6))y=Math.max(y,pad.y);
- for(const f of mansionFloors)if(f.y<=max+EPS&&Math.abs(x-f.x)<=f.w/2+RADIUS-EPS&&Math.abs(z-f.z)<=f.d/2+RADIUS-EPS)y=Math.max(y,f.y);
  for(const b of nearby(x,z)){const top=b.y+b.h/2;if(top<=max+EPS&&Math.abs(x-b.x)<=b.w/2+RADIUS-EPS&&Math.abs(z-b.z)<=b.d/2+RADIUS-EPS)y=Math.max(y,top);}
  return y;
 }
@@ -74,7 +74,7 @@ function collides(x:number,z:number,feet:number){
 }
 /** First-person walking, gravity, step-up collision and Minecraft-style creative flight. */
 export class PlayerController{
- x=110;y=2.55;z=819;flying=false;grounded=false;verticalVelocity=0;
+ x=8;y=1.9;z=-35.4;flying=false;grounded=false;verticalVelocity=0;
  private readonly jumpTap=new FlightDoubleTap();
  private metroLift:{x:number;z:number;target:number}|null=null;
  private liftCooldown=0;

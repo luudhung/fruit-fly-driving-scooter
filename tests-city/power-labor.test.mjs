@@ -81,3 +81,26 @@ test('taxi dispatch respects the same upcoming essential rota while an accepted 
  s.simulationAgeSeconds=18*3600;const job=cityVisitors.requestTaxi(passenger,'hotel');assert.ok(job,'off-shift owners can earn taxi fares');
  s.simulationAgeSeconds=9*3600+86400;cityVisitors.tick(120,gameClock());assert.ok(!['cancelled','complete'].includes(job.phase),'crossing a shift boundary does not abandon an accepted physical ride');assert.equal(driver.cityService,job.id);
 });
+
+
+test('independent physical grid crews commission paid modules in parallel without exceeding the demanded target',()=>{
+ const s=fixture(),plant=s.utilities.powerPlant,staff=ensurePowerPlantStaff();s.simulationAgeSeconds=9*3600;s.utilities.lastBillingDay=gameClock().day;plant.cash=100000;plant.maintenance=.98;plant.lastHourKey=-1;
+ for(const f of staff)Object.assign(f,{traveling:true,currentLocationId:'power',action:'working as power plant operator'});
+ for(const f of staff.slice(0,6)){healthy(f);Object.assign(f,{traveling:false,indoors:true,currentLocationId:'power',x:power().x,z:power().z,action:'working as power plant operator'});}
+ const initialMoney=liquidMoneySupply();simulatePowerGrid(gameClock());assert.equal(plant.onDuty,6);assert.equal(plant.installedCapacity,485,'three real crews commission three 100-unit modules');
+ const module=plant.assetLedger.find(a=>a.type==='turbine-module');assert.equal(module.capacity,300);assert.equal(module.cost,2712);assert.equal(module.workers.length,6);assert.ok(Math.abs(liquidMoneySupply()-initialMoney)<1e-6);
+ const paid=plant.serviceSpending,capacity=plant.installedCapacity;simulatePowerGrid(gameClock());assert.equal(plant.installedCapacity,capacity);assert.equal(plant.serviceSpending,paid,'same-hour calls cannot commission or charge again');
+ s.simulationAgeSeconds+=3600;plant.installedCapacity=Math.ceil(plant.demand*1.25/100)*100-25;simulatePowerGrid(gameClock());assert.equal(plant.assetLedger.at(-1).capacity,25,'last work order buys only missing target capacity');
+});
+
+
+test('national treasury and cargo escrow wallets do not consume power while real North and Hawaii import customers remain metered',()=>{
+ const s=fixture(),plant=s.utilities.powerPlant;s.utilities.lastBillingDay=gameClock().day;simulatePowerGrid(gameClock());const demand=plant.demand,premises=plant.commercialPremises;
+ assert.ok(plant.nationalConnections['north-city'].households>0,'North households stay on the paid shared interconnector');
+ for(let i=0;i<20;i++){s.businesses[`treasury:TEST-${i}`]={cash:1,sector:'national-treasury'};s.businesses[`national-${i}-escrow`]={cash:1,sector:'escrow'};s.businesses[`SUPPLIER-LEDGER-${i}`]={cash:1,sector:'national-trade'};}
+ s.simulationAgeSeconds+=3600;simulatePowerGrid(gameClock());assert.equal(plant.demand,demand);assert.equal(plant.commercialPremises,premises,'bookkeeping cannot invent sixty electricity customers');
+ s.businesses['NORTH-REAL-CAFE']={cash:10,sector:'leisure',locationId:'north-cafe'};s.businesses['HAWAII-REAL-RESORT']={cash:10,sector:'tourism',locationId:'island-resort'};
+ // Keep each physical address metered once even when the business has multiple accounts.
+ s.businesses['NORTH-REAL-CAFE-TILL']={cash:10,sector:'leisure',locationId:'north-cafe'};
+ s.simulationAgeSeconds+=3600;simulatePowerGrid(gameClock());assert.ok(plant.nationalConnections['north-city'].premises>0);assert.ok(plant.nationalConnections.hawaii.premises>0);assert.ok(plant.demand>=demand);assert.ok(plant.commercialPremises<=premises+2);
+});

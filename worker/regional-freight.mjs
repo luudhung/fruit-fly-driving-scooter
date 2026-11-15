@@ -1,22 +1,25 @@
 import {LOCATIONS,parkingPoint} from './city-map.mjs';
 import {INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
+import {countryAt} from './country-map.mjs';
 export const REGIONAL_TRUCK_LIMIT=24;
 export const REGIONAL_HUBS=['industrial-raw-depot','INDUSTRY-north-4','INDUSTRY-europe-4'];
 const GOODS=['fabric','grain','aggregate'],DAY=86400;
 const operatorId='regional-logistics',equipmentId='industrial-equipment-supplier',sourceId=REGIONAL_HUBS[0];
 /** Licensed intercity hauliers are transport agents, separate from resident-owned fleets.
  * The simulation persists finite cargo, paid consignments and physical road journeys. */
-export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable}){
+export function createRegionalFreight({world,account,transfer,roadPath,moveTruck,unavailable,countryAccount}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),location=id=>LOCATIONS.find(l=>l.id===id);
  const data=()=>raw().regionalFreight||={version:1,trucks:[],stocks:{},jobs:[],nextJobId:1,nextDispatchAt:now(),nextExportAt:now(),delivered:0,exports:0,exportRevenue:0,feesPaid:0,procurement:0,cancelled:0};
  const stock=id=>id===sourceId?raw().industrialEconomy.rawStock:(data().stocks[id]||={fabric:0,grain:0,aggregate:0});
  const business=id=>account(id===sourceId?sourceId:`regional-warehouse-${id}`);
  function init(){
   const d=data();account(operatorId);account('regional-freight-escrow');account('regional-haul-crews');
-  if(!d.funded&&REGIONAL_HUBS.every(id=>location(id))&&Number(raw().treasury?.cash||0)>=17800){
-   transfer(raw().treasury,account(equipmentId),10800);transfer(raw().treasury,account(operatorId),1000);
-   for(const id of REGIONAL_HUBS.slice(1))transfer(raw().treasury,business(id),3000);
+  const treasuryFor=id=>countryAccount?countryAccount(countryAt(location(id))||'hansdrex'):raw().treasury;
+  const funding=[{from:treasuryFor(sourceId),to:account(equipmentId),amount:10800},{from:treasuryFor(sourceId),to:account(operatorId),amount:1000},...REGIONAL_HUBS.slice(1).map(id=>({from:treasuryFor(id),to:business(id),amount:3000}))];
+  const obligations=new Map();for(const item of funding)obligations.set(item.from,Number(obligations.get(item.from)||0)+item.amount);
+  if(!d.funded&&REGIONAL_HUBS.every(id=>location(id))&&[...obligations].every(([from,amount])=>Number(from?.cash||0)>=amount)){
+   for(const item of funding)transfer(item.from,item.to,item.amount);
    d.procurement=10800;d.funded=true;
   }
   if(d.funded&&d.trucks.length===0){
@@ -27,6 +30,10 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
    }
   }
   if(d.funded&&!d.resupplyScheduled){raw().industrialEconomy.nextRestockAt=Math.min(Number(raw().industrialEconomy.nextRestockAt||now()),now()+1800);d.resupplyScheduled=true;}
+  if(countryAccount)for(const job of d.jobs.filter(j=>!j.paid&&j.exported)){
+   if(transfer(business(job.to),account('regional-freight-escrow'),job.price+job.fee))job.exported=false;
+   else cancel(job);
+  }
   return d;
  }
  function route(t,destination,from=t.locationId){
@@ -35,6 +42,8 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   Object.assign(t,{routeWaypoints:points,routeIndex:0,traveling:true,motionSpeed:0,lastProgressAt:now(),routeDestination:destination});return true;
  }
  function order(from,to,product,quantity,exported=false){
+  // North/Hans freight is an internal paid purchase, never an off-world buyer.
+  if(countryAccount)exported=false;
   const d=data(),available=stock(from),qty=Math.min(quantity,Math.max(0,Math.floor(available[product]||0)-(from===sourceId?180:0)));if(qty<12||unavailable(from)||unavailable(to))return null;
   const fee=24+Math.hypot(location(from).x-location(to).x,location(from).z-location(to).z)*.012,price=qty*2;
   if(!exported&&!transfer(business(to),account('regional-freight-escrow'),price+fee))return null;

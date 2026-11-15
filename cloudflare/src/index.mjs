@@ -1,6 +1,7 @@
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
+import {handleConflictControl} from '../../worker/conflict-control.mjs';
 import {
   freshState,
   restoreState,
@@ -11,7 +12,7 @@ import {
   snapshotLooksUsable,
   setNeuralSyncEnabled,
   getSimulationConfig,
-  getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,neuralActors,
+  getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed,neuralActors,countries,
 } from "../../worker/civilization-engine.mjs";
 
 const DEFAULT_WORLD_ID = "WORLD-A";
@@ -238,6 +239,11 @@ export class CivilizationWorld extends DurableObject {
       const observing=request.method==="GET";
       const advance=observing?{...(this.lastAdvance||{}),snapshotAgeSeconds:Math.max(0,(Date.now()-this.lastWallClockMs)/1000)}:await this.advanceTo(Date.now(),"request");
       const nextAlarmAtMs = await this.ensureAlarm();
+
+      if(url.pathname==='/api/civilization/conflict'&&request.method==='POST'){
+        const result=await handleConflictControl(request,{requestConflict:command=>countries.requestConflict(command),persist:()=>this.persistIfDue(true)});
+        return json(result.body,result.status);
+      }
 
       if (url.pathname === "/api/civilization/mortality") {
         const report = mortalityReport();

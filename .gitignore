@@ -75,3 +75,11 @@ snapshots/
 
 # Lossless full-connectome runtime assets, generated during the Vercel build.
 public/neural/
+
+# Local verification backups, deployment caches and generated bundles.
+/work/
+/cloudflare/work/
+/.wrangler/
+/cloudflare/.wrangler/
+/.wrangler-dry-run/
+/cloudflare/.wrangler-dry-run/

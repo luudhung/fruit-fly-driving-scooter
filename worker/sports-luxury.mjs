@@ -1,3 +1,5 @@
+import {hasCountryCommitment} from './country-commitments.mjs';
+import {COUNTRY_IDS,countryAt} from './country-map.mjs';
 import {AIRPORT,BUILDINGS,LOCATIONS,SPORTS_VENUES,entrance,pedestrianRoute,clearSegment,onIsland} from './city-map.mjs';
 
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
@@ -39,13 +41,13 @@ export function privateHelicopterPose(now,flight){
  return {x,y,z,heading:Math.atan2(b.x-a.x,b.z-a.z),phase:u===0?'takeoff':u<1?'flying':'landed'};
 }
 
-export function createSportsLuxury({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance}){
+export function createSportsLuxury({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted=()=>false,requestAirClearance=()=>({allowed:true}),aviationAdmission=()=>({allowed:true,fee:0})}){
  const pads=privateHelipads(),padById=new Map(pads.map(p=>[p.id,p]));
  const rng=f=>clamp(random?.(f)??.5,0,1);
  const get=()=>world().sportsLuxury||init();
  const alive=id=>world().flies.find(f=>f.id===id&&f.alive);
  const account=()=>world().businesses['sports-aviation'];
- const busy=f=>f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.urbanFloodEscape||f.emergencyTask||f.arrested||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
+ const busy=f=>hasCountryCommitment(f,world().simulationAgeSeconds)||isWorkCommitted(f)||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.urbanFloodEscape||f.emergencyTask||f.arrested||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
  function transfer(f,cost,to=account()){
   if(!Number.isFinite(cost)||cost<0||money(f)+1e-7<cost)return false;
   const cash=Math.min(Math.max(0,Number(f.money)||0),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings)||0)-(cost-cash);to.cash=Number(to.cash||0)+cost;
@@ -90,7 +92,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  function relocateLegacyParking(d){
   const taken=new Set(d.helicopters.flatMap(h=>[h.padId,h.flight?.to.id].filter(Boolean)));
   for(const h of d.helicopters){
-   if(!h.roofMigrationPending||h.flight)continue;
+   if(h.destroyed||!h.roofMigrationPending||h.flight)continue;
    const p=padById.get(h.homePadId)||pads.find(p=>p.rooftop&&p.id!=='PAD-island-resort'&&!taken.has(p.id));
    if(!p||taken.has(p.id)&&h.padId!==p.id)continue;
    const status=world().urbanWorld?.buildings?.[p.locationId];if(status&&status.stage!=='operational')continue;
@@ -118,18 +120,18 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  function nextAt(now){let t=Math.floor(now/86400)*86400+16*3600;return t>now?t:t+86400;}
  function maintenance(d,day){
   if(d.lastDay===day)return;d.lastDay=day;
-  for(const h of d.helicopters){const f=alive(h.ownerId);if(!f)continue;const due=6+h.maintenanceDebt,paid=Math.min(due,Math.max(0,money(f)-100));if(paid>0){transfer(f,paid);d.maintenanceRevenue+=paid;}h.maintenanceDebt=Math.min(120,due-paid);h.condition=clamp(h.condition+(paid>=due?.025:-.01),.2,1);}
+  for(const h of d.helicopters){const f=alive(h.ownerId);if(h.destroyed||!f)continue;const due=6+h.maintenanceDebt,paid=Math.min(due,Math.max(0,money(f)-100));if(paid>0){transfer(f,paid);d.maintenanceRevenue+=paid;}h.maintenanceDebt=Math.min(120,due-paid);h.condition=clamp(h.condition+(paid>=due?.025:-.01),.2,1);}
  }
  function inherit(d,now){
   if(now<d.nextOwnershipCheck)return;d.nextOwnershipCheck=now+3600;
   for(const h of d.helicopters){
    if(alive(h.ownerId))continue;const formerId=h.ownerId||h.estateOwnerId,former=world().flies.find(f=>f.id===formerId),candidates=[...(former?.children||[]),former?.partnerId].map(id=>alive(id)).filter(f=>f&&f.ageYears>=18&&!d.helicopters.some(o=>o.ownerId===f.id));
-   const heir=candidates[0];if(heir){const before=formerId;h.ownerId=heir.id;delete h.estateOwnerId;h.nextTripAt=now+7200;heir.privateHelicopterId=h.id;remember?.(heir,'helicopter_inheritance',{from:before,helicopterId:h.id});emit?.('inheritance',`${heir.id} inherited ${h.id}.`,{flyId:heir.id,helicopterId:h.id,from:before});}
+   const heir=candidates[0];if(heir){const before=formerId;h.ownerId=heir.id;delete h.estateOwnerId;h.nextTripAt=h.destroyed?Number.MAX_SAFE_INTEGER:now+7200;heir.privateHelicopterId=h.id;remember?.(heir,'helicopter_inheritance',{from:before,helicopterId:h.id});emit?.('inheritance',`${heir.id} inherited ${h.id}.`,{flyId:heir.id,helicopterId:h.id,from:before});}
    else if(h.ownerId){h.estateOwnerId=h.ownerId;h.ownerId=null;h.nextTripAt=Infinity;emit?.('estate',`${h.id} remains in its owner's estate pending an eligible heir.`,{helicopterId:h.id});}
   }
  }
  function settleUnattendedFlight(h,now){
-  const flight=h.flight;if(!flight)return;const owner=alive(flight.ownerId||h.ownerId),task=owner?.privateFlight;
+  const flight=h.flight;if(h.destroyed||!flight)return;const owner=alive(flight.ownerId||h.ownerId),task=owner?.privateFlight;
   if(owner&&task?.id===flight.id&&task.helicopterId===h.id){
    if(!['boarding','flying','disembarking'].includes(task.phase)){task.phase=now<flight.departure?'boarding':now<flight.arrival?'flying':'disembarking';task.until=task.phase==='disembarking'?flight.arrival+300+Math.max(120,flight.to.y*5):flight.departure;}
    return;
@@ -148,7 +150,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function retireUnsupportedParking(d,now){
   for(const h of d.helicopters){
-   if(h.flight||padById.has(h.padId))continue;
+   if(h.destroyed||h.flight||padById.has(h.padId))continue;
    const building=BUILDINGS.find(b=>`PAD-${b.id}`===h.padId);
    if(!building)continue;
    const safe=pads.filter(p=>padAvailable(p.id,h.id)).sort((a,b)=>Number(b.locationId==='airport')-Number(a.locationId==='airport'))[0];
@@ -186,7 +188,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    if(f.ageYears>=16&&f.energy>60&&d.match.players.length<SPORTS_RULES.stadiumPlayers)add('stadium','playing a stadium match',23+social*22+Number(f.excitement||0)*.25);
    if(d.match.spectators.length<SPORTS_RULES.spectators)add('stadium','watching a stadium match',22+social*30+stress*.35);
   }
-  const h=d.helicopters.find(h=>h.ownerId===f.id);if(h&&!h.flight&&h.nextTripAt<=now&&money(f)>250&&!dangerous()){
+  const h=d.helicopters.find(h=>h.ownerId===f.id);if(h&&!h.destroyed&&!h.flight&&h.nextTripAt<=now&&money(f)>250&&!dangerous()){
    const p=padById.get(h.padId);if(p&&onIsland(p)===onIsland(f))add(p.locationId,'taking a private helicopter',62+Number(f.traits?.ambition||.5)*30+stress*.3);
   }
  }
@@ -212,7 +214,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function beginPrivate(f,destinationPadId){
   const d=get(),now=world().simulationAgeSeconds,h=d.helicopters.find(h=>h.ownerId===f.id);
-  if(!h||h.flight||f.privateFlight||f.traveling||busy(f)||dangerous()||h.condition<.35||h.maintenanceDebt>30||f.health<55||f.energy<30)return false;
+  if(!h||h.destroyed||h.flight||f.privateFlight||f.traveling||busy(f)||dangerous()||h.condition<.35||h.maintenanceDebt>30||f.health<55||f.energy<30)return false;
   const from=padById.get(h.padId);if(!from||!padAvailable(from.id,h.id)||f.currentLocationId!==from.locationId)return false;
   const dests=pads.filter(p=>p.rooftop&&p.id!==from.id&&p.locationId!==from.locationId&&padAvailable(p.id,h.id));
   const to=destinationPadId?dests.find(p=>p.id===destinationPadId):(dests.find(p=>p.id===h.homePadId)||dests[Math.floor(rng(f)*dests.length)%dests.length]);if(!to)return false;
@@ -221,7 +223,10 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   if(money(f)<cost+120)return false;
   // Reserve the landing pad before taking any payment; it remains exclusive until landing.
   const depart=now+300+Math.max(120,from.y*5),arrival=depart+SPORTS_RULES.flightSeconds+travelDistance*.6;
-  const flight={id:`PRIVATE-FLIGHT-${d.nextFlight++}`,helicopterId:h.id,ownerId:f.id,from:{...from},to:{...to},departure:depart,arrival,cost,fuel,paid:false};
+  const flight={id:`PRIVATE-FLIGHT-${d.nextFlight++}`,helicopterId:h.id,ownerId:f.id,operatorCountryId:h.ownerCountryId||f.citizenshipCountryId||countryAt(from)||COUNTRY_IDS.hansdrex,from:{...from},to:{...to},departure:depart,arrival,cost,fuel,paid:false};
+  const admission=aviationAdmission(f,{flightId:flight.id,toCountryId:countryAt(to),fromCountryId:countryAt(from),commit:false});
+  if(!admission.allowed||money(f)<cost+120+Number(admission.fee||0))return false;
+  if(!requestAirClearance({flightId:flight.id,operatorCountryId:flight.operatorCountryId,countries:[countryAt(from),countryAt(to)],kind:'private'}).allowed)return false;
   h.flight=flight;f.privateFlight={id:flight.id,helicopterId:h.id,phase:'boarding',lastAt:now,until:depart};f.action='boarding a private helicopter';f.traveling=false;f.sleeping=false;f.onTrain=false;f.indoors=from.rooftop;f.vx=f.vz=0;f.routeWaypoints=[];f.pendingAction=null;
   // All ground transfer is along the airport apron, roof access is a timed building elevator.
   if(!from.rooftop){f.privateFlight.walk=airportAccess(from);const access=f.privateFlight.walk[0];f.x=access.x;f.z=access.z;f.y=1.1;}
@@ -232,7 +237,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function handlePrivate(f,clock){
   const d=get(),t=f.privateFlight;if(!t)return false;const h=d.helicopters.find(h=>h.id===t.helicopterId),flight=h?.flight,now=world().simulationAgeSeconds;
-  if(!h||!flight){f.privateFlight=null;f.onPrivateHelicopter=false;return false;}
+  if(!h||h.destroyed||!flight){f.privateFlight=null;f.onPrivateHelicopter=false;return false;}
   care(f,clock);
   if(t.phase==='boarding'){
    if(dangerous()||!padAvailable(flight.from.id,h.id)||!padAvailable(flight.to.id,h.id)){cancelPrivate(f,h,'unsafe weather or unavailable landing pad');return true;}
@@ -256,6 +261,8 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    }
    const p=privateHelicopterPose(now,flight);Object.assign(f,{x:p.x,y:p.y,z:p.z,vx:0,vz:0,traveling:false,transitMode:'private-helicopter',onPrivateHelicopter:true});f.action='flying in a personally owned helicopter';
    if(now<flight.arrival)return true;
+   const entry=aviationAdmission(f,{flightId:flight.id,entryId:`${flight.id}:${f.id}:arrival`,toCountryId:countryAt(flight.to),fromCountryId:countryAt(flight.from)});
+   if(!entry.allowed){f.action=`awaiting landing immigration: ${entry.reason||'entry unavailable'}`;return true;}
    t.phase='disembarking';t.until=flight.arrival+300+Math.max(120,flight.to.y*5);h.padId=flight.to.id;if(flight.landedAt==null){h.trips++;d.privateFlights++;flight.landedAt=now;}f.onPrivateHelicopter=false;remember?.(f,'private_helicopter_trip',{flightId:flight.id,from:flight.from.id,to:flight.to.id,cost:flight.cost});
   }
   if(t.phase==='disembarking'){
@@ -279,7 +286,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   const d=get(),now=world().simulationAgeSeconds;
   const visiblePads=new Set(['PAD-riverside-hotel','PAD-riverside-office','PAD-riverside-clinic','PAD-island-resort','PAD-AIRPORT-1','PAD-AIRPORT-2',...d.helicopters.flatMap(h=>[h.padId,h.homePadId,h.flight?.from.id,h.flight?.to.id])]);
   const shownPads=pads.filter(p=>visiblePads.has(p.id)).map(p=>({...p,householdIds:[...new Set(d.helicopters.filter(h=>h.homePadId===p.id).map(h=>h.familyHouseholdId).filter(Boolean))]}));
-  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,goals:d.goals,pads:shownPads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,homePadId:h.homePadId,familyHouseholdId:h.familyHouseholdId,familyIds:h.familyIds||[],condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
+  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,goals:d.goals,pads:shownPads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,homePadId:h.homePadId,familyHouseholdId:h.familyHouseholdId,familyIds:h.familyIds||[],destroyed:Boolean(h.destroyed),destroyedAt:h.destroyedAt??null,condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
  }
  return {init,tick,handleResident,addChoices,snapshot,beginPrivate,beginSports,padAvailable};
 }

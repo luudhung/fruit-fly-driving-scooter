@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,SKYLINE_PLOTS,SKY_LOUNGE,PETRONAS_TOWERS,LOCATIONS,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked} from '../worker/city-map.mjs';
+import {WORLD_HALF,BUILDINGS,APARTMENTS,ROADS,WATER,PARK,FERRIS_WHEEL,METRO_LINES,SKYLINE_PLOTS,SKY_LOUNGE,PETRONAS_TOWERS,LOCATIONS,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainState,trainStates,blocked,onWaterCrossing} from '../worker/city-map.mjs';
 test('the swapped twin towers have no intervening building and Tower Court homes stay around half the Empire height',()=>{
  assert.deepEqual(PETRONAS_TOWERS.west,{x:-118,z:-43.5});
  assert.ok(PETRONAS_TOWERS.east.x<PETRONAS_TOWERS.west.x);
@@ -18,7 +18,7 @@ test('the swapped twin towers have no intervening building and Tower Court homes
 test('all building footprints clear roads, water, park and each other',()=>{
  for(let i=0;i<BUILDINGS.length;i++){
   const b=BUILDINGS[i];
-  for(const other of [...ROADS,...WATER,PARK,...BUILDINGS.slice(i+1)])assert.equal(overlaps(b,other),false,`${b.id} overlap ${other.id||JSON.stringify(other)}`);
+  for(const other of [...ROADS,...WATER,PARK,...BUILDINGS.slice(i+1)])assert.ok(!overlaps(b,other)||b.kind==='customs'&&WATER.includes(other)&&onWaterCrossing(b),`${b.id} overlap ${other.id||JSON.stringify(other)}`);
  }
 });
 test('routes reach real entrances without crossing solids or water',()=>{

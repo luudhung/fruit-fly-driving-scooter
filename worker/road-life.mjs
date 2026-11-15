@@ -1,3 +1,4 @@
+import {hasCountryCommitment} from './country-commitments.mjs';
 import {PARKING_SPACES,parkingPoint,LOCATIONS,onIsland} from './city-map.mjs';
 const clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,Number.isFinite(n)?n:a));
 const ownsCar=f=>String(f.vehicle||'').includes('car');
@@ -62,7 +63,7 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   return now<Number(f.trafficHoldUntil||0);
  }
  function dutyCommitted(f,now){
-  if(f.traveling||f.recoveringEnergy||f.sleeping||isWorkCommitted(f))return true;
+  if(hasCountryCommitment(f,now)||f.traveling||f.recoveringEnergy||f.sleeping||isWorkCommitted(f))return true;
   if(/^working|^teaching|^resting indoors/.test(String(f.action||''))||/^working|^teaching/.test(String(f.pendingAction||'')))return true;
   if(f.jobId&&f.ageYears>=18&&f.ageYears<=75){
     const hour=(now%86400)/3600,start=Number(f.gridShiftStart??f.preferredWorkStart),duration=Number(f.preferredWorkHours||8);

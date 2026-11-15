@@ -27,12 +27,12 @@ test('actual birth pays its family and cannot pay twice on the next tick',()=>{
  assert.ok(born===1||born===2);assert.equal(mother.money-money,1000*born);
  completePregnancy(mother);assert.equal(mother.money-money,1000*born);
 });
-test('zero-cash residents eat and drink indoors even with empty inventories, no wealth destroyed',()=>{
- const s=freshState(),f=s.flies[0];f.currentLocationId=f.homeId;f.indoors=true;f.traveling=false;f.money=0;f.hunger=99;f.thirst=99;f.health=75;f.action='resting at home';f.smoking=false;
- s.foodReserve=0;s.businesses.market.inventory=0;const total=liquidMoneySupply();
- needsAndActivities(f,{hour:12});assert.ok(f.hunger<45);assert.ok(f.thirst<35);assert.equal(f.money,0);assert.ok(s.foodReserve>0);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);
- for(let i=0;i<20000;i++)needsAndActivities(f,{hour:12});
- assert.ok(f.health>=75);assert.ok(f.thirst<85);assert.ok(f.hunger<50);
+test('a penniless resident receives free indoor water and funded finite meals without resetting empty food stocks',()=>{
+ const s=freshState(),f=s.flies[0];Object.assign(f,{currentLocationId:f.homeId,indoors:true,traveling:false,money:0,savings:0,hunger:99,thirst:99,health:75,action:'resting at home',smoking:false});
+ s.foodReserve=0;s.businesses.market.inventory=0;const total=liquidMoneySupply(),treasury=s.treasury.cash;
+ needsAndActivities(f,{day:1,hour:12,minute:0},0);assert.equal(f.hunger,99);assert.equal(f.thirst,44);assert.equal(s.foodReserve,0);assert.equal(s.businesses.market.inventory,0);assert.equal(s.treasury.cash,treasury);
+ s.businesses.market.inventory=1;needsAndActivities(f,{day:1,hour:12,minute:0},0);assert.equal(f.hunger,39);assert.equal(f.thirst,0);assert.equal(s.businesses.market.inventory,0);assert.equal(f.money,0);assert.equal(s.treasury.cash,treasury-4);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);
+ f.hunger=99;needsAndActivities(f,{day:1,hour:12,minute:0},0);assert.equal(f.hunger,99);assert.equal(s.foodReserve,0);assert.equal(s.businesses.market.inventory,0);assert.equal(s.treasury.cash,treasury-4);
 });
 test('park wheel admits a penniless resident and reduces stress after a real round trip',async()=>{
  const {simulateParkWheel}=await import('../worker/civilization-server.mjs');

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {AIRPORT,AIRPORT_GARDENS,AIRPORT_PARK,AIRPORT_PARK_PATHS,AIRPORT_PARK_PONDS,WEST_DISTRICT,PARK,BUILDINGS,APARTMENTS,LOCATIONS,ROADS,METRO_LINES,contains,overlaps,entrance,pedestrianRoute,clearSegment,metroStationGeometry,trainStates,vehicleRoute} from '../worker/city-map.mjs';
 import {planNetworkMetroRoute,METRO_INTERCHANGES} from '../worker/metro-planner.mjs';
+import {NORTH_AIRPORT,NORTH_LANDMARK,countryAt} from '../worker/country-map.mjs';
 
 const homes=()=>BUILDINGS.filter(b=>b.id.startsWith('AIRPORT-APT-'));
 const m8=()=>METRO_LINES.find(line=>line.id==='M8');
@@ -26,7 +27,7 @@ test('Airport Gardens has genuine apartment capacity around a three-quarter-size
   assert.equal(overlaps(home,AIRPORT.apron,25),false);
  }
  assert.ok(ROADS.every(road=>!overlaps(road,AIRPORT_PARK)),'roads go around the park');
- assert.ok(BUILDINGS.every(building=>!overlaps(building,AIRPORT_PARK)),'parkland cannot silently become building lots');
+ assert.ok(BUILDINGS.every(building=>building.id===NORTH_LANDMARK.id||!overlaps(building,AIRPORT_PARK)),'only the approved small Aurora terrace occupies parkland');
  assert.ok(AIRPORT_PARK_PATHS.length>=6);assert.ok(AIRPORT_PARK_PONDS.length>=1);
  const gate=LOCATIONS.find(l=>l.id==='airport-park');assert.ok(gate&&contains(AIRPORT_PARK,gate));
 });
@@ -65,18 +66,17 @@ test('every new apartment has real access to both-side metro coverage, and the a
   assertPublicWalk(pedestrianRoute(AIRPORT.gate,entrance(home)));
   assert.ok(vehicleRoute(entrance(home),AIRPORT.gate).length>1,'normal city cars can reach airport-side homes');
  }
- assertPublicWalk(pedestrianRoute(AIRPORT.gate,metroStationGeometry(line,7).access));
+ assertPublicWalk(pedestrianRoute(AIRPORT.gate,metroStationGeometry(METRO_LINES.find(l=>l.id==='M12'),1).access));
 });
 
-test('M8 interchanges link the new neighbourhood to every old line and an actual Riverside itinerary',()=>{
+test('North City has domestic airport interchanges and public border crossings instead of international trains',()=>{
  const reached=new Set(['M8']);
  for(let pass=0;pass<METRO_LINES.length;pass++)for(const hub of METRO_INTERCHANGES)if(hub.lines.some(id=>reached.has(id)))for(const id of hub.lines)reached.add(id);
- assert.deepEqual([...reached].sort(),METRO_LINES.map(l=>l.id).sort());
+ assert.deepEqual([...reached].sort(),METRO_LINES.filter(l=>l.countryId==='north-city').map(l=>l.id).sort());
  const from=entrance(homes()[0]),dest=entrance(LOCATIONS.find(l=>l.id==='riverside-market'));
- const plan=planNetworkMetroRoute(from,dest);assert.ok(plan?.legs.some(leg=>leg.lineId==='M8'));
- assert.ok(plan.transfers>=1);assert.ok(plan.waypoints.some(p=>p.stage==='interchange-walk'));
+ const plan=planNetworkMetroRoute(from,NORTH_AIRPORT.gate);assert.ok(plan?.legs.some(leg=>leg.lineId==='N1'));
  assert.ok(plan.legs.every(leg=>leg.entryIndex!==leg.exitIndex));
- const reverse=planNetworkMetroRoute(dest,from);assert.ok(reverse?.legs.some(leg=>leg.lineId==='M8'));
+ assert.equal(planNetworkMetroRoute(from,dest),null);assert.equal(planNetworkMetroRoute(dest,from),null);
  assertPublicWalk(pedestrianRoute(from,dest));
  assertPublicWalk(pedestrianRoute(dest,from));
  const park=LOCATIONS.find(l=>l.id==='airport-park');
@@ -104,19 +104,19 @@ test('Westborough homes have two nearby lines and interchange journeys to the co
  const from=entrance(west.toSorted((a,b)=>Math.abs(a.z)-Math.abs(b.z)||a.x-b.x)[0]),airportHome=entrance(homes()[0]),riverside=entrance(LOCATIONS.find(l=>l.id==='riverside-market'));
  for(const dest of [AIRPORT.gate,airportHome,riverside]){
   assertPublicWalk(pedestrianRoute(from,dest));assertPublicWalk(pedestrianRoute(dest,from));
-  const plan=planNetworkMetroRoute(from,dest);assert.ok(plan?.legs.some(leg=>leg.lineId==='M9'));
+  const plan=planNetworkMetroRoute(from,dest);if(countryAt(from)!==countryAt(dest))assert.equal(plan,null);else assert.ok(plan?.legs.some(leg=>leg.lineId==='M9'));
  }
  assert.ok(vehicleRoute(from,AIRPORT.gate).length>1);
 });
 
-test('four new lines have actual interchange itineraries across the expanded city',()=>{
- assert.equal(METRO_LINES.length,11);
+test('Hansdrex retained lines keep domestic interchange itineraries after the border split',()=>{
+ assert.equal(METRO_LINES.length,14);
  const target=entrance(LOCATIONS.find(l=>l.id==='riverside-market'));
- for(const id of ['M8','M9','M10','M11']){
+ for(const id of ['M9','M11','M12','M13']){
   const line=METRO_LINES.find(line=>line.id===id),from=metroStationGeometry(line,0).access;
-  const plan=planNetworkMetroRoute(from,target);
+  const plan=planNetworkMetroRoute(from,id==='M13'?metroStationGeometry(line,line.points.length-1).access:target);
   assert.ok(plan?.legs.some(leg=>leg.lineId===id),`${id} must carry a real itinerary into the shared network`);
-  assert.ok(plan.transfers>=1);assert.ok(plan.waypoints.some(p=>p.stage==='interchange-walk'));
+  if(id!=='M13'){assert.ok(plan.transfers>=1);assert.ok(plan.waypoints.some(p=>p.stage==='interchange-walk'));}
   assert.ok(plan.legs.every(leg=>leg.entryIndex!==leg.exitIndex));
  }
 });

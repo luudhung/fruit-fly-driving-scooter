@@ -17,5 +17,11 @@ test('warehouse demand sends real cargo via motorways, waits to load and deliver
   if(s.regionalFreight.delivered>=12)break;
  }
  assert.ok(moving>=8,`only ${moving} trucks moving`);assert.ok(fastest>=20,`maximum ${fastest}`);assert.ok(s.regionalFreight.delivered>=12,JSON.stringify({done:s.regionalFreight.delivered,jobs:s.regionalFreight.jobs.map(j=>({id:j.id,phase:j.phase})),trucks:s.regionalFreight.trucks.map(t=>({id:t.id,x:t.x,z:t.z,phase:t.phase,v:t.motionSpeed}))}));
- assert.ok(Math.abs(goods(s)-stock)<1e-6);assert.ok(Math.abs(liquidMoneySupply()-cash-s.regionalFreight.exportRevenue)<1e-6);for(const id of REGIONAL_HUBS.slice(1))for(const amount of Object.values(s.regionalFreight.stocks[id]))assert.ok(amount>=0);
+ assert.ok(Math.abs(goods(s)-stock)<1e-6);assert.equal(s.regionalFreight.exportRevenue,0,'Hans/North warehouse trade has funded buyers');assert.ok(s.regionalFreight.jobs.every(j=>!j.exported));assert.ok(Math.abs(liquidMoneySupply()-cash)<1e-6);for(const id of REGIONAL_HUBS.slice(1))for(const amount of Object.values(s.regionalFreight.stocks[id]))assert.ok(amount>=0);
+});
+
+test('a restored legacy North forwarding consignment becomes a funded warehouse purchase once',()=>{
+ let s=freshState();const [from,to]=REGIONAL_HUBS,quantity=20,job={id:'LEGACY-NORTH-FUNDED',from,to,product:'fabric',quantity,price:40,fee:30,exported:true,phase:'queued',paid:false,createdAt:0,deadline:86400};s.industrialEconomy.rawStock.fabric-=quantity;s.regionalFreight.jobs.push(job);const buyerId=`regional-warehouse-${to}`,cash=s.businesses[buyerId].cash,total=liquidMoneySupply(),stock=goods(s),escrow=s.businesses['regional-freight-escrow'].cash;
+ s=restoreState(structuredClone(s));const saved=s.regionalFreight.jobs.find(j=>j.id===job.id);assert.equal(saved.exported,false);assert.equal(saved.paid,false);assert.equal(s.businesses[buyerId].cash,cash-70);assert.equal(s.businesses['regional-freight-escrow'].cash,escrow+70);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);assert.equal(goods(s),stock);
+ s=restoreState(structuredClone(s));assert.equal(s.businesses[buyerId].cash,cash-70);assert.equal(s.businesses['regional-freight-escrow'].cash,escrow+70);assert.ok(Math.abs(liquidMoneySupply()-total)<1e-6);
 });

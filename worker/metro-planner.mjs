@@ -1,7 +1,9 @@
 import {METRO_LINES,metroStationGeometry,pedestrianRoute,onIsland} from './city-map.mjs';
+import {countryAt} from './country-map.mjs';
 export const METRO_ACCESS_VERSION=3;
 const nodes=METRO_LINES.flatMap(line=>line.points.map((p,index)=>({line,index,x:p[0],z:p[1],geo:metroStationGeometry(line,index)})));
 const edges=nodes.map((a,i)=>nodes.flatMap((b,j)=>{
+ if(a.line.countryId!==b.line.countryId)return [];
  if(a.line.id===b.line.id&&Math.abs(a.index-b.index)===1)return[{to:j,cost:Math.hypot(a.x-b.x,a.z-b.z)*.18+2,rail:true}];
  if(a.line.id!==b.line.id&&Math.hypot(a.x-b.x,a.z-b.z)<1)return[{to:j,cost:Math.hypot(a.geo.access.x-b.geo.access.x,a.geo.access.z-b.geo.access.z)+(a.line.height+b.line.height)*.6+12,rail:false}];
  return [];
@@ -15,6 +17,7 @@ function stairs(a,b,lineId,down){
 }
 function stationStairs(geo,lineId,down){const points=down?[...geo.stairs].reverse():geo.stairs;return points.slice(1).flatMap((p,i)=>stairs(points[i],p,lineId,down)).map(p=>({...p,direction:geo.direction||1,metroAccessVersion:METRO_ACCESS_VERSION}));}
 export function metroTransferWaypoints(fromLine,fromIndex,toLine,toIndex,fromDirection=1,toDirection=1){
+ if(fromLine.countryId!==toLine.countryId)return null;
  const a=metroStationGeometry(fromLine,fromIndex,fromDirection),b=metroStationGeometry(toLine,toIndex,toDirection),[x,z]=fromLine.points[fromIndex];
  if(Math.hypot(x-toLine.points[toIndex][0],z-toLine.points[toIndex][1])>1)return null;
  const height=Math.max(...METRO_LINES.filter(l=>l.points.some(p=>p[0]===x&&p[1]===z)).map(l=>l.height))+4.2;
@@ -38,6 +41,7 @@ function itinerary(legs,dest){
 }
 /** Re-encode only the remaining journey. The caller keeps the passenger's pose, fare and train. */
 export function repairMetroRoute(fly,dest){
+ if(countryAt(fly)!==countryAt(dest))return null;
  const old=fly.routeWaypoints||[],index=Math.max(0,fly.routeIndex||0),current=old[index];
  const entryLeg=p=>({line:lineFor(p.lineId||fly.metroLineId),entry:p.stationIndex,exit:p.exitIndex});
  if(fly.onTrain){
@@ -87,9 +91,10 @@ export function repairMetroRoute(fly,dest){
 }
 /** Multi-source station search; passengers can walk between real platforms at interchanges. */
 export function planNetworkMetroRoute(from,dest){
- if(onIsland(from)||onIsland(dest))return null;
+ if(onIsland(from)||onIsland(dest)||countryAt(from)!==countryAt(dest))return null;
+ const country=countryAt(from);
  const n=nodes.length,dist=new Float64Array(n*2).fill(Infinity),parent=new Int32Array(n*2).fill(-1),done=new Uint8Array(n*2);
- for(let i=0;i<n;i++)dist[i]=Math.hypot(from.x-nodes[i].geo.access.x,from.z-nodes[i].geo.access.z);
+ for(let i=0;i<n;i++)if(nodes[i].line.countryId===country)dist[i]=Math.hypot(from.x-nodes[i].geo.access.x,from.z-nodes[i].geo.access.z);
  for(let pass=0;pass<n*2;pass++){
   let current=-1,best=Infinity;for(let i=0;i<dist.length;i++)if(!done[i]&&dist[i]<best){current=i;best=dist[i];}if(current<0)break;done[current]=1;
   const rail=current>=n,index=current%n;

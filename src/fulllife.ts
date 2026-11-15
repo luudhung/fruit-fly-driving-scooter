@@ -1,3 +1,6 @@
+import {CountryUI,type CountrySnapshot,type CountryPerson} from './country-ui.ts';
+import {NationalDefenseRenderer} from './national-defense-renderer.ts';
+import {InternationalLandmarks} from './international-landmarks.ts';
 import {militaryCrewPose,type MilitaryShip} from '../worker/military-life.mjs';
 import {cityRiverSurfaces,buildDistrictRiverInfrastructure} from './district-river-renderer.ts';
 import {spatialInstanceCells} from './spatial-instances.ts';
@@ -37,6 +40,7 @@ import {SportsLuxuryRenderer} from "./sports-luxury-renderer.ts";
 import type {SportsLuxurySnapshot} from "../worker/sports-luxury.mjs";
 import {CityVisitorsRenderer} from "./city-visitors-renderer.ts";
 import {VisitorAviationRenderer} from "./visitor-aviation-renderer.ts";
+import {RegionalAviationRenderer} from "./regional-aviation-renderer.ts";
 import type {VisitorAircraft} from "../worker/visitor-aviation.mjs";
 import {ResidentPhotoAlbum,type ResidentPhotoRecord} from "./city-photo-album.ts";
 import {ResidentCamera} from "./resident-camera.ts";
@@ -54,18 +58,17 @@ import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
 import {SceneViewBudget,selectViewBudget} from './view-budget.ts';
-import {buildMansion} from "./mansion-renderer.ts";
 import {PlayerCar,PlayerCarVisual,PLAYER_CAR_WORLD} from "./player-car.ts";
 import {PlayerController,PLAYER_EYE,setPlayerHelipads} from "./player-controller.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
 import {buildPetronasTowers,updatePetronasLighting} from "./petronas-towers";
-import {scheduledAircraft,helicopterPose} from "../worker/aviation.mjs";
+import {flightPose,helicopterPose,type Flight} from "../worker/aviation.mjs";
 import { createResidentDirectory } from "./resident-directory";
 import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AIRPORT, ISLAND, PARK, PARK_PATHS, PARK_PONDS, FERRIS_WHEEL, wheelCabin, RIVER, HARBOR, WATER, ROADS, BRIDGES, AVENUES, STREETS, BUILDINGS, METRO_LINES, WALKWAYS, contains, clearSegment, type Building } from "../worker/city-map.mjs";
 
 const viewerBootStarted=performance.now();
 const militaryCrewShips=new Map<string,MilitaryShip>();
-type FlyState = {
+type FlyState = CountryPerson & {
   militaryShipId?:string|null;militaryRank?:{id:string;name:string;level:number}|null;militaryCommanderId?:string|null;
   facilityEmployment?:{buildingId:string;shiftStart:number;wage:number;suspended?:boolean}|null;
   district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
@@ -125,7 +128,8 @@ type FlyState = {
   vehicle?: string | null;
   transitMode?: string;
   onPlane?:boolean;
-  airTrip?:{phase:string;cost:number};
+  airTrip?:{phase:string;cost:number;outbound?:Flight;inbound?:Flight};
+  countryAirTrip?:{phase:string;cost:number;from:string;to:string;outbound:Flight;inbound:Flight};
   heliTourStartedAt?:number;
   heliPassenger?: boolean;
   heliTourUntil?: number;
@@ -210,6 +214,9 @@ type WeatherState = {
 };
 
 type CivilizationSnapshot = {
+  international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
+  nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
+  nationalServices?:Parameters<NationalDefenseRenderer['sync']>[1];
   publicServices?:PublicServicesSnapshot;
   industrialEconomy?:IndustrialSnapshot;
   districtEconomy?:Array<{id:string;name:string;focus:string;wage:number;housing:number;food:number;living:number;pollution:number;amenities:number;residents:number}>;
@@ -244,7 +251,8 @@ type CivilizationSnapshot = {
   mortality?:{byCause:Record<string,number>};
   welfare?:{birthGrantPerChild:number;essentialMealPrice:number;populationTarget?:number;immigrationThreshold?:number};
   parkLeisure?:{passengers:number;completedRides:number};
-  aviation?:{fares:{roundTrip:number;oneWay:number;resortNight:number;helicopter:number;beachActivity:number};seats:number;heliSeats:number;nextCityFlight:{departure:number};nextIslandFlight:{departure:number};weatherClosed:boolean;passengers:number;holidaymakers:number;completedHolidays:number;helicopterGuests:number};
+  aviation?:{fares:{roundTrip:number;oneWay:number;resortNight:number;helicopter:number;beachActivity:number};seats:number;heliSeats:number;nextCityFlight:{departure:number};nextIslandFlight:{departure:number};weatherClosed:boolean;passengers:number;holidaymakers:number;completedHolidays:number;helicopterGuests:number;legacyFlights?:Flight[]};
+  regionalAviation?:Parameters<RegionalAviationRenderer['sync']>[0];
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -467,6 +475,7 @@ window.addEventListener("unhandledrejection",(event)=>{
 });
 
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
+const countryUI=new CountryUI({apiBase,onRefresh:()=>{void fetchSnapshot();}});
 const connectionHealth=new ConnectionHealth();
 let lastLiveConnection:{state:"authoritative"|"offline"|"connecting";label:string;title:string}|null=null;
 function refreshConnectionHealth(){
@@ -525,7 +534,7 @@ function saveCachedSnapshot(value: CivilizationSnapshot) {
 const residentDirectory=createResidentDirectory(id=>focusResident(id,true));
 function focusResident(id:string,moveCamera=false){
  const fly=latestFlyStates.get(id);if(!fly?.alive)return;
- document.body.classList.remove('scenic-view','mansion-visit','show-city-log');
+ document.body.classList.remove('scenic-view','show-city-log');
  selectedFlyId=id;followSelected=false;renderInspector(fly);void fetchSnapshot();
  if(moveCamera){
   if(playerCar.active){playerCar.stop();syncCarButton();}
@@ -544,6 +553,7 @@ document.getElementById('settings-residents')?.addEventListener('click',()=>{clo
 document.getElementById('settings-events')?.addEventListener('click',()=>{closeSettings();document.body.classList.toggle('show-city-log');document.getElementById('events-card')?.classList.remove('collapsed');});
 
 function renderInspector(fly: FlyState | null) {
+  countryUI.syncSelected(fly);
   if (!fly) {
     flyIdEl.textContent = "click a fly";
     flyBrainIdEl.textContent = "—";
@@ -738,7 +748,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   const publicBoard=document.getElementById('public-service-activity');if(publicBoard&&s.publicServices)publicBoard.textContent=`Quân đội ${s.publicServices.army.count}/${s.publicServices.army.target} · Cảnh sát ${s.publicServices.police.count}/${s.publicServices.police.target} · ${s.publicServices.trainingFlights} chuyến huấn luyện`;
   const industryBoard=document.getElementById('industry-activity');if(industryBoard&&s.industrialEconomy)industryBoard.textContent=`Công nghiệp: ${s.industrialEconomy.companies.length}/${s.industrialEconomy.plants.length} xưởng hoạt động · ${s.industrialEconomy.delivered+(s.industrialEconomy.regionalFreight?.delivered||0)} đơn hàng đã giao · ${s.industrialEconomy.regionalFreight?.driving||0} xe tải liên vùng đang chạy`;
   const districtBoard=document.getElementById('district-economy');if(districtBoard&&s.districtEconomy)districtBoard.textContent=s.districtEconomy.map(d=>`${d.name}: ${d.residents} dân · lương ${Math.round(d.wage*100)}% · thuê nhà ${Math.round(d.housing*100)}% · không khí ${Math.round((1-d.pollution)*100)}/100`).join('\n');
-  if(s.industrialEconomy)industrialVisuals.sync(s.industrialEconomy);
+  if(s.industrialEconomy)industrialVisuals.sync({...s.industrialEconomy,trucks:[...(s.international?.economy?.trucks||[]).map(t=>({...t,motionSpeed:t.speed,at:s.simulationAgeSeconds})),...s.industrialEconomy.trucks]});
   if(s.sportsLuxury){
     const roofs = new Map(BUILDINGS.map(building => [building.id, building]));
     const pads = s.sportsLuxury.pads.filter(pad => {
@@ -750,6 +760,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
     setPlayerHelipads(pads);
   }
   if(s.cityVisitors){visitorVisuals.sync(s.cityVisitors,actors);visitorAircraft.sync(s.cityVisitors.airportTraffic?.flights);photoAlbum.sync(s.cityVisitors.photos||[]);}
+  regionalAircraft.sync(s.regionalAviation);
+  nationalDefenseVisuals.sync(s.nationalDefense,s.nationalServices);
+  countryUI.sync(s);
   updateSocietyBoard(s);
   updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
   updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
@@ -949,6 +962,8 @@ const urbanVisuals=new UrbanWorldRenderer(cityRoot);
 const sportsVisuals=new SportsLuxuryRenderer(scene,makeCanvasSprite);
 const visitorVisuals=new CityVisitorsRenderer(scene);
 const visitorAircraft=new VisitorAviationRenderer(scene);
+const regionalAircraft=new RegionalAviationRenderer(scene);
+const nationalDefenseVisuals=new NationalDefenseRenderer(scene);
 const civicVisuals=new CivicConflictRenderer(scene);
 const emergencyVisuals=new FireServiceRenderer(scene);
 scene.add(cityRoot);
@@ -1194,7 +1209,8 @@ const landmarkMetal=new THREE.MeshStandardMaterial({color:0xaeb6b9,roughness:0.3
 const empireRoot=buildHansdrexEmpire(cityRoot,makeCanvasSprite);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
-buildMansion(cityRoot,makeCanvasSprite);
+const internationalVisuals=new InternationalLandmarks(cityRoot,makeCanvasSprite);
+for(const [id,group]of internationalVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 
 const heliPadCenter=new THREE.Vector3(AIRPORT.helipad.x,AIRPORT.helipad.y,AIRPORT.helipad.z);
 const heliTourGroup=new THREE.Group();
@@ -1526,7 +1542,7 @@ function updateDayNight(hour: number, minute: number, weather: WeatherState = {}
   sun.position.copy(sunDirection(t)).multiplyScalar(400);
   sunFill.color.copy(palette.fill);sunFill.intensity=(.12+daylight*.34)*(1-cloud*.35);
   moon.intensity=.16+night*.65*(1-cloud*.28);
-  cityFacadeBatches.setNight(night);updateLandmarkLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
+  cityFacadeBatches.setNight(night);updateLandmarkLighting(night);internationalVisuals.updateLighting(night);updatePetronasLighting(night);updateKhalifaLighting(night);updateBridgeLighting(night);updateRoadLighting(night);
   for(const material of windowMaterials)material.color.setScalar(.72+night*.28);
 
   // Fixed warm windows stay emissive at all hours and never become dynamic lights.
@@ -1582,7 +1598,7 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 
 function setCameraOverview() {
   if(playerCar.active&&!leavePlayerCar())return;
-  document.body.classList.remove("mansion-visit");document.body.classList.add("scenic-view");
+  document.body.classList.add("scenic-view");
   followSelected = false;
   player.teleport(420,290,510,true);
   freePosition.set(420, 290, 510);
@@ -1612,7 +1628,7 @@ const perfPose=new URLSearchParams(location.search).get('perf');
 const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'motorway-freight':[-1064,12,300,-3.13,-.06,68],
  'nyc-street':[-102,7,-108,0,-.04,68],
- 'mansion':[145,23,947,-2.743,-.19,68],
+ 'hawaii':[145,42,947,-2.743,-.19,68],
  'nyc-overview':[420,290,510,-2.47,-.40,52],
  'paris':[740,9,110,.35,-.05,68],
  'airport-gardens':[160,300,-510,-2.31,-.56,60],
@@ -1625,6 +1641,9 @@ const perfPoses:Record<string,[number,number,number,number,number,number]>={
  'army-gate':[695,4.2,-493,Math.PI,-.04,72],
  'army-base':[825,85,-490,-2.65,-.4,68],
  'naval-base':[540,55,-550,-1.85,-.3,68],
+ 'north-aurora':[-110,90,-785,-2.42,.30,62],
+ 'north-airport':[-830,95,-705,-2.69,-.4,66],
+ 'north-farm':[80,95,-675,2.15,-.35,66],
  'north-industry':[-650,135,-740,Math.PI,-.35,68],
  'motorway-exit':[-1064,7,210,0,-.04,68],
 };
@@ -1803,6 +1822,8 @@ function animate(now = performance.now()) {
   industrialVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   visitorVisuals.update(dt,gameNow);
   visitorAircraft.update(gameNow);
+  regionalAircraft.update(gameNow);
+  nationalDefenseVisuals.update(gameNow,snapshot?.timeScale||120);
   civicVisuals.update();
   emergencyVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   updateMetroTrains(now);
@@ -1813,11 +1834,9 @@ function animate(now = performance.now()) {
     const hour=Math.floor(gameNow%86400/3600),minute=Math.floor(gameNow%3600/60),text=`${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
     if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}
   }
-  const pose=scheduledAircraft(gameNow);
-  const activePlane=(snapshot?.flies||[]).some(f=>f.onPlane);
-  if(snapshot?.aviation?.weatherClosed&&!activePlane){aviationVisual.plane.position.set(AIRPORT.terminal.x,3,-420);}
-  else{aviationVisual.plane.position.set(pose.x,pose.y,pose.z);aviationVisual.plane.rotation.y=pose.heading;}
-  for(const prop of aviationVisual.propellers)prop.rotation.z+=dt*(pose.phase==='flying'?40:8);
+  const legacyFlight=snapshot?.aviation?.legacyFlights?.find(f=>gameNow>=f.departure-300&&gameNow<=f.arrival+900);
+  aviationVisual.plane.visible=Boolean(legacyFlight);
+  if(legacyFlight){const pose=flightPose(gameNow,legacyFlight);aviationVisual.plane.position.set(pose.x,pose.y,pose.z);aviationVisual.plane.rotation.y=pose.heading;for(const prop of aviationVisual.propellers)prop.rotation.z+=dt*(pose.phase==='flying'?40:8);}
   const heliLead=(snapshot?.flies||[]).find(f=>f.heliPassenger);
   if(heliLead&&heliLead.heliTourStartedAt&&heliLead.heliTourUntil&&gameNow>=heliLead.heliTourStartedAt){
     const h=helicopterPose(gameNow,heliLead.heliTourStartedAt,heliLead.heliTourUntil);heliTarget.set(h.x,h.y,h.z);heliTourGroup.rotation.y=h.heading;

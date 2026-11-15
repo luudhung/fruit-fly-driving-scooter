@@ -5,15 +5,30 @@ import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_PLANTS,INDUSTRIAL_ROADS,INDUSTRIAL_LOCAT
 import {BUILDINGS,ROADS,LOCATIONS,WATER,applyUrbanGeometry,overlaps,pedestrianRoute,clearSegment} from '../worker/city-map.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_RESERVED} from '../worker/government-map.mjs';
 import {motorwaySegmentAt} from '../worker/motorway.mjs';
+import {createInternationalLife} from '../worker/international-life.mjs';
 const byId=id=>LOCATIONS.find(p=>p.id===id);
-function fixture(){
+function fixture({sovereign=false}={}){
  applyUrbanGeometry({roads:INDUSTRIAL_ROADS.map(r=>({...r,stage:'operational'}))});for(const l of INDUSTRIAL_LOCATIONS)if(!byId(l.id))LOCATIONS.push({...l});
  let state={simulationAgeSeconds:3600,timeScale:120,flies:Array.from({length:30},(_,i)=>({id:`IND-${i}`,name:`Industrial resident ${i}`,brain:{id:`BRAIN-${i}`},alive:true,ageYears:32,health:95,energy:90,hunger:10,thirst:10,stress:5,money:6000,savings:4000,debt:0,bankLoan:0,creditScore:750,wage:0,jobId:null,jobTitle:null,traits:{ambition:.9,thrift:.9,resilience:.8},professionSkills:{},preferredWorkStart:8,preferredWorkHours:8,x:0,z:0,y:1.1,traveling:false,currentLocationId:'bank'})),businesses:{market:{cash:30000,inventory:0},grocery:{cash:30000,inventory:0},bakery:{cash:30000,inventory:0},'corner-shop':{cash:30000,inventory:0},'night-market':{cash:30000,inventory:0},'riverside-market':{cash:30000,inventory:0},'civic-materials':{cash:30000,inventory:0}},enterprises:{},treasury:{cash:100000},bank:{reserves:200000,loansOutstanding:0,defaults:0},nextEnterpriseId:1,totalTransactions:0};
  const events=[],care=[];const hooks={regionalDistribution:false,world:()=>state,neuralDrive:()=>.9,emit:(type,text,payload)=>events.push({type,...payload}),remember:()=>{},needsAndActivities:f=>care.push(f.id),payAndFinance:()=>{},startJourney:(f,chosen)=>{f.traveling=true;f.targetLocationId=chosen.id;f.action=chosen.action;f.routeWaypoints=pedestrianRoute(f,byId(chosen.id));},moveFly:f=>{const target=byId(f.targetLocationId);if(target){f.x=target.x;f.z=target.z;f.currentLocationId=target.id;f.traveling=false;}}};
+ if(sovereign){hooks.countryAccount=id=>id==='hansdrex'?state.treasury:state.businesses[`treasury:${id}`]||=( {cash:100000,inventory:0});hooks.countryAccount('north-city');const borders=createInternationalLife({world:()=>state,redistribute:false,nationalEconomy:false});hooks.interceptMovement=(...args)=>borders.interceptMovement(...args);}
  let service=createIndustrialEconomy(hooks);service.init();
  return{get s(){return state;},get service(){return service;},events,care,place(f,id){const p=byId(id);Object.assign(f,{x:p.x,z:p.z,currentLocationId:id,targetLocationId:id,traveling:false,indoors:false});},found(index,plantId){const f=state.flies[index];this.place(f,'bank');const b=service.foundCompany(f,plantId);assert.ok(b,plantId);return b;},restore(){state=JSON.parse(JSON.stringify(state));service=createIndustrialEconomy(hooks);service.init();},step(seconds=120){state.simulationAgeSeconds+=seconds;const h=8+(state.simulationAgeSeconds/3600)%8,clock={hour:Math.floor(h),minute:h%1*60};for(const f of state.flies)service.handleResident(f,clock);service.tick(seconds,clock);}};
 }
 const cash=s=>s.flies.reduce((n,f)=>n+f.money+f.savings,0)+s.treasury.cash+s.bank.reserves+Object.values(s.enterprises).reduce((n,b)=>n+b.cash,0)+Object.values(s.businesses).reduce((n,b)=>n+b.cash,0);
+
+test('foreign-owned North industry pays its licence, on-site payroll tax and public rent to the workplace nation',()=>{
+ const t=fixture({sovereign:true}),north=t.s.businesses['treasury:north-city'],hans=t.s.treasury.cash,total=cash(t.s),start=north.cash,b=t.found(0,'INDUSTRY-north-1');
+ assert.equal(t.s.treasury.cash,hans);assert.equal(north.cash,start+500);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
+ const employee=t.s.flies[10];employee.citizenshipCountryId='hansdrex';employee.homeX=0;employee.homeZ=0;t.place(employee,b.locationId);assert.equal(t.service.applyJob(employee,b.id),true);b.openingAt=0;b.nextOrderAt=Infinity;
+ t.service.handleResident(employee,{hour:9});const before=north.cash,wallet=employee.money;t.s.simulationAgeSeconds+=1800;t.service.handleResident(employee,{hour:9.5});assert.ok(Math.abs(employee.money-wallet-employee.wage*.5*.95)<1e-7);assert.ok(Math.abs(north.cash-before-employee.wage*.5*.05)<1e-7);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
+ const rent=b.lease.hourlyRent*24,preRent=north.cash;b.nextFinanceAt=t.s.simulationAgeSeconds;b.nextOrderAt=0;b.inventory.raw=40;t.service.tick(0,{hour:10});assert.ok(Math.abs(north.cash-preRent-rent)<1e-7);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
+});
+
+test('a resident-driven industrial shipment pays actual border entry once and delivers finite inputs without changing money supply',()=>{
+ const t=fixture({sovereign:true}),b=t.found(0,'INDUSTRY-north-1'),f=t.s.flies[0];f.citizenshipCountryId='north-city';f.countryPresence={countryId:'north-city',entryId:'INITIAL'};b.openingAt=1e12;t.place(f,b.locationId);const total=cash(t.s),order=t.service.requestInput(b.id,20);assert.ok(order);t.service.tick(0,{hour:9});
+ for(let i=0;i<2400&&!order.paid;i++)t.step();assert.equal(order.phase,'complete',JSON.stringify({order,trucks:t.s.industrialEconomy.trucks}));assert.equal(b.inventory.raw,20);const entries=f.countryEntryReceipts.filter(r=>r.toCountryId==='hansdrex');assert.equal(entries.length,1);assert.equal(entries[0].fee,50);assert.ok(Math.abs(cash(t.s)-total)<1e-6);assert.equal(f.industrialFreightDuty,null);
+});
 
 test('sixteen physical leases remain vacant until existing resident founders finance them, and West has twice the industrial sites',()=>{
  const t=fixture(),total=cash(t.s),ids=t.s.flies.map(f=>[f.id,f.brain.id]);assert.equal(t.service.snapshot().companies.length,0);

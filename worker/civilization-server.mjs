@@ -2,6 +2,7 @@ import http from "node:http";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import pg from "pg";
+import {handleConflictControl} from './conflict-control.mjs';
 import {
   freshState,
   restoreState,
@@ -13,6 +14,7 @@ import {
   subscribeEvents,
   setNeuralSyncEnabled,
   getSimulationConfig,
+  countries,
 } from "./civilization-engine.mjs";
 
 export * from "./civilization-engine.mjs";
@@ -31,6 +33,7 @@ let persistenceReady = false;
 let persistenceConnecting = false;
 let persistenceError = null;
 let checkpointAt = 0;
+let checkpointQueue = Promise.resolve();
 const clients = new Set();
 
 function json(res, status, body) {
@@ -39,7 +42,7 @@ function json(res, status, body) {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type",
   });
   res.end(payload);
@@ -135,10 +138,16 @@ async function persistEvent(event) {
 }
 
 async function checkpoint(force = false) {
-  if (!DATABASE_URL || !persistenceReady || !pool) return;
-  if (!force && Date.now() - checkpointAt < CHECKPOINT_EVERY_MS) return;
+  const operation=checkpointQueue.then(()=>writeCheckpoint(force));
+  checkpointQueue=operation.catch(()=>{});
+  return operation;
+}
+
+async function writeCheckpoint(force = false) {
+  if (!DATABASE_URL || !persistenceReady || !pool) return false;
+  if (!force && Date.now() - checkpointAt < CHECKPOINT_EVERY_MS) return false;
   const state = getRawState();
-  if (!snapshotLooksUsable(state)) return;
+  if (!snapshotLooksUsable(state)) return false;
   checkpointAt = Date.now();
   state.updatedAt = new Date().toISOString();
   const living = state.flies.filter((fly) => fly.alive);
@@ -176,6 +185,7 @@ async function checkpoint(force = false) {
         state.births, state.deaths, state.foodReserve, moneySupply, state.paused,
       ],
     );
+    return true;
   } catch (error) {
     persistenceReady = false;
     persistenceError = String(error);
@@ -199,11 +209,18 @@ async function ensurePersistence() {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+async function persistConflict(){
+  if(!DATABASE_URL||!persistenceReady||!pool)throw Error('Durable world persistence is unavailable');
+  if(!snapshotLooksUsable(getRawState()))throw Error('No usable world snapshot');
+  if(await checkpoint(true)!==true)throw Error('Durable world persistence became unavailable');
+}
+
+export function createCivilizationRequestHandler({requestConflict=command=>countries.requestConflict(command),persist=persistConflict}={}){
+ return async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET,OPTIONS",
+      "access-control-allow-methods": "GET,POST,OPTIONS",
       "access-control-allow-headers": "content-type",
     });
     res.end();
@@ -211,6 +228,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+  if(url.pathname==='/api/civilization/conflict'){
+    if(req.method!=='POST'){res.setHeader('allow','POST, OPTIONS');json(res,405,{accepted:false,reason:'Use POST for this control.'});return;}
+    const result=await handleConflictControl(req,{requestConflict,persist});
+    json(res,result.status,result.body);
+    return;
+  }
 
   if (url.pathname === "/health") {
     if (DATABASE_URL && persistenceReady && pool) {
@@ -284,9 +308,12 @@ const server = http.createServer(async (req, res) => {
 
   json(res, 404, {
     error: "not_found",
-    endpoints: ["/health", "/api/civilization/state", "/api/civilization/events", "/api/civilization/mortality"],
+    endpoints: ["/health", "/api/civilization/state", "/api/civilization/events", "/api/civilization/mortality", "/api/civilization/conflict"],
   });
-});
+ };
+}
+
+const server = http.createServer(createCivilizationRequestHandler());
 
 if (IS_MAIN) {
   setNeuralSyncEnabled(true);

@@ -17,7 +17,7 @@ test('continuous West and North channels preserve all homes, the Main airport an
  const [west,north]=DISTRICT_RIVERS;
  assert.equal(west.z-west.d/2,north.z);assert.ok(west.z+west.d/2>1150);
  assert.ok(north.x-north.w/2< -1150);assert.ok(north.x+north.w/2>=430);
- for(const b of BUILDINGS)for(const river of DISTRICT_RIVERS)assert.equal(overlaps(b,river),false,`${b.id} cannot be submerged`);
+ for(const b of BUILDINGS)for(const river of DISTRICT_RIVERS)assert.ok(!overlaps(b,river)||b.kind==='customs'&&onWaterCrossing(b),`${b.id} requires dry land or a legal customs deck`);
  for(const p of [AIRPORT.gate,AIRPORT.runway,AIRPORT.apron,{x:710,z:-560},{x:710,z:-625},{x:490,z:-560}])assert.ok(!DISTRICT_RIVERS.some(r=>contains(r,p)));
  assert.equal(MOTORWAY_ACCESS_ROADS.find(r=>r.id==='RING-SOUTH-WEST').x,-520);
 });
@@ -45,7 +45,8 @@ test('every metro access staircase stays physically reachable and transfers stil
   for(let j=1;j<geo.stairs.length;j++)assert.ok(clearMetroAccessSegment(geo.stairs[j-1],geo.stairs[j]),`${line.id}/${i}/${direction} stair ${j}`);
  }
  const west=home('WEST-APT-'),north=home('AIRPORT-APT-');
- for(const pair of [[west,north],[north,place('riverside-market')],[west,AIRPORT.gate]])assert.ok(planNetworkMetroRoute(...pair)?.legs.length);
+ for(const pair of [[west,north],[north,place('riverside-market')]])assert.equal(planNetworkMetroRoute(...pair),null,'international trips use border crossings rather than rail');
+ assert.ok(planNetworkMetroRoute(west,AIRPORT.gate)?.legs.length);
 });
 
 test('one-time migration re-banks stranded ground journeys, preserves life and money, and skips indoor/airborne actors',()=>{

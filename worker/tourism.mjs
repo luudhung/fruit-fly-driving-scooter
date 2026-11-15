@@ -1,7 +1,8 @@
+import {COUNTRY_IDS} from './country-map.mjs';
 import {AIRPORT,ISLAND,onIsland} from './city-map.mjs';
 import {AVIATION,tourismFares,nextFlight,flightPose,scheduledAircraft} from './aviation.mjs';
 
-export function createTourismSystem({world,emit,remember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance}){
+export function createTourismSystem({world,emit,remember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance=()=>({allowed:true}),aviationAdmission=()=>({allowed:true,fee:0})}){
  const money=f=>Math.max(0,f.money)+Math.max(0,f.savings);
  const reserve=f=>Math.max(80,Number(f.wage||5)*16);
  const fares=()=>tourismFares(world().centralBank?.priceLevel);
@@ -11,7 +12,7 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
   return s.aviation;
  }
  function affordable(f,cost){return f.ageYears>=18&&money(f)>=cost+reserve(f)&&cost<=money(f)*.15;}
- function canHoliday(f){const p=fares();return !f.airTrip&&affordable(f,p.roundTrip+p.resortNight)&&f.health>65&&f.energy>55;}
+ function canHoliday(f){const p=fares();return !f.countryAirTrip&&!f.countryFlightPlan&&!f.airTrip&&affordable(f,p.roundTrip+p.resortNight)&&f.health>65&&f.energy>55;}
  function charge(f,cost,business){
   if(money(f)+1e-7<cost)return false;
   const cash=Math.min(f.money,cost);f.money-=cash;f.savings-=cost-cash;
@@ -25,6 +26,9 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
   const outbound=nextFlight(s.simulationAgeSeconds),returnMorning=(Math.floor(outbound.departure/86400)+1)*86400+9*3600;
   const inbound=nextFlight(returnMorning,'island',0);
   if(seats(outbound,f)>=AVIATION.seats||seats(inbound,f)>=AVIATION.seats){f.action='island flight sold out · waiting for another departure';f.actionUntil=s.simulationAgeSeconds+1800;return false;}
+  const exit=aviationAdmission(f,{airportId:'island',flightId:outbound.id,fromCountryId:COUNTRY_IDS.hansdrex,commit:false}),home=aviationAdmission(f,{airportId:'city',flightId:inbound.id,fromCountryId:COUNTRY_IDS.hawaii,commit:false});
+  if(!exit.allowed||!home.allowed||money(f)<cost+reserve(f)+Number(exit.fee||0)+Number(home.fee||0))return false;
+  for(const flight of [outbound,inbound])if(!requestAirClearance({flightId:flight.id,operatorCountryId:COUNTRY_IDS.hansdrex,fromAirportId:flight.from,toAirportId:flight.to,kind:'commercial'}).allowed)return false;
   if(!charge(f,cost,s.businesses['travel-escrow']))return false;
   f.airTrip={phase:'outbound-wait',outbound,inbound,fares:p,cost,settled:false,bookedAt:s.simulationAgeSeconds};
   f.lastHolidayDay=Math.floor(s.simulationAgeSeconds/86400);f.traveling=false;f.sleeping=false;f.onTrain=false;
@@ -52,11 +56,14 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
  function delayReturn(f,reason){
   const t=f.airTrip;let flight=nextFlight(world().simulationAgeSeconds,'island');
   for(let i=0;i<12&&seats(flight,f)>=AVIATION.seats;i++)flight=nextFlight(flight.departure+1,'island',0);
+  if(!requestAirClearance({flightId:flight.id,operatorCountryId:COUNTRY_IDS.hansdrex,fromAirportId:flight.from,toAirportId:flight.to,kind:'commercial'}).allowed){f.action='waiting for return airspace clearance';return;}
   t.inbound=flight;ensure().delays++;f.action=`return flight delayed · ${reason} · hotel extension included`;
   emit('air_delay',`${f.id}'s return was moved to the next available flight at no charge.`,{flyId:f.id,departure:flight.departure,reason});
  }
  function arrive(f,island){
-  const p=island?ISLAND.terminal:AIRPORT.terminal;
+  const p=island?ISLAND.terminal:AIRPORT.terminal,flight=island?f.airTrip.outbound:f.airTrip.inbound;
+  const entry=aviationAdmission(f,{airportId:island?'island':'city',flightId:flight.id,entryId:`${flight.id}:${f.id}:arrival`,fromCountryId:island?COUNTRY_IDS.hansdrex:COUNTRY_IDS.hawaii});
+  if(!entry.allowed){Object.assign(f,{x:p.x,y:1.1,z:p.z,onPlane:false,traveling:false,indoors:true,action:`waiting at airport immigration: ${entry.reason||'entry unavailable'}`});return false;}
   Object.assign(f,{x:p.x,y:1.1,z:p.z,vx:0,vz:0,traveling:false,indoors:true,onPlane:false,transitMode:'walk',transitStage:null,
    currentLocationId:island?'island-airport':'airport',targetLocationId:island?'island-airport':'airport',routeWaypoints:[],routeIndex:0,pendingAction:null});
   f.targetX=p.x;f.targetZ=p.z;
@@ -72,11 +79,17 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
  }
  function touristNeeds(f,clock){
   needsAndActivities(f,clock);
-  // The room includes meals and drinking water. Leisure extras remain optional purchases.
-  if(onIsland(f)){f.thirst=Math.max(0,f.thirst-1);if(f.hunger>40)f.hunger=15;f.energy=Math.min(100,f.energy+.18);f.stress=Math.max(0,f.stress-.15);}
+  // Prepaid board consumes finite resort inventory only after physical arrival.
+  // A beach visit, an empty pantry or an unsettled booking cannot create food.
+  if(onIsland(f)){
+   const resort=world().businesses['island-resort'];
+   if(f.airTrip?.settled&&!f.traveling&&!f.onPlane&&f.currentLocationId==='island-resort'&&Math.hypot(f.x-ISLAND.resort.x,f.z-ISLAND.resort.z)<=40&&f.hunger>45&&Number(resort?.inventory||0)>=1){resort.inventory-=1;f.hunger=Math.max(0,f.hunger-60);f.airTrip.mealsConsumed=Number(f.airTrip.mealsConsumed||0)+1;}
+   f.thirst=Math.max(0,f.thirst-1);f.energy=Math.min(100,f.energy+.18);f.stress=Math.max(0,f.stress-.15);
+  }
   payAndFinance(f,clock);
  }
  function simulateIslandHoliday(f,clock){
+  if(f.countryAirTrip||f.countryFlightPlan)return false;
   const s=world(),now=s.simulationAgeSeconds;
   if(!f.airTrip){
    if(f.currentLocationId==='airport'&&!f.traveling&&f.action==='taking a holiday on Hansdrex Island'){
@@ -108,8 +121,8 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
     if(f.targetLocationId!=='island-airport'||!f.traveling)startJourney(f,{id:'island-airport',action:'checking in for the return flight'});
    }else if(!f.traveling){
     const night=clock.hour>=19||clock.hour<7;
-    const dest=night?'island-resort':'island-beach';
-    if(f.currentLocationId!==dest)startJourney(f,{id:dest,action:night?'resting at Hansdrex Island Resort':'relaxing on Hansdrex Island beach'});
+    const hungry=f.hunger>45,dest=night||hungry?'island-resort':'island-beach';
+    if(f.currentLocationId!==dest)startJourney(f,{id:dest,action:hungry?'going to the prepaid resort meal':night?'resting at Hansdrex Island Resort':'relaxing on Hansdrex Island beach'});
     if(!night&&!t.beachActivity&&money(f)>reserve(f)+t.fares.beachActivity){
      charge(f,t.fares.beachActivity,s.businesses['island-resort']);t.beachActivity=true;
      emit('resort_spending',`${f.id} paid ${t.fares.beachActivity.toFixed(0)} H$ for a guided beach and kayak activity.`,{flyId:f.id,amount:t.fares.beachActivity});
@@ -131,9 +144,10 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
  }
  function aviationSummary(){
   const s=world(),now=s.simulationAgeSeconds;
+  const legacyFlights=[...new Map(s.flies.filter(f=>f.alive&&f.airTrip).flatMap(f=>[f.airTrip.outbound,f.airTrip.inbound]).filter(f=>f&&now>=f.departure-300&&now<=f.arrival+900).map(f=>[f.id,f])).values()];
   return {...ensure(),fares:fares(),seats:AVIATION.seats,heliSeats:AVIATION.heliSeats,
    nextCityFlight:nextFlight(now,'city',0),nextIslandFlight:nextFlight(now,'island',0),
-   plane:scheduledAircraft(now),weatherClosed:weatherDanger()>.3,
+   plane:scheduledAircraft(now),legacyFlights,weatherClosed:weatherDanger()>.3,
    passengers:s.flies.filter(f=>f.alive&&f.onPlane).length,holidaymakers:s.flies.filter(f=>f.alive&&f.airTrip).length,
    helicopterGuests:s.flies.filter(f=>f.alive&&f.heliPassenger).length};
  }

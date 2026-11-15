@@ -1,3 +1,4 @@
+import {northMilitaryPerimeterBlocked} from './country-map.mjs';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_ROADS,INDUSTRIAL_RESERVED,INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
 import {districtProfile} from './district-economy.mjs';
 import {createVehicleRouter} from './vehicle-network.mjs';
@@ -5,8 +6,9 @@ import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED,militaryPerimeterBlocked} from './government-map.mjs';
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
+import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,HAWAII_COTTAGES,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 29;
+export const MAP_VERSION = 30;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -35,11 +37,10 @@ export const AIRPORT = {
  helipad:{x:-85,z:-436,y:1}, heliAccess:{x:-85,z:-373},
 };
 export const ISLAND = {
- x:160,z:790,rx:205,rz:135,
+ ...HAWAII_ISLAND,
  runway:{x:145,z:742,w:240,d:16}, terminal:{x:65,z:785,w:30,d:16},
  gate:{x:65,z:795}, resort:{x:185,z:820,w:44,d:24}, beach:{x:255,z:834},
 };
-export const MANSION={x:110,z:864,w:80,d:48,h:10.5};
 export const SEA={x:0,z:900,w:2300,d:860};
 export function onIsland(p,margin=0){return ((p.x-ISLAND.x)/(ISLAND.rx-margin))**2+((p.z-ISLAND.z)/(ISLAND.rz-margin))**2<1;}
 export function atSea(p){return p.z>470&&!onIsland(p);}
@@ -152,7 +153,7 @@ export const HARBOR_CAUSEWAYS=[
  {x:SOUTH_RING_EAST,z:(harborShore+eastLinkEnd)/2,w:16.5,d:eastLinkEnd-harborShore},
 ];
 export function onWaterCrossing(p){
- return BRIDGES.some(bridge=>contains(bridge,p))||DISTRICT_BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p))||MOTORWAY_DECKS.some(deck=>contains(deck,p));
+ return BRIDGES.some(bridge=>contains(bridge,p))||DISTRICT_BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p))||MOTORWAY_DECKS.some(deck=>contains(deck,p))||BORDER_CUSTOMS_DECKS.some(deck=>contains(deck,p));
 }
 export const UNDERPASSES=BRIDGES.flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
 export function underpassAt(p){return UNDERPASSES.find(t=>Math.abs(p.x-t.x)<=t.w/2+.2&&Math.abs(p.z-t.z)<t.halfLength);}
@@ -247,11 +248,15 @@ export const METRO_LINES = [
  {id:"M5",height:17,points:[[-210,-340],[-102,-340],[2,-340],[122,-340],[210,-340]]},
  {id:"M6",height:19,points:[[310,-340],[310,-220],[310,0],[310,87],[310,180],[310,340]]},
  {id:"M7",height:23,points:[[122,-340],[210,-340],[310,-340],[310,-180],[500,-180],[620,-180],[620,0],[740,0],[740,160],[860,160]]},
- {id:"M8",height:27,points:[[-260,-1000],[-260,-950],[-260,-830],[-260,-710],[-430,-710],[-430,-600],[-430,-400],[-210,-400],[-210,-340]]},
+ {id:"M8",countryId:'north-city',height:27,points:[[-260,-1000],[-260,-950],[-260,-830],[-260,-710],[-430,-710],[-430,-600]]},
  {id:"M9",height:31,points:[[-1000,0],[-920,0],[-840,0],[-760,0],[-680,0],[-600,0],[-520,0],[-430,0],[-310,0]]},
- {id:"M10",height:35,points:[[-80,-1000],[-80,-950],[-80,-830],[-80,-710],[50,-710],[50,-600],[50,-400],[122,-400],[122,-340]]},
- {id:"M11",height:39,points:[[-1000,-260],[-840,-260],[-840,0],[-840,260],[-680,260],[-520,260],[-430,260],[-310,260],[-310,87]]}
+ {id:"M10",countryId:'north-city',height:35,points:[[-80,-1000],[-80,-950],[-80,-830],[-80,-710],[50,-710],[50,-600]]},
+ {id:"M11",height:39,points:[[-1000,-260],[-840,-260],[-840,0],[-840,260],[-680,260],[-520,260],[-430,260],[-310,260],[-310,87]]},
+ {id:"M12",height:27,points:[[-430,-400],[-210,-400],[-210,-340]]},
+ {id:"M13",height:35,points:[[50,-400],[122,-400],[122,-340]]},
+ {id:"N1",countryId:'north-city',height:43,points:[[-880,-830],[-880,-950],[-600,-950],[-430,-950],[-260,-950],[-80,-950],[50,-950],[130,-950],[260,-950],[260,-830],[260,-710]]}
 ];
+for(const line of METRO_LINES)line.countryId??=COUNTRY_IDS.hansdrex;
 
 export const BUILDINGS=[];
 function place(b) {
@@ -264,7 +269,6 @@ place({id:'airport-control-tower',x:-245,z:-417,w:14,d:14,h:30,kind:'airport-ser
 place({id:'airport-hangar',x:-310,z:-441,w:46,d:32,h:13,kind:'airport-service'});
 place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
 place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
-place({id:'hansdrex-mansion',...MANSION,kind:'mansion'});
 for(const loc of LOCATIONS) {
  if(['airport','island-airport','island-resort'].includes(loc.id))continue;
  if(['home','transit','social'].includes(loc.type)&&!['cafe','tea-house','cinema'].includes(loc.id))continue;
@@ -455,6 +459,11 @@ ROADS.push(...INDUSTRIAL_ROADS.map(r=>({...r})));
 // Applied after append-only parcel generation so existing property IDs and
 // footprints stay exact while obsolete asphalt becomes a real canal.
 ROADS.splice(0,ROADS.length,...districtRiverRoads(ROADS,districtTopology));
+// New countries append after existing lot generation; old titles never shift.
+BUILDINGS.push(...NORTH_BUILDINGS.map(b=>({...b})),...HAWAII_COTTAGES.map(b=>({...b})),...BORDER_CUSTOMS_BUILDINGS.map(b=>({...b})));
+LOCATIONS.push(...NORTH_LOCATIONS.map(l=>({...l})),...HAWAII_COTTAGES.map(b=>({id:b.id,name:b.name,type:'seasonal-lodging',x:b.x,z:b.z})));
+ROADS.push(...NORTH_ROADS.map(r=>({...r})),...HAWAII_ROADS.map(r=>({...r})));
+APARTMENTS.push(BUILDINGS.find(b=>b.id===NORTH_LANDMARK.id));
 for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
 for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}
 
@@ -522,7 +531,7 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
  return true;
 }
 export function blocked(p) {
- if(militaryPerimeterBlocked(p))return true;
+ if(militaryPerimeterBlocked(p)||northMilitaryPerimeterBlocked(p))return true;
  if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return true;
  if(atSea(p))return true;
  if((URBAN_FLOODS.some(f=>contains(f,p))||WATER.some(w=>contains(w,p,.25)))&&!onWaterCrossing(p))return true;
@@ -540,7 +549,7 @@ export function clearMetroAccessSegment(a,b) {
  for(let i=0;i<=n;i++){
   const t=i/n,p={x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:(a.y??1.1)+((b.y??1.1)-(a.y??1.1))*t};
   if(p.y<=2){if(blocked(p))return false;continue;}
-  if(militaryPerimeterBlocked(p))return false;
+  if(militaryPerimeterBlocked(p)||northMilitaryPerimeterBlocked(p))return false;
   if(Math.abs(p.x)>WORLD_HALF-4||Math.abs(p.z)>WORLD_HALF-4)return false;
   if(nearbyGeometry(buildingBins,p).some(building=>effectiveBuildingHeight(building)>p.y-1.25&&contains(building,p,.45)))return false;
  }
@@ -572,16 +581,17 @@ const STEP=2;
 const NAV_REGIONS=[
  {id:'city',minX:-440,maxX:380,minZ:-560,maxZ:410},
  {id:'riverside',minX:480,maxX:WORLD_HALF-20,minZ:-WORLD_HALF+20,maxZ:450},
- {id:'airport',minX:-470,maxX:100,minZ:-1100,maxZ:-540},
+ {id:'airport',minX:-1130,maxX:380,minZ:-1130,maxZ:-540},
  {id:'west',minX:-1120,maxX:-380,minZ:-440,maxZ:460},
  {id:'north-industry',minX:-850,maxX:-460,minZ:-1060,maxZ:-960},
 ].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
-const regionFor=p=>NAV_REGIONS[p.x>=-850&&p.x< -470&&p.z>=-1060&&p.z<=-960?4:p.x>430?1:p.z<-570&&p.x>=-470&&p.x<=100?2:p.x<-440?3:0];
+const HAWAII_NAV_REGION={id:'hawaii',minX:-170,maxX:370,minZ:570,maxZ:1010,nx:271,nz:221};
+const regionFor=p=>NAV_REGIONS[countryAt(p)===COUNTRY_IDS.north?2:p.x>430?1:p.x<-440?3:0];
 const AIRPORT_WALK_PORTALS=[{x:-373.8,z:-540},{x:56.2,z:-540}];
 const WEST_WALK_PORTALS=DISTRICT_BRIDGES.filter(b=>b.riverId==='west-city-river'&&!b.motorway).map(b=>({x:b.x+b.w/2,z:b.z+6.2}));
 const NORTH_INDUSTRY_PORTALS=[{x:-466,z:-1006.4}];
 const publicDistrictPortals=region=>region.id==='north-industry'?NORTH_INDUSTRY_PORTALS:region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
-function airportAirside(p){return contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4);}
+function airportAirside(p){return contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4)||contains(NORTH_AIRPORT.runway,p,10)||contains(NORTH_AIRPORT.apron,p,4)||contains(ISLAND.runway,p,4);}
 function publicMotorway(p){return nearbyGeometry(roadBins,p).some(road=>road.motorway&&contains(road,p,.35));}
 const costCache=new Map();
 const segmentCache=new Map();
@@ -632,13 +642,10 @@ const routeCache=new Map();
 const vehicleRouter=createVehicleRouter({roads:()=>ROADS,clearSegment,underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:()=>urbanNavigationRevision});
 export function pedestrianRoute(start,dest,mode="walk") {
  if(mode==='car'||mode==='scooter')return vehicleRouter.route(start,dest,mode,Number.isInteger(start.motorwayLane)?{motorwayLane:start.motorwayLane}:{});
- // The island is a separate pedestrian district. Never join it to the city lattice over water.
+ // Hawaii has its own compact walking lattice, with real streets around its cottages.
  if(onIsland(start)||onIsland(dest)){
   if(!onIsland(start)||!onIsland(dest)||mode!=="walk")return [];
-  const a=entrance(start),b=entrance(dest),hub={x:155,z:838};
-  const path=clearSegment(a,b)?[a,b]:[a,hub,b];
-  if(path.some((p,i)=>i&&!clearSegment(path[i-1],p)))return [];
-  return path.map(p=>({...p,mode:'walk',stage:'island-promenade'}));
+  return localRoute(start,dest,mode,HAWAII_NAV_REGION);
  }
  const from=regionFor(start),to=regionFor(dest);
  // A route restarted on a bridge first reaches a bank before entering its local region lattice.
@@ -841,7 +848,7 @@ for(const r of ROADS){
  for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
   const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
   if(UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+3&&Math.abs(p.z-t.z)<t.halfLength+8))continue;
-  const inNeighborhood=contains(RIVERSIDE,p,-8)||contains(AIRPORT_GARDENS,p,-8)||contains(WEST_DISTRICT,p,-8)||INDUSTRIAL_BUILDINGS.some(b=>contains(b,p,30));
+  const inNeighborhood=contains(RIVERSIDE,p,-8)||countryAt(p)===COUNTRY_IDS.north||onIsland(p)||contains(AIRPORT_GARDENS,p,-8)||contains(WEST_DISTRICT,p,-8)||INDUSTRIAL_BUILDINGS.some(b=>contains(b,p,30));
   if(Object.values(INDUSTRIAL_LOADING_BAYS).some(b=>Math.abs(p.x-b.x)<5&&Math.abs(p.z-b.z)<3))continue;
   if((!inNeighborhood&&(Math.abs(p.x)>335||Math.abs(p.z)>335))||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
   if(ROADS.some(o=>o!==r&&(o.w>o.d)!==horizontal&&contains(o,p,8)))continue;

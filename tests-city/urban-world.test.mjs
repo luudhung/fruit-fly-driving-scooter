@@ -96,3 +96,22 @@ test('a burned home is rebuilt on its lot using one shared household payment tha
  assert.ok(p.refunded>0);assert.equal(t.s.flies.filter(f=>f.housingUnitId===b.id).every(f=>!f.displacedFrom),true);
  assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);assert.equal(t.s.treasury.cash,before);assert.ok(Math.abs(supply(t.s)-funds)<1e-6);
 });
+
+test('a war damaged North building uses only its country treasury and still needs real delivery, labor and inspection',()=>{
+ const t=setup(),b=BUILDINGS.find(b=>b.id==='north-school');t.s.businesses['treasury:north-city']={cash:30000};t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ const damage={buildingId:b.id,projectileId:'WAR-REPAIR-1',damage:48,fire:false,countryId:'north-city',fundingAccountId:'treasury:north-city',conflictId:'WAR-1'},hans=t.s.treasury.cash,funds=supply(t.s);
+ assert.equal(t.urban.applyWarDamage(damage),true);assert.equal(t.urban.applyWarDamage(damage),false);assert.equal(t.s.urbanWorld.buildings[b.id].health,52);
+ const north=t.s.businesses['treasury:north-city'].cash,p=t.urban.fundWarRepair(b.id);assert.ok(p);assert.equal(p.funding.accountId,'treasury:north-city');assert.equal(t.s.businesses['treasury:north-city'].cash,north-p.budget);assert.equal(t.s.treasury.cash,hans);assert.equal(p.progress,0);
+ for(const f of t.s.flies)f.sleeping=true;t.step();assert.equal(p.materialsOrdered,0);assert.equal(p.progress,0);
+ for(const f of t.s.flies)f.sleeping=false;t.step();t.onsite(p);t.step();assert.equal(p.materialsDelivered,0);assert.equal(p.progress,0);assert.ok(p.materialsOrdered>0);
+ const id=p.id;t.restore();const saved=t.s.urbanWorld.projects.find(p=>p.id===id);
+ for(let i=0;i<160&&saved.stage!=='inspection';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
+ assert.equal(saved.stage,'inspection');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'construction');assert.equal(t.s.urbanWorld.buildings[b.id].warRecovery.active,true);assert.equal(saved.materialsDelivered,saved.materialsRequired);assert.ok(saved.materialsUsed>0);
+ t.step(600);assert.equal(saved.stage,'complete');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'operational');assert.equal(t.s.urbanWorld.buildings[b.id].warRecovery.active,false);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(supply(t.s)-funds)<1e-6);assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);
+});
+
+test('war home repair never charges its household and an unfunded country cannot borrow Hans recovery cash',()=>{
+ const t=setup(),b=t.target,f=t.s.flies[0];t.s.housing.households.hh={id:'hh',unitId:b.id,members:[f.id]};f.housingUnitId=b.id;const wallet=f.money+f.savings;
+ t.urban.applyWarDamage({buildingId:b.id,projectileId:'HOME-WAR',damage:40,fire:false,countryId:'hansdrex',fundingAccountId:'treasury'});const p=t.urban.fundWarRepair(b.id);assert.ok(p);assert.equal(p.funding.accountId,'treasury');assert.equal(f.money+f.savings,wallet);
+ const north=BUILDINGS.find(b=>b.id==='north-school');t.s.businesses['treasury:north-city']={cash:0};const hans=t.s.treasury.cash;t.urban.applyWarDamage({buildingId:north.id,projectileId:'NO-NORTH-BUDGET',damage:48,fire:false,countryId:'north-city',fundingAccountId:'treasury:north-city'});assert.equal(t.urban.fundWarRepair(north.id),null);assert.equal(t.s.urbanWorld.buildings[north.id].recovery.status,'awaiting national funds');assert.equal(t.s.treasury.cash,hans);assert.equal(t.s.businesses['treasury:north-city'].cash,0);
+});

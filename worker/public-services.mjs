@@ -11,21 +11,23 @@ const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 /** Existing residents volunteer for bounded public jobs; no people or brains are generated. */
 export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,urbanWorld,recordViolation=()=>{}}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),loc=id=>LOCATIONS.find(l=>l.id===id);
+ const domestic=f=>!f.publicServiceCountryId||f.publicServiceCountryId==='hansdrex';
  let actorState=null,actorAge=-1,actorLength=-1,actors=new Map();
  const actor=id=>{const state=raw();if(actorState!==state||actorAge!==now()||actorLength!==state.flies.length){actorState=state;actorAge=now();actorLength=state.flies.length;actors=new Map(state.flies.map(f=>[f.id,f]));}return actors.get(id);};
  const alive=id=>{const f=actor(id);return f?.alive?f:null;};
  const rand=f=>clamp(random(f));
  const enabled=()=>Boolean(loc('military-base')&&loc('police-hq'));
- const outsideCommitment=f=>f.facilityEmployment||f.industrialFreightDuty||f.socialTask||f.civicDuty||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.airTrip||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.emergencyTask||f.sportsSession||f.urbanFloodEscape;
+ const outsideCommitment=f=>!domestic(f)||f.nationalServiceRole||f.internationalWork||f.facilityEmployment||f.industrialFreightDuty||f.socialTask||f.civicDuty||f.urbanTask||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.airTrip||f.heliPassenger||f.arrested||Number(f.arrestedUntil||0)>now()||f.emergencyTask||f.sportsSession||f.urbanFloodEscape;
  function account(){raw().businesses||={};return raw().businesses['public-service-supplies']||={cash:0,inventory:0,sector:'public-service-supplies'};}
  function data(){return raw().publicServices||={version:1,army:[],police:[],nextRecruitAt:0,nextFlightAt:now()+3600,nextFlightId:1,applications:0,recruits:0,retirements:0,trainingHours:0,wagesPaid:0,wageArrears:0,procurementPaid:0,flightCosts:0,trainingFlights:0,aircraft:[],history:[]};}
  function note(type,text,payload={}){const d=data();d.history.push({type,text,at:now(),...payload});d.history=d.history.slice(-24);emit(type,text,payload);}
  function memory(f,type,payload){remember(f,type,payload);}
  function supply(amount){const paid=Math.min(Math.max(0,Number(raw().treasury?.cash||0)),Math.max(0,amount));if(!paid)return 0;raw().treasury.cash-=paid;account().cash+=paid;raw().totalTransactions=Number(raw().totalTransactions||0)+1;return paid;}
- function roster(branch){return data()[branch].map(alive).filter(f=>f?.jobId===roleJob[branch]);}
+ function roster(branch){return data()[branch].map(alive).filter(f=>f&&domestic(f)&&f.jobId===roleJob[branch]);}
  function onShift(f,clock){return ((Number(clock?.hour||0)+Number(clock?.minute||0)/60-Number(f.preferredWorkStart||0)+24)%24)<Number(f.preferredWorkHours||8);}
  function target(id,point,name){let l=loc(id);if(!l){l={id,name,type:'public-duty',x:point.x,z:point.z};LOCATIONS.push(l);}else Object.assign(l,{x:point.x,z:point.z});return l;}
  function bind(f,branch,existing=false){
+  if(!domestic(f)||f.internationalWork||f.nationalServiceRole)return;
   const d=data();if(!d[branch].includes(f.id))d[branch].push(f.id);
   if(f.publicServiceRole===branch){f.publicServicePayrollManaged=true;return;}
   f.publicServicePreviousJob={id:f.jobId||null,title:f.jobTitle||null,wage:Number(f.wage||0)};
@@ -44,9 +46,9 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   const d=data();account();d.army||=[];d.police||=[];d.aircraft||=[];d.history||=[];
   if(!enabled())return d;
   // Preserve the old police career and law-system identity while adding the headquarters.
-  for(const f of raw().flies)if(f.alive&&f.jobId==='police'&&!f.businessId&&!f.businessEmployeeOf)bind(f,'police',true);
-  for(const f of raw().flies)if(f.alive&&f.jobId==='military'&&f.publicServiceRole==='army')bind(f,'army',true);
-  for(const branch of ['army','police'])d[branch]=[...new Set(d[branch])].filter(id=>alive(id)?.jobId===roleJob[branch]);
+  for(const f of raw().flies)if(f.alive&&domestic(f)&&f.jobId==='police'&&!f.businessId&&!f.businessEmployeeOf)bind(f,'police',true);
+  for(const f of raw().flies)if(f.alive&&domestic(f)&&f.jobId==='military'&&f.publicServiceRole==='army')bind(f,'army',true);
+  for(const branch of ['army','police'])d[branch]=[...new Set(d[branch])].filter(id=>alive(id)&&domestic(alive(id))&&alive(id).jobId===roleJob[branch]);
   for(const f of roster('army'))trainingTarget(f);
   for(let i=0;i<2;i++)if(!d.aircraft.some(p=>p.id===`ARMY-TRAINER-${i+1}`))d.aircraft.push({id:`ARMY-TRAINER-${i+1}`,standId:MILITARY_AIRFIELD.stands[i].id,owned:false,pilotId:null,flight:null,nextFlightAt:now()+3600+i*3000,trips:0});
   for(const plane of d.aircraft){
@@ -95,6 +97,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
   return target(`ARMY-DRILL-${f.id}`,point,'Army training position');
  }
  function addChoices(f,clock,add){
+  if(!domestic(f)||f.internationalWork||f.nationalServiceRole)return;
   if(!enabled()||!f?.alive||f.publicServiceDuty||f.militaryFlightId||outsideCommitment(f)||f.traveling||f.onPlane||f.onTrain)return;
   const branch=f.publicServiceRole;
   if(branch){
@@ -142,6 +145,7 @@ export function createPublicServices({world,random=()=>.5,neuralDrive=()=>.5,emi
  }
  function trainAviation(f,flight){const seconds=Math.max(0,Math.min(1800,Math.min(now(),flight.arrival)-Math.max(Number(f.publicServiceWorkSampleAt??now()),flight.departure)));if(seconds>0){f.professionSkills||={};f.professionSkills.aviation=clamp(Number(f.professionSkills.aviation||0)+seconds/3600*.025);f.aviationTrainingHours=Number(f.aviationTrainingHours||0)+seconds/3600;}}
  function handleResident(f,clock){
+  if(!domestic(f)||f.internationalWork||f.nationalServiceRole)return false;
   if(f.militaryShipId){const ship=data().militaryLife?.ships?.find(s=>s.id===f.militaryShipId);if(ship?.exercise){const pose=military.crewPose(f,ship);Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,indoors:false,traveling:false,action:'serving aboard a naval training patrol'});pay(f,Math.max(0,Math.min(1800,now()-Number(f.publicServiceWorkSampleAt??now()))));f.publicServiceWorkSampleAt=now();care(f,clock);return true;}}
   if(f.militaryFlightId){
    const plane=data().aircraft.find(p=>p.flight?.id===f.militaryFlightId);if(!plane)return false;

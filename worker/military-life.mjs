@@ -7,7 +7,7 @@ const ranks=[{id:'captain',name:'Đại úy · Chỉ huy trưởng',level:5,coun
 export function militaryShipPose(now,ship){
  const berth=MILITARY_NAVAL_BASE.berths.find(b=>b.id===ship.id)||MILITARY_NAVAL_BASE.berths[0],e=ship.exercise;
  if(!e||now<e.departure||now>=e.arrival)return{x:berth.x,y:.65,z:berth.z,heading:berth.heading||0,phase:'moored'};
- const north=ship.id.endsWith('2')?-900:-820,nodes=[[0,berth.x,berth.z],[.12,430,berth.z],[.38,420,north],[.70,410,-350],[.9,430,berth.z],[1,berth.x,berth.z]],u=clamp((now-e.departure)/(e.arrival-e.departure));let i=0;while(i<nodes.length-2&&u>nodes[i+1][0])i++;const a=nodes[i],b=nodes[i+1],t=(u-a[0])/(b[0]-a[0]);
+ const north=ship.id.endsWith('2')?-900:-820,nodes=[[0,berth.x,berth.z],[.12,450,berth.z],[.38,448,north],[.70,446,-350],[.9,450,berth.z],[1,berth.x,berth.z]],u=clamp((now-e.departure)/(e.arrival-e.departure));let i=0;while(i<nodes.length-2&&u>nodes[i+1][0])i++;const a=nodes[i],b=nodes[i+1],t=(u-a[0])/(b[0]-a[0]);
  return{x:a[1]+(b[1]-a[1])*t,y:.65,z:a[2]+(b[2]-a[2])*t,heading:Math.atan2(b[1]-a[1],b[2]-a[2]),phase:'naval-exercise'};
 }
 

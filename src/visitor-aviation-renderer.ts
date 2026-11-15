@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {VISITOR_STANDS, VISITOR_TAXIWAY_Z, visitorAircraftPose, type VisitorAircraft} from '../worker/visitor-aviation.mjs';
+import {VISITOR_STANDS,visitorStands, VISITOR_TAXIWAY_Z, visitorAircraftPose, type VisitorAircraft} from '../worker/visitor-aviation.mjs';
 
 function coloredGeometry(parts: Array<{geometry:THREE.BufferGeometry;color:number}>) {
  const geometries=parts.map(({geometry,color})=>{
@@ -15,7 +15,7 @@ function coloredGeometry(parts: Array<{geometry:THREE.BufferGeometry;color:numbe
  return result;
 }
 
-function airlinerGeometry() {
+export function airlinerGeometry() {
  const parts: Array<{geometry:THREE.BufferGeometry;color:number}>=[];
  const add=(geometry:THREE.BufferGeometry,color:number)=>parts.push({geometry,color});
  const white=0xeaf0f5,teal=0x16817d,dark=0x263949;
@@ -50,7 +50,7 @@ function makeApron() {
  ground(-180,-405,4,20,0x889293,.19);
  for(const x of [-308,-52])ground(x,-495,.18,44,yellow);
  const digits=[[0,1,2,3,4,5],[1,2],[0,1,6,4,3],[0,1,6,2,3],[5,6,1,2]];
- VISITOR_STANDS.forEach(({x,z},index)=>{
+ visitorStands('city').forEach(({x,z},index)=>{
   ground(x,z,25,23,0x525d60,.18);
   for(const side of [-1,1])ground(x+side*12,z,.18,23,yellow);
   ground(x,z+11.5,24,.19,yellow);
@@ -86,14 +86,15 @@ export class VisitorAviationRenderer {
   root.add(makeApron());
   const geometry=airlinerGeometry();
   const material=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.55,metalness:.08});
-  this.aircraft=VISITOR_STANDS.map(()=>{
+  const slots=[...VISITOR_STANDS,...visitorStands('north')];
+  this.aircraft=slots.map(()=>{
    const mesh=new THREE.Mesh(geometry,material);
    mesh.visible=false;
    root.add(mesh);
    return mesh;
   });
   const stairsGeometry=boardingStairsGeometry();
-  this.stairs=VISITOR_STANDS.map(()=>{
+  this.stairs=slots.map(()=>{
    const mesh=new THREE.Mesh(stairsGeometry,material);mesh.visible=false;root.add(mesh);return mesh;
   });
  }

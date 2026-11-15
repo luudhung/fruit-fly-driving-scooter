@@ -1,11 +1,13 @@
 import {BUILDINGS,LOCATIONS,entrance} from './city-map.mjs';
 import {districtProfile} from './district-economy.mjs';
+import {countryAt} from './country-map.mjs';
 const OPEN='planning a clothing shop',BUY='shopping for clothes',DAY=86400;
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 
 /** Resident-owned shops buy actual delivered garments and sell only on the premises. */
-export function createGarmentRetail({world,eligible,unavailable,account,transfer,spendResident,remember=()=>{},emit=()=>{},neuralDrive=()=>.5,committed=()=>false}){
+export function createGarmentRetail({world,eligible,unavailable,account,transfer,spendResident,remember=()=>{},emit=()=>{},neuralDrive=()=>.5,committed=()=>false,countryAccount}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),location=id=>LOCATIONS.find(l=>l.id===id);
+ const treasuryFor=id=>countryAccount?countryAccount(countryAt(location(id))||'hansdrex'):raw().treasury;
  const shops=()=>Object.values(raw().enterprises||{}).filter(b=>b.garmentRetail&&b.status==='operating');
  function ready(b){const site=location(b.locationId);if(!site)return false;const owner=raw().flies.find(f=>f.id===b.ownerId);return owner?.alive&&!owner.traveling&&!owner.onTrain&&!owner.onPlane&&!committed(owner)&&owner.currentLocationId===b.locationId&&distance(owner,site)<18&&now()>=b.openingAt&&!unavailable(b.locationId);}
  function sites(f){const occupied=new Set(Object.values(raw().enterprises||{}).filter(b=>b.status==='operating').map(b=>b.locationId)),homes=new Set(Object.values(raw().housing?.households||{}).map(h=>h.unitId));return BUILDINGS.filter(b=>(b.kind==='block'||b.kind==='civic'&&raw().urbanWorld?.buildings?.[b.id]?.ownerId===f?.id&&['commercial','retail','shop'].includes(raw().urbanWorld.buildings[b.id].usage))&&!occupied.has(b.id)&&!homes.has(b.id)&&!unavailable(b.id)).sort((a,b)=>distance(a,f)-distance(b,f));}
@@ -31,10 +33,10 @@ export function createGarmentRetail({world,eligible,unavailable,account,transfer
  }
  function handleResident(f){if((f.action===OPEN||f.pendingAction===OPEN)&&!f.traveling)open(f);if((f.action===BUY||f.pendingAction===BUY)&&!f.traveling){const b=shops().find(b=>b.locationId===f.currentLocationId);if(b)purchase(f,b);}return false;}
  function tick(requestSale,factories){for(const b of shops()){
-  const owner=raw().flies.find(f=>f.id===b.ownerId);if(!owner?.alive){b.status='closed';b.closedAt=now();if(owner){owner.money=Number(owner.money||0)+b.cash;owner.businessId=null;}else raw().treasury.cash+=b.cash;b.cash=0;continue;}
+  const owner=raw().flies.find(f=>f.id===b.ownerId);if(!owner?.alive){b.status='closed';b.closedAt=now();if(owner){owner.money=Number(owner.money||0)+b.cash;owner.businessId=null;}else treasuryFor(b.locationId).cash+=b.cash;b.cash=0;continue;}
   if(now()<b.openingAt||unavailable(b.locationId))continue;
   if(now()>=Number(b.nextStockAt||0)){b.nextStockAt=now()+1800;const inbound=(raw().industrialEconomy?.orders||[]).filter(o=>o.buyerId===b.id&&!o.paid).reduce((n,o)=>n+o.quantity,0);if(b.inventory+inbound<b.targetStock)for(const factory of factories.filter(f=>f.industrialSector==='garments'&&f.inventory.finished>=4).sort((a,c)=>distance(location(a.locationId),location(b.locationId))-distance(location(c.locationId),location(b.locationId))))if(requestSale(factory.id,b.id,Math.min(60,b.targetStock-b.inventory-inbound)))break;}
-  if(now()>=b.nextFinanceAt){b.nextFinanceAt=now()+DAY;transfer(b,raw().treasury,Math.min(b.cash,b.lease.hourlyRent*24));const dividend=Math.max(0,b.cash-900)*.1;b.cash-=dividend;owner.money=Number(owner.money||0)+dividend;}
+  if(now()>=b.nextFinanceAt){b.nextFinanceAt=now()+DAY;transfer(b,treasuryFor(b.locationId),Math.min(b.cash,b.lease.hourlyRent*24));const dividend=Math.max(0,b.cash-900)*.1;b.cash-=dividend;owner.money=Number(owner.money||0)+dividend;}
  }}
  return{init,open,purchase,addChoices,handleResident,tick,shops,snapshot:()=>shops().map(b=>({id:b.id,ownerId:b.ownerId,locationId:b.locationId,name:b.name,cash:b.cash,inventory:b.inventory,price:b.garmentPrice,sales:b.salesCount,revenueLifetime:b.revenueLifetime,open:ready(b)}))};
 }

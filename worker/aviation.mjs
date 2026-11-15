@@ -1,4 +1,5 @@
 import {AIRPORT,ISLAND} from './city-map.mjs';
+import {COUNTRY_AIRPORTS,COUNTRY_AIRPORT_ALIASES} from './country-map.mjs';
 
 // H$ prices are calibrated to the city's 4.4–7.4 H$/hour ordinary wages, not an FX conversion.
 export const AVIATION={seats:15,checkInSeconds:1800,flightSeconds:1200,heliSeats:3,heliSeconds:900};
@@ -16,6 +17,21 @@ export function nextFlight(now,from='city',minimumLead=AVIATION.checkInSeconds){
  }
  throw new Error('No scheduled flight');
 }
+export function airportById(id){return COUNTRY_AIRPORTS.find(p=>p.id===(COUNTRY_AIRPORT_ALIASES[id]||id))||null;}
+/** Every pair has a durable 15-seat timetable; legacy city/island IDs stay valid. */
+export function nextRegionalFlight(now,from,to,minimumLead=AVIATION.checkInSeconds){
+ from=airportById(from)?.id;to=airportById(to)?.id;if(!from||!to||from===to)return null;
+ if(from==='city'&&to==='island'||from==='island'&&to==='city')return nextFlight(now,from,minimumLead);
+ const first=from==='north'?(to==='city'?8.75:9.75):from==='city'?9.75:8.75;
+ for(let day=Math.floor(now/86400);day<=Math.floor(now/86400)+2;day++)for(let hour=first;hour<=21;hour+=2){const departure=day*86400+hour*3600;if(departure>=now+minimumLead)return{id:`${from}-${to}-${departure}`,from,to,departure,arrival:departure+AVIATION.flightSeconds};}
+ return null;
+}
+export function regionalFlightPath(flight){
+ const from=airportById(flight.from),to=airportById(flight.to|| (flight.from==='city'?'island':'city'));if(!from||!to)return null;
+ const port=p=>{const r=p.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=vertical?cross+26:cross+46,world=(a,c,y=3)=>vertical?[c,y,a]:[a,y,c],stand=p.stands.at(-1);return{stand:[stand.x,3,stand.z],taxiStand:world(vertical?stand.z:stand.x,taxi),taxiThreshold:world(along-half,taxi),threshold:world(along-half,cross),end:world(along+half,cross),climb:world(along+half+190,cross,110),approach:world(along-half-190,cross,110),taxiEnd:world(along+half,taxi)};};
+ const a=port(from),b=port(to),mid=[(from.gate.x+to.gate.x)/2,260,(from.gate.z+to.gate.z)/2];
+ return[a.stand,a.taxiStand,a.taxiThreshold,a.threshold,[a.end[0],4,a.end[2]],a.climb,mid,b.approach,b.threshold,b.end,b.taxiEnd,b.taxiStand,b.stand];
+}
 const mix=(a,b,t)=>a+(b-a)*t;
 export function pathPose(points,progress){
  const u=Math.max(0,Math.min(.999999,progress))*(points.length-1),i=Math.floor(u),t=u-i;
@@ -23,6 +39,10 @@ export function pathPose(points,progress){
  return {x:mix(a[0],b[0],smooth),y:mix(a[1],b[1],smooth),z:mix(a[2],b[2],smooth),heading:Math.atan2(b[0]-a[0],b[2]-a[2]),progress};
 }
 export function flightPose(now,flight){
+ if(flight.regional||flight.from==='north'||flight.to==='north'){
+  const points=regionalFlightPath(flight);if(!points)return null;
+  return {...pathPose(points,(now-flight.departure)/Math.max(1,flight.arrival-flight.departure)),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
+ }
  const city=[AIRPORT.terminal.x,3,-420],island=[ISLAND.terminal.x,3,ISLAND.gate.z];
  const outbound=[city,[-315,3,-520],[-70,18,-520],[440,180,-430],[580,220,180],
   [530,180,620],[300,48,742],[35,3,742],island];

@@ -1,3 +1,4 @@
+import {hasCountryCommitment} from './country-commitments.mjs';
 import {LOCATIONS,BUILDINGS} from './city-map.mjs';
 const DAY=86400,INTERVAL=600,MAX_TIES=8,MAX_TASKS=24,MAX_ENCOUNTERS=48;
 const cap=(v,a=0,b=100)=>Math.max(a,Math.min(b,Number(v)||0));
@@ -5,11 +6,11 @@ const VISIT='social visit with a friend',CARE='providing household care';
 const alive=f=>Boolean(f?.alive&&!f.departed&&f.kind!=='visitor');
 export const RELATIONSHIP_RULES={maxTies:MAX_TIES,maxTasks:MAX_TASKS,maxEncountersPerRound:MAX_ENCOUNTERS,encounterSeconds:INTERVAL,visitSeconds:1200,careSeconds:1800};
 /** Small persistent relationship graph. Physical encounters are bucketed; no all-pairs resident scan. */
-export function createResidentRelationships({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,urbanWorld,neuralDrive}){
+export function createResidentRelationships({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,urbanWorld,neuralDrive,isWorkCommitted=()=>false}){
  let actors=new Map(),lastIndexAt=-1,indexedWorld=null,indexedFlies=null,activeTasks=0;
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),data=()=>raw().residentRelationships||init();
  const roll=f=>cap(random?.(f)??.5,0,1),locate=id=>LOCATIONS.find(l=>l.id===id);
- const incompatible=f=>Boolean(f.industrialFreightDuty||f.publicServiceDuty||f.urbanTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain&&!(f.socialTask&&f.traveling&&f.targetLocationId===f.socialTask.locationId)||f.heliPassenger||f.wheelRideUntil>now()||f.arrested||Number(f.arrestedUntil||0)>now());
+ const incompatible=f=>Boolean(hasCountryCommitment(f,now())||isWorkCommitted(f)||f.industrialFreightDuty||f.publicServiceDuty||f.urbanTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain&&!(f.socialTask&&f.traveling&&f.targetLocationId===f.socialTask.locationId)||f.heliPassenger||f.wheelRideUntil>now()||f.arrested||Number(f.arrestedUntil||0)>now());
  const busy=f=>incompatible(f)||f.socialTask||String(f.action||'').startsWith('working')||String(f.action||'').includes('teaching')||String(f.action||'').includes('studying');
  const canAct=f=>alive(f)&&f.ageYears>=16&&f.health>55&&f.energy>40&&f.hunger<75&&!f.sleeping&&!incompatible(f);
  const outdoors=f=>alive(f)&&f.ageYears>=8&&!f.traveling&&!f.indoors&&!f.sleeping&&!busy(f);

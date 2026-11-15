@@ -1,4 +1,11 @@
+import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
+import {createInternationalLife} from './international-life.mjs';
+import {migrateCountryMetroJourneys} from './country-metro-migration.mjs';
+import {createNationalServices} from './national-services.mjs';
+import {createNationalDefense} from './national-defense.mjs';
+import {createNationalDefenseIntegration,tourHelicopterFlightId} from './national-defense-integration.mjs';
+import {applyNationalResidences,ownsCountryHome} from './country-migration.mjs';
 import {createIndustrialEconomy} from './industrial-economy.mjs';
 import {migrateNorthIndustry} from './industry-relocation.mjs';
 import {DISTRICT_PROFILES,districtAt,districtProfile,districtHousingUtility,applyDistrictExposure} from './district-economy.mjs';
@@ -8,6 +15,7 @@ import {createCivicConflict} from './civic-conflict.mjs';
 import {createUrbanWorld} from './urban-world.mjs';
 import {createSportsLuxury} from './sports-luxury.mjs';
 import {createCityVisitors} from './city-visitors.mjs';
+import {createRegionalAviationSystem,regionalJourneyBudget} from './regional-aviation.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
 import {apartmentHouseholdCapacity,apartmentHasVacancy,occupiedHouseholdCount,normalizeHousingCapacities,housingOccupancy} from './housing-capacity.mjs';
 import {RESIDENT_CAP,RESIDENT_TARGET,NEW_DISTRICT_RESIDENTS} from './population-limits.mjs';
@@ -494,17 +502,24 @@ const eventSubscribers = new Set();
 let state = null;
 let vehicleHeadway=null;
 let activeGameStepSeconds=GAME_SECONDS_PER_REAL_SECOND;
-const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance});
+let nationalDefense=null;
+let nationalServices=null;
+const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
 const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
 const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney,isWorkCommitted});
 const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted};
 const urbanWorld=createUrbanWorld(cityServices);
-const sportsLuxury=createSportsLuxury(cityServices);
-const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
+const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
+const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
+const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
+const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld,recordViolation:recordLawViolation});
-const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld});
+const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld,countryAccount:id=>countries.countryAccount(id),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options)});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
+const nationalDefenseWorld=createNationalDefenseIntegration({...cityServices,urbanWorld,countryAccount:id=>countries.countryAccount(id)});
+nationalServices=createNationalServices({...cityServices,mayWork:(f,country,options)=>countries.mayWork(f,country,options),countryAccount:id=>countries.countryAccount(id),runwayAvailable:request=>regionalAviation.runwayAvailable(request)});
+nationalDefense=createNationalDefense({...cityServices,...nationalDefenseWorld,international:countries,homeLocation:f=>({id:f.homeId,x:f.homeX??location(f.homeId).x,z:f.homeZ??location(f.homeId).z})});
 function neuralActors(){return [...state.flies,...(state.cityVisitors?.visitors||[])].filter(f=>f.alive&&!f.departed);}
 function syncDistrictHousingPrices(){
  const base=new Map(APARTMENTS.map(b=>[b.id,b]));
@@ -512,9 +527,25 @@ function syncDistrictHousingPrices(){
  for(const block of state.housing.apartmentBlocks){const plot=base.get(block.id);if(plot&&!plot.luxury){block.rent=plot.rent;block.purchaseValue=plot.purchaseValue;}}
  for(const hh of Object.values(state.housing.households)){if(hh.housingType==='apartment'&&!hh.propertyValue&&base.get(hh.unitId)&&!base.get(hh.unitId).luxury)hh.monthlyHousingCost=base.get(hh.unitId).rent;else if(hh.housingType==='house'&&houses.has(hh.unitId)&&districtAt(houses.get(hh.unitId))==='west')hh.monthlyHousingCost=Math.round(houses.get(hh.unitId).baseValue*.003);}
 }
-function initCityServices(){syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);publicServices.initializeCadre();urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();civicConflict.init();residentRelationships.init();publicServices.init();industrialEconomy.init();}
+function initCityServices(){
+ syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);publicServices.initializeCadre();urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();regionalAviation.init();civicConflict.init();residentRelationships.init();publicServices.init();
+ if(!state.nationalResidenceMigration?.version){
+  const beforeIds=new Set(state.flies.map(f=>f.id)),moneyBefore=liquidMoneySupply();
+  if(state.flies.filter(f=>f.alive).length<1000)replenishResidents(1000,'one-time national population allocation');
+  const arrivals=state.flies.filter(f=>!beforeIds.has(f.id));
+  state.nationalSettlementArrivals={at:state.simulationAgeSeconds,added:arrivals.length,arrivalIds:arrivals.map(f=>f.id),externalCapital:liquidMoneySupply()-moneyBefore};
+  applyNationalResidences(state,{housingHomeLocation,remember:brainRemember,targetTotal:state.flies.filter(f=>f.alive).length,targetNorth:250});
+ }
+ countries.init();industrialEconomy.init();nationalDefenseWorld.init();nationalServices.init();nationalDefense.init();
+ const mansion=state.urbanWorld?.buildings?.['hansdrex-mansion'];
+ if(mansion&&!state.urbanWorld.projects?.some(p=>p.buildingId===mansion.id&&!['complete','cancelled'].includes(p.stage))){delete state.urbanWorld.buildings[mansion.id];for(const fire of state.urbanWorld.fires||[])if(fire.buildingId===mansion.id)fire.containedAt=state.simulationAgeSeconds||1;}
+}
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
+  if(nationalDefense.handleResident(f,clock))return true;
+  if(regionalAviation.handleResident(f,clock))return true;
+  if(countries.handleResident(f,clock))return true;
+  if(nationalServices.handleResident(f,clock))return true;
   if(f.industrialFreightDuty)return industrialEconomy.handleResident(f,clock);
   if(residentRelationships.handleResident(f,clock))return true;
   if(civicConflict.handleResident(f,clock))return true;
@@ -803,8 +834,23 @@ function simulatePowerGrid(clock){
   if(plant.lastHourKey===hourKey)return;plant.lastHourKey=hourKey;
   const onDuty=staff.filter(f=>!f.traveling&&!f.sleeping&&f.currentLocationId==='power'&&String(f.action||'').startsWith('working')&&f.health>30);
   const activeHouseholds=new Set(state.flies.filter(f=>f.alive&&f.householdId).map(f=>f.householdId));
-  const connected=[...activeHouseholds].filter(id=>utilityAccount(id).powerOn!==false).length;
-  plant.demand=45+connected*1.35+Object.keys(state.businesses||{}).length*4.2;
+  const connectedIds=[...activeHouseholds].filter(id=>utilityAccount(id).powerOn!==false),connected=connectedIds.length;
+  // The existing metered network also supplies North/Hawaii as paid imports.
+  // A national treasury or an escrow wallet is not another physical customer.
+  const premises=new Map(),sites=new Map([...LOCATIONS,...BUILDINGS,...Object.values(state.urbanWorld?.buildings||{})].map(p=>[p.id,p]));
+  const financial=sector=>['escrow','national-treasury','national-trade'].includes(sector);
+  for(const [id,b]of Object.entries(state.businesses||{})){
+    if(financial(b.sector)||id.startsWith('treasury:')||id.includes('escrow'))continue;
+    const locationId=b.locationId||id,site=sites.get(locationId);if(site)premises.set(locationId,site);
+  }
+  for(const b of Object.values(state.enterprises||{}))if(b.status==='operating'&&!financial(b.sector)){
+    const site=sites.get(b.locationId);if(site)premises.set(b.locationId,site);
+  }
+  plant.nationalConnections=Object.fromEntries(['hansdrex','north-city','hawaii'].map(id=>[id,{households:0,premises:0}]));
+  for(const id of connectedIds){const hh=state.housing.households[id],country=economicHomeCountry(hh?.unitId,{x:hh?.homeX,z:hh?.homeZ});if(plant.nationalConnections[country])plant.nationalConnections[country].households++;}
+  for(const site of premises.values()){const country=economicCountryAt(site);if(plant.nationalConnections[country])plant.nationalConnections[country].premises++;}
+  plant.commercialPremises=premises.size;
+  plant.demand=45+connected*1.35+premises.size*4.2;
   plant.onDuty=onDuty.length;plant.roster=Object.fromEntries([6,14,22].map(start=>[start,staff.filter(f=>f.gridShiftStart===start).length]));
   // Existing turbine equipment retains its original 185-unit nameplate. Further modules are paid assets.
   plant.installedCapacity=Number(plant.installedCapacity||185);
@@ -818,7 +864,10 @@ function simulatePowerGrid(clock){
   }
   const target=Math.min(2400,Math.ceil(plant.demand*1.25/100)*100);
   if(onDuty.length>=2&&plant.installedCapacity<target){
-    const added=Math.min(100,target-plant.installedCapacity),cost=added*9+onDuty.length*2;
+    // Each paid turbine module needs two actual onsite operators. Independent
+    // crews can commission modules in parallel instead of serializing the
+    // entire expanded city's recovery behind one artificial module per hour.
+    const added=Math.min(100*Math.floor(onDuty.length/2),target-plant.installedCapacity),cost=added*9+onDuty.length*2;
     if(plant.cash>=cost){transfer(cost);plant.installedCapacity+=added;plant.installationWorkHours=Number(plant.installationWorkHours||0)+onDuty.length;
       plant.assetLedger.push({type:'turbine-module',at:state.simulationAgeSeconds,workers:onDuty.map(f=>f.id),capacity:added,cost});
       emit('grid_capacity',`Grid crews commissioned ${added} units of paid generating capacity.`,{capacity:plant.installedCapacity,cost,workers:onDuty.length});}
@@ -832,7 +881,7 @@ function simulatePowerGrid(clock){
   // Commissioned turbine modules include controls: two operators cover full dispatch; one can run a reduced load.
   const fuelFactor=plant.fuelReserve>0?1:.25,staffFactor=.3+.7*Math.min(1,onDuty.length/2);
   plant.generation=Math.min((plant.installedCapacity*staffFactor+civicGeneration)*plant.maintenance*fuelFactor,plant.demand*1.08);
-  const online=plant.generation>=plant.demand*.72;
+  const online=plant.maintenance>=.9&&plant.generation>=plant.demand*.72;
   if(online!==plant.gridOnline){plant.gridOnline=online;if(online)emit('grid_restored','Hansdrex electrical grid returned to stable operation.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});else{plant.outages=Number(plant.outages||0)+1;emit('grid_outage','Hansdrex grid entered a blackout.',{generation:plant.generation,demand:plant.demand,onDuty:onDuty.length});}}
   billElectricity(clock);
   state.utilities.disconnectedHouseholds=[...activeHouseholds].filter(id=>utilityAccount(id).powerOn===false).length;
@@ -1379,6 +1428,7 @@ function restoreState(persistedState) {
   syncDistrictHousingPrices();
   settleThousandResidents();
   initCityServices();
+  migrateCountryMetroJourneys(state,{replanResident:(f,chosen)=>startJourney(f,chosen)});
   migrateMetroAccess();
   const riverUpgrade=migrateDistrictRiverJourneys(state,{replanResident:(f,chosen)=>{if(f.metroLineId&&repairResidentMetroAccess(f))return;startJourney(f,chosen);}});
   if(riverUpgrade.trucks)industrialEconomy.init();
@@ -1466,6 +1516,7 @@ function freshState() {
   syncDistrictHousingPrices();
   settleThousandResidents();
   initCityServices();
+  migrateCountryMetroJourneys(state);
   migrateDistrictRiverJourneys(state);
   return s;
 }
@@ -1509,27 +1560,55 @@ function ensureWelfare() {
   state.welfare.immigrationThreshold=Math.floor(TARGET_POPULATION*0.9);
   return state.welfare;
 }
-function fundPublicPayment(amount) {
-  const welfare=ensureWelfare();
-  const shortage=Math.max(0,amount-Number(state.treasury.cash||0));
+function financialCountryAccount(countryId='hansdrex') {
+  return countryId==='hansdrex'?state.treasury:countries.countryAccount(countryId);
+}
+function financialLocationCountry(id,point) {
+  const site=point||LOCATIONS.find(l=>l.id===id);
+  return economicCountryAt(site)||'hansdrex';
+}
+function financialHomeCountry(fly) {
+  const hh=state.housing?.households?.[fly.householdId];
+  return economicHomeCountry(hh?.unitId||fly.housingUnitId,{x:hh?.homeX??fly.homeX,z:hh?.homeZ??fly.homeZ});
+}
+function payFundedSettlementBenefit(fly,kind,requestId) {
+  const countryId=financialHomeCountry(fly),policy=countries.populationPolicy(countryId),amount=kind==='housing'?policy.housingHelp:policy.immigrationSupport;
+  const account=financialCountryAccount(countryId),household=state.housing?.households?.[fly.householdId];
+  if(fly.nationalBenefits?.[requestId]||kind==='housing'&&household?.nationalBenefits?.[requestId]||!(amount>0)||Number(account.cash||0)<amount)return false;
+  account.cash-=amount;account.spending=Number(account.spending||0)+amount;
+  fly.money=Number(fly.money||0)+amount;
+  fly.nationalBenefits||={};fly.nationalBenefits[requestId]={at:state.simulationAgeSeconds,kind,countryId,amount};
+  if(kind==='housing'&&household){household.nationalBenefits||={};household.nationalBenefits[requestId]={...fly.nationalBenefits[requestId],recipientId:fly.id};}
+  state.totalTransactions++;
+  emit('population_benefit',`${countryId} paid ${fly.id} ${amount} H$ for ${kind} support.`,{flyId:fly.id,countryId,kind,amount});
+  return true;
+}
+function fundPublicPayment(amount,countryId='hansdrex') {
+  amount=Math.max(0,Number(amount)||0);
+  const welfare=ensureWelfare(),account=financialCountryAccount(countryId);
+  const shortage=Math.max(0,amount-Number(account.cash||0));
   if(shortage){
-    // Explicit, auditable public issuance; never silently reset the money supply.
-    state.treasury.cash+=shortage;
+    if(countryId!=='hansdrex')return false;
+    // Hansdrex may explicitly issue its own currency; another nation's obligations never do.
+    account.cash+=shortage;
     state.centralBank.moneyPrintedLifetime=Number(state.centralBank.moneyPrintedLifetime||0)+shortage;
     welfare.emergencyFunding=Number(welfare.emergencyFunding||0)+shortage;
   }
-  state.treasury.cash-=amount;
-  state.treasury.spending=Number(state.treasury.spending||0)+amount;
+  account.cash-=amount;
+  account.spending=Number(account.spending||0)+amount;
+  return true;
 }
-function payBirthGrant(child, parent) {
-  const welfare=ensureWelfare();
-  if(welfare.birthGrants[child.id])return false;
-  fundPublicPayment(1000);
-  parent.money+=1000;
-  welfare.birthGrants[child.id]={amount:1000,parentId:parent.id,paidAt:state.simulationAgeSeconds};
-  welfare.birthGrantTotal=Number(welfare.birthGrantTotal||0)+1000;
+function payBirthGrant(child,parent) {
+  const welfare=ensureWelfare(),requestId=`birth:${child.id}`;
+  if(welfare.birthGrants[child.id]||parent.nationalBenefits?.[requestId])return false;
+  const countryId=financialHomeCountry(parent),amount=countries.populationPolicy(countryId).birthGrant;
+  if(!fundPublicPayment(amount,countryId))return false;
+  parent.money=Number(parent.money||0)+amount;
+  parent.nationalBenefits||={};parent.nationalBenefits[requestId]={at:state.simulationAgeSeconds,kind:'birth',countryId,amount};
+  welfare.birthGrants[child.id]={amount,countryId,parentId:parent.id,paidAt:state.simulationAgeSeconds};
+  welfare.birthGrantTotal=Number(welfare.birthGrantTotal||0)+amount;
   state.totalTransactions++;
-  emit("birth_grant",`${parent.id}'s family received 1,000 H$ for newborn ${child.id}.`,{childId:child.id,parentId:parent.id,amount:1000});
+  emit('birth_grant',`${parent.id}'s family received ${amount.toLocaleString('en-US')} H$ from ${countryId} for newborn ${child.id}.`,{childId:child.id,parentId:parent.id,countryId,amount});
   return true;
 }
 function replenishResidents(target,reason) {
@@ -1568,10 +1647,19 @@ function maintainPopulation() {
   return added;
 }
 function restockEssentials() {
-  state.foodReserve=Math.max(Number(state.foodReserve||0),state.flies.filter(f=>f.alive).length*30,4000);
-  for(const id of ["market","grocery","bakery","restaurant","night-market","riverside-market"]){
-    const business=state.businesses[id];if(business)business.inventory=Math.max(Number(business.inventory||0),200);
+  // The inherited public pantry is a finite grandfathered stock, never a population-based reset.
+  // New North imports arrive only through funded physical freight into a buyer's inventory.
+  const at=state.simulationAgeSeconds;
+  if(state.lastEssentialDistributionAt===at)return 0;
+  state.lastEssentialDistributionAt=at;
+  let moved=0;
+  for(const id of ['market','grocery','bakery','restaurant','night-market','riverside-market']){
+    const business=state.businesses[id];if(!business)continue;
+    const units=Math.min(20,Math.max(0,40-Number(business.inventory||0)),Math.max(0,Number(state.foodReserve||0)));
+    if(!(units>0))continue;
+    state.foodReserve-=units;business.inventory=Number(business.inventory||0)+units;moved+=units;
   }
+  return moved;
 }
 function mortalityReport() {
   const dead=state.flies.filter(f=>!f.alive&&!f.migratedOut),byCause={},riskAtDeath={dehydrated:0,hungry:0,severeStress:0,lowHealth:0};
@@ -1885,7 +1973,9 @@ function workCommitment(fly,clock){
   return {job,onShift,essential,soon:essential&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
 }
 function isWorkCommitted(f){
-  if(f.industrialFreightDuty||f.facilityEmployment)return true;
+  if(f.industrialFreightDuty||f.facilityEmployment||f.countryAirTrip||f.countryFlightPlan||f.internationalFreightDuty||f.nationalSupplyTask||f.nationalTrainingFlightId||f.warResponse?.active)return true;
+  if(countries.isWorkCommitted(f))return true;
+  if(f.nationalServiceDuty)return true;
   if(f.publicServiceRole&&(f.publicServiceDuty||f.militaryFlightId||publicServices.onShift(f,gameClock())))return true;
   const duty=workCommitment(f,gameClock());
   return Boolean(duty?.essential&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
@@ -2373,6 +2463,7 @@ function simulateEnterprises(clock) {
     }
 
     if(business.hospitality&&!hospitalityReady(state,business))continue;
+    const businessCountry=financialLocationCountry(business.locationId),publicAccount=financialCountryAccount(businessCountry);
     const demand = enterpriseSectorDemand(business.sector, clock);
     const neuralManagement =
       neuralDrive(owner, "approachDrive") * 0.22 +
@@ -2432,13 +2523,14 @@ function simulateEnterprises(clock) {
     if(business.hospitality){
       business.pendingSales=0;
       if(business.sector!=='hotel'&&business.stock<24&&business.cash>30){
-        const supplied=Math.min(24-business.stock,Math.floor(business.cash/2)),cost=supplied*2;
-        business.cash-=cost;state.treasury.cash+=cost;business.stock+=supplied;stockCost=cost;
+        const vendorId=businessCountry==='north-city'?'north-market':businessCountry==='hawaii'?'island-market':'market',vendor=state.businesses[vendorId];
+        const supplied=Math.floor(Math.min(24-business.stock,Math.floor(business.cash/2),Math.max(0,Number(vendor?.inventory||0)))),cost=supplied*2;
+        if(supplied>0){business.cash-=cost;vendor.cash=Number(vendor.cash||0)+cost;vendor.inventory-=supplied;business.stock+=supplied;stockCost=cost;}
       }
     }else{
       state.externalTrade=state.externalTrade||{exports:0,imports:0};state.externalTrade.exports+=revenue;
     }
-    state.treasury.cash+=paidCost; // domestic rent, supplies and utilities
+    publicAccount.cash+=paidCost; // domestic rent, supplies and utilities
 
 
     let payrollPaid=0;
@@ -2446,7 +2538,7 @@ function simulateEnterprises(clock) {
       ensureCognitiveProfile(employee);
       const pay=Math.min(Math.max(3.8,Number(employee.wage||4.5))*districtProfile(location(business.locationId)).wage,Math.max(0,business.cash));
       if(pay<=0){employee.wageArrears=Number(employee.wageArrears||0)+Math.max(3.8,Number(employee.wage||4.5));continue;}
-      const tax=pay*0.05,net=pay-tax;business.cash-=pay;employee.money+=net;employee.salaryLifetime+=net;employee.salaryEarnedToday+=net;payrollPaid+=pay;state.treasury.cash+=tax;state.treasury.taxRevenue=Number(state.treasury.taxRevenue||0)+tax;state.totalTransactions+=1;
+      const tax=pay*0.05,net=pay-tax;business.cash-=pay;employee.money+=net;employee.salaryLifetime+=net;employee.salaryEarnedToday+=net;payrollPaid+=pay;publicAccount.cash+=tax;publicAccount.taxRevenue=Number(publicAccount.taxRevenue||0)+tax;state.totalTransactions+=1;
       if(brainRand(employee)<0.035)emit("salary",`${business.name} paid ${employee.id} ${pay.toFixed(1)} ${CURRENCY_CODE} for this hour.`,{businessId:business.id,flyId:employee.id,amount:pay});
     }
     const operatingCost=(business.hospitality?paidCost+stockCost:nonPayrollCost)+payrollPaid;
@@ -2532,6 +2624,8 @@ function brainChooseAction(fly, clock) {
   const candidates = [];
   const add = (id, action, utility) => {
     if(urbanWorld.isUnavailable(id,fly))return;
+    const site=id===fly.homeId?{x:fly.homeX,z:fly.homeZ}:LOCATIONS.find(l=>l.id===id)||BUILDINGS.find(l=>l.id===id);
+    if(site){const toCountry=economicCountryAt(site),cost=countries.travelCost(fly,toCountry);if(cost.closed||!cost.affordable)return;const fromCountry=economicCountryAt(fly);if(fromCountry!==toCountry&&[fromCountry,toCountry].includes('hawaii')&&!regionalJourneyBudget(fly,toCountry==='hawaii'?'island':toCountry==='north-city'?'north':'city',{priceLevel:state.centralBank?.priceLevel}).affordable)return;utility-=cost.entryFee*.4;}
     const learned = Number(brain.memory.locationReward[id] || 0) * 4;
     const novelty = brain.dynamic.curiosity * brain.plasticity.noveltyBias * brainRange(fly, -1.2, 2.4);
     const noise = brainRange(fly, -2.5, 2.5);
@@ -2539,6 +2633,7 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
+  countries.addChoices(fly,clock,add);nationalServices.addChoices(fly,clock,add);nationalDefense.addChoices(fly,clock,add);regionalAviation.addChoices(fly,clock,add);
   urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);industrialEconomy.addChoices(fly,clock,add);
   if(age>=21&&state.housing.households[fly.householdId]?.members?.[0]===fly.id&&!fly.ownsHome&&fly.money+fly.savings>100){
     const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
@@ -2552,7 +2647,12 @@ function brainChooseAction(fly, clock) {
   const circadianSleep = clock.hour >= 22 || clock.hour < 6;
   add(fly.homeId, "sleeping", (100 - fly.energy) * 0.88 + fly.sleepDebt * 0.72 + (circadianSleep ? 82 : -12) - fly.caffeine * 0.42);
   add(fly.homeId, "resting at home", (100 - fly.energy) * 0.42 + fly.stress * 0.20 + (circadianSleep ? 20 : 0));
-  add("market", "buying food", fly.hunger * 0.9 + 18);
+  for(const vendor of residentFoodChoices(fly))add(vendor.id,'buying food',fly.hunger*.9+18+(economicCountryAt(vendor)===economicCountryAt(fly)?20:0)-Math.hypot(vendor.x-fly.x,vendor.z-fly.z)*.025);
+  if(economicCountryAt(fly)==='hawaii')add('island-beach','resting on the Hawaii public beach',fly.stress*.9+fly.loneliness*.2+15);
+  if(economicCountryAt(fly)==='north-city'){
+    add('north-cafe','socializing',fly.loneliness*.62+fly.traits.sociability*28+20);
+    add('north-hospital','seeking care',(100-fly.health)*1.28+(fly.illness?72:0)+20);
+  }
   if(fly.x>400||fly.homeX>480){
     add('riverside-market','buying food',fly.hunger*.9+30);
     add('riverside-cafe','drinking Hansdrex coffee',(100-fly.energy)*.58+fly.sleepDebt*.46+fly.thirst*.18+(fly.money>5?20:-30));
@@ -2663,7 +2763,7 @@ function brainChooseAction(fly, clock) {
       ? fly.parents.map((id)=>state.flies.find((p)=>p.id===id)).filter(Boolean).reduce((a,p)=>a+Number(p.educationLevel||40),0)/Math.max(1,fly.parents.length)/100
       : 0.5;
     if(schoolWindow){
-      add(fly.homeX>480?"riverside-school":"school","studying at Hansdrex Academy",
+      add(economicCountryAt(fly)==='north-city'?'north-school':fly.homeX>480?"riverside-school":"school",economicCountryAt(fly)==='north-city'?'studying at North City Community School':"studying at Hansdrex Academy",
         82+teacherQuality*18+fly.learningRate*14+familyEducation*10+brain.dynamic.curiosity*12-fly.stress*0.14-fly.sleepDebt*0.12);
     }
     if(!schoolWindow && fly.energy>35 && (brain.dynamic.curiosity+fly.intelligence)>1.0){
@@ -2710,8 +2810,15 @@ function brainChooseAction(fly, clock) {
     }
   }
 
+  if(!candidates.length){
+    // Closed borders and exhausted local stocks cannot remove the ability to
+    // rest safely in the current country. This choice grants no food or money.
+    const country=economicCountryAt(fly),nearby=LOCATIONS.filter(site=>site.type!=='private-access'&&site.type!=='home'&&economicCountryAt(site)===country&&!urbanWorld.isUnavailable(site.id,fly)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+    if(nearby)add(nearby.id,'resting locally',0);
+  }
   candidates.sort((a, b) => b.utility - a.utility);
   const chosen = candidates[0];
+  if(!chosen)return {id:fly.currentLocationId||fly.homeId,action:'waiting for a safe local destination',utility:0};
   fly.brainDecision = chosen.action;
   fly.brainConfidence = clamp((chosen.utility - (candidates[1]?.utility ?? 0) + 20) / 60, 0, 1);
   brain.decisionCount += 1;
@@ -2727,6 +2834,7 @@ function brainChooseAction(fly, clock) {
 
 function chooseDestination(fly, clock) {
   if(!fly.alive)return;
+  if(fly.onTrain||fly.onPlane||fly.onPrivateHelicopter||fly.heliPassenger||fly.onFireEngine||fly.onAmbulance)return;
   const work=workCommitment(fly,clock),healthy=fly.energy>=25&&fly.health>=45&&!fly.illness&&!fly.recoveringEnergy&&!fly.sleeping&&fly.hunger<75&&fly.thirst<80;
   if(work&&healthy&&!urbanWorld.isUnavailable(work.job.locationId,fly)){
     const action=`working as ${fly.jobTitle||work.job.title}`;
@@ -2759,24 +2867,71 @@ function chooseDestination(fly, clock) {
   if (fly.traveling) return;
   if (!fly.traveling && fly.actionUntil > state.simulationAgeSeconds && fly.hunger<85 && fly.thirst<85) return;
 
-  const food=LOCATIONS.filter(l=>["market","grocery","bakery","riverside-market"].includes(l.id)&&!urbanWorld.isUnavailable(l.id,fly)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+  const food=residentFoodChoices(fly)[0];
   const chosen = fly.hunger>72&&food ? {id:food.id,action:"getting a subsidized meal"}
     : fly.thirst>72 ? {id:fly.homeId,action:"drinking free water"}
     : brainChooseAction(fly, clock);
   startJourney(fly,chosen);
 }
 
+function residentFoodChoices(fly){
+  const ids=new Set(['market','grocery','bakery','restaurant','night-market','riverside-market','north-market','north-restaurant','island-market','island-restaurant','island-resort']);
+  const here=economicCountryAt(fly),hospitality=diningVenues(state,fly).filter(v=>v.price<=Number(fly.money||0)+Number(fly.savings||0));
+  const stocked=LOCATIONS.filter(l=>ids.has(l.id)&&!urbanWorld.isUnavailable(l.id,fly)&&
+    (Number(state.businesses[l.id]?.inventory||0)>=1||economicCountryAt(l)==='hansdrex'&&Number(state.foodReserve||0)>=1));
+  return [...stocked,...hospitality].filter(l=>{const cost=countries.travelCost(fly,economicCountryAt(l));return cost.affordable&&!cost.closed;})
+    .sort((a,b)=>(economicCountryAt(a)===here?0:10000)+Math.hypot(a.x-fly.x,a.z-fly.z)-(economicCountryAt(b)===here?0:10000)-Math.hypot(b.x-fly.x,b.z-fly.z));
+}
+function residentGroundTravelPlan(fly,dest,mode){
+  const from=economicCountryAt(fly),to=economicCountryAt(dest),foreign=from!==to;
+  const preview=countries.planJourney(fly,dest,{mode:mode==='walk'?'walk':'car'});
+  if(!preview.allowed||preview.airportRequired)return {...preview,route:[]};
+  let plan=mode==='walk'?{mode:'walk',route:buildPedestrianRoute(fly,dest)}:
+    mode==='car'&&String(fly.vehicle||'').includes('car')?{mode:'car',route:buildRoadRoute(fly,dest,'car',fly.parkedCar,roadLife.destination(fly,dest))}:chooseTravelMode(fly,dest);
+  const internationalMetro=plan.metro&&(plan.route||plan.metro.waypoints||[]).some(p=>economicCountryAt(p)!==from);
+  if(internationalMetro)plan={mode:'walk',route:[]};
+  if(foreign&&(plan.mode==='walk'||plan.mode==='metro'||!plan.route?.some(p=>p.mode==='car'||p.mode==='scooter'))){
+    const walking=countries.planJourney(fly,dest,{mode:'walk'});if(!walking.allowed)return {...walking,route:[]};
+    const route=[];let at=fly;
+    for(const target of [...walking.viaPoints,dest]){
+      const leg=target.stage==='border-entry'&&clearSegment(at,target)?[{...target,mode:'walk'}]:buildPedestrianRoute(at,target);
+      if(!leg.length&&Math.hypot(at.x-target.x,at.z-target.z)>.85)return {allowed:false,reason:'no reachable official border crossing',route:[]};
+      route.push(...leg.map(p=>({...p,mode:'walk'})));
+      if(target.stage&&route.length)Object.assign(route[route.length-1],{stage:target.stage,portId:target.portId});
+      at=target;
+    }
+    plan={mode:'walk',route};
+  }else if(internationalMetro)plan={mode:'walk',route:buildPedestrianRoute(fly,dest)};
+  return {...plan,allowed:true};
+}
 function startJourney(fly,chosen) {
+  if(fly.onTrain||fly.onPlane||fly.onPrivateHelicopter||fly.heliPassenger||fly.onFireEngine||fly.onAmbulance)return false;
   if(urbanWorld.isUnavailable(chosen.id,fly)){
     if(!fly.traveling){fly.action="waiting outside an unsafe destination";fly.actionUntil=state.simulationAgeSeconds+600;}
     return;
   }
-  if(!fly.traveling&&fly.indoors&&fly.currentLocationId===chosen.id){
+  if(!fly.traveling&&fly.indoors&&fly.currentLocationId===chosen.id&&
+     (chosen.id!==fly.homeId||economicCountryAt(fly)===economicCountryAt({x:fly.homeX,z:fly.homeZ}))){
     fly.action=chosen.action;fly.pendingAction=null;
-    fly.sleeping=chosen.action==="sleeping"&&fly.indoors&&chosen.id===fly.homeId;
-    fly.actionUntil=state.simulationAgeSeconds+brainRange(fly,1200,4200);
-    return;
+    fly.sleeping=chosen.action==='sleeping'&&chosen.id===fly.homeId;
+    fly.actionUntil=state.simulationAgeSeconds+brainRange(fly,1200,4200);return true;
   }
+  const dest=chosen.id===fly.homeId?{...location(fly.homeId),x:fly.homeX??location(fly.homeId).x,z:fly.homeZ??location(fly.homeId).z}:location(chosen.id);
+  const p=legalDestinationPoint(dest),departure=fly.indoors?entrance(fly):{x:fly.x,z:fly.z};
+  const traveler={...fly,...departure,indoors:false},preview=countries.planJourney(traveler,p,{mode:chosen.mode==='walk'?'walk':'car'});
+  if(!preview.allowed){
+    fly.countryTravelDenied={at:state.simulationAgeSeconds,countryId:economicCountryAt(p),reason:preview.reason};
+    if(!fly.traveling){fly.action='remaining locally because foreign entry is unavailable';fly.actionUntil=state.simulationAgeSeconds+300;}
+    return false;
+  }
+  if(preview.airportRequired){
+    const to=economicCountryAt(p),airportId=to==='hawaii'?'island':to==='north-city'?'north':'city';
+    if(!regionalJourneyBudget(fly,airportId,{priceLevel:state.centralBank?.priceLevel}).affordable){fly.countryTravelDenied={at:state.simulationAgeSeconds,countryId:to,reason:'insufficient funds for a reserved regional return journey'};return false;}
+    return regionalAviation.request(fly,airportId,{destinationId:chosen.id,action:chosen.action});
+  }
+  const travelPlan=residentGroundTravelPlan(traveler,p,chosen.mode);
+  if(!travelPlan.allowed||!travelPlan.route?.length){if(!fly.traveling){fly.action='waiting for a reachable lawful route';fly.actionUntil=state.simulationAgeSeconds+600;}return false;}
+  fly.destinationParking=traveler.destinationParking;
   if(fly.indoors){const door=entrance(fly);fly.x=door.x;fly.z=door.z;fly.y=1.1;fly.movementTrace=[];}
   fly.onTrain=false;fly.metroBoardingsThisTrip=0;fly.metroTrainId=null;fly.metroTrainDirection=null;fly.metroPlatformCheckedAt=null;fly.metroTrainCheckedAt=null;
   fly.targetLocationId = chosen.id;
@@ -2786,15 +2941,9 @@ function startJourney(fly,chosen) {
   fly.exercising = chosen.action === "exercising";
   fly.sleeping = false;
 
-  const dest = chosen.id === fly.homeId
-    ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
-    : location(chosen.id);
-  const p = legalDestinationPoint(dest);
   fly.finalTargetX = p.x;
   fly.finalTargetZ = p.z;
-  const travelPlan = chosen.mode === 'walk'
-    ? {mode: 'walk', route: buildPedestrianRoute(fly, p)}
-    : chooseTravelMode(fly, p);
+  fly.countryBorderHold=null;fly.countryTravelDenied=null;fly.countryGroundMode=travelPlan.mode;
   fly.transitMode = travelPlan.mode;
   fly.routeWaypoints = travelPlan.route || travelPlan.metro?.waypoints || [];
   fly.routeIndex = 0;
@@ -2816,6 +2965,7 @@ function startJourney(fly,chosen) {
   fly.travelStuckTicks = 0;
   fly.travelGoalId = chosen.id;
   fly.actionUntil = 0;
+  return true;
 }
 
 function pinResidentMetroTrain(fly){
@@ -2854,6 +3004,20 @@ function validBoardingPlatform(waypoint,lineId){
   const platform=metroStationGeometry(line,waypoint.stationIndex,waypoint.direction).platform;
   return Math.hypot(waypoint.x-platform.x,waypoint.z-platform.z,(waypoint.y??0)-platform.y)<.01;
 }
+function residentCountryAdmission(fly,next){
+  const admission=countries.interceptMovement(fly,fly,next,{mode:['car','scooter'].includes(fly.transitMode)?fly.transitMode:'walk'});
+  if(admission.allowed){fly.countryBorderHold=null;return true;}
+  fly.vx=fly.vz=0;fly.travelStuckTicks=0;
+  const reason=admission.reason||'foreign entry unavailable';
+  if(reason==='border closed during conflict'){
+    fly.countryBorderHold={at:state.simulationAgeSeconds,reason};fly.action='waiting at the closed national border';
+  }else{
+    fly.countryTravelDenied={at:state.simulationAgeSeconds,reason,countryId:economicCountryAt(next)};
+    fly.traveling=false;fly.routeWaypoints=[];fly.routeIndex=0;fly.targetX=fly.x;fly.targetZ=fly.z;fly.pendingAction=null;
+    fly.action='remaining locally until lawful entry is available';fly.actionUntil=state.simulationAgeSeconds+120;
+  }
+  return false;
+}
 function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_SECONDS_PER_REAL_SECOND) {
   if(!fly.traveling){fly.vx=fly.vz=0;return;}
   const boarding=fly.routeWaypoints?.[fly.routeIndex];
@@ -2888,6 +3052,10 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
   if (dist <= 0.85) {
     const barrier=stopForSignal(fly,{x:fly.targetX,z:fly.targetZ});
     if(barrier&&!fly.signalEncounter?.permit&&barrier.distance<dist-.001){fly.vx=fly.vz=0;fly.trafficStatus="waiting at red light";return;}
+    const next={x:fly.targetX,z:fly.targetZ,y:routeTarget?.y??fly.y},stationAccess=fly.transitMode==='walk'&&(routeTarget?.stage?.startsWith('station-')||routeTarget?.stage==='interchange-walk');
+    const clear=stationAccess?clearMetroAccessSegment(fly,next):clearSegment(fly,next);
+    if(!clear){fly.vx=fly.vz=0;fly.traveling=false;fly.action='replanning a blocked route';fly.actionUntil=0;return;}
+    if(!residentCountryAdmission(fly,next))return;
     fly.vx = 0;
     fly.vz = 0;
     fly.x = fly.targetX;
@@ -2900,6 +3068,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
         fly.metroTrainDirection=currentWp.direction;
         if(!validBoardingPlatform(currentWp,fly.metroLineId)||Math.hypot(fly.x-currentWp.x,fly.z-currentWp.z,fly.y-currentWp.y)>.85){repairResidentMetroAccess(fly);return;}
         const line=METRO_LINES.find(l=>l.id===fly.metroLineId),seconds=state.simulationAgeSeconds/GAME_SECONDS_PER_REAL_SECOND,currentTrain=trainState(line,seconds,currentWp.direction);
+        if(line.points.some(p=>economicCountryAt({x:p[0],z:p[1]})!==economicCountryAt(fly))){fly.traveling=false;fly.pendingAction=null;fly.action='waiting for a domestic metro route';fly.actionUntil=state.simulationAgeSeconds+120;return;}
         const t=currentTrain.active&&currentTrain.dwelling&&currentTrain.from===currentWp.stationIndex?currentTrain:metroServiceBetween(line,Number.isFinite(fly.metroPlatformCheckedAt)?fly.metroPlatformCheckedAt:seconds,seconds,{stationIndex:currentWp.stationIndex,direction:currentWp.direction});
         fly.metroPlatformCheckedAt=seconds;
         fly.y=Number.isFinite(currentWp.y)?currentWp.y:line.height+.25;
@@ -3039,6 +3208,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
   const stationAccess=fly.transitMode==='walk'&&(activeWp?.stage?.startsWith('station-')||activeWp?.stage==='interchange-walk');
   const clear=stationAccess?clearMetroAccessSegment(fly,{...nextPosition,y:nextY}):clearSegment(fly,nextPosition);
   if(!clear){if(fly.transitMode==="car"){roadLife.park(fly);fly.carPosition=null;roadLife.arrived(fly);}fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
+  if(!residentCountryAdmission(fly,nextPosition))return;
   fly.x=nextPosition.x;fly.z=nextPosition.z;fly.y=nextY;
   if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
@@ -3064,7 +3234,8 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
       ? { ...location(fly.homeId), x: fly.homeX ?? location(fly.homeId).x, z: fly.homeZ ?? location(fly.homeId).z }
       : location(fly.targetLocationId);
     const p=legalDestinationPoint(dest);
-    const plan=chooseTravelMode(fly,p);
+    const plan=residentGroundTravelPlan(fly,p,fly.countryGroundMode);
+    if(!plan.allowed||!plan.route?.length){fly.traveling=false;fly.actionUntil=state.simulationAgeSeconds+120;fly.action='waiting for a lawful route';return;}
     fly.routeWaypoints=plan.route||plan.metro?.waypoints||[];
     fly.routeIndex=0;fly.metroLineId=plan.metro?.lineId||null;fly.transitMode=plan.mode;fly.transitStage=plan.metro?"station-entry":plan.mode;
     if(fly.routeWaypoints.length){fly.targetX=fly.routeWaypoints[0].x;fly.targetZ=fly.routeWaypoints[0].z;}else{fly.targetX=p.x;fly.targetZ=p.z;}
@@ -3099,14 +3270,14 @@ function productionAndRetail(fly, clock, gameSeconds=activeGameStepSeconds) {
 
 }
 
-function payAndFinance(fly, clock) {
+function payAndFinance(fly, clock=gameClock()) {
   const day = clock.day;
   const financeNow=(day-1)*86400+clock.hour*3600+clock.minute*60;
   const previous=Number.isFinite(fly.financeClockSeconds)?Math.min(financeNow,fly.financeClockSeconds):financeNow-activeGameStepSeconds;
   fly.financeClockSeconds=financeNow;
   const crossed=hour=>{const at=Math.floor((financeNow-hour*3600)/86400)*86400+hour*3600;return at>previous&&at<=financeNow;};
   const salaryJob = fly.jobId ? JOBS.find((j) => j.id === fly.jobId) : null;
-  if (salaryJob && !fly.businessEmployeeOf && !fly.publicServicePayrollManaged) {
+  if (salaryJob && !fly.businessEmployeeOf && !fly.publicServicePayrollManaged && !fly.internationalWork && !fly.internationalFreightDuty) {
     ensureCognitiveProfile(fly);
     const payHour=Math.floor((fly.preferredWorkStart+fly.preferredWorkHours)%24);
     if(crossed(payHour)&&fly.lastPaidDay!==day&&fly.ageYears>=18&&fly.ageYears<=75){
@@ -3114,13 +3285,21 @@ function payAndFinance(fly, clock) {
       if(workedHours>=1){
         const base=fly.wage*workedHours*districtProfile(location(salaryJob.locationId)).wage;
         const bonus=base*fly.traits.ambition*randRange(0,0.14);
-        const gross=base+bonus,tax=gross*0.07,available=Math.max(0,Number(state.treasury?.cash||0)),paid=Math.min(gross,available),net=Math.max(0,paid-tax);
-        state.treasury.cash-=paid;state.treasury.spending=Number(state.treasury.spending||0)+paid;state.treasury.taxRevenue=Number(state.treasury.taxRevenue||0)+Math.min(tax,paid);state.treasury.cash+=Math.min(tax,paid);
+        const countryId=financialLocationCountry(salaryJob.locationId),account=financialCountryAccount(countryId),gross=base+bonus,available=Math.max(0,Number(account.cash||0)),paid=Math.min(gross,available),tax=paid*0.07,net=paid-tax;
+        account.cash-=paid;account.spending=Number(account.spending||0)+paid;account.taxRevenue=Number(account.taxRevenue||0)+tax;account.cash+=tax;
+        fly.wageArrears=Number(fly.wageArrears||0)+gross-paid;
         fly.money+=net;fly.salaryEarnedToday+=net;fly.salaryLifetime+=net;fly.happiness=clamp(fly.happiness+(paid>=gross?2.5:-2));state.totalTransactions+=1;
-        emit("salary",`${fly.id} earned ${net.toFixed(1)} ${CURRENCY_CODE} after tax for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,amount:net,hours:workedHours,tax:Math.min(tax,paid)});
+        emit("salary",`${fly.id} earned ${net.toFixed(1)} ${CURRENCY_CODE} after tax for ${workedHours.toFixed(1)}h worked.`,{flyId:fly.id,countryId,amount:net,hours:workedHours,tax});
       }
       fly.lastPaidDay=day;fly.workMinutesToday=0;
     }
+  }
+
+  const homeCountry=financialHomeCountry(fly);
+  if(fly.ageYears>=18&&fly.citizenshipCountryId&&fly.citizenshipCountryId!==homeCountry&&
+     fly.countryPresence?.countryId===homeCountry&&fly.currentLocationId===fly.homeId&&!fly.traveling&&
+     economicCountryAt(fly)===homeCountry){
+    payFundedSettlementBenefit(fly,'immigration',`immigration:${homeCountry}`);
   }
 
   if (crossed(0) && fly.lastRentDay !== day) {
@@ -3128,8 +3307,9 @@ function payAndFinance(fly, clock) {
     if(hh&&hh.lastRentDay!==day){
       const expense=Math.max(0,Number(hh.monthlyHousingCost||18))/30;
       const adults=householdMembers(hh.id).filter(f=>f.ageYears>=18),payers=adults.length?adults:[fly];
+      const homeAccount=financialCountryAccount(financialHomeCountry(fly));
       let remaining=expense;
-      for(const payer of payers){const payment=Math.min(Math.max(0,payer.money),remaining);payer.money-=payment;payer.expensesLifetime+=payment;state.treasury.cash+=payment;remaining-=payment;}
+      for(const payer of payers){const payment=Math.min(Math.max(0,payer.money),remaining);payer.money-=payment;payer.expensesLifetime+=payment;homeAccount.cash+=payment;remaining-=payment;}
       hh.rentArrears=Number(hh.rentArrears||0)+remaining;hh.lastRentDay=day;
       if(remaining>0)for(const member of payers)member.stress=clamp(member.stress+2);
     }
@@ -3189,9 +3369,10 @@ function payAndFinance(fly, clock) {
             fly.homeEquity = lot.baseValue;
             fly.bankLoan += loan;
             state.bank.reserves -= loan;
-            state.treasury.cash+=lot.baseValue;
+            financialCountryAccount(financialLocationCountry(lot.id,lot)).cash+=lot.baseValue;
             for(const member of householdMembers(hh.id)){const oldHomeId=member.homeId,returningHome=member.targetLocationId===oldHomeId;member.homeId=housingHomeLocation(lot);member.homeX=lot.x;member.homeZ=lot.z;member.housingType='house';member.housingUnitId=lot.id;member.actionUntil=0;if(member.indoors){member.indoors=false;const door=entrance(member);member.x=door.x;member.z=door.z;member.currentLocationId=null;}if(returningHome){member.traveling=false;member.routeWaypoints=[];member.targetLocationId=member.homeId;}}
             state.bank.loansOutstanding += loan;
+            payFundedSettlementBenefit(fly,'housing',`housing:${hh.id}`);
             emit("home_purchase", `${fly.id} bought a ground house for ${lot.baseValue.toFixed(0)} H$ with Hansdrex Bank financing.`, {
               flyId: fly.id, lotId: lot.id, value: lot.baseValue, loan,
             });
@@ -3203,7 +3384,7 @@ function payAndFinance(fly, clock) {
     if (fly.ownsHome && fly.homeTier < 3 && fly.savings >= 3200 + fly.homeTier * 3600 && rand() < 0.08) {
       const upgradeCost = 3200 + fly.homeTier * 3600;
       fly.savings -= upgradeCost;
-      state.treasury.cash+=upgradeCost;
+      financialCountryAccount(financialHomeCountry(fly)).cash+=upgradeCost;
       fly.homeEquity += upgradeCost;
       fly.homeTier += 1;
       emit("home_upgrade", `${fly.id} expanded their home to tier ${fly.homeTier}.`, { flyId: fly.id, tier: fly.homeTier });
@@ -3218,7 +3399,7 @@ function ensureHeliTourStaff(){
   if(staff.length>=4)return staff;
   const slots=["heli-pilot-day","heli-pilot-evening","heli-ground","heli-ground-evening"];
   const candidates=state.flies
-    .filter((f)=>f.alive&&f.ageYears>=23&&f.ageYears<=66&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!ids.has(f.jobId)&&!["doctor","police","military","power","power-evening","power-night","grid-dispatch","school"].includes(f.jobId))
+    .filter((f)=>f.alive&&f.ageYears>=23&&f.ageYears<=66&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!f.publicServiceRole&&!f.publicServicePayrollManaged&&!f.nationalServiceDuty&&!f.internationalWork&&!f.internationalFreightDuty&&!f.countryAirTrip&&!f.countryFlightPlan&&!ids.has(f.jobId)&&!["doctor","police","military","power","power-evening","power-night","grid-dispatch","school"].includes(f.jobId))
     .sort((a,b)=>(b.intelligence+b.traits.resilience+b.traits.ambition)-(a.intelligence+a.traits.resilience+a.traits.ambition));
   while(staff.length<4&&candidates.length){
     const fly=candidates.shift(),job=JOBS.find((j)=>j.id===slots[staff.length]);
@@ -3277,7 +3458,7 @@ function simulateParkWheel(fly){
 
 function heliTourTicketPrice(){return tourismFares(state.centralBank?.priceLevel).helicopter;}
 function heliTourAvailable(clock){
-  if(weatherDanger()>.22||clock.hour<8||clock.hour>=20)return false;
+  if(state.helicopterFlight?.destroyed||weatherDanger()>.22||clock.hour<8||clock.hour>=20)return false;
   const staff=ensureHeliTourStaff();
   return staff.some(p=>String(p.jobId||"").startsWith("heli-pilot")&&!p.traveling&&p.currentLocationId==="heliport");
 }
@@ -3306,9 +3487,12 @@ function simulateHeliTour(fly,clock){
   if(!heliTourAvailable(clock)||!tourism.affordable(fly,price)){
     fly.action="helicopter unavailable · protecting essential savings";fly.actionUntil=now+1800;return true;
   }
+  const flight=!state.helicopterFlight||now>=state.helicopterFlight.endsAt?{startsAt:now+600,endsAt:now+600+AVIATION.heliSeconds}:state.helicopterFlight;
+  const clearance=countries.requestAirClearance({flightId:tourHelicopterFlightId(flight),operatorCountryId:'hansdrex',countries:['hansdrex'],kind:'sightseeing'});
+  if(!clearance.allowed){fly.action='helicopter waiting for airspace clearance';fly.actionUntil=now+1800;return true;}
   const cash=Math.min(fly.money,price);fly.money-=cash;fly.savings-=price-cash;
   state.businesses["heli-tour"].cash+=price;fly.expensesLifetime+=price;state.totalTransactions++;
-  if(!state.helicopterFlight||now>=state.helicopterFlight.endsAt)state.helicopterFlight={startsAt:now+600,endsAt:now+600+AVIATION.heliSeconds};
+  state.helicopterFlight=flight;
   Object.assign(fly,{lastHeliTicket:price,lastHeliAt:now,heliTourStartedAt:state.helicopterFlight.startsAt,heliTourUntil:state.helicopterFlight.endsAt,
     heliPassenger:true,transitMode:"helicopter",transitStage:"boarding",action:"boarding helicopter at Hansdrex Airport"});
   emit("heli_boarding",`${fly.id} paid ${price.toFixed(0)} H$ for an airport skyline helicopter tour.`,{flyId:fly.id,price});
@@ -3867,7 +4051,7 @@ function maybeRoamInsidePark(fly){
   return true;
 }
 
-function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
+function needsAndActivities(fly, clock=gameClock(), gameSeconds=activeGameStepSeconds) {
   applyDistrictExposure(fly,state,DAYS_PER_YEAR);
   const elapsed=Math.max(0,gameSeconds)/GAME_SECONDS_PER_REAL_SECOND;
   fly.hunger = clamp(fly.hunger + 0.055*elapsed);
@@ -3905,18 +4089,25 @@ function needsAndActivities(fly, clock, gameSeconds=activeGameStepSeconds) {
   if(!fly.traveling&&fly.hunger>40&&purchaseHospitalityMeal(state,fly,fly.currentLocationId)){
     brainRemember(fly,'resident_restaurant_meal',{locationId:fly.currentLocationId});
   }
-  const foodPlaces = ["market","grocery","bakery","restaurant","night-market","riverside-market"];
-  const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
-  const workplaceMeal=String(fly.action||'').startsWith('working as')&&fly.currentLocationId===workLocation&&!urbanWorld.isUnavailable(workLocation,fly)&&(fly.indoors||workLocation==='power');
-  // Deliver essentials to homes/shelters as well: children, poor and rain-bound residents can eat.
-  if ((foodPlaces.includes(fly.currentLocationId)||atHome||fly.action==="sheltering from bad weather"||fly.action==="temporary disaster shelter"||workplaceMeal) && fly.hunger > 45) {
-    restockEssentials();
-    const business=state.businesses[foodPlaces.includes(fly.currentLocationId)?fly.currentLocationId:"market"];
-    const price=districtAt(fly)==='west'?.065:.1,paid=Math.min(price,Math.max(0,fly.money)),subsidy=4-paid;
-    if(paid>0)spend(fly,paid,business);
-    fundPublicPayment(subsidy);business.cash+=subsidy;ensureWelfare().foodSubsidies+=subsidy;
-    fly.hunger=clamp(fly.hunger-60);fly.thirst=clamp(fly.thirst-30);fly.happiness=clamp(fly.happiness+2);
-    business.inventory=Math.max(0,business.inventory-1);state.foodReserve--;
+  const foodPlaces=['market','grocery','bakery','restaurant','night-market','riverside-market','north-market','north-restaurant','island-market','island-restaurant'];
+  const workLocation=fly.internationalWork?.locationId||(fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId);
+  const workplaceMeal=String(fly.action||'').startsWith('working')&&fly.currentLocationId===workLocation&&!urbanWorld.isUnavailable(workLocation,fly)&&(fly.indoors||workLocation==='power');
+  if((foodPlaces.includes(fly.currentLocationId)||atHome||fly.action==='sheltering from bad weather'||fly.action==='temporary disaster shelter'||workplaceMeal)&&fly.hunger>45){
+    const countryId=financialLocationCountry(fly.currentLocationId,fly),vendorId=foodPlaces.includes(fly.currentLocationId)?fly.currentLocationId:countryId==='north-city'?'north-market':countryId==='hawaii'?'island-market':'market';
+    const business=state.businesses[vendorId];
+    if(countryId==='hansdrex'&&business&&Number(business.inventory||0)<1)restockEssentials();
+    if(business&&Number(business.inventory||0)>=1){
+      const price=districtAt(fly)==='west'?.065:.1;
+      let paid=Math.min(price,Math.max(0,fly.money)),subsidy=4-paid;
+      const funded=fundPublicPayment(subsidy,countryId);
+      if(!funded&&Number(fly.money||0)>=4){paid=4;subsidy=0;}
+      if(funded||paid===4){
+        if(paid>0)spend(fly,paid,business);
+        business.cash=Number(business.cash||0)+subsidy;ensureWelfare().foodSubsidies+=subsidy;
+        business.inventory-=1;
+        fly.hunger=clamp(fly.hunger-60);fly.thirst=clamp(fly.thirst-30);fly.happiness=clamp(fly.happiness+2);
+      }
+    }
   }
   if(fly.indoors&&fly.hunger<55&&fly.thirst<55&&fly.stress<80){
     fly.health=clamp(fly.health+(sleeping?0.025:0.008)*elapsed);
@@ -4151,6 +4342,8 @@ function tickFly(fly, clock) {
 
 function compactFly(f) {
   return {
+    citizenshipCountryId:f.citizenshipCountryId||null,residencyCountryId:f.residencyCountryId||null,legalResidency:f.legalResidency||null,countryAirTrip:f.countryAirTrip||null,
+    nationalServiceDuty:f.nationalServiceDuty||null,publicServiceRole:f.publicServiceRole||null,publicServiceCountryId:f.publicServiceCountryId||null,warResponse:f.warResponse||null,
     heliTourStartedAt:Number(f.heliTourStartedAt||0),
     onPlane:Boolean(f.onPlane),
     airTrip:f.airTrip?{phase:f.airTrip.phase,outbound:f.airTrip.outbound,inbound:f.airTrip.inbound,cost:f.airTrip.cost}:null,
@@ -4315,9 +4508,9 @@ function motionPlan(f){
  return {at:state.simulationAgeSeconds,speed:Number(f.motionSpeed||Math.hypot(f.vx,f.vz)||2.5),mode:f.transitMode,points,blocked:Number(f.trafficHoldUntil||0)>state.simulationAgeSeconds,signalPermit:Boolean(f.signalEncounter?.permit)};
 }
 function observerFly(f,selectedId){
- if(f.id===selectedId)return {...compactFly(f),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
+ if(f.id===selectedId)return {...compactFly(f),ownsHome:Boolean(ownsCountryHome(state,f,f.residencyCountryId)),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId','citizenshipCountryId','residencyCountryId','publicServiceRole','publicServiceCountryId']){
   const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
  record.motion=motionPlan(f);
@@ -4397,7 +4590,7 @@ function getState(options={}) {
       west:{residents:living.filter(f=>f.housingUnitId?.startsWith('WEST-')).length,settlersAdded:(state.expansionSettlement?.west?.added||0)+(state.thousandSettlement?.west?.added||0)}},urbanWorld:urbanWorld.snapshot(),sportsLuxury:sportsLuxury.snapshot(),cityVisitors:visitorSnapshot(options),civicConflict:civicConflict.snapshot(),residentRelationships:residentRelationships.snapshot(),publicServices:publicServices.snapshot(),industrialEconomy:industrialEconomy.snapshot(),
     transit:{...(state.transit||{boardings:0,completedTrips:0}),passengers:living.filter(f=>f.onTrain).length,waiting:living.filter(f=>String(f.action||"").includes("platform")&&String(f.action||"").includes("waiting")).length},
     parkLeisure:{...(state.parkLeisure||{boardings:0,completedRides:0}),passengers:living.filter(f=>f.wheelRideUntil>state.simulationAgeSeconds).length,ticket:0},
-    aviation:aviationSummary(),
+    aviation:aviationSummary(),regionalAviation:regionalAviation.snapshot(),international:countries.snapshot(),nationalServices:nationalServices.snapshot(),nationalDefense:nationalDefense.snapshot(),
     roadTraffic:roadLife.summary(),
     activity:{working:living.filter(f=>!f.traveling&&f.action?.startsWith("working")).length,sleeping:living.filter(f=>f.sleeping).length,indoors:living.filter(f=>f.indoors).length,traveling:living.filter(f=>f.traveling).length},
     housing: {
@@ -4472,12 +4665,13 @@ async function tick(options = {}) {
        if(host){host.jobId="rooftop";host.jobTitle="sky bar host";host.wage=5.3;host.preferredWorkStart=17;host.preferredWorkHours=8;}
       }
       roadLife.normalizeParking();
-      for(const [name,service]of [['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
+      for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
       vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;
       roadLife.tick();
       aviationTick();
+      try{regionalAviation.tick();nationalDefense.tick();}catch(error){recordSimulationFault('nationalAviationDefense',error);}
       simulateEnterprises(clock);
       simulatePowerGrid(clock);
       updateMonetaryPolicy(clock);
@@ -4524,6 +4718,6 @@ export {
   endRelationship,freshState,restoreState,getRawState,getState,tick,tickFly,gameClock,chooseDestination,moveFly,
   planMetroRoute,maybeRoamInsidePark,assignApartment,assignGroundHouse,inheritHousehold,liquidMoneySupply,
   migrateGroundHousesToSafeLots,migrateResidentNavigation,snapshotLooksUsable,subscribeEvents,setNeuralSyncEnabled,
-  publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,settleThousandResidents,
+  countries,nationalServices,nationalDefense,regionalAviation,publicServices,industrialEconomy,urbanWorld,sportsLuxury,cityVisitors,civicConflict,residentRelationships,neuralActors,settleRiversideResidents,settleExpansionResidents,settleThousandResidents,
   attemptStartup,simulateEnterprises,startupReadiness,chooseStartupType,purchaseLuxuryApartment,ensurePowerPlantStaff,simulatePowerGrid,personalWorkWindow,roadLife,chooseTravelMode,vehicleShopping,getSimulationConfig,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,markNeuralCycleFailed
 };

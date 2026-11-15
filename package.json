@@ -49,6 +49,7 @@
   "dependencies": {
     "@mujoco/mujoco": "^3.8.0",
     "@types/three": "^0.184.0",
+    "pg": "^8.23.1",
     "three": "^0.184.0"
   }
 }
