@@ -1,6 +1,8 @@
 import {hasCountryCommitment} from './country-commitments.mjs';
-import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES} from './city-map.mjs';
+import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES,ROADS,UNDERPASSES,roadTravelY} from './city-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
+import {createVehicleRouter} from './vehicle-network.mjs';
+import {COUNTRY_IDS,BORDER_CHECKPOINTS,borderDirection,countryAt} from './country-map.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
 export const EMERGENCY_RULES={engines:3,ambulances:2,firefighters:9,paramedics:6,speed:22,crewPerEngine:3,crewPerAmbulance:2};
 const DAY=86400,dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),loc=id=>LOCATIONS.find(l=>l.id===id);
@@ -8,15 +10,34 @@ const essential=new Set(['doctor','school','police','military','power','power-ev
 const cap=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number(n)||0));
 const busy=(f,now)=>hasCountryCommitment(f,now)||f.industrialFreightDuty||f.publicServiceDuty||f.fireEngineDuty||f.ambulanceDuty||f.urbanTask||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested;
 /** Bounded public fleets. The server persists routes/tasks; the browser alone animates vehicles/lights. */
-export function createFireService({world,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false}){
+export function createFireService({world,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities=()=>{},payAndFinance=()=>{},isWorkCommitted=()=>false,depots=[]}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),enabled=()=>Boolean(raw().emergencyServicesEnabled&&loc('firestation'));
  const people=()=>[...(raw().flies||[]),...(raw().cityVisitors?.visitors||[]).filter(f=>f.alive&&!f.departed)];
  const actor=id=>(raw().flies||[]).find(f=>f.id===id)||(raw().cityVisitors?.visitors||[]).find(f=>f.id===id),alive=id=>{const f=actor(id);return f?.alive?f:null;};
  const fires=()=>raw().urbanWorld?.fires||[];
  function data(){raw().urbanWorld||={};return raw().urbanWorld.fireService||={version:1,engines:[],ambulances:[],roster:[],nextRecruitAt:0,nextMedicalCheckAt:0,nextCall:1,dispatches:0,medicalDispatches:0,hospitalDeliveries:0,returns:0,operatingCosts:0,history:[]};}
  const fleet=()=>[...data().engines,...data().ambulances];
- function stationExit(engine){if(engine.kind==='fire')return{x:850,z:-208+engine.bay*8};const home=loc(engine.homeLocationId)||loc('hospital-central');return parkingPoint(home)||entrance(home);}
- function garage(engine){return engine.kind==='fire'?{x:830,z:-208+engine.bay*8}:engine.home;}
+ const depotFor=e=>depots.find(d=>d.id===e.depotId)||null,countryFor=e=>e.countryId||depotFor(e)?.countryId||COUNTRY_IDS.hansdrex;
+ const accountFor=e=>depotFor(e)?.budget?.()||(!depotFor(e)?raw().treasury:null);
+ const rosterIds=()=>[...new Set([...data().roster,...depots.flatMap(d=>['fire','ambulance'].flatMap(kind=>d.staffIds?.(kind)||[]))])];
+ const countryRouters=new Map();
+ function geometryRevision(){const u=raw().urbanWorld||{};return Object.values(u.buildings||{}).map(b=>`${b.id}:${b.stage}:${b.h}`).join('|')+';'+(u.floods||[]).map(f=>`${f.x},${f.z},${f.depth}`).join('|');}
+ function routeInCountry(from,to,country){if(!countryRouters.has(country))countryRouters.set(country,createVehicleRouter({roads:()=>emergencyRoads(country),underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:geometryRevision,clearSegment:(a,b)=>clearSegment(a,b)&&emergencyCountrySegment(country,a,b)}));return countryRouters.get(country).route(from,to,'car');}
+ function domesticRoute(e,from,to){return routeInCountry(from,to,countryFor(e));}
+ function retreatRoute(e){
+  const home=stationExit(e),own=countryFor(e),foreign=countryAt(e);if(foreign===own)return domesticRoute(e,e,home);
+  const choices=[];for(const port of BORDER_CHECKPOINTS.filter(p=>p.modes.includes('emergency'))){const d=borderDirection(port,own,'car');if(!d||countryAt(d.queuePoint)!==foreign||countryAt(d.admissionPoint)!==own||!clearSegment(d.queuePoint,d.admissionPoint))continue;const a=routeInCountry(e,d.queuePoint,foreign),b=routeInCountry(d.admissionPoint,home,own);if(a.length&&b.length)choices.push([...a,{...d.admissionPoint,y:1.1,mode:'car',stage:'authorized-emergency-return'},...b]);}
+  return choices.sort((a,b)=>routeLength(a,e)-routeLength(b,e))[0]||[];
+ }
+ function routeLength(route,from){let distance=0,p=from;for(const q of route){distance+=dist(p,q);p=q;}return distance;}
+ function allowedMove(e,a,b){if(e.repatriating&&countryAt(a)!==countryFor(e))return countryAt(b)===countryAt(a)||countryAt(b)===countryFor(e);return emergencyCountrySegment(countryFor(e),a,b);}
+ function syncDepots(){
+  const d=data();for(const depot of depots){if(!loc(depot.stationId))continue;for(const spec of depot.definitions?.()||[]){if(fleet().some(e=>e.id===spec.id))continue;const budget=depot.budget?.();if(!budget||Number(budget.cash||0)<spec.purchaseCost)continue;const operator=raw().businesses[depot.operationsAccountId]||={cash:0,inventory:0,sector:'emergency-services',countryId:depot.countryId};budget.cash-=spec.purchaseCost;operator.cash+=spec.purchaseCost;raw().totalTransactions=Number(raw().totalTransactions||0)+1;d.procurementPaid=Number(d.procurementPaid||0)+spec.purchaseCost;const vehicle={...spec,depotId:depot.id,countryId:depot.countryId,owned:true,purchasedAt:now(),phase:'idle',x:spec.home.x,y:1.1,z:spec.home.z,crewIds:[],route:[],routeIndex:0,completedTrips:0,fuel:100,water:spec.kind==='fire'?depot.waterCapacity:0,waterCapacity:spec.kind==='fire'?depot.waterCapacity:0,headingHome:spec.heading||0};(spec.kind==='fire'?d.engines:d.ambulances).push(vehicle);}}
+ }
+ function beginLegacyRetreat(e){if(countryAt(e)===countryFor(e)||e.repatriating)return;e.repatriating=true;e.repatriationStartedAt=now();if(e.kind==='fire')releaseFireDispatch(e);else clearPatient(e,'waiting for the local national ambulance');e.incidentId=null;e.pickup={x:e.x,z:e.z};pickupLocation(e,e.pickup);if(e.crewIds.length){const ready=e.crewIds.every(id=>{const f=alive(id);return f&&!f.traveling&&dist(f,e)<5;});if(ready){board(e,e.crewIds);returnRoute(e);}else gatherForReturn(e);}else{e.phase='awaiting-relief';e.traveling=false;e.route=[];}}
+
+ function stationExit(engine){if(depotFor(engine))return engine.exit||engine.home;if(engine.kind==='fire')return{x:850,z:-208+engine.bay*8};const home=loc(engine.homeLocationId)||loc('hospital-central');return parkingPoint(home)||entrance(home);}
+ function garage(engine){if(depotFor(engine))return engine.home;return engine.kind==='fire'?{x:830,z:-208+engine.bay*8}:engine.home;}
  function pickupLocation(engine,p){const id=`EMERGENCY-PICKUP-${engine.id}`;let l=loc(id);if(!l){l={id,type:'emergency-access',name:engine.kind==='fire'?'Fire engine pickup':'Ambulance pickup',x:p.x,z:p.z};LOCATIONS.push(l);}else Object.assign(l,{x:p.x,z:p.z});return l;}
  function init(){
   const d=data();d.roster||=[];d.history||=[];d.engines||=[];d.ambulances||=[];
@@ -24,30 +45,32 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   raw().businesses||={};raw().businesses['emergency-operations']||={cash:0,inventory:0,sector:'emergency-services'};
   if(!d.engines.length)for(let i=0;i<EMERGENCY_RULES.engines;i++)d.engines.push({id:`FIRE-ENGINE-${i+1}`,kind:'fire',phase:'idle',homeLocationId:'firestation',bay:i,x:830,y:1.1,z:-208+i*8,heading:Math.PI/2,crewIds:[],route:[],routeIndex:0,completedTrips:0,fuel:100});
   if(!d.ambulances.length){const occupied=new Set();for(let i=0;i<EMERGENCY_RULES.ambulances;i++){const id=i?'riverside-clinic':'hospital-central',home=parkingPoint(loc(id)||loc('hospital-central'),occupied)||entrance(loc(id)||loc('hospital-central'));if(home.spaceId)occupied.add(home.spaceId);d.ambulances.push({id:`AMBULANCE-${i+1}`,kind:'ambulance',phase:'idle',homeLocationId:id,bay:i,home:{x:home.x,z:home.z},x:home.x,y:1.1,z:home.z,heading:home.heading||0,crewIds:[],route:[],routeIndex:0,completedTrips:0,fuel:100});}}
+  syncDepots();
   for(const vehicle of fleet()){
+   vehicle.countryId||=COUNTRY_IDS.hansdrex;
    vehicle.crewIds||=[];vehicle.route||=[];if(vehicle.pickup)pickupLocation(vehicle,vehicle.pickup);
    for(const id of vehicle.crewIds){const f=alive(id);if(!f)continue;if(!f.fireEngineDuty){f.fireEngineDuty={vehicleId:vehicle.id,kind:vehicle.kind,phase:vehicle.phase};if(['pullout','enroute','returning','pullin','hospital'].includes(vehicle.phase))f.onFireEngine=vehicle.kind==='fire',f.onAmbulance=vehicle.kind==='ambulance';}}
   }
-  recruit(!d.rosterInitialized);d.rosterInitialized=true;return d;
+  recruit(!d.rosterInitialized);d.rosterInitialized=true;for(const vehicle of fleet())beginLegacyRetreat(vehicle);return d;
  }
  function recruit(force=false){
   const d=data();if(!force&&now()<d.nextRecruitAt)return;d.nextRecruitAt=now()+3600;
-  d.roster=d.roster.filter(id=>{const f=alive(id);return f&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.ageYears>=18&&f.ageYears<76&&['firefighter','paramedic'].includes(f.jobId);});
+  d.roster=d.roster.filter(id=>{const f=alive(id);return f&&(f.citizenshipCountryId||COUNTRY_IDS.hansdrex)===COUNTRY_IDS.hansdrex&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.ageYears>=18&&f.ageYears<76&&['firefighter','paramedic'].includes(f.jobId);});
   for(const [role,target]of [['firefighter',EMERGENCY_RULES.firefighters],['paramedic',EMERGENCY_RULES.paramedics]]){
-   for(const f of raw().flies||[])if(f.alive&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role&&f.ageYears>=18&&f.ageYears<76&&!d.roster.includes(f.id))d.roster.push(f.id);
+   for(const f of raw().flies||[])if(f.alive&&(f.citizenshipCountryId||COUNTRY_IDS.hansdrex)===COUNTRY_IDS.hansdrex&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role&&f.ageYears>=18&&f.ageYears<76&&!d.roster.includes(f.id))d.roster.push(f.id);
    const current=()=>d.roster.filter(id=>alive(id)?.jobId===role).length;
-   const candidates=(raw().flies||[]).filter(f=>f.alive&&f.ageYears>=21&&f.ageYears<66&&f.health>60&&!busy(f,now())&&!isWorkCommitted(f)&&!d.roster.includes(f.id)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!essential.has(f.jobId)&&!f.businessId&&!f.businessEmployeeOf).sort((a,b)=>Number(Boolean(a.jobId))-Number(Boolean(b.jobId))||Number(b.professionSkills?.emergencyCare||b.professionSkills?.fireSafety||0)-Number(a.professionSkills?.emergencyCare||a.professionSkills?.fireSafety||0)||a.id.localeCompare(b.id));
+   const candidates=(raw().flies||[]).filter(f=>f.alive&&(f.citizenshipCountryId||COUNTRY_IDS.hansdrex)===COUNTRY_IDS.hansdrex&&countryAt(f)===COUNTRY_IDS.hansdrex&&f.ageYears>=21&&f.ageYears<66&&f.health>60&&!busy(f,now())&&!isWorkCommitted(f)&&!d.roster.includes(f.id)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!essential.has(f.jobId)&&!f.businessId&&!f.businessEmployeeOf).sort((a,b)=>Number(Boolean(a.jobId))-Number(Boolean(b.jobId))||Number(b.professionSkills?.emergencyCare||b.professionSkills?.fireSafety||0)-Number(a.professionSkills?.emergencyCare||a.professionSkills?.fireSafety||0)||a.id.localeCompare(b.id));
    for(const f of candidates){if(current()>=target)break;const index=current();f.jobId=role;f.jobTitle=role==='firefighter'?'firefighter':'paramedic';f.wage=4.8;f.preferredWorkStart=(index%3)*8;f.preferredWorkHours=8;f.emergencyStationId=role==='firefighter'?'firestation':index%2?'riverside-clinic':'hospital-central';f.professionSkills||={};f.professionSkills[role==='firefighter'?'fireSafety':'emergencyCare']=Math.max(.7,Number(f.professionSkills[role==='firefighter'?'fireSafety':'emergencyCare']||0));d.roster.push(f.id);remember(f,'emergency_service_job',{role,stationId:f.emergencyStationId});emit('emergency_hire',`${f.id} joined the public ${role==='firefighter'?'fire brigade':'ambulance service'}.`,{flyId:f.id,role});}
   }
  }
  function onShift(f,hour){return ((hour-Number(f.preferredWorkStart||0)+24)%24)<8;}
  function atGarage(f,e){const home=loc(e.homeLocationId);return f&&!f.traveling&&home&&dist(f,home)<32;}
  function staff(engine,clock){
-  const role=engine.kind==='fire'?'firefighter':'paramedic',home=loc(engine.homeLocationId);
-  return data().roster.map(alive).filter(f=>f&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role&&!busy(f,now())&&f.health>40&&f.energy>12&&f.hunger<88)
+  const role=engine.kind==='fire'?'firefighter':'paramedic',home=loc(engine.homeLocationId),depot=depotFor(engine),ids=depot?depot.staffIds(engine.kind):data().roster;
+  return ids.map(alive).filter(f=>f&&(countryAt(f)===countryFor(engine)||depot&&f.citizenshipCountryId===countryFor(engine)&&countryAt(f)!==COUNTRY_IDS.hawaii)&&(depot?depot.acceptsStaff(f,engine.kind):!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role)&&!busy({...f,...(depot?{nationalServiceDuty:null,nationalServiceResting:false,publicServiceRole:null}: {})},now())&&f.health>40&&f.energy>12&&f.hunger<88)
    .sort((a,b)=>Number(atGarage(b,engine))-Number(atGarage(a,engine))||dist(a,home)-dist(b,home)||Number(onShift(b,clock.hour))-Number(onShift(a,clock.hour)));
  }
- function driveAccess(from,target){
+ function driveAccess(from,target,e){
   const first=parkingPoint(target);if(!first)return null;
   const best=[first];
   for(const curb of PARKING_SPACES){
@@ -56,54 +79,65 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    if(i<8){best.splice(i,0,curb);if(best.length>8)best.pop();}
   }
   for(const curb of best){
-   const route=pedestrianRoute(from,curb,'car');
-   if(route.length&&route.every((p,i)=>clearSegment(i?route[i-1]:from,p))&&pedestrianRoute(curb,target).length)return {curb,route};
+   const route=e?domesticRoute(e,from,curb):pedestrianRoute(from,curb,'car');
+   if(route.length&&route.every((p,i)=>clearSegment(i?route[i-1]:from,p)&&(!e||emergencyCountrySegment(countryFor(e),i?route[i-1]:from,p)))&&countryAt(curb)===countryAt(target)&&pedestrianRoute(curb,target).length)return {curb,route};
   }
   return null;
  }
  function duty(f,e,phase){f.fireEngineDuty={vehicleId:e.id,kind:e.kind,phase};f.roadDuty=false;f.mobilityShopping=false;f.sleeping=false;f.actionUntil=0;}
  function releaseCrew(f,e){if(!f||f.fireEngineDuty?.vehicleId!==e.id)return;f.fireEngineDuty=null;f.onFireEngine=false;f.onAmbulance=false;if(f.urbanTask?.engineId===e.id)f.urbanTask=null;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;f.actionUntil=now()+600;f.action='returned from an emergency response';}
  function requestJourney(f,id,action,mode){
-  if(startJourney){startJourney(f,{id,action,mode});return;}
+  if(f.onTrain||f.onPlane||f.onPrivateHelicopter||f.heliPassenger)return false;
+  if(startJourney){
+   const e=fleet().find(e=>e.id===(f.fireEngineDuty?.vehicleId||f.ambulanceDuty?.vehicleId)),origin=countryAt(f),own=e&&countryFor(e),commuting=e&&e.phase==='loading'&&id===e.homeLocationId&&f.citizenshipCountryId===own&&origin!==own;
+   // National crews report on the ground. Selecting a new metro transfer here
+   // can strand the only two available responders while a fire grows.
+   if(depotFor(e||{})&&e.phase==='loading'&&id===e.homeLocationId&&!mode)mode='walk';
+   startJourney(f,{id,action,mode});if(e&&f.traveling){let at=f,entered=countryAt(f)===own,valid=true;for(const p of (f.routeWaypoints||[]).slice(f.routeIndex||0)){
+    if(commuting){const a=countryAt(at),b=countryAt(p);if(entered&&b!==own||!entered&&![origin,own].includes(b)||a===b&&!emergencyCountrySegment(a,at,p)){valid=false;break;}if(b===own)entered=true;}
+    else if(!emergencyCountrySegment(e.repatriating?origin:own,at,p)){valid=false;break;}at=p;
+   }if(!valid){f.traveling=false;f.routeWaypoints=[];f.emergencyRouteWait='awaiting a domestic emergency route or lawful staff return';}}
+   return;
+  }
   const p=loc(id);if(!p)return;f.routeWaypoints=pedestrianRoute(f,p);f.routeIndex=0;f.targetLocationId=id;f.traveling=Boolean(f.routeWaypoints.length);f.action=action;
  }
  function startLoading(e,crew){
-  e.crewIds=crew.map(f=>f.id);e.phase='loading';e.loadStartedAt=now();e.loadDeadlineAt=now()+(e.kind==='fire'?3600:6*3600);e.lastAt=now();e.retryRouteAt=0;e.blocked=false;
+  e.crewIds=crew.map(f=>f.id);e.phase='loading';e.loadStartedAt=now();e.loadDeadlineAt=now()+Math.max(e.kind==='fire'?3600:6*3600,Math.min(DAY,Math.max(...crew.map(f=>dist(f,loc(e.homeLocationId))))/2.5*Math.max(1,Number(raw().timeScale||120))*1.5+600));e.lastAt=now();e.retryRouteAt=0;e.blocked=false;
   for(const f of crew){
-   duty(f,e,'gathering');if(e.kind==='fire')f.urbanTask={type:'fire',id:e.incidentId,targetId:`CIVIC-FIRE-${e.incidentId}`,engineId:e.id};
+   depotFor(e)?.onAssign?.(f,e);duty(f,e,'gathering');if(e.kind==='fire')f.urbanTask={type:'fire',id:e.incidentId,targetId:`CIVIC-FIRE-${e.incidentId}`,engineId:e.id};
    if(!atGarage(f,e)&&!(f.traveling&&f.targetLocationId===e.homeLocationId))requestJourney(f,e.homeLocationId,e.kind==='fire'?'reporting to the fire engine garage':'reporting to the ambulance station');
   }
  }
  function dispatchFire(fire,clock){
   if(!enabled()||!fire?.detected||fire.containedAt||fire.engineId||now()<Number(fire.nextDispatchAt||0))return null;
-  const engines=data().engines.filter(v=>v.phase==='idle');if(!engines.length)return null;
+  const targetCountry=countryAt(loc(`CIVIC-FIRE-${fire.id}`)||BUILDINGS.find(b=>b.id===fire.buildingId));const engines=data().engines.filter(v=>v.phase==='idle'&&countryFor(v)===targetCountry);if(!engines.length)return null;
   const target=loc(`CIVIC-FIRE-${fire.id}`)||BUILDINGS.find(b=>b.id===fire.buildingId);if(!target)return null;
   fire.nextDispatchAt=now()+600;
   for(const e of engines){
    const candidates=staff(e,clock).slice(0,EMERGENCY_RULES.crewPerEngine);if(!candidates.length)return null;
    const ready=candidates.filter(f=>atGarage(f,e)),crew=ready.length>=2?ready:candidates;
-   const access=driveAccess(stationExit(e),target);if(!access)continue;
+   const access=driveAccess(stationExit(e),target,e);if(!access)continue;
    const {curb,route}=access;
    Object.assign(e,{incidentId:fire.id,patientId:null,destination:{x:curb.x,z:curb.z},pickup:{x:curb.x,z:curb.z},outboundRoute:route,paidForCall:false,callId:`FIRE-CALL-${fire.id}`});pickupLocation(e,curb);
    fire.engineId=e.id;fire.teamIds=crew.map(f=>f.id);startLoading(e,crew);data().dispatches++;emit('fire_engine_dispatch',`${e.id} was assigned to ${fire.buildingId}; its crew is gathering at the garage.`,{engineId:e.id,fireId:fire.id,crewIds:e.crewIds});return e;
   }
   return null;
  }
- function medicalCandidates(){return people().filter(f=>f.alive&&f.health>0&&f.health<38&&!f.ambulanceDuty&&!f.fireEngineDuty&&!f.onPlane&&!f.onTrain&&!f.privateFlight&&!f.heliPassenger&&!f.cityService&&!f.taxiPassenger&&!f.arrested&&Number(f.nextAmbulanceCallAt||0)<=now()&&!['hospital-central','hospital-east','riverside-clinic'].includes(f.currentLocationId)).sort((a,b)=>a.health-b.health||a.id.localeCompare(b.id));}
+ function medicalCandidates(){return people().filter(f=>f.alive&&f.health>0&&f.health<38&&!f.ambulanceDuty&&!f.fireEngineDuty&&!f.onPlane&&!f.onTrain&&!f.privateFlight&&!f.heliPassenger&&!f.cityService&&!f.taxiPassenger&&!f.arrested&&Number(f.nextAmbulanceCallAt||0)<=now()&&!['hospital-central','hospital-east','riverside-clinic','north-hospital'].includes(f.currentLocationId)).sort((a,b)=>a.health-b.health||a.id.localeCompare(b.id));}
  function dispatchAmbulance(patient,clock){
   if(!enabled()||!patient?.alive||patient.health<=0||patient.ambulanceDuty||patient.onPlane||patient.onTrain||patient.cityService)return null;
-  const e=data().ambulances.filter(v=>v.phase==='idle').sort((a,b)=>dist(a,patient)-dist(b,patient))[0];if(!e)return null;
+  const e=data().ambulances.filter(v=>v.phase==='idle'&&countryFor(v)===countryAt(patient)).sort((a,b)=>dist(a,patient)-dist(b,patient))[0];if(!e)return null;
   const crew=staff(e,clock).slice(0,EMERGENCY_RULES.crewPerAmbulance);if(!crew.length)return null;const curb=parkingPoint(patient);if(!curb)return null;
-  const route=pedestrianRoute(stationExit(e),curb,'car');if(!route.length)return null;
+  const route=domesticRoute(e,stationExit(e),curb);if(!route.length)return null;
   const callId=`MEDICAL-${data().nextCall++}`;Object.assign(e,{incidentId:null,patientId:patient.id,pickup:{x:curb.x,z:curb.z},destination:{x:curb.x,z:curb.z},outboundRoute:route,callId,paidForCall:false});pickupLocation(e,curb);
   patient.ambulanceDuty={vehicleId:e.id,phase:'waiting',calledAt:now()};patient.onAmbulance=false;patient.traveling=false;patient.routeWaypoints=[];patient.onTrain=false;patient.sleeping=false;patient.action='waiting for the ambulance';patient.actionUntil=0;patient.nextAmbulanceCallAt=now()+DAY;
   startLoading(e,crew,clock);data().medicalDispatches++;emit('ambulance_dispatch',`${e.id} was dispatched for ${patient.id}.`,{ambulanceId:e.id,patientId:patient.id,crewIds:e.crewIds});return e;
  }
  function payOperatingCost(e){
-  if(e.paidForCall)return true;const account=raw().businesses['emergency-operations'],refill=Number(e.fuel||0)<5,cost=(e.kind==='fire'?6:4)+Number(e.operatingDebt||0)+(refill?20:0);
-  const available=Math.max(0,Number(raw().treasury?.cash||0));if(refill&&available<cost){e.delayReason='awaiting public fuel funding';return false;}
-  const paid=Math.min(cost,available);if(paid>0){raw().treasury.cash-=paid;account.cash+=paid;raw().totalTransactions=Number(raw().totalTransactions||0)+1;data().operatingCosts+=paid;}
-  e.operatingDebt=Math.max(0,cost-paid);e.paidForCall=true;e.fuel=Math.max(0,(refill?100:Number(e.fuel||100))-5);e.delayReason=null;return true;
+  if(e.paidForCall)return true;const depot=depotFor(e),account=raw().businesses[depot?.operationsAccountId||'emergency-operations'],refill=Number(e.fuel||0)<5,water=Math.max(0,Number(e.waterCapacity||0)-Number(e.water||0)),cost=(e.kind==='fire'?6:4)+Number(e.operatingDebt||0)+(refill?20:0)+(depot?water*.02:0),budget=accountFor(e);
+  const available=Math.max(0,Number(budget?.cash||0));if((refill||depot)&&available<cost){e.delayReason='awaiting national fuel and water funding';return false;}
+  const paid=Math.min(cost,available);if(paid>0){budget.cash-=paid;account.cash+=paid;raw().totalTransactions=Number(raw().totalTransactions||0)+1;data().operatingCosts+=paid;}
+  e.operatingDebt=Math.max(0,cost-paid);e.paidForCall=true;e.fuel=Math.max(0,(refill?100:Number(e.fuel||100))-5);if(depot)e.water=Number(e.water||0)+water;e.delayReason=null;return true;
  }
  function setRoute(e,route,phase){e.alive=true;e.emergency=true;e.signalPermit=true;e.speed=EMERGENCY_RULES.speed;e.transitMode='car';e.route=route;e.routeIndex=0;e.phase=phase;e.traveling=Boolean(route.length);e.targetX=route[0]?.x??e.x;e.targetZ=route[0]?.z??e.z;e.blocked=false;e.lastRouteAt=now();e.lastProgressAt=now();e.retryRouteAt=0;}
  function moveVehicle(e,dt,index){
@@ -114,7 +148,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    const speed=EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e);e.speed=speed;
    let step=Math.min(len,time*speed);const ux=dx/len,uz=dz/len;
    if(index){const limit=index({...e,alive:true,traveling:true,transitMode:'car'},{x:e.x+ux*step,z:e.z+uz*step});if(limit<step){step=limit;e.blocked=true;}}
-   const target={x:e.x+ux*step,z:e.z+uz*step};if(!clearSegment(e,target)){e.blocked=true;break;}
+   const target={x:e.x+ux*step,z:e.z+uz*step};if(!clearSegment(e,target)||!allowedMove(e,e,target)){e.blocked=true;break;}
    e.heading=Math.atan2(dx,dz);e.x=target.x;e.z=target.z;e.y+=(Number(p.y??1.1)-Number(e.y||1.1))*Math.min(1,step/len);time-=step/speed;if(e.blocked)break;if(step>=len-.001)e.routeIndex++;
   }
   e.traveling=e.routeIndex<e.route.length;return !e.traveling;
@@ -125,16 +159,16 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   const point=e.pickup||{x:e.x,z:e.z};pickupLocation(e,point);e.phase='gathering-return';e.gatherStartedAt=now();
   for(const id of e.crewIds){const f=alive(id);if(!f)continue;f.onFireEngine=false;f.onAmbulance=false;f.urbanTask=null;duty(f,e,'gathering-return');requestJourney(f,`EMERGENCY-PICKUP-${e.id}`,'returning to the emergency vehicle','walk');}
  }
- function returnRoute(e){if(e.retryRouteAt>now())return false;const home=stationExit(e);if(dist(e,home)<.6){if(e.kind==='fire'){e.phase='pullin';e.phaseStartedAt=now();}else finishReturn(e);return true;}const route=pedestrianRoute(e,home,'car');if(!route.length){e.blocked=true;e.phase='awaiting-route';e.traveling=false;e.retryRouteAt=now()+600;return false;}setRoute(e,route,'returning');return true;}
+ function returnRoute(e){if(e.retryRouteAt>now())return false;const home=stationExit(e);if(dist(e,home)<.6){if(e.kind==='fire'){e.phase='pullin';e.phaseStartedAt=now();}else finishReturn(e);return true;}const route=e.repatriating?retreatRoute(e):domesticRoute(e,e,home);if(!route.length){e.blocked=true;e.phase='awaiting-route';e.traveling=false;e.retryRouteAt=now()+600;return false;}setRoute(e,route,'returning');return true;}
  function clearPatient(e,reason='cancelled'){const p=actor(e.patientId);if(p?.ambulanceDuty?.vehicleId===e.id){p.ambulanceDuty=null;p.onAmbulance=false;p.actionUntil=now()+600;p.nextAmbulanceCallAt=Math.max(Number(p.nextAmbulanceCallAt||0),now()+3600);p.action=reason;}e.patientId=null;}
  function finishReturn(e){
-  const home=garage(e);Object.assign(e,{x:home.x,z:home.z,y:1.1,phase:'idle',traveling:false,route:[],routeIndex:0,heading:e.kind==='fire'?Math.PI/2:0,emergency:false,completedTrips:Number(e.completedTrips||0)+1});
-  for(const id of e.crewIds){const f=alive(id);if(!f)continue;Object.assign(f,{x:loc(e.homeLocationId)?.x??home.x,z:loc(e.homeLocationId)?.z??home.z,y:1.1,currentLocationId:e.homeLocationId,targetLocationId:e.homeLocationId,indoors:true});releaseCrew(f,e);remember(f,'emergency_response_return',{vehicleId:e.id,callId:e.callId});}
+  const home=garage(e);Object.assign(e,{x:home.x,z:home.z,y:1.1,phase:'idle',traveling:false,route:[],routeIndex:0,heading:depotFor(e)?(e.headingHome??e.heading):e.kind==='fire'?Math.PI/2:0,emergency:false,repatriating:false,completedTrips:Number(e.completedTrips||0)+1});
+  for(const id of e.crewIds){const f=alive(id);if(!f)continue;Object.assign(f,{x:depotFor(e)?home.x:loc(e.homeLocationId)?.x??home.x,z:depotFor(e)?home.z:loc(e.homeLocationId)?.z??home.z,y:1.1,currentLocationId:e.homeLocationId,targetLocationId:e.homeLocationId,indoors:true});releaseCrew(f,e);remember(f,'emergency_response_return',{vehicleId:e.id,callId:e.callId});}
   data().returns++;data().history.push({id:e.callId,kind:e.kind,vehicleId:e.id,returnedAt:now()});data().history=data().history.slice(-24);clearPatient(e,'arrived at hospital');e.crewIds=[];e.incidentId=null;e.callId=null;e.destination=null;e.pickup=null;e.paidForCall=false;
  }
- function nearestHospital(p){return ['hospital-central','hospital-east','riverside-clinic'].map(loc).filter(l=>l&&!raw().urbanWorld?.fires?.some(f=>f.buildingId===l.id&&!f.containedAt)&&(!raw().urbanWorld?.buildings?.[l.id]||raw().urbanWorld.buildings[l.id].stage==='operational')).sort((a,b)=>dist(a,p)-dist(b,p))[0];}
- function beginHospital(e){if(e.retryRouteAt>now())return;const p=alive(e.patientId),hospital=p&&nearestHospital(p);if(!p||!hospital){clearPatient(e,'medical transport unavailable');returnRoute(e);return;}
-  const curb=parkingPoint(hospital),route=curb&&pedestrianRoute(e,curb,'car');if(!route?.length){e.blocked=true;e.retryRouteAt=now()+600;return;}
+ function nearestHospital(p,e){return ['hospital-central','hospital-east','riverside-clinic','north-hospital'].map(loc).filter(l=>l&&countryAt(l)===countryFor(e)&&!raw().urbanWorld?.fires?.some(f=>f.buildingId===l.id&&!f.containedAt)&&(!raw().urbanWorld?.buildings?.[l.id]||raw().urbanWorld.buildings[l.id].stage==='operational')).sort((a,b)=>dist(a,p)-dist(b,p))[0];}
+ function beginHospital(e){if(e.retryRouteAt>now())return;const p=alive(e.patientId),hospital=p&&nearestHospital(p,e);if(!p||!hospital){clearPatient(e,'medical transport unavailable');returnRoute(e);return;}
+  const curb=parkingPoint(hospital),route=curb&&domesticRoute(e,e,curb);if(!route?.length){e.blocked=true;e.retryRouteAt=now()+600;return;}
   p.onAmbulance=true;p.ambulanceDuty.phase='riding';p.traveling=false;p.routeWaypoints=[];p.indoors=false;e.hospitalId=hospital.id;e.hospitalCurb=curb;setRoute(e,route,'hospital');placeRiders(e);
  }
  function releaseFireDispatch(e){
@@ -154,12 +188,12 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   // closes or a queue hasn't moved for an extended time.
   if(!blocked&&now()-e.lastProgressAt<3600)return;
   if(phase==='returning'){
-   const route=pedestrianRoute(e,stationExit(e),'car');if(route.length&&route.every((p,i)=>clearSegment(i?route[i-1]:e,p)))setRoute(e,route,phase);
+   const route=e.repatriating?retreatRoute(e):domesticRoute(e,e,stationExit(e));if(route.length&&route.every((p,i)=>clearSegment(i?route[i-1]:e,p)))setRoute(e,route,phase);
    return;
   }
   const target=phase==='hospital'?loc(e.hospitalId):e.kind==='fire'?loc(`CIVIC-FIRE-${e.incidentId}`):alive(e.patientId);
   if(!target)return;
-  const access=driveAccess(e,target);if(!access)return;
+  const access=driveAccess(e,target,e);if(!access)return;
   const {curb,route}=access;
   if(phase==='hospital')e.hospitalCurb=curb;
   else{e.pickup=e.destination={x:curb.x,z:curb.z};pickupLocation(e,curb);}
@@ -174,8 +208,8 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    const fire=e.kind==='fire'?fires().find(f=>f.id===e.incidentId):null;
    if(e.kind==='fire'&&(!fire||fire.containedAt)){resetLoading(e);return;}
    const arrived=e.crewIds.filter(id=>atGarage(alive(id),e));
-   const waited=now()-Number(e.loadStartedAt||0),expired=now()>=e.loadDeadlineAt||(e.kind==='fire'&&waited>=3600);
-   if(arrived.length&&(arrived.length===e.crewIds.length||expired||(e.kind==='fire'&&waited>=360))){
+   const waited=now()-Number(e.loadStartedAt||0),expired=now()>=e.loadDeadlineAt;
+   if(arrived.length>=(e.kind==='fire'?Number(depotFor(e)?.minimumFireCrew||1):1)&&(arrived.length===e.crewIds.length||expired||(e.kind==='fire'&&waited>=360))){
     if(!payOperatingCost(e))return;
     for(const id of e.crewIds)if(!arrived.includes(id))releaseCrew(alive(id),e);
     e.crewIds=arrived;if(fire)fire.teamIds=[...arrived];board(e,arrived);e.phase=e.kind==='fire'?'pullout':'enroute';e.phaseStartedAt=now();
@@ -189,7 +223,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    return;
   }
   if(e.phase==='pullout'){
-   const a=garage(e),b=stationExit(e),u=cap((now()-e.phaseStartedAt)/300,0,1);e.x=a.x+(b.x-a.x)*u;e.z=a.z+(b.z-a.z)*u;e.y=1.1;e.heading=Math.PI/2;placeRiders(e);if(u>=1)setRoute(e,e.outboundRoute,'enroute');return;
+   const a=garage(e),b=stationExit(e),u=cap((now()-e.phaseStartedAt)/300,0,1);e.x=a.x+(b.x-a.x)*u;e.z=a.z+(b.z-a.z)*u;e.y=1.1;e.heading=depotFor(e)?Math.atan2(b.x-a.x,b.z-a.z):Math.PI/2;placeRiders(e);if(u>=1)setRoute(e,e.outboundRoute,'enroute');return;
   }
   if(['enroute','returning','hospital'].includes(e.phase)){
    const phase=e.phase,x=e.x,z=e.z,arrived=moveVehicle(e,dt,index);placeRiders(e);
@@ -231,7 +265,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    }
    if(!fire.engineId)dispatchFire(fire,clock);
   }
-  if(now()>=d.nextMedicalCheckAt){d.nextMedicalCheckAt=now()+300;for(const p of medicalCandidates().slice(0,EMERGENCY_RULES.ambulances))dispatchAmbulance(p,clock);}
+  if(now()>=d.nextMedicalCheckAt){d.nextMedicalCheckAt=now()+300;for(const p of medicalCandidates()){if(!d.ambulances.some(e=>e.phase==='idle'))break;dispatchAmbulance(p,clock);}}
   const index=createVehicleIndex([...(raw().flies||[]),...fleet().map(e=>({...e,alive:true,transitMode:'car',traveling:['enroute','returning','hospital'].includes(e.phase)}))]);
   for(const e of fleet())tickVehicle(e,dt,clock,index);
  }
@@ -241,12 +275,35 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   if(!enabled()||!f.alive)return false;
   if(f.ambulanceDuty){const e=fleet().find(e=>e.id===f.ambulanceDuty.vehicleId);if(!e){f.ambulanceDuty=null;f.onAmbulance=false;return false;}if(!f.onAmbulance&&f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}care(f,clock);if(f.onAmbulance){f.action='being transported by ambulance';f.sleeping=false;}return true;}
   if(!f.fireEngineDuty)return false;const e=fleet().find(e=>e.id===f.fireEngineDuty.vehicleId);if(!e){f.fireEngineDuty=null;f.onFireEngine=f.onAmbulance=false;return false;}
-  if(e.phase==='on-scene'&&e.kind==='fire')return false;
+  if(e.phase==='on-scene'&&e.kind==='fire'){if(!depotFor(e))return false;if(f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}else if(f.urbanTask?.targetId&&dist(f,loc(f.urbanTask.targetId))>12)requestJourney(f,f.urbanTask.targetId,'deploying hoses at the fire','walk');care(f,clock);f.action=f.traveling?'deploying hoses at the fire':'operating the national fire engine hose';return true;}
   if(!f.onFireEngine&&!f.onAmbulance&&f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}care(f,clock);f.action=f.onFireEngine||f.onAmbulance?'riding an emergency vehicle':e.phase==='loading'?'reporting to the emergency garage':'returning to the emergency vehicle';return true;
  }
+ function managesCountry(country){return enabled()&&data().engines.some(e=>countryFor(e)===country&&e.owned!==false);}
+ function fundingAccount(fire){const e=data().engines.find(e=>e.id===fire.engineId);return e?accountFor(e):raw().treasury;}
+ function consumeWater(fire,onsite,dt){const e=data().engines.find(e=>e.id===fire.engineId),depot=e&&depotFor(e);if(!depot)return null;const crew=onsite.filter(f=>e.crewIds.includes(f.id)),water=e.phase==='on-scene'?Math.min(Number(e.water||0),crew.length*dt*.12):0;e.water=Math.max(0,Number(e.water||0)-water);e.waterUsed=Number(e.waterUsed||0)+water;depot.onWaterUsed?.(water);return {water};}
  function snapshot(){
-  const d=data(),project=e=>({id:e.id,kind:e.kind,phase:e.phase,homeLocationId:e.homeLocationId,x:e.x,y:e.y,z:e.z,heading:e.heading,crewIds:e.crewIds,incidentId:e.incidentId||null,patientId:e.patientId||null,completedTrips:e.completedTrips,emergency:e.phase!=='idle',signalPermit:true,traveling:['enroute','hospital','returning'].includes(e.phase),transitMode:'car',targetX:e.targetX,targetZ:e.targetZ,motion:{at:now(),speed:EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e),mode:'car',signalPermit:true,blocked:Boolean(e.blocked),points:(e.route||[]).slice(e.routeIndex||0,(e.routeIndex||0)+12).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}});
-  return {enabled:enabled(),stationId:'firestation',speed:EMERGENCY_RULES.speed,roster:d.roster.map(id=>{const f=alive(id);return f?{id:f.id,role:f.jobId,stationId:f.emergencyStationId,onDuty:Boolean(f.fireEngineDuty),shiftStart:f.preferredWorkStart}:null;}).filter(Boolean),engines:d.engines.map(project),ambulances:d.ambulances.map(project),dispatches:d.dispatches,medicalDispatches:d.medicalDispatches,hospitalDeliveries:d.hospitalDeliveries,returns:d.returns,operatingCosts:d.operatingCosts,history:d.history.slice(-12)};
+  const d=data(),project=e=>({id:e.id,kind:e.kind,phase:e.phase,homeLocationId:e.homeLocationId,x:e.x,y:e.y,z:e.z,heading:e.heading,crewIds:e.crewIds,incidentId:e.incidentId||null,patientId:e.patientId||null,completedTrips:e.completedTrips,countryId:countryFor(e),owned:e.owned!==false,water:e.water,waterCapacity:e.waterCapacity,emergency:e.phase!=='idle',signalPermit:true,traveling:['enroute','hospital','returning'].includes(e.phase),transitMode:'car',targetX:e.targetX,targetZ:e.targetZ,motion:{at:now(),speed:EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e),mode:'car',signalPermit:true,blocked:Boolean(e.blocked),points:(e.route||[]).slice(e.routeIndex||0,(e.routeIndex||0)+12).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}});
+  return {enabled:enabled(),stationId:'firestation',speed:EMERGENCY_RULES.speed,roster:rosterIds().map(id=>{const f=alive(id);return f?{id:f.id,role:f.jobId,stationId:f.emergencyStationId,onDuty:Boolean(f.fireEngineDuty),shiftStart:f.preferredWorkStart}:null;}).filter(Boolean),engines:d.engines.map(project),ambulances:d.ambulances.map(project),dispatches:d.dispatches,medicalDispatches:d.medicalDispatches,hospitalDeliveries:d.hospitalDeliveries,returns:d.returns,operatingCosts:d.operatingCosts,history:d.history.slice(-12)};
  }
- return {enabled,init,tick,handleResident,snapshot,dispatchFire,dispatchAmbulance};
+ return {enabled,init,tick,handleResident,snapshot,dispatchFire,dispatchAmbulance,managesCountry,consumeWater,fundingAccount};
+}
+
+
+/** A same-country segment cannot use the other mainland as a road shortcut. */
+export function emergencyCountrySegment(country,a,b){
+ if(!a||!b||countryAt(a)!==country||countryAt(b)!==country)return false;
+ const cuts=[0,1];for(const [axis,value]of [['x',430],['z',-570]]){const delta=b[axis]-a[axis];if(Math.abs(delta)>1e-8){const t=(value-a[axis])/delta;if(t>0&&t<1)cuts.push(t);}}
+ cuts.sort((a,b)=>a-b);for(let i=1;i<cuts.length;i++){const t=(cuts[i-1]+cuts[i])/2;if(countryAt({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t})!==country)return false;}return true;
+}
+
+
+/** Cut border-spanning graph edges at the actual boundary, retaining legal
+ * approaches on both banks instead of deleting a whole long road segment. */
+function emergencyRoads(country){
+ const result=[],add=(r,minX,maxX,minZ,maxZ)=>{if(maxX-minX>.15&&maxZ-minZ>.15)result.push({...r,x:(minX+maxX)/2,z:(minZ+maxZ)/2,w:maxX-minX,d:maxZ-minZ});};
+ for(const r of ROADS){const x1=r.x-r.w/2,x2=r.x+r.w/2,z1=r.z-r.d/2,z2=r.z+r.d/2;
+  if(country===COUNTRY_IDS.north)add(r,x1,Math.min(x2,429.95),z1,Math.min(z2,-570.05));
+  else{add(r,x1,x2,Math.max(z1,-570),z2);add(r,Math.max(x1,430),x2,z1,Math.min(z2,-570));}
+ }
+ return result;
 }

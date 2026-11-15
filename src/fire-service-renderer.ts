@@ -3,6 +3,7 @@ import {CityMotion} from './city-motion.ts';
 import type {FireServiceSnapshot,EmergencyVehicle} from '../worker/fire-service.mjs';
 type Sign=(text:string,fontSize?:number,scale?:number)=>THREE.Sprite;
 const boxGeometry=new THREE.BoxGeometry(1,1,1);
+export const EMERGENCY_VISUAL_CAPACITY=7;
 /** Open-front three-bay French fire workshop. Parking and dispatch use these same bay coordinates. */
 export function buildFireStation(root:THREE.Group,makeSign?:Sign){
  const g=new THREE.Group();g.position.set(830,0,-200);root.add(g);
@@ -27,7 +28,7 @@ export function buildFireStation(root:THREE.Group,makeSign?:Sign){
 }
 
 type VehicleVisual={motion:CityMotion;hasMotion:boolean;x:number;y:number;z:number;heading:number;data:EmergencyVehicle};
-/** Five vehicles share eight instanced batches. Sirens and wheels never run on the server. */
+/** Seven actual vehicles share eight instanced batches. Sirens and wheels never run on the server. */
 export class FireServiceRenderer{
  private root=new THREE.Group();
  private vehicles=new Map<string,VehicleVisual>();
@@ -36,17 +37,17 @@ export class FireServiceRenderer{
  private elapsed=0;
  constructor(scene:THREE.Object3D){
   scene.add(this.root);const batch=(geometry:THREE.BufferGeometry,material:THREE.Material,capacity:number)=>{const m=new THREE.InstancedMesh(geometry,material,capacity);m.count=0;m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.frustumCulled=false;this.root.add(m);return m;};
-  this.body=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.43,metalness:.18}),5);
-  this.cabin=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.4,metalness:.2}),5);
-  this.glass=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0x81b6c8,roughness:.22,metalness:.25}),5);
-  this.wheels=batch(new THREE.CylinderGeometry(.43,.43,.25,10),new THREE.MeshStandardMaterial({color:0x20282a,roughness:.95}),30);
-  this.trim=batch(boxGeometry,new THREE.MeshBasicMaterial({color:0xe9e6d5}),70);
-  this.red=batch(new THREE.SphereGeometry(.19,8,6),new THREE.MeshBasicMaterial({color:0xff3a30,toneMapped:false}),5);
-  this.blue=batch(new THREE.SphereGeometry(.19,8,6),new THREE.MeshBasicMaterial({color:0x4489ff,toneMapped:false}),5);
-  this.equipment=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0x869497,roughness:.45,metalness:.6}),50);
+  this.body=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.43,metalness:.18}),EMERGENCY_VISUAL_CAPACITY);
+  this.cabin=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.4,metalness:.2}),EMERGENCY_VISUAL_CAPACITY);
+  this.glass=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0x81b6c8,roughness:.22,metalness:.25}),EMERGENCY_VISUAL_CAPACITY);
+  this.wheels=batch(new THREE.CylinderGeometry(.43,.43,.25,10),new THREE.MeshStandardMaterial({color:0x20282a,roughness:.95}),EMERGENCY_VISUAL_CAPACITY*6);
+  this.trim=batch(boxGeometry,new THREE.MeshBasicMaterial({color:0xe9e6d5}),EMERGENCY_VISUAL_CAPACITY*14);
+  this.red=batch(new THREE.SphereGeometry(.19,8,6),new THREE.MeshBasicMaterial({color:0xff3a30,toneMapped:false}),EMERGENCY_VISUAL_CAPACITY);
+  this.blue=batch(new THREE.SphereGeometry(.19,8,6),new THREE.MeshBasicMaterial({color:0x4489ff,toneMapped:false}),EMERGENCY_VISUAL_CAPACITY);
+  this.equipment=batch(boxGeometry,new THREE.MeshStandardMaterial({color:0x869497,roughness:.45,metalness:.6}),EMERGENCY_VISUAL_CAPACITY*10);
  }
  sync(data:FireServiceSnapshot){
-  const active=new Set<string>();for(const e of [...(data.engines||[]),...(data.ambulances||[])]){
+  const active=new Set<string>();for(const e of [...(data.engines||[]),...(data.ambulances||[])].slice(0,EMERGENCY_VISUAL_CAPACITY)){
    active.add(e.id);let v=this.vehicles.get(e.id);if(!v){v={motion:new CityMotion(),hasMotion:false,x:e.x,y:e.y,z:e.z,heading:e.heading,data:e};this.vehicles.set(e.id,v);}v.data=e;v.hasMotion=Boolean(e.traveling&&e.motion.points.length);if(v.hasMotion)v.motion.accept(e,e.motion);
   }
   for(const id of this.vehicles.keys())if(!active.has(id))this.vehicles.delete(id);

@@ -4,6 +4,7 @@ import {createCivicFacilityOperations} from './civic-facilities.mjs';
 import {INDUSTRIAL_RESERVED} from './industry-map.mjs';
 import {GOVERNMENT_RESERVED} from './government-map.mjs';
 import {createFireService} from './fire-service.mjs';
+import {createNorthFireDepot} from './north-fire-service.mjs';
 import {restoreInitialFireDamage} from './urban-restoration.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import * as cityGeometry from './city-map.mjs';
@@ -19,7 +20,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  let byId=new Map();
  const people=()=>[...world().flies,...(world().cityVisitors?.visitors||[]).filter(v=>v.alive&&!v.departed)];
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0),u=()=>raw().urbanWorld;
- const fireService=createFireService({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted});
+ const fireService=createFireService({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted,depots:[createNorthFireDepot({world})]});
  const facilityOperations=createCivicFacilityOperations({world,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance});
  const roll=()=>{const sample=raw().flies.find(f=>f.alive&&f.brain);return sample?random(sample):.5;};
  const report=(type,text,payload={})=>emit(type,text,payload);
@@ -125,12 +126,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   if(fire.detected)crewFor(fire,'fire',b,4);
   const onsite=fire.teamIds.map(id=>byId.get(id)).filter(f=>!f?.onFireEngine&&(!f?.fireEngineDuty||f.fireEngineDuty.phase==='on-scene')&&present(f,`CIVIC-FIRE-${fire.id}`));
-  const water=Math.min(u().safety.water,onsite.length*dt*.12);u().safety.water-=water;fire.waterUsed+=water;
+  const supply=fireService.consumeWater(fire,onsite,dt),water=supply?supply.water:Math.min(u().safety.water,onsite.length*dt*.12);if(!supply)u().safety.water-=water;fire.waterUsed+=water;
   const suppression=water*.09;fire.intensity=clamp(fire.intensity+dt*.0016-suppression,0,100);
   const loss=dt*(fire.intensity/100)*.0018;b.health=clamp(b.health-loss);b.lastDamageAt=now();
   if(b.health<18&&b.stage!=='collapsed'){setStage(b,'collapsed');report('building_collapsed',`${b.id} collapsed after fire damage. The site remains blocked until cleared.`,{buildingId:b.id,incidentId:fire.id});}
   else if(b.health<60&&b.stage==='operational')setStage(b,'unsafe');
-  if(onsite.length){const funding=transfer(raw().treasury,account('civic-escrow'),dt*14/3600);payCrew(onsite.map(f=>f.id),14,dt,funding);}
+  if(onsite.length){const source=fireService.fundingAccount(fire),funding=source?transfer(source,account('civic-escrow'),dt*14/3600):0;payCrew(onsite.map(f=>f.id),14,dt,funding);}
   if(!fire.spreadAttempted&&now()>=fire.spreadAttemptAt&&fire.intensity>75&&u().fires.length<MAX_FIRES){
    fire.spreadAttempted=true;const nearest=BUILDINGS.filter(other=>other.id!==b.id&&!u().fires.some(f=>f.buildingId===other.id)&&Math.hypot(other.x-b.x,other.z-b.z)<22&&other.kind!=='landmark').sort((a,c)=>Math.hypot(a.x-b.x,a.z-b.z)-Math.hypot(c.x-b.x,c.z-b.z))[0];
    if(nearest&&roll()<.18+Number(raw().weather?.wind||0)*.2)ignite(nearest.id,'spread from a nearby fire');
