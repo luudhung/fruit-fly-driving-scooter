@@ -1,4 +1,4 @@
-export type DistrictProfile={id:string;name:string;focus:string;wage:number;housing:number;property:number;food:number;living:number;pollution:number;amenities:number};
+export type DistrictProfile={id:string;name:string;focus:string;wage:number;housing:number;property:number;food:number;living:number;pollution:number;amenities:number;bustle:number};
 export const DISTRICT_PROFILES:Record<string,DistrictProfile>;
 export function districtAt(point?:{x?:number;z?:number;homeX?:number;homeZ?:number}):string;
 export function districtProfile(point:string|{x?:number;z?:number;homeX?:number;homeZ?:number}):DistrictProfile;

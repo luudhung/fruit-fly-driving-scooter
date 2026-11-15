@@ -1,3 +1,4 @@
+import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {createSpaceProgram} from './space-program.mjs';
 import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
@@ -63,7 +64,13 @@ const VERSION = {
 const planMetroRoute=planNetworkMetroRoute;
 
 
+const MAIN_EMPLOYMENT_TARGET=.8;
+const CENTRAL_RECRUITMENT='interviewing for a Main City job';
+const LOCAL_JOB_FLOORS={'riverside-office':4,'riverside-hotel':12,'riverside-market':3,'riverside-cafe':2,'marina-bay-day':3,'marina-bay-evening':3,'marina-bay-night':3};
+const CENTRAL_DAY_JOBS=new Set(['office','lab','central-finance','central-technology']);
 const JOBS = [
+  {id:'central-finance',locationId:'office',title:'financial operations analyst',wage:7.1,shiftStart:8,shiftEnd:16,publicOnly:true},
+  {id:'central-technology',locationId:'lab',title:'technology services specialist',wage:7.4,shiftStart:9,shiftEnd:17,publicOnly:true},
   {id:'spaceworks-engineer',locationId:'spaceworks-assembly',title:'Spaceworks assembly engineer',wage:8.2,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
   {id:'spaceworks-operations',locationId:'spaceworks-control',title:'Spaceworks mission controller',wage:8.6,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
   {id:'military',locationId:'military-base',title:'army service member',wage:6.6,shiftStart:0,shiftEnd:8,publicOnly:true},
@@ -518,7 +525,10 @@ const spaceProgram=createSpaceProgram({...cityServices,isUnavailable:(id,f)=>urb
 const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
 const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
 const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
-const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
+const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,
+ schoolOpen:(id,clock)=>!urbanWorld.isUnavailable(id)&&Boolean(teacherAtSchool(id,clock)),
+ studyAtSchool:(f,clock)=>educationTick(f,clock,activeGameStepSeconds),
+aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestAirClearance:request=>countries.requestAirClearance(request)});
 const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld,recordViolation:recordLawViolation});
 const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld,freightProviders:()=>[countries.economy.freightProvider],countryAccount:id=>countries.countryAccount(id),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options)});
@@ -563,6 +573,7 @@ function specialActivity(f,clock){
 }
 function finishSpecialActivity(f,clock){
   // Committed civic work, shelter and leisure must not suspend the resident's life.
+  if(f.action==='attending a community school')educationTick(f,clock,activeGameStepSeconds);
   applyPowerEffects(f,clock);updateSocialClass(f);completePregnancy(f);
   mentalHealthAndMortality(f);if(f.alive)regulateEmotions(f,clock);
   f.movementTrace=[...(f.movementTrace||[]),{x:f.x,y:f.y,z:f.z,t:state.simulationAgeSeconds}].slice(-8);
@@ -1962,6 +1973,7 @@ function ensureCognitiveProfile(fly){
 function residentWorkSchedule(fly,baseJob){
   ensureCognitiveProfile(fly);
   if(GRID_JOB_IDS.has(fly.jobId))return {start:Number(fly.gridShiftStart??baseJob?.shiftStart??6),hours:8};
+  if(CENTRAL_DAY_JOBS.has(fly.jobId))return {start:8+(Number(fly.brain?.seed||0)%6)*.25,hours:8};
   const essential=['police','doctor','hospital-central','hospital-east','transit','firefighter','paramedic'].includes(fly.jobId);
   const baseStart=Number(baseJob?.shiftStart??fly.preferredWorkStart),brainStart=Number(fly.preferredWorkStart);
   return {start:essential?Math.round(baseStart*.72+brainStart*.28)%24:brainStart,hours:essential?Math.max(7,Number(fly.preferredWorkHours||8)):Number(fly.preferredWorkHours||8)};
@@ -1977,7 +1989,8 @@ function workCommitment(fly,clock){
   const {start,hours}=residentWorkSchedule(fly,job),until=(start-nowHour+24)%24;
   const distance=Math.hypot(location(job.locationId).x-fly.x,location(job.locationId).z-fly.z);
   const commuteHours=Math.min(4,Math.max(.5,distance/85+.5));
-  return {job,onShift,essential,soon:essential&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
+  const commuter=CENTRAL_DAY_JOBS.has(job.id)&&districtAt({x:fly.homeX,z:fly.homeZ})!=='main';
+  return {job,onShift,essential,commuter,start,soon:(essential||commuter)&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
 }
 function isWorkCommitted(f){
   if(f.industrialFreightDuty||f.facilityEmployment||f.countryAirTrip||f.countryFlightPlan||f.internationalFreightDuty||f.nationalSupplyTask||f.nationalTrainingFlightId||f.warResponse?.active)return true;
@@ -1985,7 +1998,7 @@ function isWorkCommitted(f){
   if(f.nationalServiceDuty)return true;
   if(f.publicServiceRole&&(f.publicServiceDuty||f.militaryFlightId||publicServices.onShift(f,gameClock())))return true;
   const duty=workCommitment(f,gameClock());
-  return Boolean(duty?.essential&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
+  return Boolean(duty&&(duty.essential||duty.commuter)&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
 }
 function academyTeacher(){
   const id=state.education?.teacherId;
@@ -2020,8 +2033,23 @@ function ensureAcademyTeacher(force=false){
   });
   return current;
 }
+function teacherAtSchool(id,clock){
+  if(id==='north-school')return nationalServices.roster('education').find(f=>f.alive&&!f.traveling&&f.nationalServiceDuty?.targetId===id&&f.currentLocationId===id);
+  if(id==='school'||id==='riverside-school'){
+    const teacher=id==='school'?ensureAcademyTeacher():state.flies.find(f=>f.alive&&f.jobId===id&&!f.traveling&&f.currentLocationId===id);
+    return teacher?.alive&&!teacher.traveling&&teacher.indoors&&teacher.currentLocationId===id&&/teaching|^working/.test(teacher.action||'')?teacher:null;
+  }
+  const now=state.simulationAgeSeconds;
+  return state.flies.find(f=>{
+    const job=f.facilityEmployment;
+    return f.alive&&!f.traveling&&f.indoors&&f.currentLocationId===id&&job?.buildingId===id&&job.wasPresent&&job.lastPaidAt>=0&&job.lastPaidAt>=now-1800&&(clock.hour-job.shiftStart+24)%24<8;
+  });
+}
 function localSchool(fly){
-  return economicCountryAt(fly)==='north-city'?'north-school':fly.homeX>480?'riverside-school':'school';
+  if(economicCountryAt(fly)==='north-city')return 'north-school';
+  if(fly.homeX>480)return 'riverside-school';
+  const sites=MAIN_SCHOOL_IDS.map(id=>location(id)).filter(b=>!urbanWorld.isUnavailable(b.id,fly));
+  return sites.reduce((best,site)=>!best||Math.hypot(site.x-fly.homeX,site.z-fly.homeZ)<Math.hypot(best.x-fly.homeX,best.z-fly.homeZ)?site:best,null)?.id||'school';
 }
 function educationTick(fly,clock,elapsed){
   ensureCognitiveProfile(fly);
@@ -2032,13 +2060,13 @@ function educationTick(fly,clock,elapsed){
     if(completed)brainRemember(fly,'life_skills_lesson',{subject:completed,locationId:fly.homeId});
     return;
   }
-  if(fly.ageYears>=18&&(!fly.lifeSkillsOnboarding||fly.lifeSkills?.graduatedAt))return;
-  const schoolId=localSchool(fly);
-  if(fly.currentLocationId!==schoolId||!fly.indoors||!String(fly.action||'').includes('studying'))return;
-  const teacher=schoolId==='school'?ensureAcademyTeacher():schoolId==='north-school'
-    ? nationalServices.roster('education').find(f=>!f.traveling&&f.nationalServiceDuty?.targetId===schoolId&&Math.hypot(f.x-fly.x,f.z-fly.z)<40)
-    : state.flies.find(f=>f.alive&&f.jobId==='riverside-school');
-  const teacherPresent=Boolean(teacher&&!teacher.traveling&&(schoolId==='north-school'||teacher.indoors&&teacher.currentLocationId===schoolId&&(String(teacher.action||'').includes('teaching')||String(teacher.action||'').startsWith('working'))));
+  const exchangeSchool=fly.countryAirTrip?.studySchoolId;
+  const communitySchool=fly.action==='attending a community school'?fly.currentLocationId:null;
+  if(!exchangeSchool&&fly.ageYears>=18&&(!fly.lifeSkillsOnboarding||fly.lifeSkills?.graduatedAt))return false;
+  const schoolId=exchangeSchool||communitySchool||localSchool(fly);
+  if(fly.traveling||fly.currentLocationId!==schoolId||!fly.indoors||!(/studying|attending a community school/.test(fly.action||'')))return false;
+  const teacher=teacherAtSchool(schoolId,clock),teacherPresent=Boolean(teacher&&Math.hypot(teacher.x-fly.x,teacher.z-fly.z)<40);
+  if(exchangeSchool&&!teacherPresent)return false;
   const completed=lifeSkillsLesson(fly,{now:state.simulationAgeSeconds,elapsed,schoolId,supervised:teacherPresent});
   if(completed)brainRemember(fly,'life_skills_lesson',{teacherId:teacher.id,subject:completed,locationId:schoolId});
   const teacherSkill=teacher?Number(teacher.professionSkills?.teaching||0.65):0.35;
@@ -2058,6 +2086,7 @@ function educationTick(fly,clock,elapsed){
     teacher.professionSkills.teaching=clamp(Number(teacher.professionSkills.teaching||0)+0.000002,0,1);
     state.education.lessons=Number(state.education.lessons||0)+1;
   }
+  return teacherPresent;
 }
 
 function nearestTransitStation(x, z) {
@@ -2638,6 +2667,58 @@ function simulateEnterprises(clock) {
   );
 }
 
+function residentWorkplace(f){
+  const business=state.enterprises?.[f.businessId||f.businessEmployeeOf];
+  if(f.publicServiceRole==='army')return location('military-base');
+  if(f.publicServiceRole==='police')return location('police');
+  const id=f.facilityEmployment?.buildingId||f.internationalWork?.locationId||business?.locationId||JOBS.find(j=>j.id===f.jobId)?.locationId;
+  return id?LOCATIONS.find(l=>l.id===id)||BUILDINGS.find(b=>b.id===id):null;
+}
+function hansdrexWorkforce(people,clock){
+  const jobs={main:0,europe:0,west:0,north:0},roles={};
+  let inboundMorning=0;
+  for(const f of people){
+    if(!f.alive)continue;
+    const site=residentWorkplace(f);
+    if(!site||economicCountryAt(site)!=='hansdrex')continue;
+    const district=districtAt(site);
+    jobs[district]++;
+    if(f.jobId)roles[f.jobId]=(roles[f.jobId]||0)+1;
+    if(district==='main'&&clock.hour>=5&&clock.hour<11&&f.traveling&&f.targetLocationId===site.id&&districtAt({x:f.homeX,z:f.homeZ})!=='main')inboundMorning++;
+  }
+  const total=Object.values(jobs).reduce((sum,count)=>sum+count,0);
+  return {jobs,roles,total,mainShare:total?jobs.main/total:0,mainTarget:MAIN_EMPLOYMENT_TARGET,inboundMorning};
+}
+let centralHiringState=null,centralHiringHour=-1,centralHiring=null;
+function hiringReview(clock){
+  const hour=Math.floor(state.simulationAgeSeconds/3600);
+  if(centralHiringState!==state||hour!==centralHiringHour){
+    centralHiringState=state;centralHiringHour=hour;centralHiring=hansdrexWorkforce(state.flies,clock);
+  }
+  return centralHiring;
+}
+function centralApplication(f,clock,offer,record=hiringReview(clock)){
+  if(f.citizenshipCountryId!=='hansdrex'||f.ageYears<19||f.ageYears>60||f.publicServiceRole||f.facilityEmployment||f.businessId||f.businessEmployeeOf||f.internationalWork||f.urbanTask||f.cityService||f.civicDuty||f.industrialFreightDuty||f.displacedFrom||f.energy<42||f.health<57||f.educationLevel<10||f.jobId&&(record.roles[f.jobId]||0)<=Number(LOCAL_JOB_FLOORS[f.jobId]??Infinity))return false;
+  return record.mainShare<MAIN_EMPLOYMENT_TARGET&&clock.hour>=9&&clock.hour<17&&(!offer||f.money+f.savings>=4);
+}
+function addCentralApplication(f,clock,add){
+  if(f.citizenshipCountryId!=='hansdrex'||f.jobId&&!(f.jobId in LOCAL_JOB_FLOORS)||!centralApplication(f,clock,true))return;
+  const jobId=f.intelligence>.64?'central-technology':'central-finance';
+  const job=JOBS.find(j=>j.id===jobId);
+  add(job.locationId,CENTRAL_RECRUITMENT,54+f.traits.ambition*48+Math.max(0,job.wage-Number(f.wage||0))*10);
+}
+function finishCentralApplication(f,clock){
+  if(f.traveling||f.action!==CENTRAL_RECRUITMENT)return;
+  const record=hiringReview(clock);
+  const job=JOBS.find(j=>(j.id==='central-finance'||j.id==='central-technology')&&j.locationId===f.currentLocationId);
+  if(!job||!centralApplication(f,clock,false,record)){f.action='reviewing career options';f.actionUntil=state.simulationAgeSeconds+1200;return;}
+  if(f.jobId)record.roles[f.jobId]=(record.roles[f.jobId]||1)-1;
+  else record.total++;
+  if(f.jobId){const previous=residentWorkplace(f);if(previous&&economicCountryAt(previous)==='hansdrex')record.jobs[districtAt(previous)]--;else record.total++;}
+  record.roles[job.id]=(record.roles[job.id]||0)+1;record.jobs.main++;record.mainShare=record.jobs.main/record.total;
+  f.jobId=job.id;f.jobTitle=job.title;f.wage=job.wage;f.action='starting a new career in Main City';f.actionUntil=0;
+  brainRemember(f,'job_change',{jobId:job.id,locationId:job.locationId});emit('job',`${f.id} accepted a job in Main City as ${job.title}.`,{flyId:f.id,jobId:job.id});
+}
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
   updateBrainDynamics(fly);
@@ -2657,14 +2738,14 @@ function brainChooseAction(fly, clock) {
     candidates.push({ id, action, utility: combined });
   };
 
+  addCentralApplication(fly,clock,add);
   spaceProgram.addChoices(fly,clock,add);
   countries.addChoices(fly,clock,add);nationalServices.addChoices(fly,clock,add);nationalDefense.addChoices(fly,clock,add);regionalAviation.addChoices(fly,clock,add);
   urbanWorld.addChoices(fly,clock,add);sportsLuxury.addChoices(fly,clock,add);cityVisitors.addChoices(fly,clock,add);civicConflict.addChoices(fly,clock,add);residentRelationships.addChoices(fly,clock,add);publicServices.addChoices(fly,clock,add);industrialEconomy.addChoices(fly,clock,add);
   if(age>=21&&state.housing.households[fly.householdId]?.members?.[0]===fly.id&&!fly.ownsHome&&fly.money+fly.savings>100){
-    const workLocation=fly.businessEmployeeOf?state.enterprises?.[fly.businessEmployeeOf]?.locationId:JOBS.find(j=>j.id===fly.jobId)?.locationId;
-    const workplace=LOCATIONS.find(l=>l.id===workLocation),current=districtAt({x:fly.homeX,z:fly.homeZ});
-    for(const [district,id] of [['north','airport-gardens-homes'],['west','west-gardens-homes'],['main','apt-west']]){
-      const site=location(id);if(current===district)continue;
+    const workplace=residentWorkplace(fly),current=districtAt({x:fly.homeX,z:fly.homeZ});
+    for(const [district,id] of [['north','airport-gardens-homes'],['west','west-gardens-homes'],['main','apt-west'],['europe','riverside-homes']]){
+      const site=location(id);if(current===district||['main','europe'].includes(district)&&economicCountryAt({x:fly.homeX,z:fly.homeZ})!=='hansdrex')continue;
       const utility=districtHousingUtility(fly,site,workplace);
       if(utility>8)add(id,`viewing a ${district} district apartment`,30+utility+fly.traits.ambition*15);
     }
@@ -2691,9 +2772,6 @@ function brainChooseAction(fly, clock) {
     const block=affordable.sort((a,b)=>b.purchaseValue-a.purchaseValue)[0];
     if(block)add(block.id,'viewing a luxury apartment',85+fly.traits.ambition*25);
   }
-  if(age>=18&&!fly.ownsHome&&!fly.displacedFrom&&fly.homeX<480&&movingHousehold?.housingType==='apartment'&&movingHousehold.members[0]===fly.id&&riversideApartment()){
-    add('riverside-homes','viewing a Riverside apartment',38+brain.dynamic.curiosity*45+neuralDrive(fly,'exploreDrive')*20+(String(fly.jobId||'').startsWith('riverside-')?45:0));
-  }
   add("cafe", "drinking Hansdrex coffee", (100 - fly.energy) * 0.58 + fly.sleepDebt * 0.46 + fly.thirst * 0.18 + (fly.money > 5 ? 8 : -30));
   add("tea-house", "drinking tea", fly.thirst * 0.48 + fly.stress * 0.28 + fly.loneliness * 0.12);
   const ownerBusiness=fly.businessId?state.enterprises?.[fly.businessId]:null;
@@ -2707,6 +2785,7 @@ function brainChooseAction(fly, clock) {
   add("grocery", "shopping groceries", fly.hunger * 0.68 + fly.traits.thrift * 13);
   add("bakery", "getting a meal", fly.hunger * 0.55 + fly.excitement * 0.12);
   add("cafe", "socializing", fly.loneliness * 0.62 + fly.traits.sociability * 28 + fly.excitement * 0.18 + brain.plasticity.socialBias * 12);
+  if(fly.homeX>480&&age>=59)add('riverside-park','taking a quiet walk in Riverside Gardens',44+fly.stress*.82+fly.traits.resilience*15);
   add("park", "taking a walk", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
   add("airport-park", "visiting Airport Gardens Park", fly.stress * 0.9 + fly.traits.resilience * 15 + 15);
   if(weatherDanger()<.3)add("ferris-wheel","riding the free Central Park wheel",fly.stress*.95+fly.loneliness*.2+fly.traits.sociability*18+12);
@@ -2871,9 +2950,9 @@ function chooseDestination(fly, clock) {
       fly.actionUntil=state.simulationAgeSeconds+Math.max(60,handover?(2-work.hoursAfterEnd)*3600:work.shiftEndIn);fly.gridHandover=Boolean(handover);return;
     }
     if(fly.gridHandover&&!handover&&!work.onShift){fly.gridHandover=false;fly.actionUntil=0;}
-    if(work.essential&&(work.onShift||work.soon)&&!fly.onTrain&&!fly.socialTask&&!fly.civicDuty&&!fly.cityService&&!fly.urbanTask&&!fly.privateFlight&&!fly.onPlane&&!fly.heliPassenger&&!fly.fireEngineDuty&&!fly.ambulanceDuty){
+    if((work.essential||work.commuter)&&(work.onShift||work.soon)&&!fly.onTrain&&!fly.socialTask&&!fly.civicDuty&&!fly.cityService&&!fly.urbanTask&&!fly.privateFlight&&!fly.onPlane&&!fly.heliPassenger&&!fly.fireEngineDuty&&!fly.ambulanceDuty){
       if(fly.traveling&&fly.targetLocationId===work.job.locationId){fly.pendingAction=action;return;}
-      if(!fly.traveling&&fly.currentLocationId===work.job.locationId){fly.action='waiting for scheduled shift';fly.actionUntil=state.simulationAgeSeconds+Math.max(60,((Number(fly.gridShiftStart??fly.preferredWorkStart)-clock.hour-clock.minute/60+24)%24)*3600);return;}
+      if(!fly.traveling&&fly.currentLocationId===work.job.locationId){fly.action='waiting for scheduled shift';fly.actionUntil=state.simulationAgeSeconds+Math.max(60,((work.start-clock.hour-clock.minute/60+24)%24)*3600);return;}
       // A physical reroute replaces an obsolete personal errand, never the resident's position.
       fly.roadDuty=false;fly.mobilityShopping=false;fly.actionUntil=0;
       startJourney(fly,{id:work.job.locationId,action});return;
@@ -3299,6 +3378,7 @@ function productionAndRetail(fly, clock, gameSeconds=activeGameStepSeconds) {
     }
   }
   educationTick(fly,clock,gameSeconds);
+  finishCentralApplication(fly,clock);
   spaceProgram.finishApplication(fly);
 
   if (fly.jobId === "farm" && fly.currentLocationId === "farm" && String(fly.action).startsWith("working")) {
@@ -4280,9 +4360,9 @@ function riversideApartment(){
   return state.housing?.apartmentBlocks?.filter(b=>!b.luxury&&b.x>480&&apartmentHasVacancy(b)&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>occupiedHouseholdCount(a)-occupiedHouseholdCount(b))[0]||null;
 }
 function completeDistrictMove(f){
- const match=/^viewing a (north|west|main) district apartment$/.exec(f.action||'');
+ const match=/^viewing a (north|west|main|europe) district apartment$/.exec(f.action||'');
  if(!match||f.traveling)return false;
- const district=match[1],viewId={north:'airport-gardens-homes',west:'west-gardens-homes',main:'apt-west'}[district];
+ const district=match[1],viewId={north:'airport-gardens-homes',west:'west-gardens-homes',main:'apt-west',europe:'riverside-homes'}[district];
  const hh=state.housing.households[f.householdId];
  if(f.currentLocationId!==viewId||!hh||hh.members[0]!==f.id||f.ownsHome||hh.housingType!=='apartment')return false;
  const block=state.housing.apartmentBlocks.filter(b=>!b.luxury&&districtAt(b)===district&&apartmentHasVacancy(b)&&!urbanWorld.isUnavailable(b.id)).sort((a,b)=>a.rent-b.rent||occupiedHouseholdCount(a)-occupiedHouseholdCount(b))[0];
@@ -4290,7 +4370,7 @@ function completeDistrictMove(f){
  const fee=Math.min(20,Math.max(0,f.money));if(fee&&!spend(f,fee,state.treasury))return false;
  const old=hh.unitId;releaseHousingUnit(hh);block.occupants||=[];block.occupants.push(hh.id);
  Object.assign(hh,{unitId:block.id,housingType:'apartment',homeX:block.x,homeZ:block.z,monthlyHousingCost:block.rent,propertyValue:0});
- for(const member of householdMembers(hh.id)){Object.assign(member,{homeId:housingHomeLocation(block),homeDistrict:district==='main'?'central':district,housingUnitId:block.id,homeX:block.x,homeZ:block.z,housingType:'apartment',actionUntil:0});brainRemember(member,'household_moved',{from:old,to:block.id,district,reason:'cost, commute and environmental preferences'});}
+ for(const member of householdMembers(hh.id)){Object.assign(member,{homeId:housingHomeLocation(block),homeDistrict:district==='main'?'central':district==='europe'?'riverside':district,housingUnitId:block.id,homeX:block.x,homeZ:block.z,housingType:'apartment',actionUntil:0});brainRemember(member,'household_moved',{from:old,to:block.id,district,reason:'cost, commute and environmental preferences'});}
  if(f.indoors){Object.assign(f,entrance(f));f.indoors=false;}f.actionUntil=0;
  startJourney(f,{id:f.homeId,action:'moving into a district apartment'});
  emit('household_moved',`${f.id} chose a home in ${DISTRICT_PROFILES[district].name}.`,{flyId:f.id,buildingId:block.id,district});return true;
@@ -4657,6 +4737,7 @@ function getState(options={}) {
     utilities:{powerPlant:state.utilities?.powerPlant||null,disconnectedHouseholds:Number(state.utilities?.disconnectedHouseholds||0),householdAccounts:Object.keys(state.utilities?.householdAccounts||{}).length},
     justice:state.justice,
     mapVersion:MAP_VERSION,
+    hansdrexEmployment:hansdrexWorkforce(living,gameClock()),
     districtEconomy:Object.values(DISTRICT_PROFILES).map(profile=>({...profile,residents:living.filter(f=>districtAt({x:f.homeX,z:f.homeZ})===profile.id).length})),
     districts:{riverside:{residents:state.flies.filter(f=>f.alive&&f.homeX>480).length,settlersAdded:state.riversideSettlement?.added||0},
       airport:{residents:living.filter(f=>f.housingUnitId?.startsWith('AIRPORT-APT-')).length,settlersAdded:(state.expansionSettlement?.airport?.added||0)+(state.thousandSettlement?.north?.added||0)},

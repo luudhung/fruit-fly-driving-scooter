@@ -1,3 +1,5 @@
+import {MAIN_SCHOOL_IDS} from './education-map.mjs';
+import {countryAt} from './country-map.mjs';
 import {civicFacilities,facilitySpec,civicServiceCapacity} from './civic-development.mjs';
 const APPLY='applying for a civic facility job',CARE='visiting a community clinic',LEARN='attending a community school';
 const money=a=>Math.max(0,Number(a?.cash)||0),distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
@@ -11,7 +13,10 @@ export function createCivicFacilityOperations({world,emit=()=>{},remember=()=>{}
  const facilities=()=>{directory();return memoSites;};
  const workersFor=id=>{directory();return (memoRosters.get(id)||[]).filter(f=>f.alive&&f.facilityEmployment?.buildingId===id);};
  const source=b=>b.fundingAccountId==='power-grid'?raw().utilities?.powerPlant:raw().treasury;
- const eligible=(f,spec)=>f?.alive&&f.ageYears>=21&&f.ageYears<70&&!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!f.publicServiceRole&&!diverted(f)&&!f.sleeping&&f.health>50&&f.energy>25&&Number(f.professionSkills?.[spec.skill]||0)>=spec.minimumSkill;
+ const campus=b=>b.facilityType==='school'&&MAIN_SCHOOL_IDS.includes(b.id);
+ const qualified=(f,b,spec)=>Number(f.professionSkills?.[spec.skill]||0)>=spec.minimumSkill
+  ||campus(b)&&Number(f.educationLevel||0)>=25&&Number(f.traits?.empathy||0)>=.42;
+ const eligible=(f,spec,b)=>f?.alive&&f.ageYears>=21&&f.ageYears<70&&!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&!f.facilityEmployment&&!f.publicServiceRole&&!diverted(f)&&!f.sleeping&&f.health>50&&f.energy>25&&qualified(f,b,spec)&&(!campus(b)||countryAt({x:f.homeX,z:f.homeZ})==='hansdrex');
  const onShift=(job,spec,clock)=>((Number(clock.hour||0)+Number(clock.minute||0)/60-job.shiftStart+24)%24)<Number(spec.hours||8);
  const here=(f,b)=>f.alive&&!f.traveling&&!f.sleeping&&!diverted(f)&&f.health>30&&f.energy>8&&f.currentLocationId===b.id&&distance(f,b.frontage||b)<24;
  function care(f,clock){needsAndActivities(f,clock);payAndFinance(f,clock);}
@@ -27,9 +32,10 @@ export function createCivicFacilityOperations({world,emit=()=>{},remember=()=>{}
   if(job.suspended){job.wasPresent=false;job.lastPaidAt=-1;}
  }
  function apply(f,id){
-  const b=find(id),spec=facilitySpec(b?.facilityType);if(!b||b.stage!=='operational'||!spec?.staff||!eligible(f,spec)||f.traveling||f.currentLocationId!==id||money(source(b))<spec.wage)return false;
+  const b=find(id),spec=facilitySpec(b?.facilityType);if(!b||b.stage!=='operational'||!spec?.staff||!eligible(f,spec,b)||f.traveling||f.currentLocationId!==id||money(source(b))<spec.wage)return false;
   const jobs=workersFor(id).map(f=>f.facilityEmployment);
   const shifts=spec.shifts.map(start=>({start,count:jobs.filter(j=>j.shiftStart===start).length})).sort((a,b)=>a.count-b.count||a.start-b.start),shift=shifts[0];if(!shift||shift.count>=spec.staff)return false;
+  if(campus(b)){f.professionSkills||={};f.professionSkills.teaching=Math.max(Number(f.professionSkills.teaching||0),spec.minimumSkill);}
   f.facilityEmployment={buildingId:id,shiftStart:shift.start,wage:spec.wage,joinedAt:now(),lastAt:now(),wasPresent:false,lastPaidAt:-1};
   let roster=memoRosters.get(id);if(!roster){roster=[];memoRosters.set(id,roster);}roster.push(f);
   remember(f,'civic_facility_job',{buildingId:id,facilityType:b.facilityType,shiftStart:shift.start,wage:spec.wage});emit('civic_facility_hire',`${f.id} accepted a paid job at ${b.name}.`,{flyId:f.id,buildingId:id});return true;
@@ -38,8 +44,17 @@ export function createCivicFacilityOperations({world,emit=()=>{},remember=()=>{}
   if(!f?.alive||f.traveling||diverted(f))return;
   if(f.facilityEmployment){const b=find(f.facilityEmployment.buildingId),spec=facilitySpec(b?.facilityType);if(b?.stage==='operational'&&spec&&onShift(f.facilityEmployment,spec,clock))add(b.id,'working at a civic facility',150);return;}
   const candidates=facilities().filter(b=>b.stage==='operational'&&facilitySpec(b.facilityType)?.staff).sort((a,b)=>distance(f,a.frontage||a)-distance(f,b.frontage||b));
+  if(!f.jobId&&!f.businessId&&!f.businessEmployeeOf&&Number(f.educationLevel||0)>=25&&countryAt({x:f.homeX,z:f.homeZ})==='hansdrex'){
+   const school=candidates.filter(campus).sort((a,b)=>workersFor(a.id).length-workersFor(b.id).length)[0];
+   if(school){
+    const spec=facilitySpec(school.facilityType);
+    if(workersFor(school.id).length<spec.staff&&eligible(f,spec,school)&&money(source(school))>=spec.wage){
+     add(school.id,APPLY,115+Number(f.traits?.empathy||.5)*28);
+    }
+   }
+  }
   let offered=0;
-  for(const b of candidates){const spec=facilitySpec(b.facilityType);if(eligible(f,spec)&&money(source(b))>=spec.wage&&workersFor(b.id).length<spec.staff*spec.shifts.length){add(b.id,APPLY,70+Number(f.traits?.empathy||.5)*30);if(++offered>=2)break;}}
+  for(const b of candidates){const spec=facilitySpec(b.facilityType);if(!campus(b)&&eligible(f,spec,b)&&money(source(b))>=spec.wage&&workersFor(b.id).length<spec.staff*spec.shifts.length){add(b.id,APPLY,70+Number(f.traits?.empathy||.5)*30);if(++offered>=2)break;}}
   const staffed=b=>workersFor(b.id).some(p=>p.facilityEmployment.wasPresent&&p.facilityEmployment.lastPaidAt>=0&&p.facilityEmployment.lastPaidAt>=now()-1800&&here(p,b)&&onShift(p.facilityEmployment,facilitySpec(b.facilityType),clock));
   if((f.illness||f.health<80)){const b=candidates.find(b=>b.facilityType==='clinic'&&staffed(b));if(b)add(b.id,CARE,100+(80-Number(f.health||80)));}
   if(f.ageYears>=5&&f.ageYears<18&&Number(clock.hour)>=7&&Number(clock.hour)<15){const b=candidates.find(b=>b.facilityType==='school'&&staffed(b));if(b)add(b.id,LEARN,125);}

@@ -1,9 +1,9 @@
 // Synthetic city policy, expressed in simulation units rather than medical claims.
 export const DISTRICT_PROFILES={
- main:{id:'main',name:'Main city',focus:'finance and company offices',wage:1.30,housing:1.35,property:1.40,food:1.20,living:1.20,pollution:.16,amenities:.96},
- europe:{id:'europe',name:'Tiểu khu châu Âu',focus:'public administration and military',wage:1.05,housing:1,property:1.08,food:1,living:1,pollution:.12,amenities:.87},
- north:{id:'north',name:'Thành phố phía Bắc',focus:'middle-income homes and high amenities',wage:1.06,housing:1.18,property:1.15,food:1.06,living:1.05,pollution:.10,amenities:.93},
- west:{id:'west',name:'Thành phố phía Tây',focus:'manufacturing, skilled trades and logistics',wage:.90,housing:.25,property:.22,food:.38,living:.42,pollution:.42,amenities:.86},
+ main:{id:'main',name:'Main city',focus:'finance and company offices',wage:1.30,housing:1.45,property:1.50,food:1.24,living:1.23,pollution:.16,amenities:.94,bustle:1},
+ europe:{id:'europe',name:'Tiểu khu châu Âu',focus:'walkable retirement, public administration and military',wage:1.05,housing:1,property:1.08,food:1,living:1,pollution:.05,amenities:1,bustle:.18},
+ north:{id:'north',name:'Thành phố phía Bắc',focus:'middle-income homes and high amenities',wage:1.06,housing:1.18,property:1.15,food:1.06,living:1.05,pollution:.10,amenities:.93,bustle:.60},
+ west:{id:'west',name:'Thành phố phía Tây',focus:'manufacturing, skilled trades and logistics',wage:.90,housing:.25,property:.22,food:.38,living:.42,pollution:.42,amenities:.86,bustle:.32},
 };
 export function districtAt(point={}){
  const x=Number(point.x??point.homeX??0),z=Number(point.z??point.homeZ??0);
@@ -45,5 +45,10 @@ export function districtHousingUtility(actor,target,workplace){
  const amenities=(next.amenities-current.amenities)*(18+Number(t.ambition??.5)*30);
  const expense=(next.housing-current.housing)*(funds<1000?45:funds<4000?23:8)*(0.7+Number(t.thrift??.5));
  const commute=workplace?(Math.hypot(actor.homeX-workplace.x,actor.homeZ-workplace.z)-Math.hypot(target.x-workplace.x,target.z-workplace.z))*.025:0;
- return cleaner+amenities-expense+commute;
+ const age=Number(actor.ageYears||40),social=Number(t.sociability??.5),ambition=Number(t.ambition??.5);
+ const bustle=next.bustle-current.bustle;
+ const preference=age<38?bustle*(34+social*48+ambition*25)
+  :age>=59?-bustle*Math.min(45,(age-51)*1.55):0;
+ // Retirement changes the preferred neighbourhood, not the household budget.
+ return cleaner+amenities-expense+commute+preference;
 }

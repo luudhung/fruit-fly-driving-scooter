@@ -1,3 +1,4 @@
+import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT_BUILDINGS,SPACEPORT_LOCATIONS,SPACEPORT_ROADS} from './spaceport-map.mjs';
 import {northMilitaryPerimeterBlocked} from './country-map.mjs';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_ROADS,INDUSTRIAL_RESERVED,INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
@@ -9,7 +10,7 @@ import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RE
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 33;
+export const MAP_VERSION = 34;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -177,6 +178,7 @@ export const LOCATIONS = [
  {id:'riverside-hotel',type:'service',name:'Riverside Grand Hotel',x:530,z:-40},
  {id:'riverside-office',type:'job',name:'Riverside Exchange Tower',x:530,z:40},
  {id:'riverside-clinic',type:'health',name:'Riverside Clinic',x:710,z:40},
+ {id:'riverside-park',type:'park',name:'Riverside Gardens',x:530,z:120},
  {id:'riverside-school',type:'service',name:'Riverside Community Academy',x:710,z:-40},
  ...SPORTS_VENUES.map(v=>({id:v.id,type:'social',name:v.name,x:v.x,z:v.z})),
  {id:'bridge-view',type:'social',name:'Harbour Arch Promenade',x:488,z:-25},
@@ -464,6 +466,10 @@ ROADS.splice(0,ROADS.length,...districtRiverRoads(ROADS,districtTopology));
 BUILDINGS.push(...NORTH_BUILDINGS.map(b=>({...b})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({...b})),...SPACEPORT_BUILDINGS.map(b=>({...b})),...BORDER_CUSTOMS_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...NORTH_LOCATIONS.map(l=>({...l})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({id:b.id,name:b.name,type:'seasonal-lodging',x:b.x,z:b.z})),...SPACEPORT_LOCATIONS.map(l=>({...l})));
 ROADS.push(...NORTH_ROADS.map(r=>({...r})),...HAWAII_ROADS.map(r=>({...r})),...SPACEPORT_ROADS.map(r=>({...r})));
+for(const b of MAIN_SCHOOL_CAMPUSES){
+ BUILDINGS.push({...b});
+ LOCATIONS.push({id:b.id,name:b.name,type:'service',x:b.x,z:b.z});
+}
 APARTMENTS.push(BUILDINGS.find(b=>b.id===NORTH_LANDMARK.id));
 for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
 for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}

@@ -21,7 +21,8 @@ test('real engine builds a paid nonresidential factory with delivered materials 
  let s=fixture();const crew=s.flies.filter(available).slice(0,8);assert.equal(crew.length,8);
  for(const f of crew){healthy(f);Object.assign(f,{jobId:'construction',jobTitle:'builder',x:1000,z:40,currentLocationId:'construction',money:30000,savings:10000});}
  const owner=crew[0],housing=s.housing.apartmentBlocks.length,identities=s.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]);
- const initial=liquidMoneySupply(),wallet=owner.money+owner.savings,p=urbanWorld.developFacility('factory',{ownerId:owner.id,lot:{x:1000,z:0},industrySector:'garments'});assert.ok(p);assert.ok(p.roadIds.length);assert.equal(owner.money+owner.savings,wallet-p.budget);assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-6);assert.equal(urbanWorld.completedFacilities().length,0);
+ const facilities=urbanWorld.completedFacilities().map(b=>b.id);
+ const initial=liquidMoneySupply(),wallet=owner.money+owner.savings,p=urbanWorld.developFacility('factory',{ownerId:owner.id,lot:{x:1000,z:0},industrySector:'garments'});assert.ok(p);assert.ok(p.roadIds.length);assert.equal(owner.money+owner.savings,wallet-p.budget);assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-6);assert.deepEqual(urbanWorld.completedFacilities().map(b=>b.id),facilities);
  step(s);assert.equal(p.progress,0);assert.equal(p.materialsOrdered,0,'travelling workers cannot order or build');assert.ok(p.workerIds.length);
  arriveCrew(s,p);step(s);assert.ok(p.materialsOrdered>0);assert.equal(p.materialsDelivered,0);const invoice=s.businesses['civic-materials'].cash,projectId=p.id,buildingId=p.buildingId;
  s=restoreState(structuredClone(s));const saved=s.urbanWorld.projects.find(p=>p.id===projectId);assert.ok(saved);assert.equal(saved.materialsOrdered,p.materialsOrdered);

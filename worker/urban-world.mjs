@@ -1,3 +1,4 @@
+import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
 import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MILITARY,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
@@ -60,6 +61,10 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const s=raw();s.urbanWorld ||= {version:1,buildings:{},fires:[],projects:[],floods:[],nextFireAt:now()+DAY*.55,nextGrowthAt:now()+DAY*.7,nextFloodCheckAt:now()+1800,nextProjectId:1,nextIncidentId:1,lastTickAt:now(),completedProjects:0,extinguishedFires:0,displaced:0,materialsDelivered:0,safety:{water:16000,stationCash:0},history:[]};
   const v=s.urbanWorld;v.buildings ||= {};v.fires ||= [];v.projects ||= [];v.floods ||= [];v.history ||= [];v.roads ||= [];v.growthCursor=Number(v.growthCursor||0);v.safety ||= {water:16000,stationCash:0};v.development ||= {version:1,nextReviewAt:now()+DEVELOPMENT_REVIEW_INTERVAL,reviews:0,lastDemand:[],decisions:[]};
   for(const name of ['civic-escrow','civic-materials','civic-recovery'])account(name);
+  if(!v.mainEducationVersion){
+   for(const campus of MAIN_SCHOOL_CAMPUSES)Object.assign(stateFor(campus.id),campus,{fundingAccountId:'treasury'});
+   v.mainEducationVersion=1;
+  }
   if(!v.customsOwnershipVersion){
    for(const base of BORDER_CUSTOMS_BUILDINGS){
     const record=v.buildings[base.id];if(!record)continue;

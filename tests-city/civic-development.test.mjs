@@ -27,12 +27,13 @@ test('catalog distinguishes factories and public services from homes; shortages 
 
 test('private factory contract reserves actual owner capital, builds its road and materials, survives restore and adds no apartments',()=>{
  const t=setup(),owner=t.s.flies[0],initial=supply(t.s),ids=t.s.flies.map(f=>f.id),brains=t.s.flies.map(f=>JSON.stringify(f.brain)),wallet=owner.money+owner.savings;
+ const existingFacilities=t.urban.completedFacilities().map(b=>b.id);
  const p=t.urban.developFacility('factory',{ownerId:owner.id,lot:point,industrySector:'food-production'});assert.ok(p);assert.equal(p.funding.type,'resident');assert.equal(owner.money+owner.savings,wallet-p.budget);assert.equal(supply(t.s),initial);
- assert.equal(t.urban.completedFacilities().length,0);assert.equal(t.s.housing.apartmentBlocks.length,0);
+ assert.deepEqual(t.urban.completedFacilities().map(b=>b.id),existingFacilities);assert.equal(t.s.housing.apartmentBlocks.length,0);
  for(const f of t.s.flies)f.sleeping=true;t.step();assert.equal(p.progress,0);assert.equal(p.materialsOrdered,0);for(const f of t.s.flies)f.sleeping=false;
  t.step();t.onsite(p);t.step();assert.ok(p.materialsOrdered>0);assert.equal(p.materialsDelivered,0);
  const invoice=t.s.businesses['civic-materials'].cash;t.restore();const saved=t.s.urbanWorld.projects.find(v=>v.id===p.id);t.finish(saved);
- assert.equal(saved.stage,'complete');assert.equal(t.s.urbanWorld.buildings[p.buildingId].stage,'operational');assert.equal(t.urban.completedFacilities()[0].industrySector,'food-production');assert.equal(t.urban.completedFacilities()[0].capacity,50);
+ assert.equal(saved.stage,'complete');assert.equal(t.s.urbanWorld.buildings[p.buildingId].stage,'operational');const factory=t.urban.completedFacilities().find(b=>b.id===p.buildingId);assert.equal(factory.industrySector,'food-production');assert.equal(factory.capacity,50);
  assert.equal(t.s.housing.apartmentBlocks.length,0,'factories must not create residential capacity');assert.equal(t.s.businesses[p.buildingId].inventory,0,'commissioning does not invent output inventory');
  const l=LOCATIONS.find(l=>l.id===p.buildingId);assert.deepEqual({x:l.x,z:l.z},t.s.urbanWorld.buildings[p.buildingId].frontage);
  assert.deepEqual(t.s.flies.map(f=>f.id),ids);assert.deepEqual(t.s.flies.map(f=>JSON.stringify(f.brain)),brains);assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===p.buildingId).length,1);
@@ -47,12 +48,12 @@ test('public power works reserve utility cash, never commission before inspectio
 });
 
 test('approval rejects unsafe land, unknown types and unfunded budgets without changing money, IDs or roads',()=>{
- const t=setup(),owner=t.s.flies[0],cash=supply(t.s),roads=t.s.urbanWorld.roads.length;
+ const t=setup(),owner=t.s.flies[0],cash=supply(t.s),roads=t.s.urbanWorld.roads.length,buildings=Object.keys(t.s.urbanWorld.buildings);
  assert.equal(t.urban.developFacility('castle',{lot:point,ownerId:owner.id}),null);
  assert.equal(t.urban.developFacility('factory',{ownerId:owner.id,lot:{x:430,z:0}}),null);
  owner.money=owner.savings=0;assert.equal(t.urban.developFacility('workshop',{ownerId:owner.id,lot:point}),null);
  t.s.utilities.powerPlant.cash=0;assert.equal(t.urban.developFacility('power-plant',{lot:point}),null);
- assert.equal(Object.keys(t.s.urbanWorld.buildings).length,0);assert.equal(t.s.urbanWorld.roads.length,roads);assert.equal(supply(t.s),cash-60000-60000);
+ assert.deepEqual(Object.keys(t.s.urbanWorld.buildings),buildings);assert.equal(t.s.urbanWorld.roads.length,roads);assert.equal(supply(t.s),cash-60000-60000);
 });
 
 test('national planner makes a bounded demand-based funded approval, counts its committed capacity and preserves disaster priority',()=>{

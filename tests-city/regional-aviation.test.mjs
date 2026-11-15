@@ -97,3 +97,38 @@ test('Hawaii seasonal apartments offer real room capacity when the main resort i
  assert.equal(t.s.cityVisitors.hotels['island-resort'].rooms[f.id],undefined);
  assert.equal(t.s.businesses['regional-flight-escrow'].cash,trip.cost);
 });
+
+test('North City exchange charges two room nights and tuition, then counts physical lessons once', async()=>{
+ const {MAIN_SCHOOL_CAMPUSES}=await import('../worker/education-map.mjs');
+ const t=fixture('north'),student=t.s.flies[0],campus=MAIN_SCHOOL_CAMPUSES[0];
+ Object.assign(student,{ageYears:19,traits:{ambition:.9}});
+ const travel=[];
+ let teacher=false;
+ const air=createRegionalAviationSystem({
+  world:()=>t.s,schoolOpen:id=>id===campus.id,studyAtSchool:f=>teacher&&f.indoors&&Math.hypot(f.x-campus.x,f.z-campus.z)<20,
+  startJourney:(f,choice)=>travel.push(choice),aviationAdmission:t.countries.aviationAdmission,requestAirClearance:t.countries.requestAirClearance,
+ });
+ const options=[];
+ air.addChoices(student,{hour:9},(id,action)=>options.push({id,action}));
+ assert.ok(options.some(o=>o.id==='north-airport'&&o.action.endsWith(campus.id)));
+ assert.equal(air.book(student,'city',{studySchoolId:'north-school'}),false);
+ assert.ok(air.book(student,'city',{studySchoolId:campus.id}));
+ const trip=student.countryAirTrip,originalCash=supply(t.s);
+ assert.ok(trip.inbound.departure-trip.outbound.arrival>=172800);
+ assert.equal(t.s.cityVisitors.hotels.hotel.rooms[student.id].nights,2);
+ t.at(trip.outbound.departure+300);
+ air.handleResident(student,{hour:9});
+ assert.equal(t.s.businesses[campus.id].cash,15);
+ assert.equal(t.s.businesses.hotel.cash,88);
+ t.arrive(student,trip.outbound);
+ t.at(t.s.simulationAgeSeconds+120);
+ air.handleResident(student,{hour:12});
+ assert.equal(travel.at(-1).id,campus.id);
+ assert.equal(air.snapshot().exchangeStudents,undefined);
+ Object.assign(student,{currentLocationId:campus.id,x:campus.x,z:campus.z,indoors:true});
+ air.handleResident(student,{hour:12});
+ assert.equal(air.snapshot().exchangeStudents,undefined);
+ teacher=true;air.handleResident(student,{hour:12});air.handleResident(student,{hour:12});
+ assert.equal(air.snapshot().exchangeStudents,1);
+ assert.equal(supply(t.s),originalCash);
+});

@@ -1,3 +1,5 @@
+import {buildCivicFacility} from './civic-facility-renderer.ts';
+import {MAIN_SCHOOL_CAMPUSES} from '../worker/education-map.mjs';
 import {SpaceportRenderer,type SpaceProgramView} from './spaceport-renderer.ts';
 import {CountryUI,type CountrySnapshot,type CountryPerson} from './country-ui.ts';
 import {NationalDefenseRenderer} from './national-defense-renderer.ts';
@@ -223,6 +225,7 @@ type CivilizationSnapshot = {
   nationalServices?:Parameters<NationalDefenseRenderer['sync']>[1];
   publicServices?:PublicServicesSnapshot;
   industrialEconomy?:IndustrialSnapshot;
+  hansdrexEmployment?:{mainShare:number;mainTarget:number;inboundMorning:number};
   districtEconomy?:Array<{id:string;name:string;focus:string;wage:number;housing:number;food:number;living:number;pollution:number;amenities:number;residents:number}>;
   housing?:{capacityUnit?:'households';apartmentBlocks:Array<{id:string;capacity:number;occupants:number;occupiedHouseholds?:number;residentCount?:number;overCapacityHouseholds?:number}>;groundHouses?:Array<{id:string;capacity:number;occupiedHouseholds:number;residentCount:number}>};
   districts?:{riverside:{residents:number;settlersAdded:number};airport?:{residents:number;settlersAdded:number};west?:{residents:number;settlersAdded:number}};
@@ -256,7 +259,7 @@ type CivilizationSnapshot = {
   welfare?:{birthGrantPerChild:number;essentialMealPrice:number;populationTarget?:number;immigrationThreshold?:number};
   parkLeisure?:{passengers:number;completedRides:number};
   aviation?:{fares:{roundTrip:number;oneWay:number;resortNight:number;helicopter:number;beachActivity:number};seats:number;heliSeats:number;nextCityFlight:{departure:number};nextIslandFlight:{departure:number};weatherClosed:boolean;passengers:number;holidaymakers:number;completedHolidays:number;helicopterGuests:number;legacyFlights?:Flight[]};
-  regionalAviation?:Parameters<RegionalAviationRenderer['sync']>[0]&{northSportsVisits?:number};
+  regionalAviation?:Parameters<RegionalAviationRenderer['sync']>[0]&{northSportsVisits?:number;exchangeStudents?:number;completedExchanges?:number};
   foodReserve: number;
   moneySupply: number;
   currency?: { code?: string; name?: string };
@@ -682,7 +685,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const sportsVisits=id==='north-city'&&s.regionalAviation?.northSportsVisits!=null?`${num(s.regionalAviation.northSportsVisits)} lượt khách Hansdrex tới khu thể thao`:'';
       const finances=`Ngân sách ${num(nation.cash??0)} H$ · Trợ cấp sinh ${num(nation.populationPolicy?.birthGrant??0)} H$`;
       const residents=`${num(data?.residents??nation.residents??0)} cư dân${data?` · ${num(data.working)} có việc`:''}`;
-      board.textContent=[residents,finances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
+      const workforce=id==='hansdrex'?s.hansdrexEmployment:null;
+      const jobs=workforce?`Main City · ${num(workforce.mainShare*100,1)}% việc làm (mục tiêu ${num(workforce.mainTarget*100)}%) · ${num(workforce.inboundMorning)} người đang đi làm vào trung tâm sáng nay`:'';
+      const exchanges=id==='hansdrex'&&s.regionalAviation?`5 trường Main City · ${num(s.regionalAviation.exchangeStudents??0)} học viên North City đã vào lớp`:'';
+      board.textContent=[residents,finances,jobs,exchanges,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
   }
   const space=document.getElementById('spaceworks-activity');
@@ -1232,6 +1238,13 @@ const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 const internationalVisuals=new InternationalLandmarks(cityRoot,makeCanvasSprite);
 const spaceportVisuals=new SpaceportRenderer(cityRoot,makeCanvasSprite);
 for(const [id,group] of spaceportVisuals.buildings)urbanVisuals.registerBuilding(id,group);
+for(const campus of MAIN_SCHOOL_CAMPUSES){
+  const group=buildCivicFacility(campus);
+  if(!group)continue;
+  const sign=makeCanvasSprite(campus.name,24,7);
+  sign.position.set(0,campus.h+1.3,0);group.add(sign);
+  cityRoot.add(group);urbanVisuals.registerBuilding(campus.id,group);
+}
 for(const [id,group]of internationalVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 
 const heliPadCenter=new THREE.Vector3(AIRPORT.helipad.x,AIRPORT.helipad.y,AIRPORT.helipad.z);
