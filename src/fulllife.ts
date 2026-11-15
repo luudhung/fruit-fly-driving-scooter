@@ -680,8 +680,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const sportsVisits=id==='north-city'&&s.regionalAviation?.northSportsVisits!=null?`${num(s.regionalAviation.northSportsVisits)} lượt khách Hansdrex tới khu thể thao`:'';
       const finances=`Ngân sách ${num(nation.cash??0)} H$ · Trợ cấp sinh ${num(nation.populationPolicy?.birthGrant??0)} H$`;
       const residents=`${num(data?.residents??nation.residents??0)} cư dân${data?` · ${num(data.working)} có việc`:''}`;
-      board.textContent=[residents,finances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('
-');
+      board.textContent=[residents,finances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
   }
   const activity=document.getElementById("city-activity");if(activity)activity.textContent=s.activity?`${s.activity.working} working · ${s.activity.traveling} traveling · ${s.activity.indoors} indoors`:"Awaiting activity telemetry";
