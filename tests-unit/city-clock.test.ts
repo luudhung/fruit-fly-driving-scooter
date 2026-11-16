@@ -11,3 +11,24 @@ test('the city viewer can cover normal slow alarm intervals without growing an u
   assert.ok(clock.read(now+60_000)<=source+120*CITY_VIEW_PREDICTION_SECONDS);
  }
 });
+
+
+test('switching from delayed cloud observations to the local engine removes predicted hours and limits further lead',()=>{
+ const c=new CityClock(90);c.accept(14*3600,0,120);
+ assert.equal(c.read(90000),14*3600+7440);
+ c.setLocalMode(true);c.accept(14*3600+120,90000,120);
+ assert.equal(c.read(90000),14*3600+120);
+ assert.equal(c.read(150000),14*3600+360);
+ c.accept(14*3600+240,150000,120);
+ assert.ok(c.read(180000)<=14*3600+480);
+});
+
+test('local snapshots keep one monotonic clock for the sky and illumination through continuous updates',()=>{
+ const c=new CityClock(90);c.setLocalMode(true);
+ let previous=0;
+ for(let i=0;i<60;i++){
+  const at=i*750,source=16*3600+i*90;c.accept(source,at,120);
+  const shown=c.read(at+500);assert.ok(shown>=previous);assert.ok(shown-source<=240);previous=shown;
+ }
+ c.setLocalMode(false);c.accept(22*3600,100000,120);assert.equal(c.read(100000),22*3600);
+});

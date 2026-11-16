@@ -672,6 +672,7 @@ function renderInspector(fly: FlyState | null) {
 }
 
 function renderSnapshot(s: CivilizationSnapshot) {
+  presentationClock.setLocalMode(s.runtime?.platform==='browser-worker');
   if(!presentationClock.accept(s.simulationAgeSeconds,performance.now(),s.timeScale||120))return;
   snapshot = s;
   militaryCrewShips.clear();for(const ship of s.publicServices?.military?.ships||[])for(const id of ship.crewIds)militaryCrewShips.set(id,ship);
@@ -817,7 +818,8 @@ function renderSnapshot(s: CivilizationSnapshot) {
   nationalDefenseVisuals.sync(s.nationalDefense,s.nationalServices);
   countryUI.sync(s);
   updateSocietyBoard(s);
-  updateDayNight(s.gameHour ?? 12, s.gameMinute ?? 0, s.weather);
+  // Snapshot time never paints lighting; the animation frame owns the one visual clock.
+  lastSkyMinute=-1;
   updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
 
   if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
