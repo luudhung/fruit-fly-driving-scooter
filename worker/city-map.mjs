@@ -495,7 +495,7 @@ function indexRectangles(rects,margin=0){
 const emptyGeometry=[];
 const nearbyGeometry=(bins,p)=>bins.get(`${Math.floor(p.x/SPATIAL_CELL)},${Math.floor(p.z/SPATIAL_CELL)}`)||emptyGeometry;
 let buildingBins=indexRectangles(BUILDINGS,.45);
-let roadBins=indexRectangles(ROADS);
+let roadBins=indexRectangles(ROADS,.4);
 const BASE_ROADS=ROADS.map(r=>({...r}));
 export let URBAN_ROADS=[];
 const BASE_URBAN_BUILDINGS=BUILDINGS.map(b=>({...b}));
@@ -515,7 +515,7 @@ export function applyUrbanGeometry({buildings=[],floods=[],roads=[]}={}){
  if(key===urbanGeometryKey)return false;
  urbanGeometryKey=key;urbanGeometryRevision++;
  URBAN_ROADS=roads.filter(r=>r.stage==='operational'&&[r.x,r.z,r.w,r.d].every(Number.isFinite)&&r.w>0&&r.d>0).map(r=>({...r}));
- ROADS.splice(0,ROADS.length,...BASE_ROADS,...URBAN_ROADS);roadBins=indexRectangles(ROADS);
+ ROADS.splice(0,ROADS.length,...BASE_ROADS,...URBAN_ROADS);roadBins=indexRectangles(ROADS,.4);
  rebuildWalkways();
  const existing=new Map(BUILDINGS.map(b=>[b.id,b]));
  BUILDINGS.length=0;
@@ -749,19 +749,20 @@ export function metroStationGeometry(line,index,direction=1) {
  const p=line.points[index],prev=line.points[Math.max(0,index-1)],next=line.points[Math.min(line.points.length-1,index+1)];
  const dx=next[0]-prev[0],dz=next[1]-prev[1],axis=Math.abs(dx)>=Math.abs(dz)?'x':'z';
  const along=axis==='x'?{x:1,z:0}:{x:0,z:1},perp=axis==='x'?{x:0,z:1}:{x:1,z:0};
- const width=Math.max(6,...ROADS.filter(r=>(r.w>r.d)===(axis==='x')&&contains(r,{x:p[0],z:p[1]},.2)).map(r=>Math.min(r.w,r.d)));
+ const width=Math.max(6,...nearbyGeometry(roadBins,{x:p[0],z:p[1]}).filter(r=>(r.w>r.d)===(axis==='x')&&contains(r,{x:p[0],z:p[1]},.2)).map(r=>Math.min(r.w,r.d)));
  const offset=width/2+1.22,candidates=[];
- for(const side of [index%2===0?1:-1,index%2===0?-1:1])for(const approach of [-1,1]){
+ if(!cache[`access:${index}`])for(const side of [index%2===0?1:-1,index%2===0?-1:1])for(const approach of [-1,1]){
   const point=(u,v,y)=>({x:p[0]+along.x*u+perp.x*v,z:p[1]+along.z*u+perp.z*v,y});
   const stairs=[point(approach*21,side*offset-.5,1.1),point(approach*7,side*offset-.5,line.height/2+1.125),point(approach*7,side*offset+.5,line.height/2+1.125),point(approach*21,side*offset+.5,line.height+1.15)];
   let violations=0;for(let u=7;u<=21;u+=1)for(const v of [-.98,0,.98]){
-   const q=point(approach*u,side*offset+v,1.1);if(ROADS.some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q)||contains(AIRPORT_PARK,q)||airportAirside(q)||publicMotorway(q))violations++;
+   const q=point(approach*u,side*offset+v,1.1);if(nearbyGeometry(roadBins,q).some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q)||contains(AIRPORT_PARK,q)||airportAirside(q)||publicMotorway(q))violations++;
   }
   const footprint=metroStairFootprint(stairs),conflicts=metroStairReservations.filter(r=>r.line!==line&&metroStairOverlap(footprint,r.footprint)).length;
   candidates.push({side,stairs,violations,footprint,conflicts});
  }
  const corner=index>0&&index<line.points.length-1&&Math.abs((p[0]-prev[0])*(next[1]-p[1])-(p[1]-prev[1])*(next[0]-p[0]))>.01;
  const platformFor=dir=>{
+  const platformKey=`platform:${index}:${dir}`;if(cache[platformKey])return cache[platformKey];
   const track=metroTrackPoints(line,dir)[index];
   if(corner){
    // Put a corner platform beside a straight part of its service's outgoing
@@ -779,12 +780,12 @@ export function metroStationGeometry(line,index,direction=1) {
       for(let j=0;j<=steps;j++){const t=j/steps,x=a.x+(b.x-a.x)*t,z=a.z+(b.z-a.z)*t;if(Math.hypot(Math.max(0,Math.abs(x-point.x)-w/2),Math.max(0,Math.abs(z-point.z)-d/2))<1.63){obstructsRail=true;break;}}
      }
     }
-    if(!obstructsRail)return{point,platformLength,axis};
+    if(!obstructsRail)return cache[platformKey]={point,platformLength,axis};
    }
    throw new Error(`No clear corner metro platform for ${line.id}/${index}/${dir}`);
   }
   const projection=(track.x-p[0])*perp.x+(track.z-p[1])*perp.z,side=projection>=0?1:-1;
-  return{point:{x:track.x+perp.x*3.4*side,z:track.z+perp.z*3.4*side,y:line.height+1.15},platformLength:16,axis};
+  return cache[platformKey]={point:{x:track.x+perp.x*3.4*side,z:track.z+perp.z*3.4*side,y:line.height+1.15},platformLength:16,axis};
  };
  const accessKey=`access:${index}`;
  let best=cache[accessKey];
