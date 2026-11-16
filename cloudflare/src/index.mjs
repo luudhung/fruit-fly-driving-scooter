@@ -76,6 +76,10 @@ export class CivilizationWorld extends DurableObject {
       }
       this.localHost=await this.ctx.storage.get("localHostLease")||null;
       this.localEpoch=Number(this.localHost?.epoch||0);
+      if(this.localHost&&this.localHost.protocol!==2){
+        this.localHost.leaving=true;this.localHost.expiresAt=Math.min(this.localHost.expiresAt,Date.now()+15000);
+        await this.ctx.storage.put('localHostLease',this.localHost);
+      }
       await this.ensureAlarm();
     });
     if(env.NEURAL_ENABLED==='1'&&env.NEURAL_COORDINATOR){
@@ -245,6 +249,7 @@ export class CivilizationWorld extends DurableObject {
   async localSession(request,url){
     await this.ready;
     const path=url.pathname;
+    if(path.endsWith('/checkpoint')&&request.headers.get('content-type')!=='application/x-city-checkpoint+gzip')return json({error:'local_protocol_update_required'},409);
     let body;
     try{
       // Decode outside the mutation queue so an upload cannot hold heartbeats.
@@ -261,11 +266,12 @@ export class CivilizationWorld extends DurableObject {
       const now=Date.now(),claim=path.endsWith('/claim');
       const lease=this.localHost;
       if(claim){
+        if(body.clientProtocol!==2)return json({granted:false,updateRequired:true});
         if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
         // Apply any accepted commands from an expired host before handing over.
         for(const command of lease?.commands||[])countries.requestConflict(command);
         const raw=getRawState();
-        const next={token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
+        const next={protocol:2,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
         await this.ctx.storage.put('localHostLease',next);
         this.localHost=next;
         return new Response(localHostClaimStream(raw,next).pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});

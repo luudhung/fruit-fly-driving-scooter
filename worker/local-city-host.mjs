@@ -45,7 +45,7 @@ async function start(){
  if(controlBusy||session)return;
  controlBusy=true;
  try{
-  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID()});
+  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:2});
   if(!result.granted){send('observer');return;}
   session=result.lease;processedCommands.clear();
   restoreState(result.state);

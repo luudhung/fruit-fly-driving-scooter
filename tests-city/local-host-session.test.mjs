@@ -24,14 +24,15 @@ function fixture(){
  const world=new Class(ctx,{NEURAL_ENABLED:'0'});
  const post=(path,body)=>world.fetch(new Request('https://city/api/civilization/local/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}));
  const claim=async()=>{
-  const response=await post('claim',{clientId:'test'});
+  const response=await post('claim',{clientId:'test',clientProtocol:2});
   const data=response.headers.get('content-encoding')==='gzip'?await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json():await response.json();
   if(data.granted){assert.equal(response.headers.get('x-city-host-token'),data.lease.token);assert.equal(Number(response.headers.get('x-city-host-epoch')),data.lease.epoch);}
   return data;
  };
  const save=async body=>{
-  const packed=await new Response(new Blob([JSON.stringify(body)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-  return world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',body:packed}));
+  const {state,...metadata}=body;
+  const packed=await new Response(localHostCheckpointStream(state,metadata).pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  return world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-checkpoint+gzip'},body:packed}));
  };
  return {world,claim,post,save,metadata,commands,get state(){return state;},get ticks(){return ticks;},get saves(){return saves;}};
 }
@@ -98,7 +99,7 @@ test('heartbeats persist ownership and a closing tab shortens the fallback deadl
 
 test('invalid bodies and checkpoint sequences do not evict a valid host',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
- const broken=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',body:'not gzip'}));
+ const broken=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-checkpoint+gzip'},body:'not gzip'}));
  assert.equal(broken.status,400);
  assert.equal((await t.save({...lease,state,sequence:'bad'})).status,400);
  assert.equal(t.world.localHost.token,lease.token);
@@ -157,4 +158,14 @@ test('streamed claim and framed checkpoint retain complete records without an al
  const result=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-checkpoint+gzip'},body:packed}));
  assert.equal(result.status,200);assert.equal(t.saves,1);
  await assert.rejects(readLocalHostCheckpoint(new Blob([document.slice(0,-4)]).stream()),/incomplete/);
+});
+
+
+test('older viewers remain observers and cannot trigger a buffered whole-world upload',async()=>{
+ const t=fixture();await t.world.ready;
+ const old=await(await t.post('claim',{clientId:'old-viewer'})).json();
+ assert.equal(old.granted,false);assert.equal(old.updateRequired,true);assert.equal(t.world.localHost,null);
+ const first=await t.claim();
+ const response=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',body:'legacy-body-is-not-read'}));
+ assert.equal(response.status,409);assert.equal(t.world.localHost.token,first.lease.token);
 });
