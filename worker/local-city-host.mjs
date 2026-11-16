@@ -16,6 +16,10 @@ async function request(path,body,compressed=false){
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),55000);
  try{
   const response=await fetch(api+path,{method:'POST',cache:'no-store',headers:{'content-type':compressed?'application/octet-stream':'application/json'},body:compressed?body:JSON.stringify(body),signal:controller.signal});
+  if(path.endsWith('/claim')&&response.ok){
+   const token=response.headers.get('x-city-host-token'),epoch=Number(response.headers.get('x-city-host-epoch'));
+   if(token&&Number.isSafeInteger(epoch))send('lease',{lease:{token,epoch}});
+  }
   if(response.status===409){session=null;running=false;send('fenced');throw Error('local session transferred');}
   if(!response.ok)throw Error('session HTTP '+response.status);
   return await response.json();

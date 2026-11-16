@@ -15,6 +15,7 @@ export class LocalCitySession{
   if(!this.worker){
    this.worker=new Worker(new URL('../worker/local-city-host.mjs',import.meta.url),{type:'module'});
    this.worker.onmessage=({data}:{data:SessionMessage})=>{
+    if(data.type==='lease'){this.lease=data.lease||null;if(document.hidden)this.release();}
     if(data.type==='started'){this.lease=data.lease||null;this.active=true;this.starting=false;this.syncing=false;if(document.hidden)this.release();}
     if(data.type==='snapshot'&&this.active)this.onSnapshot(data.snapshot);
     if(data.type==='contact'||data.type==='saved'){this.syncing=false;if(data.type==='saved')this.lastSavedAt=Date.now();}
@@ -37,7 +38,9 @@ export class LocalCitySession{
   if(!this.worker)return;
   if(this.lease){
    const body=new Blob([JSON.stringify(this.lease)],{type:'text/plain'});
-   navigator.sendBeacon(this.api+'/api/civilization/local/leave',body);
+   try{
+    if(!navigator.sendBeacon(this.api+'/api/civilization/local/leave',body))void fetch(this.api+'/api/civilization/local/leave',{method:'POST',body,keepalive:true}).catch(()=>{});
+   }catch{/* The durable lease timeout still provides crash recovery. */}
   }
   this.worker.postMessage({type:'release'});this.active=false;this.starting=false;
  }

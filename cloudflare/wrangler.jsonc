@@ -2,6 +2,7 @@
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "fruit-fly-civilization-free",
   "main": "src/index.mjs",
+  "minify": true,
   "compatibility_date": "2026-10-03",
   "triggers": { "crons": ["*/2 * * * *"] },
   "durable_objects": {

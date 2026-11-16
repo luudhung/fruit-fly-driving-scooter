@@ -193,9 +193,14 @@ export class CivilizationWorld extends DurableObject {
     });
   }
 
+  hostingStatus(){
+    const lease=this.localHost,active=Boolean(lease&&lease.expiresAt>Date.now());
+    return {active,mode:active?'browser':'background',sequence:lease?.sequence||0,expiresAt:lease?.expiresAt||null,lastCheckpointError:this.lastCheckpointError||null};
+  }
+
   async localHostingStatus(){
     await this.ready;
-    return {active:Boolean(this.localHost&&this.localHost.expiresAt>Date.now())};
+    return this.hostingStatus();
   }
 
   async getNeuralInputs(){
@@ -227,9 +232,9 @@ export class CivilizationWorld extends DurableObject {
       const state=getRawState();
       if(url.searchParams.get('view')==='brief'){
         return json({ok:snapshotLooksUsable(state),worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,
-          simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),snapshotAgeSeconds:advance.snapshotAgeSeconds});
+          simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),snapshotAgeSeconds:advance.snapshotAgeSeconds,hosting:this.hostingStatus()});
       }
-      return json({ok:snapshotLooksUsable(state),service:'fruit-fly-civilization-cloudflare',runtime:'cloudflare-durable-object',worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,simulationStatus:state?'SYNTHETIC_CIVILIZATION_LIVE':'STARTING',population:state?.flies?.filter(f=>f.alive).length||0,simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),persistence:'DURABLE_OBJECT_SQLITE',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance,storage:this.storageStats,neural:getNeuralStatus()});
+      return json({ok:snapshotLooksUsable(state),service:'fruit-fly-civilization-cloudflare',runtime:'cloudflare-durable-object',worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,simulationStatus:state?'SYNTHETIC_CIVILIZATION_LIVE':'STARTING',population:state?.flies?.filter(f=>f.alive).length||0,simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),persistence:'DURABLE_OBJECT_SQLITE',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance,hosting:this.hostingStatus(),storage:this.storageStats,neural:getNeuralStatus()});
     }
     const observer=url.searchParams.get('view')==='observer';
     const payload=getState({observer,compactObserver:observer&&url.searchParams.get('transport')==='compact',selectedId:url.searchParams.get('selected')});
@@ -256,7 +261,7 @@ export class CivilizationWorld extends DurableObject {
       const now=Date.now(),claim=path.endsWith('/claim');
       const lease=this.localHost;
       if(claim){
-        if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt});
+        if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
         // Apply any accepted commands from an expired host before handing over.
         for(const command of lease?.commands||[])countries.requestConflict(command);
         const raw=getRawState();
@@ -264,7 +269,7 @@ export class CivilizationWorld extends DurableObject {
         await this.ctx.storage.put('localHostLease',next);
         this.localHost=next;
         const payload=JSON.stringify({granted:true,lease:next,state:localHostSnapshot(raw)});
-        return new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip'})});
+        return new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
       }
       if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
       if(path.endsWith('/heartbeat')){
@@ -290,6 +295,7 @@ export class CivilizationWorld extends DurableObject {
           for(const command of lease.commands||[])countries.requestConflict(command);
           this.lastWallClockMs=now;
           await this.persistIfDue(true);
+          this.lastCheckpointError=null;
           lease.sequence=body.sequence;
           const acknowledged=new Set(Array.isArray(body.acknowledgedCommands)?body.acknowledgedCommands:[]);
           lease.commands=(lease.commands||[]).filter(c=>!acknowledged.has(c.requestId));
@@ -301,7 +307,11 @@ export class CivilizationWorld extends DurableObject {
             await this.ctx.storage.put('localHostLease',lease);
           }
           return json({ok:true,sequence:lease.sequence,commands:lease.commands||[]});
-        }catch(error){return json({error:String(error)},422);}
+        }catch(error){
+          this.lastCheckpointError={at:now,error:String(error)};
+          console.warn(JSON.stringify({event:'local_checkpoint_rejected',...this.lastCheckpointError}));
+          return json({error:String(error)},422);
+        }
       }
       return json({error:'unknown_local_operation'},404);
     });
