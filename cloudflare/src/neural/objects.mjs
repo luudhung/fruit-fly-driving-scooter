@@ -121,6 +121,9 @@ export class FlyWireNeuralCoordinator extends DurableObject{
   await this.ctx.storage.setAlarm(Date.now()+this.interval());
   let cycle=await this.ctx.storage.get('cycle');
   try{
+   if((await this.world().localHostingStatus()).active){
+    await this.ctx.storage.setAlarm(Date.now()+60000);return;
+   }
    if(!cycle){
     const inputs=await this.world().getNeuralInputs();
     if(inputs.agents.length>MAX_AGENTS)throw Error('Living brain count exceeds free-budget bound');

@@ -70,6 +70,7 @@ function viewer(options:Record<string,any>={}){
  if(snapshot){connectionHealth.accepted(snapshot.simulationAgeSeconds,now);presentationClock.accept(snapshot.simulationAgeSeconds,now,120);}
  let lastLiveConnection=snapshot?{state:'authoritative',label:'1 ALIVE · CITY LIVE',title:'City status'}:null;
  const connection={dataset:{state:snapshot?'authoritative':'connecting'},title:'City status'},connectionLabel={textContent:''};
+ const localCity={active:Boolean(options.localActive),syncing:Boolean(options.savePending),select:()=>{},start:()=>{}};
  const apiBase='https://city.test',document={hidden:false},navigator={onLine:true},events={textContent:''};
  const Date={now:()=>now,parse:deps.parseDate};const console={error:()=>{}};
  const residentDirectory={count:1,offline:()=>{offlineCalls++;}};
@@ -163,4 +164,15 @@ test('a cached scene can be replaced by the authoritative world after checkpoint
  assert.equal(v.snapshot.authoritative,true);
  assert.equal(v.snapshot.simulationAgeSeconds,90);
  assert.equal(v.presentationClock.read(1000),90);
+});
+
+
+test('local hosting keeps its live badge and avoids census polling during a save outage',async()=>{
+ const v=viewer({initial:snapshot,localActive:true,savePending:true,error:true});
+ v.navigator.onLine=false;v.setNow(500000);
+ await v.fetchSnapshot();v.refreshConnectionHealth();
+ assert.equal(v.calls,0);assert.equal(v.snapshot,snapshot);
+ assert.equal(v.connection.dataset.state,'authoritative');
+ assert.match(v.connectionLabel.textContent,/RUNNING ON THIS DEVICE.*SAVE PENDING/);
+ assert.doesNotMatch(v.connectionLabel.textContent,/OFFLINE|RETRYING|STALE/);
 });

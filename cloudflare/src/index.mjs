@@ -1,3 +1,4 @@
+import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
@@ -53,6 +54,7 @@ export class CivilizationWorld extends DurableObject {
     this.storageStats = null;
     this.nextAlarmAtMs = null;
     this.queue = Promise.resolve();
+    this.localHost=null;this.localEpoch=0;
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const saved = await loadSnapshot(this.ctx.storage);
@@ -72,6 +74,8 @@ export class CivilizationWorld extends DurableObject {
         );
         this.lastPersistMs = Date.now();
       }
+      this.localHost=await this.ctx.storage.get("localHostLease")||null;
+      this.localEpoch=Number(this.localHost?.epoch||0);
       await this.ensureAlarm();
     });
     if(env.NEURAL_ENABLED==='1'&&env.NEURAL_COORDINATOR){
@@ -109,6 +113,12 @@ export class CivilizationWorld extends DurableObject {
 
   async advanceTo(nowMs, reason = "request") {
     await this.ready;
+    if(this.localHost&&this.localHost.expiresAt>nowMs)return {elapsedRealSeconds:0,steps:0,localHost:true};
+    if(this.localHost){
+      for(const command of this.localHost.commands||[])countries.requestConflict(command);
+      this.localHost=null;
+      await this.ctx.storage.delete('localHostLease');
+    }
     const elapsedRealSeconds = Math.max(0, (nowMs - this.lastWallClockMs) / 1000);
     if (elapsedRealSeconds < 0.75) return { elapsedRealSeconds, steps: 0 };
 
@@ -183,19 +193,24 @@ export class CivilizationWorld extends DurableObject {
     });
   }
 
+  async localHostingStatus(){
+    await this.ready;
+    return {active:Boolean(this.localHost&&this.localHost.expiresAt>Date.now())};
+  }
+
   async getNeuralInputs(){
     await this.ready;
-    return this.withLock(async()=>({worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:getNeuralAgents()}));
+    return this.withLock(async()=>({worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:this.localHost&&this.localHost.expiresAt>Date.now()?[]:getNeuralAgents()}));
   }
   async applyNeuralBatch(batch){
     await this.ready;
     // Brain shards persist their own neural checkpoints. City progress follows
     // the normal snapshot cadence instead of recompressing the city per batch.
-    return this.withLock(async()=>{const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(false);return status;});
+    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {applied:0,localHost:true};const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(false);return status;});
   }
   async neuralCycleFailed(details){
     await this.ready;
-    return this.withLock(async()=>{markNeuralCycleFailed(details);return getNeuralStatus();});
+    return this.withLock(async()=>{if(!this.localHost||this.localHost.expiresAt<=Date.now())markNeuralCycleFailed(details);return getNeuralStatus();});
   }
 
   readObservation(url) {
@@ -222,9 +237,80 @@ export class CivilizationWorld extends DurableObject {
     return json(payload);
   }
 
+  async localSession(request,url){
+    await this.ready;
+    const path=url.pathname;
+    let body;
+    try{
+      // Decode outside the mutation queue so an upload cannot hold heartbeats.
+      const stream=path.endsWith('/checkpoint')
+        ?request.body.pipeThrough(new DecompressionStream('gzip')):request.body;
+      let bytes=0;
+      const limit=path.endsWith('/checkpoint')?64*1024*1024:4096;
+      const bounded=stream.pipeThrough(new TransformStream({transform(chunk,controller){
+        bytes+=chunk.byteLength;if(bytes>limit)throw Error('local request too large');controller.enqueue(chunk);
+      }}));
+      body=await new Response(bounded).json();
+    }catch{return json({error:'invalid_local_request'},400);}
+    return this.withLock(async()=>{
+      const now=Date.now(),claim=path.endsWith('/claim');
+      const lease=this.localHost;
+      if(claim){
+        if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt});
+        // Apply any accepted commands from an expired host before handing over.
+        for(const command of lease?.commands||[])countries.requestConflict(command);
+        const raw=getRawState();
+        const next={token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
+        await this.ctx.storage.put('localHostLease',next);
+        this.localHost=next;
+        const payload=JSON.stringify({granted:true,lease:next,state:localHostSnapshot(raw)});
+        return new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip'})});
+      }
+      if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
+      if(path.endsWith('/heartbeat')){
+        lease.expiresAt=now+LOCAL_HOST_TTL_MS;
+        await this.ctx.storage.put('localHostLease',lease);
+        return json({ok:true,expiresAt:lease.expiresAt,sequence:lease.sequence,commands:lease.commands||[]});
+      }
+      if(path.endsWith('/leave')){
+        // A tiny unload beacon gives the final checkpoint time to finish. If a
+        // mobile OS freezes the worker, the last durable save resumes shortly.
+        lease.expiresAt=Math.min(lease.expiresAt,now+15000);
+        await this.ctx.storage.put('localHostLease',lease);
+        return json({ok:true});
+      }
+      if(path.endsWith('/checkpoint')){
+        if(!Number.isSafeInteger(body.sequence)||body.sequence<1)return json({error:'invalid_local_sequence'},400);
+        if(body.sequence<=lease.sequence)return json({ok:true,duplicate:true,sequence:lease.sequence});
+        try{
+          const merged=mergeLocalHostCheckpoint(getRawState(),body.state,lease,now);
+          restoreState(merged);
+          // Commands accepted on another device are replayed idempotently;
+          // replacing the checkpoint must never erase a queued gameplay action.
+          for(const command of lease.commands||[])countries.requestConflict(command);
+          this.lastWallClockMs=now;
+          await this.persistIfDue(true);
+          lease.sequence=body.sequence;
+          const acknowledged=new Set(Array.isArray(body.acknowledgedCommands)?body.acknowledgedCommands:[]);
+          lease.commands=(lease.commands||[]).filter(c=>!acknowledged.has(c.requestId));
+          if(body.release){
+            await this.ctx.storage.delete('localHostLease');
+            this.localHost=null;
+          }else{
+            lease.expiresAt=now+LOCAL_HOST_TTL_MS;
+            await this.ctx.storage.put('localHostLease',lease);
+          }
+          return json({ok:true,sequence:lease.sequence,commands:lease.commands||[]});
+        }catch(error){return json({error:String(error)},422);}
+      }
+      return json({error:'unknown_local_operation'},404);
+    });
+  }
+
   async fetch(request) {
     if(request.method==='OPTIONS')return new Response(null,{status:204,headers:corsHeaders()});
     const url=new URL(request.url);
+    if(request.method==='POST'&&url.pathname.startsWith('/api/civilization/local/'))return this.localSession(request,url);
     if(request.method==='GET'&&['/health','/api/civilization/state','/api/civilization/neural'].includes(url.pathname)){
       await this.ready;
       // A read is synchronous against the last complete JS step. It must not
@@ -246,7 +332,19 @@ export class CivilizationWorld extends DurableObject {
       const nextAlarmAtMs = await this.ensureAlarm();
 
       if(url.pathname==='/api/civilization/conflict'&&request.method==='POST'){
-        const result=await handleConflictControl(request,{requestConflict:command=>countries.requestConflict(command),persist:()=>this.persistIfDue(true)});
+        const lease=this.localHost&&this.localHost.expiresAt>Date.now()?this.localHost:null;
+        const result=await handleConflictControl(request,{
+          requestConflict:command=>{
+            if(!lease)return countries.requestConflict(command);
+            lease.commands||=[];
+            if(!lease.commands.some(c=>c.requestId===command.requestId)){
+              if(lease.commands.length>=32)return {accepted:false,reason:'conflict queue is full'};
+              lease.commands.push(command);
+            }
+            return {accepted:true,requestId:command.requestId,status:'queued'};
+          },
+          persist:()=>lease?this.ctx.storage.put('localHostLease',lease):this.persistIfDue(true),
+        });
         return json(result.body,result.status);
       }
 

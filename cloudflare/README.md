@@ -66,3 +66,25 @@ to `/api/civilization/import` with `Authorization: Bearer <token>`.
 `CIV_IDLE_MAX_STEPS` defaults to 90. Under normal one-minute alarms, the world can run roughly one engine step per elapsed real second, matching the original Railway cadence closely. If an alarm is delayed longer, it still catches the game clock up while capping CPU work. While the frontend is open and polling, catch-up is much finer grained.
 
 The existing Node/Postgres adapter remains in `worker/civilization-server.mjs` for compatibility and data recovery.
+
+
+### Foreground device hosting
+
+A visible city tab can claim a fenced local session. Its dedicated Web Worker
+runs the city engine; the Durable Object pauses city and neural background work.
+Only one device owns the shared simulation at a time. Other viewers read its
+latest checkpoint. Rendering always stays on each viewer's device.
+
+The owner sends a small heartbeat every 5 seconds and a compressed complete
+checkpoint every 20 seconds. Each accepted checkpoint is saved durably, including
+new births, deaths, finances and journeys. Historical residents remain archived
+on the server. Session metadata is durable across Object eviction. Monotonic
+sequence numbers make retries idempotent, and expired owners cannot overwrite a
+new owner. Gameplay commands from another viewer are queued for the owner and
+replayed idempotently when saving or handing over.
+
+A hidden or closing tab requests a final save and sends a small leave beacon. If
+the browser cannot complete the save, background simulation resumes from the last
+saved checkpoint after a 15-second grace period. An abrupt crash without a beacon
+falls back after the 120-second lease timeout. Temporary network failures do not
+stop a running local engine; cloud-save status is separate from simulation status.

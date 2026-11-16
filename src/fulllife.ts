@@ -1,3 +1,4 @@
+import {LocalCitySession} from './local-city-session.ts';
 import {NorthF1Renderer,type NorthF1View} from './north-f1-renderer.ts';
 import {buildCivicFacility} from './civic-facility-renderer.ts';
 import {MAIN_SCHOOL_CAMPUSES} from '../worker/education-map.mjs';
@@ -487,8 +488,22 @@ window.addEventListener("unhandledrejection",(event)=>{
 const apiBase = (import.meta.env.VITE_CIVILIZATION_API || "https://fruit-fly-civilization-free.luuhungdocs.workers.dev").replace(/\/$/, "");
 const countryUI=new CountryUI({apiBase,onRefresh:()=>{void fetchSnapshot();}});
 const connectionHealth=new ConnectionHealth();
+const localCity=new LocalCitySession(apiBase,value=>{
+ const incoming=value as CivilizationSnapshot;
+ if(!usableSnapshot(incoming))return;
+ connectionHealth.accepted(incoming.simulationAgeSeconds,Date.now(),0);
+ renderSnapshot(incoming);
+ refreshConnectionHealth();
+});
 let lastLiveConnection:{state:"authoritative"|"offline"|"connecting";label:string;title:string}|null=null;
 function refreshConnectionHealth(){
+ if(localCity.active){
+  const alive=snapshot?.flies?.filter(f=>f.alive).length||0;
+  setConnection('authoritative',`${alive} ALIVE · RUNNING ON THIS DEVICE${localCity.syncing?' · SAVE PENDING':''}`);
+  connection.title='Simulation runs in a worker on this device. Heartbeat every 5 seconds, checkpoint every 20 seconds.';
+  return;
+ }
+
  const health=connectionHealth.view(Date.now(),navigator.onLine!==false);
  if(health.reason!=="live"){
   const alive=snapshot?.flies?.filter(f=>f.alive).length||residentDirectory.count||0;
@@ -854,6 +869,9 @@ function restoreCachedSnapshot(){
 }
 
 async function fetchSnapshotOnce() {
+  localCity.select(selectedFlyId);
+  if(localCity.active)return;
+  localCity.start(selectedFlyId);
   // The civilization keeps running without a viewer; hidden tabs do not poll/render it.
   if (document.hidden) return;
   refreshConnectionHealth();
@@ -874,6 +892,7 @@ async function fetchSnapshotOnce() {
     if (!snapshot) events.textContent = "Waiting for the city census. The last confirmed view will stay visible during retries.";
     return;
   }finally{clearTimeout(probeTimer);}
+  if(localCity.active)return;
   if(payload.authoritative&&snapshot&&!snapshot.authoritative)presentationClock.reset();
   else if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds){refreshConnectionHealth();return;}
   if(payload.authoritative)connectionHealth.accepted(payload.simulationAgeSeconds,Date.now(),Number(payload.runtime?.sampledCatchup?.snapshotAgeSeconds)*1_000);
@@ -903,7 +922,8 @@ async function fetchSnapshot(){
  if(snapshotFetchPending||document.hidden)return;
  snapshotFetchPending=true;try{await fetchSnapshotOnce();}finally{snapshotFetchPending=false;}
 }
-addEventListener("visibilitychange",()=>{if(!document.hidden)void fetchSnapshot();});
+addEventListener("visibilitychange",()=>{if(document.hidden)localCity.release();else void fetchSnapshot();});
+addEventListener('pagehide',()=>localCity.release());
 addEventListener("online",()=>{refreshConnectionHealth();void fetchSnapshot();});
 addEventListener("offline",refreshConnectionHealth);
 
