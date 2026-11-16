@@ -1,10 +1,13 @@
 import {signalBarrier} from '../worker/traffic.mjs';
+export const CITY_ROUTE_PREDICTION_SECONDS=75;
 export type MotionPoint={x:number;y?:number;z:number};
 export type MotionPlan={at:number;speed:number;mode:string;points:MotionPoint[];blocked?:boolean;signalPermit?:boolean};
 /** Client-only locomotion. Never changes server state, money, needs, jobs or neural checkpoints. */
 export class CityMotion{
  x=0;y=1.1;z=0;
  private plan:MotionPlan|null=null;private index=0;private remaining=0;
+ private readonly predictionSeconds:number;
+ constructor(predictionSeconds=8){this.predictionSeconds=predictionSeconds;}
  accept(position:MotionPoint,plan:MotionPlan){
   if(!Number.isFinite(plan.at)||!Number.isFinite(position.x)||!Number.isFinite(position.z)||this.plan&&plan.at<=this.plan.at)return;
   plan={...plan,speed:Number.isFinite(plan.speed)?Math.max(0,Math.min(40,plan.speed)):0,points:plan.points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,16)};
@@ -21,16 +24,18 @@ export class CityMotion{
   if(!this.plan||this.plan.mode!==plan.mode||closest>(plan.mode==='car'?4:2)){
    this.x=position.x;this.y=position.y??1.1;this.z=position.z;segment=0;ahead=0;
   }
-  // A refresh must not renew eight seconds of lead on top of existing lead.
+  // A refresh must not renew prediction on top of existing lead.
   // Only actual server progress releases more of the prediction budget.
-  this.plan={...plan,points:plan.points.slice(segment)};this.index=0;this.remaining=plan.speed>0?Math.max(0,8-ahead/plan.speed):0;
+  this.plan={...plan,points:plan.points.slice(segment)};this.index=0;this.remaining=plan.speed>0?Math.max(0,this.predictionSeconds-ahead/plan.speed):0;
  }
  get targetX(){return this.plan?.points[this.index]?.x??this.x;}
  get targetZ(){return this.plan?.points[this.index]?.z??this.z;}
  advance(dt:number,gameSeconds:number,timeScale=120,headway?:(from:{x:number;z:number},to:{x:number;z:number})=>number){
   const plan=this.plan;if(!plan||plan.blocked||this.remaining<=0)return;
   dt=Math.min(.1,Math.max(0,dt),this.remaining);this.remaining-=dt;
-  let distance=Math.max(0,plan.speed)*dt;
+  const elapsed=this.predictionSeconds-this.remaining;
+  const continuation=this.predictionSeconds>8?Math.max(.5,1-Math.max(0,elapsed-12)*.02):1;
+  let distance=Math.max(0,plan.speed)*dt*continuation;
   for(let hops=0;distance>1e-5&&this.index<plan.points.length&&hops<12;hops++){
    const target=plan.points[this.index],dx=target.x-this.x,dy=(target.y??this.y)-this.y,dz=target.z-this.z,len=plan.mode==='walk'?Math.hypot(dx,dy,dz):Math.hypot(dx,dz);
    if(len<.01){this.y=target.y??this.y;this.index++;continue;}

@@ -210,9 +210,14 @@ export class CivilizationWorld extends DurableObject {
     }
     if(url.pathname==='/health'){
       const state=getRawState();
+      if(url.searchParams.get('view')==='brief'){
+        return json({ok:snapshotLooksUsable(state),worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,
+          simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),snapshotAgeSeconds:advance.snapshotAgeSeconds});
+      }
       return json({ok:snapshotLooksUsable(state),service:'fruit-fly-civilization-cloudflare',runtime:'cloudflare-durable-object',worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,simulationStatus:state?'SYNTHETIC_CIVILIZATION_LIVE':'STARTING',population:state?.flies?.filter(f=>f.alive).length||0,simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),persistence:'DURABLE_OBJECT_SQLITE',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance,storage:this.storageStats,neural:getNeuralStatus()});
     }
-    const payload=getState({observer:url.searchParams.get('view')==='observer',selectedId:url.searchParams.get('selected')});
+    const observer=url.searchParams.get('view')==='observer';
+    const payload=getState({observer,compactObserver:observer&&url.searchParams.get('transport')==='compact',selectedId:url.searchParams.get('selected')});
     payload.runtime={platform:'cloudflare-durable-object',persistence:'sqlite-gzip-chunks',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance};
     return json(payload);
   }

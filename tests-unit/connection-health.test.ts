@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
-import {ConnectionHealth,requestCitySnapshot,SNAPSHOT_TIMEOUT_MS} from '../src/connection-health.ts';
-import {CityClock} from '../src/city-clock.ts';
+import {ConnectionHealth,requestCitySnapshot,SNAPSHOT_TIMEOUT_MS,OBSERVER_TIMEOUT_MS} from '../src/connection-health.ts';
+import {CityClock,CITY_VIEW_PREDICTION_SECONDS} from '../src/city-clock.ts';
 
 test('a fresh delayed response is retrying; repeated failures, stale data and browser offline are distinct',()=>{
  const health=new ConnectionHealth();health.accepted(100,0);health.failed();
  assert.equal(health.view(25_000).reason,'delayed');assert.equal(health.view(25_000).state,'connecting');
  assert.equal(health.view(25_000,false).reason,'offline');
  assert.equal(health.view(45_000).reason,'stale');
- health.failed();health.failed();assert.equal(health.view(30_000).reason,'offline');
+ health.failed();health.failed();assert.equal(health.view(30_000).reason,'delayed');
+ assert.equal(health.view(65_000).reason,'offline');
  health.accepted(200,31_000);assert.equal(health.view(31_000).reason,'live');assert.equal(health.view(31_000).failures,0);
 });
 
@@ -60,12 +61,12 @@ test('a complete slow body is accepted and cancels its deadline; invalid HTTP/da
 function viewer(options:Record<string,any>={}){
  const source=fs.readFileSync(new URL('../src/fulllife.ts',import.meta.url),'utf8');
  const refresh=source.slice(source.indexOf('function refreshConnectionHealth()'),source.indexOf('window.setInterval(refreshConnectionHealth'));
- const once=source.slice(source.indexOf('async function fetchSnapshotOnce()'),source.indexOf('// ---------- Three.js city ----------'));
+ const once=source.slice(source.indexOf('let nextHealthProbeAt=0;'),source.indexOf('// ---------- Three.js city ----------'));
  const poll=source.slice(source.indexOf('let snapshotFetchPending=false;'),source.indexOf('addEventListener("visibilitychange"'));
  const setup=`
- const {ConnectionHealth,CityClock,options}=deps;
+ const {ConnectionHealth,CityClock,CITY_VIEW_PREDICTION_SECONDS,OBSERVER_TIMEOUT_MS,options}=deps;
  let now=1000,snapshot=options.initial||null,selectedFlyId='FLY /A',calls=0,offlineCalls=0,renderCalls=0;
- const connectionHealth=new ConnectionHealth(),presentationClock=new CityClock();
+ const connectionHealth=new ConnectionHealth(),presentationClock=new CityClock(CITY_VIEW_PREDICTION_SECONDS);
  if(snapshot){connectionHealth.accepted(snapshot.simulationAgeSeconds,now);presentationClock.accept(snapshot.simulationAgeSeconds,now,120);}
  let lastLiveConnection=snapshot?{state:'authoritative',label:'1 ALIVE · CITY LIVE',title:'City status'}:null;
  const connection={dataset:{state:snapshot?'authoritative':'connecting'},title:'City status'},connectionLabel={textContent:''};
@@ -77,12 +78,16 @@ function viewer(options:Record<string,any>={}){
  const loadCachedSnapshot=()=>options.cache||null;
  const saveCachedSnapshot=()=>{if(options.cacheError)throw Error('local storage unavailable');};
  const readCitySnapshot=async response=>response.json();
- const requestCitySnapshot=async(url,request)=>{calls++;options.urls?.push(url);if(options.request)return options.request();if(options.error)throw Error('network timeout');return options.payload;};
+ const requestCitySnapshot=async(url,request)=>{
+   if(url.includes('/health?')){if(!options.healthReachable)throw Error('network timeout');return {ok:true,worldId:'test',simulationAgeSeconds:110};}
+   calls++;options.urls?.push(url);if(options.request)return options.request();if(options.error)throw Error('network timeout');return options.payload;
+ };
+
  const renderSnapshot=value=>{renderCalls++;if(options.renderError)throw Error('WebGL error');snapshot=value;presentationClock.accept(value.simulationAgeSeconds,now,120);setConnection(value.authoritative?'authoritative':'offline','1 ALIVE · CITY LIVE');};
  `;
  const result=`return {fetchSnapshot,refreshConnectionHealth,connection,connectionLabel,connectionHealth,presentationClock,navigator,setNow:value=>{now=value;},get snapshot(){return snapshot;},get selected(){return selectedFlyId;},get calls(){return calls;},get offlineCalls(){return offlineCalls;},get renderCalls(){return renderCalls;}};`;
  const compiled=ts.transpileModule(setup+refresh+once+poll+result,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
- return new Function('deps',compiled)({ConnectionHealth,CityClock,options,parseDate:Date.parse});
+ return new Function('deps',compiled)({ConnectionHealth,CityClock,CITY_VIEW_PREDICTION_SECONDS,OBSERVER_TIMEOUT_MS,options,parseDate:Date.parse});
 }
 const snapshot={authoritative:true,simulationAgeSeconds:100,serverTime:'2026-11-14T00:00:00Z',flies:[{id:'FLY /A',alive:true}]};
 
@@ -93,7 +98,8 @@ test('first timeout retains the scene, selected resident and bounded presentatio
  assert.ok(v.presentationClock.read(20_000)>100);
  v.setNow(51_000);v.refreshConnectionHealth();assert.match(v.connectionLabel.textContent,/STALE SNAPSHOT/);
  assert.equal(v.connection.dataset.snapshotAgeSeconds,'50');assert.match(v.connection.title,/advance 50s ago/);
- assert.equal(v.presentationClock.read(51_000),v.presentationClock.read(61_000),'presentation prediction must remain bounded');
+ assert.ok(v.presentationClock.read(61_000)>v.presentationClock.read(51_000),'routine Worker delays keep scheduled motion going');
+ assert.equal(v.presentationClock.read(91_000),v.presentationClock.read(181_000),'presentation prediction must remain bounded');
 });
 
 test('cold cache is rendered once during retry and remains explicitly unconfirmed',async()=>{
@@ -106,7 +112,7 @@ test('single-flight polling preserves selection and successful reconnection clea
  let release!:(payload:unknown)=>void;const urls:string[]=[];
  const options:Record<string,any>={initial:snapshot,error:true,urls};const v=viewer(options);await v.fetchSnapshot();
  options.error=false;options.request=()=>new Promise(resolve=>{release=resolve;});
- const first=v.fetchSnapshot();await v.fetchSnapshot();assert.equal(v.calls,2);assert.match(urls[1],/selected=FLY%20%2FA/);
+ const first=v.fetchSnapshot();await v.fetchSnapshot();assert.equal(v.calls,2);assert.match(urls[1],/transport=compact&selected=FLY%20%2FA/);
  release({...snapshot,simulationAgeSeconds:200});await first;
  assert.equal(v.selected,'FLY /A');assert.equal(v.connectionHealth.view(1000).failures,0);assert.equal(v.connection.dataset.state,'authoritative');
 });
@@ -115,4 +121,46 @@ test('render and local cache failures do not become civilization network failure
  const v=viewer({payload:snapshot,renderError:true,cacheError:true});await v.fetchSnapshot();
  assert.equal(v.connectionHealth.view(1000).failures,0);assert.equal(v.connection.dataset.state,'authoritative');
  assert.match(v.connectionLabel.textContent,/VISUAL DEGRADED/);assert.match(v.connection.title,/Last live response 0s ago/);
+});
+
+
+test('a responsive health endpoint distinguishes a slow census without advancing the rendered city',async()=>{
+ const v=viewer({initial:snapshot,error:true,healthReachable:true});
+ v.setNow(50_000);
+ await v.fetchSnapshot();
+ await Promise.resolve();
+ assert.match(v.connectionLabel.textContent,/STALE SNAPSHOT · CITY REACHABLE/);
+ assert.equal(v.connectionHealth.view(50_000).simulationTime,100);
+ assert.equal(v.renderCalls,0);
+ assert.equal(v.connection.dataset.state,'connecting');
+ v.navigator.onLine=false;v.refreshConnectionHealth();
+ assert.match(v.connectionLabel.textContent,/OFFLINE · LAST GOOD/);
+});
+
+test('the observer deadline is separately configurable for slow transfers',async()=>{
+ let scheduled=0;
+ const payload=await requestCitySnapshot('https://city.test/state',{
+  fetcher:async()=>new Response('{"ok":true}'),read:r=>r.json(),usable:value=>value.ok===true,
+  deadlineMs:OBSERVER_TIMEOUT_MS,schedule:(_callback,delay)=>{scheduled=delay;return 0;},cancel:()=>{},
+ });
+ assert.equal(scheduled,45_000);
+ assert.equal(payload.ok,true);
+});
+
+
+test('a first census carrying an already old Worker snapshot remains labeled stale',async()=>{
+ const v=viewer({payload:{...snapshot,runtime:{sampledCatchup:{snapshotAgeSeconds:70}}}});
+ await v.fetchSnapshot();
+ assert.equal(v.connectionHealth.view(1000).reason,'stale');
+ assert.equal(v.connection.dataset.snapshotAgeSeconds,'70');
+});
+
+test('a cached scene can be replaced by the authoritative world after checkpoint rollback',async()=>{
+ const options={cache:snapshot,error:true,payload:{...snapshot,simulationAgeSeconds:90}};
+ const v=viewer(options);await v.fetchSnapshot();
+ assert.equal(v.snapshot.authoritative,false);
+ options.error=false;await v.fetchSnapshot();
+ assert.equal(v.snapshot.authoritative,true);
+ assert.equal(v.snapshot.simulationAgeSeconds,90);
+ assert.equal(v.presentationClock.read(1000),90);
 });

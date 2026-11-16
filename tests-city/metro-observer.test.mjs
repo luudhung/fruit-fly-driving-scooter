@@ -21,3 +21,19 @@ test('a platform waiter publishes the requested direction before boarding',()=>{
  moveFly(f);assert.equal(f.onTrain,false);assert.equal(f.transitStage,'platform-wait');assert.equal(f.metroTrainDirection,1);
  const record=getState({observer:true,selectedId:s.flies[1].id}).flies.find(r=>r.id===f.id);assert.equal(record.metroTrainDirection,1);
 });
+
+
+test('compact observer skips unused traces, keeps the announced route and preserves selected inspector details',()=>{
+ const state=freshState(),[moving,selected]=state.flies.filter(f=>f.alive);
+ const target={x:23.452345,y:1.1,z:1.500283},trace={x:20,y:1.1,z:0,t:state.simulationAgeSeconds};
+ Object.assign(moving,{x:20,y:1.1,z:0,traveling:true,onTrain:false,onPlane:false,heliPassenger:false,onPrivateHelicopter:false,taxiPassenger:false,transitMode:'walk',routeIndex:0,routeWaypoints:[{...target,mode:'walk'}],movementTrace:[trace]});
+ selected.movementTrace=[trace];
+ const full=getState({observer:true,selectedId:selected.id}),compact=getState({observer:true,selectedId:selected.id,compactObserver:true});
+ assert.equal(compact.population,full.population);
+ assert.equal(compact.simulationAgeSeconds,full.simulationAgeSeconds);
+ assert.deepEqual(compact.flies.find(f=>f.id===selected.id),full.flies.find(f=>f.id===selected.id));
+ const c=compact.flies.find(f=>f.id===moving.id),f=full.flies.find(f=>f.id===moving.id);
+ assert.equal(c.movementTrace,undefined);assert.ok(f.movementTrace.length);
+ assert.deepEqual(c.motion.points,[{x:23.45,y:1.1,z:1.5}]);
+ assert.ok(JSON.stringify(compact).length<JSON.stringify(full).length);
+});

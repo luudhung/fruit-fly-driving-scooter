@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {CityMotion} from './city-motion.ts';
+import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS} from './city-motion.ts';
 import type {FireServiceSnapshot,EmergencyVehicle} from '../worker/fire-service.mjs';
 type Sign=(text:string,fontSize?:number,scale?:number)=>THREE.Sprite;
 const boxGeometry=new THREE.BoxGeometry(1,1,1);
@@ -48,7 +48,7 @@ export class FireServiceRenderer{
  }
  sync(data:FireServiceSnapshot){
   const active=new Set<string>();for(const e of [...(data.engines||[]),...(data.ambulances||[])].slice(0,EMERGENCY_VISUAL_CAPACITY)){
-   active.add(e.id);let v=this.vehicles.get(e.id);if(!v){v={motion:new CityMotion(),hasMotion:false,x:e.x,y:e.y,z:e.z,heading:e.heading,data:e};this.vehicles.set(e.id,v);}v.data=e;v.hasMotion=Boolean(e.traveling&&e.motion.points.length);if(v.hasMotion)v.motion.accept(e,e.motion);
+   active.add(e.id);let v=this.vehicles.get(e.id);if(!v){v={motion:new CityMotion(CITY_ROUTE_PREDICTION_SECONDS),hasMotion:false,x:e.x,y:e.y,z:e.z,heading:e.heading,data:e};this.vehicles.set(e.id,v);}v.data=e;v.hasMotion=Boolean(e.traveling&&e.motion.points.length);if(v.hasMotion)v.motion.accept(e,e.motion);
   }
   for(const id of this.vehicles.keys())if(!active.has(id))this.vehicles.delete(id);
  }

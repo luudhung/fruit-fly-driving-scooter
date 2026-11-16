@@ -4636,7 +4636,7 @@ function compactFly(f) {
   };
 }
 
-function motionPlan(f){
+function motionPlan(f,compact=false){
  if(!f.traveling||f.onTrain||f.onPlane||f.heliPassenger||f.onPrivateHelicopter||f.taxiPassenger)return null;
  const current=f.routeWaypoints?.[f.routeIndex];
  const points=[{x:current?.x??f.targetX,y:current?.y??f.y,z:current?.z??f.targetZ}];
@@ -4644,23 +4644,32 @@ function motionPlan(f){
   if(p.mode!==f.transitMode||p.stage==='station-entry'||p.stage==='parking')break;
   points.push({x:p.x,y:p.y??1.1,z:p.z});
  }
+ if(compact)for(const point of points){
+  point.x=Math.round(point.x*100)/100;point.y=Math.round(point.y*100)/100;point.z=Math.round(point.z*100)/100;
+ }
  return {at:state.simulationAgeSeconds,speed:Number(f.motionSpeed||Math.hypot(f.vx,f.vz)||2.5),mode:f.transitMode,points,blocked:Number(f.trafficHoldUntil||0)>state.simulationAgeSeconds,signalPermit:Boolean(f.signalEncounter?.permit)};
 }
-function observerFly(f,selectedId){
+function observerFly(f,selectedId,compactObserver=false){
  if(f.id===selectedId)return {...compactFly(f),ownsHome:Boolean(ownsCountryHome(state,f,f.residencyCountryId)),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
  for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId','citizenshipCountryId','residencyCountryId','publicServiceRole','publicServiceCountryId']){
-  const value=f[key];record[key]=typeof value==='number'?Math.round(value*100)/100:value;
+  const value=f[key];
+  if(compactObserver&&value===null)continue;
+  record[key]=typeof value==='number'?Math.round(value*100)/100:value;
  }
- record.motion=motionPlan(f);
+ const motion=motionPlan(f,compactObserver);
+ if(!compactObserver||motion)record.motion=motion;
  record.onFireEngine=Boolean(f.onFireEngine);record.onAmbulance=Boolean(f.onAmbulance);record.homeDistrict=f.homeDistrict||null;record.trafficStatus=f.trafficStatus||null;record.trafficSignalPermit=Boolean(f.signalEncounter?.permit);
  record.parkedCar=f.parkedCar?{x:f.parkedCar.x,z:f.parkedCar.z,heading:f.parkedCar.heading}:null;
- record.movementTrace=(f.movementTrace||[]).slice(-8).map(p=>({x:Math.round(p.x*100)/100,y:Math.round((p.y||1.1)*100)/100,z:Math.round(p.z*100)/100,t:p.t}));
+ // The viewer uses traces only as a fallback when no route is available.
+ if(!compactObserver||f.traveling&&!motion&&!f.onTrain&&!f.onPlane&&!f.taxiPassenger&&!f.onFireEngine&&!f.onAmbulance){
+  record.movementTrace=(f.movementTrace||[]).slice(compactObserver?-3:-8).map(p=>({x:Math.round(p.x*100)/100,y:Math.round((p.y||1.1)*100)/100,z:Math.round(p.z*100)/100,t:p.t}));
+ }
  return record;
 }
 function visitorSnapshot(options){
  const data=cityVisitors.snapshot();
- data.visitors=cityVisitors.visitors().map(f=>({...observerFly(f,options.selectedId),kind:'visitor',taxiPassenger:Boolean(f.taxiPassenger),departAt:f.departAt,hotelId:f.hotelId}));
+ data.visitors=cityVisitors.visitors().map(f=>({...observerFly(f,options.selectedId,options.compactObserver),kind:'visitor',taxiPassenger:Boolean(f.taxiPassenger),departAt:f.departAt,hotelId:f.hotelId}));
  return data;
 }
 function mainlandStats(living){
@@ -4783,7 +4792,7 @@ function getState(options={}) {
     neuralBridge: getNeuralStatus(),
     daysPerYear: DAYS_PER_YEAR,
     locations: LOCATIONS,
-    flies: living.map(f=>options.observer?observerFly(f,options.selectedId):compactFly(f)),
+    flies: living.map(f=>options.observer?observerFly(f,options.selectedId,options.compactObserver):compactFly(f)),
     selectedFly: selected ? {
       id: selected.id,
       brainId: selected.brain?.id,

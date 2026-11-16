@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {CityMotion,type MotionPlan} from '../src/city-motion.ts';
+import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS,type MotionPlan} from '../src/city-motion.ts';
 const plan=(overrides:Partial<MotionPlan>={}):MotionPlan=>({at:0,speed:4,mode:'walk',points:[{x:40,y:1.1,z:0}],...overrides});
 function run(m:CityMotion,seconds:number,fps=60,gameSeconds=0){for(let i=0;i<seconds*fps;i++)m.advance(1/fps,gameSeconds+i/fps*120);}
 test('local movement is continuous between snapshots and independent of render frequency',()=>{
@@ -56,4 +56,13 @@ test('an unrelated itinerary and a transport mode change still replace the previ
  assert.equal(m.z,20);assert.equal(m.x,0);
  run(m,1);m.accept({x:2,y:1.1,z:20},plan({at:240,mode:'car',points:[{x:40,y:1.1,z:20}]}));
  assert.equal(m.x,2,'changing transport must reconcile to its authoritative position');
+});
+
+test('a viewer car can coast through a routine delayed census and stop at the end of its confirmed route',()=>{
+ const m=new CityMotion(CITY_ROUTE_PREDICTION_SECONDS);
+ m.accept({x:1300,z:0},plan({mode:'car',speed:5,signalPermit:true,points:[{x:1430,z:0}]}));
+ run(m,12);const before=m.x;
+ run(m,12);assert.ok(m.x>before&&m.x<before+60);
+ run(m,100);assert.ok(Math.abs(m.x-1430)<.001);
+ run(m,60);assert.ok(Math.abs(m.x-1430)<.001);
 });

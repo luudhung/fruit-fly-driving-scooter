@@ -1,4 +1,4 @@
-import {CityMotion} from './city-motion.ts';
+import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS} from './city-motion.ts';
 import {SceneViewBudget} from './view-budget.ts';
 import {REGIONAL_TRUCK_LIMIT} from '../worker/regional-freight.mjs';
 import * as THREE from 'three';
@@ -55,7 +55,7 @@ export class IndustrialDistrictRenderer{
    // Retained trucks are displayed at their predicted position, not the older
    // snapshot coordinate. Keep that same point for interest and its hysteresis.
    if(this.camera&&!this.view.visible(motion??t,Boolean(motion),5))continue;
-   if(!motion){motion=new CityMotion();this.motions.set(t.id,motion);motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});}
+   if(!motion){motion=new CityMotion(CITY_ROUTE_PREDICTION_SECONDS);this.motions.set(t.id,motion);motion.accept(t,{at:t.at,speed:t.motionSpeed,mode:'car',points:t.routeWaypoints,blocked:t.motionSpeed<=0});}
    motion.advance(dt,gameNow,timeScale);
    const next={x:motion.targetX-motion.x,z:motion.targetZ-motion.z},heading=Math.hypot(next.x,next.z)>.05?Math.atan2(next.x,next.z):t.heading;
    this.dummy.position.set(motion.x,motion.y-1.1,motion.z);this.dummy.rotation.set(0,heading,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();

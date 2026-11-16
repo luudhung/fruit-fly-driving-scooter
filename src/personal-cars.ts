@@ -1,4 +1,4 @@
-import {CityMotion,type MotionPlan} from './city-motion.ts';
+import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS,type MotionPlan} from './city-motion.ts';
 import {SceneViewBudget,selectViewBudget} from './view-budget.ts';
 import {signalBarrier,createVehicleIndex,type TrafficActor} from '../worker/traffic.mjs';
 import * as THREE from 'three';
@@ -61,7 +61,7 @@ export class PersonalCars{
   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route.length=0;car.x=q.x;car.y=q.y??1.1;car.z=q.z;}}
   if(car.route.length>12)car.route=car.route.slice(-8);
   car.hasMotion=Boolean(driving&&f.motion);
-  if(car.hasMotion){car.motion ||=new CityMotion();car.motion.accept(f,f.motion!);car.route.length=0;}
+  if(car.hasMotion){car.motion ||=new CityMotion(CITY_ROUTE_PREDICTION_SECONDS);car.motion.accept(f,f.motion!);car.route.length=0;}
   else car.motion=undefined;
   car.signalPermit=Boolean(f.trafficSignalPermit);car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;
   car.targetX=p.x;car.targetY=driving?(f.y??1.1):1.1;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
@@ -78,7 +78,7 @@ export class PersonalCars{
    if(sleeping){this.syncDriver(f,sleeping,false);if(sleeping.hasMotion&&sleeping.motion){sleeping.x=sleeping.motion.x;sleeping.y=sleeping.motion.y;sleeping.z=sleeping.motion.z;}}
    const car=this.cars.get(f.id)||sleeping,driving=Boolean(f.traveling&&f.transitMode==='car');
    // Interest must follow what the camera actually sees. A delayed snapshot can
-   // be up to eight seconds behind a predicted car; culling against it would
+   // lag behind a predicted car; culling against it would
    // discard a visible ID and restart its animation when the snapshot catches up.
    return car&&car.driving===driving?car:authoritative;
   },f=>f.id,this.retained,this.capacity),wanted=new Set(selected.map(f=>f.id));

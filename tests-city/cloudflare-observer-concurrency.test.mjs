@@ -7,7 +7,7 @@ function fixture({recentCheckpoint=false,scheduler,onTick=()=>{}}={}){
  source=source.slice(0,source.indexOf('\nexport default')).replace('export class CivilizationWorld','class CivilizationWorld');
  let release,saveStarted=false,saveCalls=0,ticks=0,reads=0,alarmReads=0,neuralUpdates=0;
  const waiting=new Promise(resolve=>{release=resolve;}),state={simulationAgeSeconds:10,timeScale:120,flies:[{id:'A',alive:true,brain:{id:'B'}}]};
- const deps={scheduler,DurableObject:class{},loadSnapshot:async()=>({state,lastWallClockMs:Date.now()-5000,savedAtMs:recentCheckpoint?Date.now():0,stats:{chunks:1}}),saveSnapshot:async()=>{saveStarted=true;saveCalls++;await waiting;return{chunks:1};},exportSnapshot:async()=>'',freshState:()=>state,restoreState:()=>{},getRawState:()=>state,getState:options=>{reads++;return{population:1,simulationAgeSeconds:state.simulationAgeSeconds,flies:state.flies,selected:options.selectedId};},tick:({gameSeconds})=>{ticks++;state.simulationAgeSeconds+=gameSeconds;onTick(ticks);},mortalityReport:()=>({}),snapshotLooksUsable:()=>true,setNeuralSyncEnabled:()=>{},getSimulationConfig:()=>({gameSecondsPerRealSecond:120}),getNeuralAgents:()=>[],applyNeuralOutputs:outputs=>{neuralUpdates++;return{applied:outputs.length};},getNeuralStatus:()=>({}),markNeuralCycleFailed:()=>{},neuralActors:()=>state.flies};
+ const deps={scheduler,DurableObject:class{},loadSnapshot:async()=>({state,lastWallClockMs:Date.now()-5000,savedAtMs:recentCheckpoint?Date.now():0,stats:{chunks:1}}),saveSnapshot:async()=>{saveStarted=true;saveCalls++;await waiting;return{chunks:1};},exportSnapshot:async()=>'',freshState:()=>state,restoreState:()=>{},getRawState:()=>state,getState:options=>{reads++;return{population:1,simulationAgeSeconds:state.simulationAgeSeconds,flies:state.flies,selected:options.selectedId,compactObserver:options.compactObserver};},tick:({gameSeconds})=>{ticks++;state.simulationAgeSeconds+=gameSeconds;onTick(ticks);},mortalityReport:()=>({}),snapshotLooksUsable:()=>true,setNeuralSyncEnabled:()=>{},getSimulationConfig:()=>({gameSecondsPerRealSecond:120}),getNeuralAgents:()=>[],applyNeuralOutputs:outputs=>{neuralUpdates++;return{applied:outputs.length};},getNeuralStatus:()=>({}),markNeuralCycleFailed:()=>{},neuralActors:()=>state.flies};
  const Class=new Function(...Object.keys(deps),source+'\nreturn CivilizationWorld;')(...Object.values(deps));
  let nextAlarm=Date.now()+5000;const storage={getAlarm:async()=>{alarmReads++;return nextAlarm;},setAlarm:async at=>{nextAlarm=at;}};
  const ctx={storage,blockConcurrencyWhile:fn=>fn(),waitUntil:()=>{}};const world=new Class(ctx,{NEURAL_ENABLED:'0'});
@@ -22,6 +22,11 @@ test('health and observer reads finish while an alarm checkpoint is blocked, wit
   const response=await Promise.race([t.world.fetch(new Request('https://test/api/civilization/state?view=observer&selected=A')),new Promise(resolve=>setTimeout(()=>resolve(null),100))]);
   assert.ok(response,'observer waited for the persistence queue');assert.equal(response.status,200);const data=await response.json();assert.equal(data.selected,'A');assert.equal(data.simulationAgeSeconds,t.state.simulationAgeSeconds);
   const health=await t.world.fetch(new Request('https://test/health'));assert.equal((await health.json()).population,1);
+  const brief=await (await t.world.fetch(new Request('https://test/health?view=brief'))).json();
+  assert.equal(brief.ok,true);assert.equal(brief.simulationAgeSeconds,t.state.simulationAgeSeconds);assert.equal(brief.neural,undefined);
+  const compact=await (await t.world.fetch(new Request('https://test/api/civilization/state?view=observer&transport=compact'))).json();
+  assert.equal(compact.compactObserver,true);
+
   const neural=await t.world.fetch(new Request('https://test/api/civilization/neural'));assert.equal((await neural.json()).brains.length,1);
   assert.equal(t.saved,1);assert.equal(t.ticks,ticks);assert.equal(t.alarmReads,alarmReads);
  }finally{t.release();await alarm;}

@@ -1,26 +1,32 @@
 export const SNAPSHOT_TIMEOUT_MS = 25_000;
 const STALE_AFTER_MS = 45_000;
 const FAILURE_LIMIT = 3;
+const CONTACT_WINDOW_MS = 65_000;
+export const OBSERVER_TIMEOUT_MS = 45_000;
 
 export class ConnectionHealth {
   private responseAt: number | null = null;
   private advancedAt: number | null = null;
+  private contactAt: number | null = null;
   private cachedAt: number | null = null;
   private simulationTime: number | null = null;
   private failures = 0;
 
-  accepted(simulationTime: number, now: number) {
+  accepted(simulationTime: number, now: number, sourceAgeMs = 0) {
     this.responseAt = now;
+    this.reachable(now);
     this.failures = 0;
     if (this.simulationTime === null || simulationTime > this.simulationTime) {
       this.simulationTime = simulationTime;
-      this.advancedAt = now;
+      this.advancedAt = now-(Number.isFinite(sourceAgeMs)?Math.max(0,sourceAgeMs):0);
     }
   }
 
   cached(capturedAt: number | null) {
     this.cachedAt = capturedAt !== null && Number.isFinite(capturedAt) ? capturedAt : null;
   }
+
+  reachable(now: number) { this.contactAt = now; }
 
   failed() { this.failures++; }
 
@@ -29,7 +35,9 @@ export class ConnectionHealth {
     const advanceAge = this.advancedAt === null ? null : Math.max(0, now - this.advancedAt);
     const cacheAge = this.cachedAt === null ? null : Math.max(0, now - this.cachedAt);
     const stale = (responseAge !== null && responseAge >= STALE_AFTER_MS) || (advanceAge !== null && advanceAge >= STALE_AFTER_MS);
-    const reason = !online || this.failures >= FAILURE_LIMIT ? 'offline'
+    const contactAge = this.contactAt === null ? null : Math.max(0, now - this.contactAt);
+    const reachable = online && contactAge !== null && contactAge < CONTACT_WINDOW_MS;
+    const reason = !online || this.failures >= FAILURE_LIMIT && !reachable ? 'offline'
       : stale ? 'stale'
       : this.failures > 0 && this.responseAt !== null ? 'delayed'
       : this.responseAt === null ? 'connecting' : 'live';
@@ -39,8 +47,8 @@ export class ConnectionHealth {
     const detail = this.responseAt === null
       ? `No live response yet. Cached snapshot: ${cacheAge === null ? 'age unknown' : age(cacheAge)}.`
       : `Last live response ${age(responseAge)}. Last observed simulation advance ${age(advanceAge)}. Authoritative simulation time: ${this.simulationTime!.toFixed(2)}s.`;
-    return { state, reason, failures: this.failures, simulationTime: this.simulationTime, responseAgeMs: responseAge, advanceAgeMs: advanceAge,
-      detail: `${detail} Consecutive sync failures: ${this.failures}.${online ? '' : ' Browser reports no network connection.'}` } as const;
+    return { state, reason, reachable, failures: this.failures, simulationTime: this.simulationTime, responseAgeMs: responseAge, advanceAgeMs: advanceAge,
+      detail: `${detail} Consecutive sync failures: ${this.failures}.${!online ? ' Browser reports no network connection.' : reachable ? ' City service responded recently.' : ''}` } as const;
   }
 }
 
@@ -48,6 +56,7 @@ type SnapshotRequest<T> = {
   read: (response: Response) => Promise<T>;
   usable: (payload: T) => boolean;
   fetcher?: typeof fetch;
+  deadlineMs?: number;
   schedule?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout> | number;
   cancel?: (timer: ReturnType<typeof setTimeout> | number) => void;
 };
@@ -55,7 +64,7 @@ type SnapshotRequest<T> = {
 /** The deadline includes headers, body download and decoding; polling owns the retry. */
 export async function requestCitySnapshot<T>(url: string, options: SnapshotRequest<T>): Promise<T> {
   const controller = new AbortController();
-  const timer = (options.schedule ?? setTimeout)(() => controller.abort(), SNAPSHOT_TIMEOUT_MS);
+  const timer = (options.schedule ?? setTimeout)(() => controller.abort(), options.deadlineMs ?? SNAPSHOT_TIMEOUT_MS);
   try {
     const response = await (options.fetcher ?? fetch)(url, {
       signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store',

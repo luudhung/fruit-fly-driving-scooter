@@ -49,13 +49,13 @@ import type {VisitorAircraft} from "../worker/visitor-aviation.mjs";
 import {ResidentPhotoAlbum,type ResidentPhotoRecord} from "./city-photo-album.ts";
 import {ResidentCamera} from "./resident-camera.ts";
 import {buildRiverBridges,buildSportsDistrict,updateBridgeLighting} from "./city-district.ts";
-import {CityMotion,type MotionPlan} from "./city-motion.ts";
+import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS,type MotionPlan} from "./city-motion.ts";
 import {CitySky,skyLight,citySkyPalette,cityFogRange,sunDirection} from "./city-sky.ts";
 import {INTERSECTIONS} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {readCitySnapshot} from "./read-city-snapshot.ts";
-import {ConnectionHealth,requestCitySnapshot} from "./connection-health.ts";
-import {CityClock} from "./city-clock.ts";
+import {ConnectionHealth,OBSERVER_TIMEOUT_MS,requestCitySnapshot} from "./connection-health.ts";
+import {CityClock,CITY_VIEW_PREDICTION_SECONDS} from "./city-clock.ts";
 import * as THREE from "three";
 import {HARBOR_CAUSEWAYS} from "../worker/city-map.mjs";
 import {InstancedResidents} from "./instanced-residents";
@@ -219,6 +219,7 @@ type WeatherState = {
 
 type NationalSummary = {residents:number;working:number;traveling:number;indoors:number;students:number;graduates:number;fires:number;projects:number};
 type CivilizationSnapshot = {
+  runtime?:{sampledCatchup?:{snapshotAgeSeconds?:number}};
   spaceProgram?:SpaceProgramView|null;
   northF1?:NorthF1View|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
@@ -491,9 +492,12 @@ function refreshConnectionHealth(){
  const health=connectionHealth.view(Date.now(),navigator.onLine!==false);
  if(health.reason!=="live"){
   const alive=snapshot?.flies?.filter(f=>f.alive).length||residentDirectory.count||0;
-  const label=health.reason==="delayed"?`SYNC DELAY · RETRYING · ${alive} ALIVE`:health.reason==="stale"?`STALE SNAPSHOT · RETRYING · ${alive} ALIVE`:health.reason==="offline"?`OFFLINE · LAST GOOD ${alive} ALIVE · RETRYING`:"CONNECTING · CENSUS RETRYING";
-  setConnection(health.state,label);
-  if(health.state==="offline")residentDirectory.offline();
+  const label=health.reason==='delayed'?`SYNC DELAY · RETRYING · ${alive} ALIVE`
+    :health.reason==='stale'?`STALE SNAPSHOT · ${health.reachable?'CITY REACHABLE':'RETRYING'} · ${alive} ALIVE`
+    :health.reason==='offline'?alive?`OFFLINE · LAST GOOD ${alive} ALIVE · RETRYING`:'OFFLINE · RETRYING'
+    :health.reachable?'CITY REACHABLE · CENSUS RETRYING':health.failures?'CONNECTING · CENSUS RETRYING':'CONNECTING · LOADING CENSUS';
+  setConnection(health.reason==='stale'&&health.reachable?'connecting':health.state,label);
+  if(health.state==='offline')residentDirectory.offline();
  }else if(lastLiveConnection)setConnection(lastLiveConnection.state,lastLiveConnection.label);
  const title=lastLiveConnection?.title||connection.title.split('\nSnapshot status:')[0];
  connection.title=`${title}\nSnapshot status: ${health.detail}`;
@@ -507,7 +511,7 @@ const recoveryCache=new IdleSnapshotCache<CivilizationSnapshot>({
  canWrite:()=>!document.hidden&&!playerCar.active,
  schedule:job=>{if(typeof requestIdleCallback==='function')requestIdleCallback(()=>job(),{timeout:1000});else window.setTimeout(job,0);},
 });
-const presentationClock=new CityClock();
+const presentationClock=new CityClock(CITY_VIEW_PREDICTION_SECONDS);
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
 let latestFlyStates = new Map<string, FlyState>();
@@ -824,35 +828,56 @@ function updateHeliTourState(flies:FlyState[]){
   }
 }
 
+let nextHealthProbeAt=0;
+async function probeCityHealth(){
+  if(document.hidden||navigator.onLine===false||Date.now()<nextHealthProbeAt)return;
+  nextHealthProbeAt=Date.now()+45_000;
+  try{
+    await requestCitySnapshot(`${apiBase}/health?view=brief`,{
+      read:response=>response.json() as Promise<{ok?:boolean;worldId?:string;simulationAgeSeconds?:number}>,
+      usable:value=>value?.ok===true&&typeof value.worldId==='string'&&Number.isFinite(value.simulationAgeSeconds),
+    });
+    connectionHealth.reachable(Date.now());
+    refreshConnectionHealth();
+  }catch{
+    // A lightweight probe never turns a failed census into a live snapshot.
+  }
+}
+
+function restoreCachedSnapshot(){
+  if(snapshot&&usableSnapshot(snapshot))return;
+  const cached=loadCachedSnapshot();
+  if(!cached)return;
+  connectionHealth.cached(Date.parse(cached.serverTime));
+  try{renderSnapshot({...cached,authoritative:false});}
+  catch(error){console.error('[fulllife] cached snapshot render failed',error);}
+}
+
 async function fetchSnapshotOnce() {
   // The civilization keeps running without a viewer; hidden tabs do not poll/render it.
   if (document.hidden) return;
   refreshConnectionHealth();
   let payload: CivilizationSnapshot;
+  const probeTimer=setTimeout(()=>{void probeCityHealth();},12_000);
   try {
-    payload = await requestCitySnapshot(`${apiBase}/api/civilization/state?view=observer${selectedFlyId?`&selected=${encodeURIComponent(selectedFlyId)}`:""}`, {
+    payload = await requestCitySnapshot(`${apiBase}/api/civilization/state?view=observer&transport=compact${selectedFlyId?`&selected=${encodeURIComponent(selectedFlyId)}`:""}`, {
       read:async response=>await readCitySnapshot(response) as CivilizationSnapshot,
       usable:usableSnapshot,
+      deadlineMs:OBSERVER_TIMEOUT_MS,
     });
   } catch (error) {
     connectionHealth.failed();
     console.error("[fulllife] civilization fetch failed", error);
-    const cached = snapshot && usableSnapshot(snapshot) ? snapshot : loadCachedSnapshot();
-    if (cached && (!snapshot || !usableSnapshot(snapshot))) {
-      connectionHealth.cached(Date.parse(cached.serverTime));
-      try {
-        renderSnapshot({ ...cached, authoritative: false });
-      } catch (renderError) {
-        console.error("[fulllife] cached snapshot render failed", renderError);
-      }
-    }
+    restoreCachedSnapshot();
+    void probeCityHealth();
     refreshConnectionHealth();
-    if (!snapshot) events.textContent = "Civilization worker is unavailable; retrying automatically.";
+    if (!snapshot) events.textContent = "Waiting for the city census. The last confirmed view will stay visible during retries.";
     return;
-  }
-  if(payload.authoritative)connectionHealth.accepted(payload.simulationAgeSeconds,Date.now());
+  }finally{clearTimeout(probeTimer);}
+  if(payload.authoritative&&snapshot&&!snapshot.authoritative)presentationClock.reset();
+  else if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds){refreshConnectionHealth();return;}
+  if(payload.authoritative)connectionHealth.accepted(payload.simulationAgeSeconds,Date.now(),Number(payload.runtime?.sampledCatchup?.snapshotAgeSeconds)*1_000);
   else connectionHealth.failed();
-  if(snapshot&&payload.simulationAgeSeconds<snapshot.simulationAgeSeconds){refreshConnectionHealth();return;}
   try{saveCachedSnapshot(payload);}catch(error){console.error("[fulllife] snapshot recovery cache failed",error);}
   try {
     renderSnapshot(payload);
@@ -879,6 +904,8 @@ async function fetchSnapshot(){
  snapshotFetchPending=true;try{await fetchSnapshotOnce();}finally{snapshotFetchPending=false;}
 }
 addEventListener("visibilitychange",()=>{if(!document.hidden)void fetchSnapshot();});
+addEventListener("online",()=>{refreshConnectionHealth();void fetchSnapshot();});
+addEventListener("offline",refreshConnectionHealth);
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 7000);
 // The scene has its own MSAA target; the fullscreen output needs neither
@@ -1500,7 +1527,7 @@ function createFlyVisual(id: string): FlyVisual {
     child.matrixAutoUpdate = false;
   });
   scene.add(group);
-  return { motion:new CityMotion(),hasMotion:false,group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status, route:[],lastTraceTime:-1,stationary:false };
+  return { motion:new CityMotion(CITY_ROUTE_PREDICTION_SECONDS),hasMotion:false,group, target: new THREE.Vector3(), current: new THREE.Vector3(), halo, status, route:[],lastTraceTime:-1,stationary:false };
 }
 
 function syncFlyMeshes(flies: FlyState[]) {
@@ -1949,6 +1976,7 @@ function animate(now = performance.now()) {
 }
 // Start census polling before the first animation frame. All Three.js globals are initialized by
 // this point, but a render-frame failure must never prevent the city census from connecting.
+restoreCachedSnapshot();
 void fetchSnapshot();
 window.setInterval(fetchSnapshot,5000);
 try {
