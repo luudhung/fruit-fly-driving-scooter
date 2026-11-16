@@ -220,7 +220,7 @@ type WeatherState = {
 
 type NationalSummary = {residents:number;working:number;traveling:number;indoors:number;students:number;graduates:number;fires:number;projects:number};
 type CivilizationSnapshot = {
-  runtime?:{sampledCatchup?:{snapshotAgeSeconds?:number}};
+  runtime?:{platform?:string;sampledCatchup?:{snapshotAgeSeconds?:number}};
   spaceProgram?:SpaceProgramView|null;
   northF1?:NorthF1View|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
