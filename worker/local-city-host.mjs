@@ -1,5 +1,5 @@
 import {restoreState,getRawState,getState,tick,setNeuralSyncEnabled,countries} from './civilization-engine.mjs';
-import {LOCAL_HOST_HEARTBEAT_MS,LOCAL_HOST_CHECKPOINT_MS} from './local-host-state.mjs';
+import {LOCAL_HOST_HEARTBEAT_MS,LOCAL_HOST_CHECKPOINT_MS,localHostCheckpointStream} from './local-host-state.mjs';
 setNeuralSyncEnabled(false);
 let api='',session=null,running=false,busy=false,selectedId=null,checkpointBusy=false,controlBusy=false,lastSave=0,lastTick=0;
 const send=(type,extra={})=>postMessage({type,...extra});
@@ -15,7 +15,7 @@ function applyCommands(commands=[]){
 async function request(path,body,compressed=false){
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),55000);
  try{
-  const response=await fetch(api+path,{method:'POST',cache:'no-store',headers:{'content-type':compressed?'application/octet-stream':'application/json'},body:compressed?body:JSON.stringify(body),signal:controller.signal});
+  const response=await fetch(api+path,{method:'POST',cache:'no-store',headers:{'content-type':compressed?'application/x-city-checkpoint+gzip':'application/json'},body:compressed?body:JSON.stringify(body),signal:controller.signal});
   if(path.endsWith('/claim')&&response.ok){
    const token=response.headers.get('x-city-host-token'),epoch=Number(response.headers.get('x-city-host-epoch'));
    if(token&&Number.isSafeInteger(epoch))send('lease',{lease:{token,epoch}});
@@ -30,8 +30,8 @@ async function save(release=false){
  checkpointBusy=true;
  try{
   const raw=getRawState(),sequence=session.sequence+1;
-  const document=JSON.stringify({token:session.token,epoch:session.epoch,sequence,release,acknowledgedCommands:[...processedCommands],state:raw});
-  const packed=await new Response(new Blob([document]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  const stream=localHostCheckpointStream(raw,{token:session.token,epoch:session.epoch,sequence,release,acknowledgedCommands:[...processedCommands]});
+  const packed=await new Response(stream.pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
   const receipt=await request('/api/civilization/local/checkpoint',packed,true);
   applyCommands(receipt.commands);
   if(session){session.sequence=receipt.sequence;lastSave=Date.now();}
@@ -76,7 +76,7 @@ async function advance(){
  finally{busy=false;}
 }
 async function heartbeat(){
- if(!session||controlBusy)return;
+ if(!session||!running||controlBusy)return;
  controlBusy=true;
  try{
   const result=await request('/api/civilization/local/heartbeat',{token:session.token,epoch:session.epoch});
@@ -92,7 +92,12 @@ self.onmessage=async({data})=>{
  if(data.type==='release'){
   running=false;
   while(busy||checkpointBusy)await new Promise(r=>setTimeout(r,20));
-  await save(true);send('released');
+  const owner=session,complete=await save(true);
+  if(!complete&&owner&&session===owner){
+   await request('/api/civilization/local/leave',{token:owner.token,epoch:owner.epoch}).catch(()=>{});
+   session=null;
+  }
+  send('released');
  }
  if(data.type==='snapshot')publish();
 };

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint} from '../worker/local-host-state.mjs';
+import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,localHostCheckpointStream,readLocalHostCheckpoint} from '../worker/local-host-state.mjs';
 
 function fixture(){
  let commands=[];
@@ -12,7 +12,7 @@ function fixture(){
  let source=fs.readFileSync(new URL('../cloudflare/src/index.mjs',import.meta.url),'utf8');
  source=source.replace(/^export \{FlyWire[^\n]*\n/m,'').replace(/^import[\s\S]*?from\s+["'][^"']+["'];\n/gm,'');
  source=source.slice(0,source.indexOf('\nexport default')).replace('export class CivilizationWorld','class CivilizationWorld');
- const deps={LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,DurableObject:class{},
+ const deps={LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint,DurableObject:class{},
  loadSnapshot:async()=>({state,lastWallClockMs:Date.now(),savedAtMs:Date.now(),stats:{}}),
  saveSnapshot:async()=>{saves++;return{};},exportSnapshot:()=>'',freshState:()=>state,
  restoreState:s=>{state=s;},getRawState:()=>state,getState:()=>({}),snapshotLooksUsable:()=>true,setNeuralSyncEnabled:()=>{},
@@ -85,7 +85,10 @@ test('heartbeats persist ownership and a closing tab shortens the fallback deadl
  await t.post('heartbeat',lease);
  assert.ok(t.metadata.get('localHostLease').expiresAt>Date.now()+100000);
  assert.equal((await t.post('leave',lease)).status,200);
- assert.ok(t.metadata.get('localHostLease').expiresAt<=Date.now()+15000);
+ const leavingAt=t.metadata.get('localHostLease').expiresAt;
+ assert.ok(leavingAt<=Date.now()+15000);
+ await t.post('heartbeat',lease);
+ assert.equal(t.metadata.get('localHostLease').expiresAt,leavingAt,'a stopped worker cannot renew a closing lease');
  t.world.localHost.expiresAt=Date.now()-1;
  t.world.lastWallClockMs=Date.now()-4000;
  await t.world.alarm();
@@ -140,4 +143,18 @@ test('the neural coordinator does no background brain work while a browser owns 
  assert.equal(inputs,0);assert.equal(shards,0);
  assert.equal(cycle.cursor,0,'the paused neural checkpoint is preserved');
  assert.ok(nextAlarm>Date.now()+50000);
+});
+
+
+test('streamed claim and framed checkpoint retain complete records without an all-world JSON buffer',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
+ const metadata={token:lease.token,epoch:lease.epoch,sequence:1,release:true};
+ const document=await new Response(localHostCheckpointStream(state,metadata)).text();
+ assert.deepEqual(JSON.parse(document),{...metadata,state});
+ const decoded=await readLocalHostCheckpoint(new Blob([document]).stream());
+ assert.deepEqual(decoded,{...metadata,state});
+ const packed=await new Response(localHostCheckpointStream(state,metadata).pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+ const result=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-checkpoint+gzip'},body:packed}));
+ assert.equal(result.status,200);assert.equal(t.saves,1);
+ await assert.rejects(readLocalHostCheckpoint(new Blob([document.slice(0,-4)]).stream()),/incomplete/);
 });

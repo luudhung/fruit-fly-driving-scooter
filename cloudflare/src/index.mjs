@@ -1,4 +1,4 @@
-import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint} from '../../worker/local-host-state.mjs';
+import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
@@ -255,7 +255,7 @@ export class CivilizationWorld extends DurableObject {
       const bounded=stream.pipeThrough(new TransformStream({transform(chunk,controller){
         bytes+=chunk.byteLength;if(bytes>limit)throw Error('local request too large');controller.enqueue(chunk);
       }}));
-      body=await new Response(bounded).json();
+      body=request.headers.get('content-type')==='application/x-city-checkpoint+gzip'?await readLocalHostCheckpoint(bounded):await new Response(bounded).json();
     }catch{return json({error:'invalid_local_request'},400);}
     return this.withLock(async()=>{
       const now=Date.now(),claim=path.endsWith('/claim');
@@ -268,18 +268,18 @@ export class CivilizationWorld extends DurableObject {
         const next={token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
         await this.ctx.storage.put('localHostLease',next);
         this.localHost=next;
-        const payload=JSON.stringify({granted:true,lease:next,state:localHostSnapshot(raw)});
-        return new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
+        return new Response(localHostClaimStream(raw,next).pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
       }
       if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
       if(path.endsWith('/heartbeat')){
-        lease.expiresAt=now+LOCAL_HOST_TTL_MS;
+        if(!lease.leaving)lease.expiresAt=now+LOCAL_HOST_TTL_MS;
         await this.ctx.storage.put('localHostLease',lease);
         return json({ok:true,expiresAt:lease.expiresAt,sequence:lease.sequence,commands:lease.commands||[]});
       }
       if(path.endsWith('/leave')){
         // A tiny unload beacon gives the final checkpoint time to finish. If a
         // mobile OS freezes the worker, the last durable save resumes shortly.
+        lease.leaving=true;
         lease.expiresAt=Math.min(lease.expiresAt,now+15000);
         await this.ctx.storage.put('localHostLease',lease);
         return json({ok:true});
@@ -303,7 +303,7 @@ export class CivilizationWorld extends DurableObject {
             await this.ctx.storage.delete('localHostLease');
             this.localHost=null;
           }else{
-            lease.expiresAt=now+LOCAL_HOST_TTL_MS;
+            if(!lease.leaving)lease.expiresAt=now+LOCAL_HOST_TTL_MS;
             await this.ctx.storage.put('localHostLease',lease);
           }
           return json({ok:true,sequence:lease.sequence,commands:lease.commands||[]});
