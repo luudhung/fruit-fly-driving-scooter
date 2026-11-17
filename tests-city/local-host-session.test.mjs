@@ -24,7 +24,7 @@ function fixture(){
  exportSnapshotMapped:(_storage,worldId,document)=>Journal.localHostExportStream(savedBase,document,worldId),freshState:()=>state,
  restoreState:s=>{state=s;},getRawState:()=>state,getState:()=>({}),snapshotLooksUsable:()=>true,setNeuralSyncEnabled:()=>{},
  countries:{requestConflict:command=>{if(!commands.some(c=>c.requestId===command.requestId))commands.push(command);return {accepted:true,requestId:command.requestId};}},getSimulationConfig:()=>({gameSecondsPerRealSecond:120}),neuralActors:()=>state.flies.filter(f=>f.alive),
- tick:async()=>{ticks++;},getNeuralAgents:()=>[],applyNeuralOutputs:()=>({}),markNeuralCycleFailed:()=>{},getNeuralStatus:()=>({})};
+ tick:async({gameSeconds})=>{ticks++;state.simulationAgeSeconds+=gameSeconds;},getNeuralAgents:()=>[],applyNeuralOutputs:()=>({}),markNeuralCycleFailed:()=>{},getNeuralStatus:()=>({})};
  const Class=new Function(...Object.keys(deps),source+'\nreturn CivilizationWorld;')(...Object.values(deps));
  const metadata=new Map();let failTransaction=false;
  const baseStorage={get:async key=>structuredClone(metadata.get(key)),put:async(key,value)=>metadata.set(key,structuredClone(value)),delete:async key=>metadata.delete(key)};
@@ -173,6 +173,33 @@ test('heartbeats persist ownership and a closing tab shortens the fallback deadl
  await t.world.alarm();
  assert.ok(t.ticks>0);
  assert.equal(t.metadata.has('localHostLease'),false);
+});
+
+test('the same closing tab resumes immediately with clock catch-up, while other tabs cannot replace the owner',async()=>{
+ const t=fixture();await t.world.ready;const first=await t.claim();
+ first.state.simulationAgeSeconds+=120;first.state.flies[0].money=37;
+ assert.equal((await t.save({...first.lease,sequence:1,state:first.state})).status,200);
+ const resume={token:first.lease.token,epoch:first.lease.epoch};
+ const beforeLeave=await (await t.post('claim',{clientProtocol:3,resume})).json();assert.equal(beforeLeave.granted,false,'an active owner is never taken over');
+ await t.post('leave',resume);
+ assert.equal((await (await t.post('claim',{clientProtocol:3,resume:{...resume,token:'wrong'}})).json()).granted,false);
+ assert.equal((await (await t.post('claim',{clientProtocol:3,resume:{...resume,epoch:resume.epoch+1}})).json()).granted,false);
+ t.world.lastWallClockMs=Date.now()-5000;
+ const response=await t.post('claim',{clientProtocol:3,resume});
+ const next=await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
+ assert.equal(next.granted,true);assert.notEqual(next.lease.token,first.lease.token);
+ assert.ok(next.state.simulationAgeSeconds>=first.state.simulationAgeSeconds+600,'five real seconds are advanced through the actual engine before the new base is agreed');
+ assert.equal(next.state.flies.find(f=>f.id==='A').money,37);
+ assert.equal((await t.post('heartbeat',resume)).status,409,'late old-tab writes are fenced');
+ assert.equal(t.metadata.get('localHostLease').token,next.lease.token);
+});
+
+test('claiming an expired session between alarms advances from its latest durable save rather than rewinding the clock',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;
+ assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ t.world.localHost.expiresAt=Date.now()-1;t.world.lastWallClockMs=Date.now()-4000;
+ const next=await t.claim();assert.equal(next.granted,true);
+ assert.ok(next.state.simulationAgeSeconds>=state.simulationAgeSeconds+480);assert.equal(t.ticks,1);
 });
 
 test('invalid bodies and checkpoint sequences do not evict a valid host',async()=>{

@@ -30,7 +30,7 @@ async function request(path,body,compressed=false){
 async function save(release=false){
  if(!session||!baseline||checkpointBusy)return false;
  checkpointBusy=true;
- const owner=session;
+ const owner=session,retrying=Boolean(pendingCheckpoint);let sent=0;
  try{
   do{
    if(!pendingCheckpoint){
@@ -42,6 +42,7 @@ async function save(release=false){
    }
    const packet=pendingCheckpoint;
    const receipt=await request('/api/civilization/local/checkpoint',packet.packed,true);
+   sent++;
    if(session!==owner)return false;
    if(receipt.sequence!==packet.sequence)throw Error('checkpoint sequence was not acknowledged');
    baseline=packet.document;owner.sequence=receipt.sequence;pendingCheckpoint=null;lastSave=Date.now();
@@ -50,17 +51,19 @@ async function save(release=false){
    if(packet.release){running=false;session=null;baseline=null;return true;}
    // A lost regular-save response must first be retried verbatim; closing then
    // sends a separate final delta from that acknowledged base to the latest step.
-   if(!release)return true;
+   // A recovered receipt may describe an older step. Send the latest delta
+   // immediately instead of waiting another five-second timer after the retry.
+   if(!release&&(!retrying||sent>=2||baseline.world.simulationAgeSeconds>=getRawState().simulationAgeSeconds))return true;
   }while(session===owner);
   return false;
  }catch(error){console.warn('[local-city checkpoint]',String(error));send('sync-pending',{message:String(error)});return false;}
  finally{checkpointBusy=false;}
 }
-async function start(){
+async function start(resume=null){
  if(controlBusy||session)return;
  controlBusy=true;
  try{
-  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:3});
+  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:3,resume});
   if(!result.granted){send('observer');return;}
   session=result.lease;processedCommands.clear();pendingCheckpoint=null;
   // Capture the agreed server base before restoration adds local runtime data.
@@ -102,7 +105,7 @@ async function heartbeat(){
  finally{controlBusy=false;}
 }
 self.onmessage=async({data})=>{
- if(data.type==='start'){api=data.api;selectedId=data.selectedId||null;await start();}
+ if(data.type==='start'){api=data.api;selectedId=data.selectedId||null;await start(data.resume);}
  if(data.type==='select'){selectedId=data.id;}
  if(data.type==='release'){
   running=false;

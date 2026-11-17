@@ -68,8 +68,7 @@ test('a lost receipt retries identical bytes and advances the delta base only af
  t.state.simulationAgeSeconds+=120;t.state.flies[0].x=22;t.state.flies[0].money-=3;
  assert.equal(await t.save(),true);
  assert.deepEqual(t.packets[1].bytes,t.packets[0].bytes,'retry must not silently replace an already committed sequence');
- assert.equal(t.remote.actors['FLY-A'].x,8);
- assert.equal(await t.save(),true);
+ assert.equal(t.remote.actors['FLY-A'].x,22,'retry recovery immediately flushes the latest step without waiting another five seconds');
  assert.deepEqual(t.packets.map(packet=>[packet.payload.baseSequence,packet.payload.sequence]),[[0,1],[0,1],[1,2]]);
  assert.equal(t.remote.actors['FLY-A'].x,22);assert.equal(t.remote.actors['FLY-A'].money,147);
  assert.equal(t.remote.actors['FLY-A'].brain.id,'BRAIN-A');

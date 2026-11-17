@@ -323,9 +323,15 @@ export class CivilizationWorld extends DurableObject {
       const now=Date.now(),claim=path.endsWith('/claim'),lease=this.localHost;
       if(claim){
         if(body.clientProtocol!==3)return json({granted:false,updateRequired:true});
-        if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
-        await this.materializeLocalDocument();
-        for(const command of lease?.commands||[])countries.requestConflict(command);
+        const resuming=lease?.leaving&&body.resume?.token===lease.token&&body.resume?.epoch===lease.epoch;
+        if(lease&&lease.expiresAt>now&&!resuming)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
+        // Only the same closing tab may skip its leave grace period. Other
+        // devices cannot replace an active owner, even if they retry rapidly.
+        if(resuming)this.localHost={...lease,expiresAt:now};
+        // Resume actual simulation time from the durable checkpoint BEFORE
+        // agreeing a new delta base. Otherwise a reload between alarms starts
+        // at an older clock (five real seconds are ten game minutes).
+        await this.advanceTo(now,'local_claim');
         let raw=getRawState();
         // Build the initial observer BEFORE agreeing the base. Active reads then
         // serve this record, so no observer normalizer mutates the shared base.

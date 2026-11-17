@@ -1,10 +1,20 @@
 import test from 'node:test';import assert from 'node:assert/strict';import * as THREE from 'three';
-import {MetroRenderer,metroDirectionLabel} from '../src/metro-renderer.ts';
+import {MetroRenderer,metroDirectionLabel,METRO_CARRIAGES} from '../src/metro-renderer.ts';
 import {metroInterchangePaths} from '../src/metro-interchanges.ts';
 import {METRO_LINES,metroStationGeometry,metroTrackPoints,trainStates} from '../worker/city-map.mjs';
 const sign=(text:string)=>{const sprite=new THREE.Sprite();sprite.userData.text=text;return sprite;};
 const write=(sprite:THREE.Sprite,text:string)=>{sprite.userData.text=text;};
 const setup=()=>new MetroRenderer(new THREE.Group(),sign,write,3);
+
+test('graphics detail changes windows, never removes physical carriages',()=>{
+ for(const detail of [0,1,2,3]){
+  const m=new MetroRenderer(new THREE.Group(),sign,write,detail);
+  for(const train of m.trains){
+   const bodies=train.group.children.find(o=>o instanceof THREE.InstancedMesh&&(o.material as THREE.MeshStandardMaterial).color.getHex()===0xc6cbce) as THREE.InstancedMesh;
+   assert.ok(bodies);assert.equal(bodies.count,METRO_CARRIAGES);assert.equal(bodies.count,3);
+  }
+ }
+});
 
 test('rail infrastructure remains visible from across the map while nearby trains resume their current poses',()=>{
  const renderer=setup(),camera=new THREE.PerspectiveCamera(68,1,.1,7000);

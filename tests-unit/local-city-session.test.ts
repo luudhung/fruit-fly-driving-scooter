@@ -6,20 +6,21 @@ import ts from 'typescript';
 function fixture(){
  const workers:Array<{sent:unknown[];onmessage:((event:{data:unknown})=>void)|null;onerror:((event:{message:string})=>void)|null;terminate:()=>void;postMessage:(data:unknown)=>void}>=[];
  const beacons:Array<{url:string;body:Blob}>=[],fallbacks:unknown[]=[],snapshots:unknown[]=[];
- const document={hidden:false};let now=1000,beaconAccepted=true;
+ const document={hidden:false},storage=new Map<string,string>();let now=1000,beaconAccepted=true;
  class WorkerMock{
   sent:unknown[]=[];onmessage:((event:{data:unknown})=>void)|null=null;onerror:((event:{message:string})=>void)|null=null;
   constructor(){workers.push(this);}postMessage(data:unknown){this.sent.push(data);}terminate(){}
  }
  const source=fs.readFileSync(new URL('../src/local-city-session.ts',import.meta.url),'utf8').replace('export class LocalCitySession','class LocalCitySession').replace("new URL('../worker/local-city-host.mjs',import.meta.url)","new URL('https://city.test/local-worker.js')");
  const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
- const Class=new Function('Worker','document','navigator','fetch','Date','console',js+'\nreturn LocalCitySession;')(
+ const Class=new Function('Worker','document','navigator','fetch','Date','console','sessionStorage',js+'\nreturn LocalCitySession;')(
   WorkerMock,document,{sendBeacon:(url:string,body:Blob)=>{beacons.push({url,body});return beaconAccepted;}},
   async(input:unknown,init:unknown)=>{fallbacks.push({input,init});return new Response('{}');},
   class extends Date{static now(){return now;}},{error:()=>{}},
+  {getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)},
  );
  const session=new Class('https://city.test',(snapshot:unknown)=>snapshots.push(snapshot));
- return {session,workers,beacons,fallbacks,snapshots,document,setNow:(value:number)=>{now=value;},rejectBeacon:()=>{beaconAccepted=false;},
+ return {session,workers,beacons,fallbacks,snapshots,document,storage,reload:()=>new Class('https://city.test',(snapshot:unknown)=>snapshots.push(snapshot)),setNow:(value:number)=>{now=value;},rejectBeacon:()=>{beaconAccepted=false;},
   emit:(data:unknown)=>workers.at(-1)!.onmessage!({data})};
 }
 
@@ -53,4 +54,21 @@ test('a rejected leave beacon falls back to a small keepalive request without bl
  assert.equal(t.fallbacks.length,1);const sent=t.fallbacks[0] as {input:string;init:{keepalive:boolean;body:Blob}};
  assert.equal(sent.init.keepalive,true);assert.deepEqual(JSON.parse(await sent.init.body.text()),{token:'A',epoch:1});
  assert.deepEqual(t.workers[0].sent.at(-1),{type:'release'});
+});
+
+test('reload retains only the same-tab resume credential and a closing worker cannot receive a second start',()=>{
+ const t=fixture();t.session.start(null);t.emit({type:'started',lease:{token:'A',epoch:1}});
+ t.session.release();t.session.release();t.session.start(null);
+ assert.equal(t.beacons.length,1);assert.equal(t.workers[0].sent.length,2,'one start, one release; no start may be lost while the worker is closing');
+ const next=t.reload();next.start(null);
+ assert.deepEqual((t.workers[1].sent[0] as {resume:unknown}).resume,{token:'A',epoch:1});
+ t.emit({type:'started',lease:{token:'B',epoch:2}});
+ t.workers[0].onmessage!({data:{type:'released'}});
+ assert.equal(JSON.parse([...t.storage.values()][0]).token,'B','a late old-tab cleanup cannot delete the new owner credential');
+});
+
+test('hiding before the initial download completes stays inactive even when started arrives after release',()=>{
+ const t=fixture();t.session.start(null);t.document.hidden=true;
+ t.emit({type:'lease',lease:{token:'A',epoch:1}});t.emit({type:'started',lease:{token:'A',epoch:1}});
+ assert.equal(t.session.active,false);assert.equal(t.beacons.length,1);
 });
