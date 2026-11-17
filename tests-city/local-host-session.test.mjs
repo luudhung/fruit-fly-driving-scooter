@@ -53,6 +53,7 @@ test('an active browser lease pauses idle simulation and excludes a second write
  const t=fixture();await t.world.ready;
  const first=await t.claim();assert.equal(first.granted,true);
  assert.equal(first.state.flies.length,1,'archived residents stay in durable storage');
+ assert.equal(t.state.flies.some(f=>f.id==='D'),false,'historical heavy models are evicted from engine/service memory while hosting');
  assert.equal((await t.claim()).granted,false);
  assert.equal((await t.world.localHostingStatus()).active,true);
  assert.deepEqual((await t.world.getNeuralInputs()).agents,[]);
@@ -193,4 +194,25 @@ test('a failed initial durable claim cannot leave a phantom local owner or mutab
  assert.equal(t.world.localHost,null);assert.equal(t.world.localDocument,null);assert.equal(t.world.localObserver,null);
  assert.equal(t.metadata.get('localHostLease'),undefined);
  assert.equal((await t.claim()).granted,true);
+});
+
+
+test('recent deaths before claim survive lazy archive hydration without reviving the old base resident',async()=>{
+ const t=fixture();await t.world.ready;
+ t.state.flies[0].alive=false;t.state.flies[0].health=0;
+ t.state.flies.push({id:'C',alive:true,x:2,z:3,health:100,brain:{id:'BC'}});
+ const {lease,state}=await t.claim();assert.deepEqual(state.flies.map(f=>f.id),['C']);
+ state.simulationAgeSeconds+=120;assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
+ assert.equal(t.state.flies.find(f=>f.id==='A').alive,false);assert.equal(t.state.flies.find(f=>f.id==='A').health,0);
+ assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');assert.equal(t.state.flies.find(f=>f.id==='C').brain.id,'BC');
+});
+
+
+test('an expired host is hydrated before a neural RPC can persist, so archives can never be written as a trimmed city',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=24;
+ assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ t.world.localHost.expiresAt=Date.now()-1;t.world.lastPersistMs=0;
+ await t.world.applyNeuralBatch({outputs:[]});
+ assert.equal(t.state.flies.find(f=>f.id==='A').x,24);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assert.equal(t.world.archiveDormant,false);assert.equal(t.saves,1);
 });

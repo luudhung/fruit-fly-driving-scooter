@@ -48,7 +48,7 @@ async function readStoredSnapshot(storage) {
   return {meta, json: streamFrom(parts.values()).pipeThrough(new DecompressionStream("gzip"))};
 }
 
-async function readFramedJson(stream) {
+async function readFramedJson(stream, mapResident = null) {
   let state, opened = false, closed = false, buffer = "";
   for await (const text of stream.pipeThrough(new TextDecoderStream())) {
     buffer += text;
@@ -66,7 +66,9 @@ async function readFramedJson(stream) {
       } else if (line === ']}') {
         closed = true;
       } else {
-        state.flies.push(JSON.parse(state.flies.length ? line.slice(1) : line));
+        const resident=JSON.parse(line.startsWith(',')?line.slice(1):line);
+        const mapped=mapResident?mapResident(resident):resident;
+        if(mapped!=null)state.flies.push(mapped);
       }
     }
   }
@@ -74,11 +76,12 @@ async function readFramedJson(stream) {
   return state;
 }
 
-export async function loadSnapshot(storage) {
+export async function loadSnapshot(storage, {mapResident=null}={}) {
   const saved = await readStoredSnapshot(storage);
   if (!saved) return null;
   const {meta, json} = saved;
-  const state = meta.version === 2 ? await readFramedJson(json) : await new Response(json).json();
+  const state = meta.version === 2 ? await readFramedJson(json,mapResident) : await new Response(json).json();
+  if(meta.version!==2&&mapResident)state.flies=state.flies.map(mapResident).filter(f=>f!=null);
   return {
     state,
     lastWallClockMs: Number(meta.lastWallClockMs || Date.now()),
@@ -125,5 +128,39 @@ export async function exportSnapshot(storage, worldId) {
     yield encoder.encode(header.slice(0, -1) + ',"state":');
     yield* saved.json;
     yield encoder.encode('}');
+  })());
+}
+
+
+/** Stream a consistent accepted living document over the untouched archived base.
+ * Resident replacement happens one record at a time; old living brains are never
+ * retained alongside their already-loaded current replacements. */
+export async function exportSnapshotMapped(storage,worldId,document){
+  const saved=await readStoredSnapshot(storage);
+  if(!saved)throw Error('No saved civilization snapshot');
+  const actors=document.actors,seen=new Set(),head=JSON.stringify({exportedAt:new Date().toISOString(),worldId,state:document.world});
+  return streamFrom((async function*(){
+    yield encoder.encode(head.slice(0,-2)+',"flies":[');
+    let count=0;
+    if(saved.meta.version!==2){
+      const base=await new Response(saved.json).json();
+      for(const old of base.flies){seen.add(old.id);yield encoder.encode((count++?',':'')+JSON.stringify(actors[old.id]||old));}
+    }else{
+      let buffer='',lineIndex=0,finished=false;
+      for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
+        buffer+=text;let end;
+        while((end=buffer.indexOf('\n'))!==-1){
+          const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
+          if(lineIndex++<2)continue;
+          if(line===']}'){finished=true;continue;}
+          if(finished)throw Error('Unexpected archived snapshot data');
+          const old=JSON.parse(line.startsWith(',')?line.slice(1):line);seen.add(old.id);
+          yield encoder.encode((count++?',':'')+JSON.stringify(actors[old.id]||old));
+        }
+      }
+      if(!finished||buffer)throw Error('Incomplete archived snapshot');
+    }
+    for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield encoder.encode((count++?',':'')+JSON.stringify(actor));
+    yield encoder.encode(']}}');
   })());
 }

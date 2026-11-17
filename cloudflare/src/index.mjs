@@ -4,7 +4,7 @@ import {loadLocalHostJournal,clearLocalHostJournal,saveLocalHostBase,appendLocal
 import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
-import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
+import {loadSnapshot, saveSnapshot, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
 import {handleConflictControl} from '../../worker/conflict-control.mjs';
 import {
   freshState,
@@ -57,11 +57,15 @@ export class CivilizationWorld extends DurableObject {
     this.storageStats = null;
     this.nextAlarmAtMs = null;
     this.queue = Promise.resolve();
-    this.localHost=null;this.localEpoch=0;this.localDocument=null;this.localObserver=null;this.localJournalMeta=null;
+    this.localHost=null;this.localEpoch=0;this.localDocument=null;this.localObserver=null;this.localJournalMeta=null;this.archiveDormant=false;
     this.baseKnownIds=new Set();this.baseAliveIds=new Set();
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
-      const saved=await loadSnapshot(this.ctx.storage);
+      const hasJournal=Boolean(await this.ctx.storage.get('local-save:meta'));
+      const storedKnown=new Set(),storedAlive=new Set();
+      const mapResident=hasJournal?f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;}:null;
+      const saved=await loadSnapshot(this.ctx.storage,{mapResident});
+      this.archiveDormant=hasJournal;
       if(saved&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
       let base;
       if(saved){
@@ -70,8 +74,8 @@ export class CivilizationWorld extends DurableObject {
         freshState();base=getRawState();this.lastWallClockMs=Date.now();
         this.storageStats=await saveSnapshot(this.ctx.storage,base,this.lastWallClockMs);this.lastPersistMs=Date.now();
       }
-      this.baseKnownIds=new Set(base.flies.map(f=>f.id));
-      this.baseAliveIds=new Set(base.flies.filter(f=>f.alive).map(f=>f.id));
+      this.baseKnownIds=storedKnown.size?storedKnown:new Set(base.flies.map(f=>f.id));
+      this.baseAliveIds=storedAlive.size?storedAlive:new Set(base.flies.filter(f=>f.alive).map(f=>f.id));
       // Reconstruct against the persisted schema BEFORE the engine migrates maps.
       // A new map release must preserve every already-acknowledged browser save.
       const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
@@ -126,13 +130,22 @@ export class CivilizationWorld extends DurableObject {
     this.nextAlarmAtMs=current;return current;
   }
 
-  materializeLocalDocument(){
-    if(!this.localDocument)return;
-    const incoming=localDocumentState(this.localDocument),current=getRawState(),records=new Map(incoming.flies.map(f=>[f.id,f]));
-    const ids=new Set(current.flies.map(f=>f.id)),flies=current.flies.map(f=>records.get(f.id)||f);
-    for(const f of incoming.flies)if(!ids.has(f.id))flies.push(f);
-    restoreState({...incoming,flies,locations:current.locations});
-    this.localDocument=null;this.localObserver=null;
+  async materializeLocalDocument(){
+    if(!this.localDocument&&!this.archiveDormant)return;
+    const document=this.journalDocument(this.localDocument||projectLocalDocument(getRawState())),locations=getRawState().locations;
+    // First release the engine's old living objects and service maps. Only then
+    // stream archived records, replacing old live models during parsing.
+    let archived=this.archiveDormant?[]:getRawState().flies.filter(f=>!document.actors[f.id]);
+    restoreState({...localDocumentState(document),locations});
+    if(this.archiveDormant){
+      const saved=await loadSnapshot(this.ctx.storage,{mapResident:f=>document.actors[f.id]||f});
+      if(!saved)throw Error('Missing archived city base');
+      archived=saved.state.flies.map(f=>document.actors[f.id]||f);
+    }
+    const seen=new Set(archived.map(f=>f.id)),flies=archived;
+    for(const [id,f]of Object.entries(document.actors))if(!seen.has(id)){flies.push(f);seen.add(id);}
+    restoreState({...document.world,flies,locations});
+    this.archiveDormant=false;this.localDocument=null;this.localObserver=null;
   }
 
   journalDocument(document){
@@ -144,7 +157,7 @@ export class CivilizationWorld extends DurableObject {
   async advanceTo(nowMs, reason = "request") {
     await this.ready;
     if(this.localHost&&this.localHost.expiresAt>nowMs)return {elapsedRealSeconds:0,steps:0,localHost:true};
-    this.materializeLocalDocument();
+    await this.materializeLocalDocument();
     if(this.localHost){
       for(const command of this.localHost.commands||[])countries.requestConflict(command);
       this.localHost=null;
@@ -195,6 +208,7 @@ export class CivilizationWorld extends DurableObject {
     if(this.localHost&&this.localHost.expiresAt>Date.now())return this.storageStats;
     const now = Date.now();
     if (!force && now - this.lastPersistMs < ACTIVE_PERSIST_INTERVAL_MS) return this.storageStats;
+    await this.materializeLocalDocument();
     this.storageStats = await saveSnapshot(
       this.ctx.storage,
       getRawState(),
@@ -240,17 +254,17 @@ export class CivilizationWorld extends DurableObject {
 
   async getNeuralInputs(){
     await this.ready;
-    return this.withLock(async()=>({worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:this.localHost&&this.localHost.expiresAt>Date.now()?[]:getNeuralAgents()}));
+    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:[]};await this.materializeLocalDocument();return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:getNeuralAgents()};});
   }
   async applyNeuralBatch(batch){
     await this.ready;
     // Brain shards persist their own neural checkpoints. City progress follows
     // the normal snapshot cadence instead of recompressing the city per batch.
-    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {applied:0,localHost:true};const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(false);return status;});
+    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {applied:0,localHost:true};await this.materializeLocalDocument();const status=applyNeuralOutputs(batch.outputs,batch);await this.persistIfDue(false);return status;});
   }
   async neuralCycleFailed(details){
     await this.ready;
-    return this.withLock(async()=>{if(!this.localHost||this.localHost.expiresAt<=Date.now())markNeuralCycleFailed(details);return getNeuralStatus();});
+    return this.withLock(async()=>{if(!this.localHost||this.localHost.expiresAt<=Date.now()){await this.materializeLocalDocument();markNeuralCycleFailed(details);}return getNeuralStatus();});
   }
 
   readObservation(url) {
@@ -298,12 +312,17 @@ export class CivilizationWorld extends DurableObject {
       if(claim){
         if(body.clientProtocol!==3)return json({granted:false,updateRequired:true});
         if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
-        this.materializeLocalDocument();
+        await this.materializeLocalDocument();
         for(const command of lease?.commands||[])countries.requestConflict(command);
-        const raw=getRawState();
+        let raw=getRawState();
         // Build the initial observer BEFORE agreeing the base. Active reads then
         // serve this record, so no observer normalizer mutates the shared base.
         const initialObserver=getState({observer:true,compactObserver:true});
+        const recentDead=raw.flies.filter(f=>!f.alive&&(this.baseAliveIds.has(f.id)||!this.baseKnownIds.has(f.id)));
+        // Historical deaths remain intact in SQLite. Drop their heavy in-memory
+        // models and rebuild all service maps before subsequent COW updates.
+        raw.flies=raw.flies.filter(f=>f.alive||recentDead.includes(f));
+        restoreState(raw);raw=getRawState();this.archiveDormant=true;
         const document=projectLocalDocument(localHostSnapshot(raw));
         const next={protocol:3,mapVersion:raw.mapVersion,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
         const journalDocument=this.journalDocument(document);
@@ -348,7 +367,7 @@ export class CivilizationWorld extends DurableObject {
           this.lastWallClockMs=meta.lastWallClockMs;this.lastCheckpointError=null;
           this.localHost=body.release?null:updated;
           if(body.release){
-            this.materializeLocalDocument();
+            await this.materializeLocalDocument();
             for(const command of updated.commands)countries.requestConflict(command);
           }
           return json({ok:true,sequence:body.sequence,savedAt:meta.savedAtMs,commands:updated.commands});
@@ -432,7 +451,13 @@ export class CivilizationWorld extends DurableObject {
       }
 
       if (url.pathname === "/api/civilization/export") {
-        if(this.localDocument)return new Response(localHostExportStream(getRawState(),this.localDocument,this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID),{headers:corsHeaders({'content-type':'application/json; charset=utf-8'})});
+        if(this.localDocument){
+          // Re-read the durable accepted document so an asynchronous export is
+          // isolated from later handoff/engine ticks and never drops archives.
+          const journal=await loadLocalHostJournal(this.ctx.storage,getRawState());
+          const document=journal&&!journal.stale?journal.document:this.localDocument;
+          return new Response(await exportSnapshotMapped(this.ctx.storage,this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,document),{headers:corsHeaders({'content-type':'application/json; charset=utf-8'})});
+        }
         await this.persistIfDue(true);
         const body = await exportSnapshot(this.ctx.storage, this.env.CIV_WORLD_ID || DEFAULT_WORLD_ID);
         return new Response(body, {
