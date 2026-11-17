@@ -323,10 +323,11 @@ export class CivilizationWorld extends DurableObject {
       const now=Date.now(),claim=path.endsWith('/claim'),lease=this.localHost;
       if(claim){
         if(body.clientProtocol!==3)return json({granted:false,updateRequired:true});
-        const resuming=lease?.leaving&&body.resume?.token===lease.token&&body.resume?.epoch===lease.epoch;
+        const resuming=Boolean(lease&&body.resume?.token===lease.token&&body.resume?.epoch===lease.epoch);
         if(lease&&lease.expiresAt>now&&!resuming)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
-        // Only the same closing tab may skip its leave grace period. Other
-        // devices cannot replace an active owner, even if they retry rapidly.
+        // The same tab proves ownership with its private resume credential,
+        // including reloads where the leave beacon was lost. Other devices
+        // cannot replace an active owner, even if they retry rapidly.
         if(resuming)this.localHost={...lease,expiresAt:now};
         // Resume actual simulation time from the durable checkpoint BEFORE
         // agreeing a new delta base. Otherwise a reload between alarms starts
