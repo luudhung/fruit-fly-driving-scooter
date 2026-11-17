@@ -5,6 +5,8 @@ import {createNorthF1} from './north-f1.mjs';
 import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {relocateHansdrexAirport} from './hansdrex-airport-map.mjs';
+import {createResidentVision} from './resident-vision.mjs';
+import {createResidentSelfModel} from './resident-self-model.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
 import {createInternationalLife} from './international-life.mjs';
@@ -542,6 +544,20 @@ const civicConflict=createCivicConflict({...cityServices,urbanWorld});
 const publicServices=createPublicServices({...cityServices,neuralDrive,urbanWorld,recordViolation:recordLawViolation});
 const industrialEconomy=createIndustrialEconomy({...cityServices,neuralDrive,urbanWorld,freightProviders:()=>[countries.economy.freightProvider],countryAccount:id=>countries.countryAccount(id),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options)});
 const residentRelationships=createResidentRelationships({...cityServices,urbanWorld,neuralDrive});
+const residentVision=createResidentVision({world:()=>state});
+const residentSelfModel=createResidentSelfModel({world:()=>state,workplaceFor:residentWorkplace});
+function perceiveResident(fly,clock){
+ if(!fly?.alive||!fly.brain)return;
+ const time={...clock,at:state.simulationAgeSeconds};
+ residentSelfModel.observe(fly,residentVision.observe(fly,time),time);
+}
+function updateResidentPerception(clock,budget=96){
+ const actors=neuralActors();if(!actors.length)return;
+ const count=Math.min(actors.length,Math.max(1,Math.min(320,Number(budget)||96)));
+ let cursor=Math.max(0,Number(state.perceptionCursor||0))%actors.length;
+ for(let n=0;n<count;n++)perceiveResident(actors[(cursor+n)%actors.length],clock);
+ state.perceptionCursor=(cursor+count)%actors.length;
+}
 const nationalDefenseWorld=createNationalDefenseIntegration({...cityServices,urbanWorld,countryAccount:id=>countries.countryAccount(id)});
 nationalServices=createNationalServices({...cityServices,managesFireResponse:()=>urbanWorld.fireService.managesCountry('north-city'),mayWork:(f,country,options)=>countries.mayWork(f,country,options),countryAccount:id=>countries.countryAccount(id),runwayAvailable:request=>regionalAviation.runwayAvailable(request)});
 nationalDefense=createNationalDefense({...cityServices,...nationalDefenseWorld,international:countries,homeLocation:f=>({id:f.homeId,x:f.homeX??location(f.homeId).x,z:f.homeZ??location(f.homeId).z})});
@@ -723,6 +739,7 @@ function brainRemember(fly, kind, payload = {}) {
     ...payload,
   });
   if (episodes.length > 32) episodes.splice(0, episodes.length - 32);
+  residentSelfModel.remember(fly,kind,payload,{...gameClock(),at:state.simulationAgeSeconds});
 }
 
 function updateBrainDynamics(fly) {
@@ -1801,11 +1818,30 @@ function socialSignalFor(fly) {
   return clamp(1 - fly.loneliness / 130 + fly.traits.sociability * 0.35 + residentRelationships.supportSignal(fly)*.15, 0, 1);
 }
 
-function getNeuralAgents() {
+function residentVisualInput(fly){
+ const sight=fly.vision;if(!sight)return undefined;
+ const fresh=state.simulationAgeSeconds-Number(sight.lastObservedAt||0)<=3600;
+ if(!fresh||sight.available===false)return {available:false,left:0,right:0,threat:0,social:0};
+ let left=0,right=0,threat=0,social=0;
+ for(const o of (sight.observations||[]).slice(0,8)){
+  const bearing=Math.atan2(o.x-(sight.eyeX??fly.x),o.z-(sight.eyeZ??fly.z))-Number(sight.heading||0);
+  const angle=Math.atan2(Math.sin(bearing),Math.cos(bearing));
+  const signal=clamp(Number(o.confidence||0))*(.15+.85*(1-clamp(Number(o.distance||0)/Math.max(1,Number(sight.range||100)))));
+  if(angle<=.15)left=Math.max(left,signal);
+  if(angle>=-.15)right=Math.max(right,signal);
+  if(o.kind==='fire')threat=Math.max(threat,signal);
+  if(o.kind==='resident')social=Math.max(social,signal);
+ }
+ return {available:true,left,right,threat,social};
+}
+
+function getNeuralAgents({refreshPerception=false}={}) {
   if(!state)return [];
+  const clock=refreshPerception?gameClock():null;
   return neuralActors()
       .filter((fly) => fly.brain?.id)
       .map((fly) => {
+        if(refreshPerception)perceiveResident(fly,clock);
         const target = fly.targetLocationId === fly.homeId
           ? { x: fly.homeX ?? fly.x, z: fly.homeZ ?? fly.z }
           : location(fly.targetLocationId);
@@ -1822,6 +1858,7 @@ function getNeuralAgents() {
           target_dx: (target?.x ?? fly.x) - fly.x,
           target_dz: (target?.z ?? fly.z) - fly.z,
           social_signal: socialSignalFor(fly),
+          vision:residentVisualInput(fly),
           reward: clamp(fly.brain.dynamic?.rewardExpectation || 0, -1, 1),
           weather_danger: weatherDanger(),
           precipitation: Number(state.weather?.precipitation || 0),
@@ -1904,7 +1941,7 @@ async function syncFullConnectomeBrains() {
   lastNeuralSyncAt = Date.now();
 
   try {
-    const agents = getNeuralAgents();
+    const agents = getNeuralAgents({refreshPerception:true});
 
     if (!agents.length) return;
 
@@ -2737,6 +2774,7 @@ function finishCentralApplication(f,clock){
 }
 function brainChooseAction(fly, clock) {
   const age = fly.ageYears;
+  perceiveResident(fly,clock);
   updateBrainDynamics(fly);
   const brain = fly.brain;
   const candidates = [];
@@ -2750,7 +2788,7 @@ function brainChooseAction(fly, clock) {
     const learned = Number(brain.memory.locationReward[id] || 0) * 4;
     const novelty = brain.dynamic.curiosity * brain.plasticity.noveltyBias * brainRange(fly, -1.2, 2.4);
     const noise = brainRange(fly, -2.5, 2.5);
-    const combined = applyFullConnectomeBias(fly, action, utility + learned + novelty + noise);
+    const combined = applyFullConnectomeBias(fly, action, utility + learned + novelty + noise)+residentSelfModel.bias(fly,id,action);
     candidates.push({ id, action, utility: combined });
   };
 
@@ -3870,6 +3908,8 @@ function socialLife(fly, clock) {
     candidate.loneliness = clamp(candidate.loneliness - 30);
     fly.brainDecision = `chose relationship with ${candidate.id}`;
     candidate.brainDecision = `chose relationship with ${fly.id}`;
+    brainRemember(fly,'partnered',{partnerId:candidate.id,locationId:fly.currentLocationId});
+    brainRemember(candidate,'partnered',{partnerId:fly.id,locationId:candidate.currentLocationId});
     emit("relationship", `${fly.id} and ${candidate.id} mutually chose a relationship.`, { flyId: fly.id, partnerId: candidate.id, desireA, desireB });
   } else if ((desireA < 0.38 || desireB < 0.38) && rand() < 0.18) {
     fly.flirtingWith = null;
@@ -4001,6 +4041,8 @@ function completePregnancy(fly) {
     state.flies.push(child);
     fly.children.push(child.id);
     father.children.push(child.id);
+    brainRemember(fly,'child_born',{otherId:child.id,locationId:fly.currentLocationId});
+    if(father.alive)brainRemember(father,'child_born',{otherId:child.id,locationId:father.currentLocationId});
     state.births += 1;
     payBirthGrant(child, fly);
     state.generation = Math.max(state.generation, child.generation);
@@ -4369,7 +4411,11 @@ function maintainHouseholds(){
     if(heir)heir.savings+=estate;else state.treasury.cash+=estate;
     f.money=f.savings=0;f.estateSettled=true;
   }
-  if(f.alive&&f.partnerId&&!state.flies.some(p=>p.id===f.partnerId&&p.alive)){f.partnerId=null;f.relationshipSince=null;f.affection=0;}
+  if(f.alive&&f.partnerId&&!state.flies.some(p=>p.id===f.partnerId&&p.alive)){
+    const partner=state.flies.find(p=>p.id===f.partnerId);
+    if(partner?.alive===false&&!partner.migratedOut)brainRemember(f,'lost_partner',{partnerId:f.partnerId,locationId:f.currentLocationId});
+    f.partnerId=null;f.relationshipSince=null;f.affection=0;
+  }
   if(!f.alive||!f.partnerId||f.id>f.partnerId||f.affection<55||f.traveling)continue;
   const partner=state.flies.find(p=>p.id===f.partnerId&&p.alive);
   if(!partner||partner.traveling||partner.householdId===f.householdId||gameYears()-Number(f.relationshipSince??gameYears())<.03)continue;
@@ -4665,7 +4711,7 @@ function motionPlan(f,compact=false){
  return {at:state.simulationAgeSeconds,speed:Number(f.motionSpeed||Math.hypot(f.vx,f.vz)||2.5),mode:f.transitMode,points,blocked:Number(f.trafficHoldUntil||0)>state.simulationAgeSeconds,signalPermit:Boolean(f.signalEncounter?.permit)};
 }
 function observerFly(f,selectedId,compactObserver=false){
- if(f.id===selectedId)return {...compactFly(f),ownsHome:Boolean(ownsCountryHome(state,f,f.residencyCountryId)),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
+ if(f.id===selectedId)return {...compactFly(f),ownsHome:Boolean(ownsCountryHome(state,f,f.residencyCountryId)),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),awareness:f.selfModel?residentSelfModel.snapshot(f):null,vision:f.vision||null,motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
  for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId','citizenshipCountryId','residencyCountryId','publicServiceRole','publicServiceCountryId']){
   const value=f[key];
@@ -4855,6 +4901,7 @@ async function tick(options = {}) {
       }
       roadLife.normalizeParking();
       for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['northF1',northF1],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy],['spaceProgram',spaceProgram]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
+      try{updateResidentPerception(clock,options.perceptionBudget);}catch(error){recordSimulationFault('perception',error);}
       vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;

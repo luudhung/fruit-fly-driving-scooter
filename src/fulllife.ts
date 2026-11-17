@@ -1,4 +1,5 @@
 import {LocalCitySession} from './local-city-session.ts';
+import {ResidentAwarenessUI,ResidentEyeSession,residentEyeVerticalFov,type ResidentVision,type ResidentAwareness} from './resident-awareness-ui.ts';
 import {createCityLabelSprite,setCityLabelText} from './city-label-texture.ts';
 import {HansdrexStorefrontRenderer} from './hansdrex-storefront-renderer.ts';
 import {NorthF1Renderer,type NorthF1View} from './north-f1-renderer.ts';
@@ -76,6 +77,7 @@ import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, PETRONAS_TOWERS, WORLD_HALF, AI
 const viewerBootStarted=performance.now();
 const militaryCrewShips=new Map<string,MilitaryShip>();
 type FlyState = CountryPerson & {
+  vision?:ResidentVision|null;awareness?:ResidentAwareness|null;selfModel?:ResidentAwareness|null;residentSelf?:ResidentAwareness|null;
   militaryShipId?:string|null;militaryRank?:{id:string;name:string;level:number}|null;militaryCommanderId?:string|null;
   facilityEmployment?:{buildingId:string;shiftStart:number;wage:number;suspended?:boolean}|null;
   district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
@@ -530,6 +532,7 @@ const recoveryCache=new IdleSnapshotCache<CivilizationSnapshot>({
 const presentationClock=new CityClock(CITY_VIEW_PREDICTION_SECONDS);
 let snapshot: CivilizationSnapshot | null = null;
 let selectedFlyId: string | null = null;
+const residentEyeSession=new ResidentEyeSession();
 let latestFlyStates = new Map<string, FlyState>();
 const eventHistory=new Map<string,CivilizationSnapshot["events"][number]>();
 const residentActionHistory=new Map<string,Array<{at:number;action:string}>>();
@@ -561,8 +564,11 @@ function saveCachedSnapshot(value: CivilizationSnapshot) {
 }
 
 const residentDirectory=createResidentDirectory(id=>focusResident(id,true));
+const residentAwarenessHost=document.querySelector<HTMLElement>('#fly-card .inspector');
+const residentAwarenessUI=residentAwarenessHost?new ResidentAwarenessUI(residentAwarenessHost,()=>toggleResidentEyes()):null;
 function focusResident(id:string,moveCamera=false){
  const fly=latestFlyStates.get(id);if(!fly?.alive)return;
+ if(residentEyeSession.actorId)leaveResidentEyes();
  document.body.classList.remove('scenic-view','show-city-log');
  selectedFlyId=id;followSelected=false;renderInspector(fly);void fetchSnapshot();
  if(moveCamera){
@@ -583,6 +589,7 @@ document.getElementById('settings-events')?.addEventListener('click',()=>{closeS
 
 function renderInspector(fly: FlyState | null) {
   countryUI.syncSelected(fly);
+  residentAwarenessUI?.sync(fly,snapshot?.simulationAgeSeconds||0,residentEyeSession.actorId===fly?.id);
   if (!fly) {
     flyIdEl.textContent = "click a fly";
     flyBrainIdEl.textContent = "—";
@@ -1651,6 +1658,7 @@ function leavePlayerCar(){
  cameraSprint.reset();player.resetInput();syncCarButton();return true;
 }
 playerCarButton?.addEventListener("click",()=>{
+ if(residentEyeSession.actorId)leaveResidentEyes();
  if(playerCar.active){leavePlayerCar();return;}
  followSelected=false;cameraSprint.reset();player.resetInput();playerCar.enter();player.flying=false;
  cameraYaw=playerCar.heading;cameraPitch=0;camera.fov=84;camera.updateProjectionMatrix();
@@ -1662,7 +1670,25 @@ const moveForward = new THREE.Vector3();
 const moveRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 
+function leaveResidentEyes(){
+ const previous=residentEyeSession.end();if(!previous)return;
+ freePosition.set(previous.x,previous.y,previous.z);cameraYaw=previous.yaw;cameraPitch=previous.pitch;followSelected=previous.following;
+ camera.fov=previous.fov;camera.updateProjectionMatrix();cameraSprint.reset();player.resetInput();
+ residentAwarenessUI?.syncViewing(selectedFlyId?latestFlyStates.get(selectedFlyId):null,false);
+}
+function toggleResidentEyes(){
+ if(residentEyeSession.actorId){leaveResidentEyes();return;}
+ const actor=selectedFlyId?latestFlyStates.get(selectedFlyId):null;if(!actor||playerCar.active||!localCity.active&&connection.dataset.state!=='authoritative')return;
+ if(residentEyeSession.begin(actor,{x:freePosition.x,y:freePosition.y,z:freePosition.z,yaw:cameraYaw,pitch:cameraPitch,fov:camera.fov,following:followSelected})){
+  followSelected=false;cameraSprint.reset();player.resetInput();
+  // Fit the modeled 110° horizontal / 80° vertical field within the existing camera.
+  camera.fov=residentEyeVerticalFov(camera.aspect);camera.updateProjectionMatrix();
+  residentAwarenessUI?.syncViewing(actor,true);
+ }
+}
+
 function setCameraOverview() {
+  if(residentEyeSession.actorId)leaveResidentEyes();
   if(playerCar.active&&!leavePlayerCar())return;
   document.body.classList.add("scenic-view");
   followSelected = false;
@@ -1724,6 +1750,7 @@ blockBrowserGestures();
 for(const type of ["touchstart","touchend","dblclick"])renderer.domElement.addEventListener(type,event=>{if(event.cancelable)event.preventDefault();},{passive:false});
 renderer.domElement.addEventListener("pointerdown", (e) => {
   e.preventDefault();
+  if(residentEyeSession.actorId)return;
   dragging = true;
   moved = false;
   pointerStartX=lastX=e.clientX;pointerStartY=lastY=e.clientY;
@@ -1751,6 +1778,7 @@ renderer.domElement.addEventListener("pointerup", (e) => {
 renderer.domElement.addEventListener("contextmenu",e=>e.preventDefault());
 renderer.domElement.addEventListener("wheel", (e) => {
   e.preventDefault();
+  if(residentEyeSession.actorId)return;
   camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.018, playerCar.active?68:24, playerCar.active?100:78);
   camera.updateProjectionMatrix();
 }, { passive: false });
@@ -1762,6 +1790,7 @@ const movementKeys = new Set([
 ]);
 addEventListener("keydown", (e) => {
   if(document.querySelector("dialog[open]")||((e.target as HTMLElement)?.matches?.("input,textarea,select,[contenteditable=true]")))return;
+  if(residentEyeSession.actorId&&(movementKeys.has(e.code)||['Escape','KeyF','KeyC'].includes(e.code)))leaveResidentEyes();
   if (movementKeys.has(e.code)) {
     cameraSprint.down(e.code,e.timeStamp,e.repeat);
     if(e.code==="Space"&&!playerCar.active)player.jumpDown(e.timeStamp,e.repeat);
@@ -1782,7 +1811,7 @@ addEventListener("blur",()=>{cameraSprint.reset();player.resetInput();if(playerC
 renderer.domElement.addEventListener("pointercancel",()=>{dragging=false;});
 addEventListener("keyup", (e) => {cameraSprint.up(e.code);if(e.code==="Space")player.jumpUp(e.timeStamp);if (movementKeys.has(e.code)) e.preventDefault();});
 const mobileInput=bindTouchControls(document.querySelectorAll<HTMLButtonElement>(".mobile-control"),{
- down(key,now){followSelected=false;cameraSprint.down(key,now);if(key==="Space"&&!playerCar.active)player.jumpDown(now);},
+ down(key,now){if(residentEyeSession.actorId)leaveResidentEyes();followSelected=false;cameraSprint.down(key,now);if(key==="Space"&&!playerCar.active)player.jumpDown(now);},
  up(key){cameraSprint.up(key);if(key==="Space")player.jumpUp(performance.now());},
 });
 
@@ -1808,7 +1837,13 @@ let nextPositionDiagnosticAt=0;
 let lastFlyingClass:boolean|undefined;
 const cameraLookTarget=new THREE.Vector3();
 function updateFreeCamera(dt: number,now:number) {
-  if(playerCar.active){
+  const eyeActor=residentEyeSession.actorId?latestFlyStates.get(residentEyeSession.actorId):null;
+  const eyePose=residentEyeSession.pose(eyeActor,localCity.active||connection.dataset.state==='authoritative',eyeActor?flyVisuals.get(eyeActor.id)?.current:undefined);
+  if(residentEyeSession.actorId&&!eyePose)leaveResidentEyes();
+  residentAwarenessUI?.syncViewing(selectedFlyId?latestFlyStates.get(selectedFlyId):null,Boolean(eyePose),!playerCar.active&&(localCity.active||connection.dataset.state==='authoritative'));
+  if(eyePose){
+    freePosition.set(eyePose.x,eyePose.y,eyePose.z);cameraYaw=eyePose.yaw;cameraPitch=eyePose.pitch;
+  } else if(playerCar.active){
     const forward=Number(pressed.has("KeyW")||pressed.has("ArrowUp"))-Number(pressed.has("KeyS")||pressed.has("ArrowDown"));
     const steer=Number(pressed.has("KeyD")||pressed.has("ArrowRight"))-Number(pressed.has("KeyA")||pressed.has("ArrowLeft"));
     const heading=playerCar.heading;
@@ -1837,7 +1872,7 @@ function updateFreeCamera(dt: number,now:number) {
     freePosition.set(player.x,player.y,player.z);
   }
 
-  const mode=playerCar.active?"DRIVING":followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
+  const mode=eyePose?"RESIDENT_EYES":playerCar.active?"DRIVING":followSelected?"FOLLOWING":player.flying?"FLYING":player.swimming?"SWIMMING":"WALKING";
   if(renderer.domElement.dataset.playerMode!==mode){
     renderer.domElement.dataset.playerMode=mode;
     const status=document.getElementById('player-movement-mode');if(status)status.textContent=playerCar.active?'Đang lái xe · W/S ga, lùi · A/D lái · Space phanh':player.flying?'Đang bay · Space/E lên · Shift/Q xuống':'Đang đi bộ · Space ×2 để bay';
@@ -1878,7 +1913,9 @@ function animate(now = performance.now()) {
     visual.group.position.copy(visual.current);
     visitorVisuals.updateActor(id,visual.current);
     civicVisuals.updateActor(id,visual.current);
-    residentBodies.add(id,visual.current.x,visual.current.y,visual.current.z,visual.group.scale.x,visual.group.visible);
+    const viewingSelf=residentEyeSession.actorId===id;
+    if(viewingSelf){visual.halo.visible=false;visual.status.visible=false;}
+    residentBodies.add(id,visual.current.x,visual.current.y,visual.current.z,visual.group.scale.x,visual.group.visible&&!viewingSelf);
   }
 
   residentBodies.finish();
@@ -1983,6 +2020,7 @@ try {
 
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
+  if(residentEyeSession.actorId)camera.fov=residentEyeVerticalFov(camera.aspect);
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(renderPixelRatio());
   renderer.setSize(innerWidth, innerHeight);cityFrame.resize();

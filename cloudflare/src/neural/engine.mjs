@@ -59,12 +59,17 @@ export function createNeuralState(graph,snapshot=null){
 export function encodeSensoryInput(graph,state,sense){
  const input=state.ext;input.fill(0);
  const dx=clamp(sense.target_dx/80,-1,1),dz=clamp(sense.target_dz/80,-1,1);
- const left=clamp(.22+Math.max(0,-dx)*.75+Math.abs(dz)*.10,0,1.5),right=clamp(.22+Math.max(0,dx)*.75+Math.abs(dz)*.10,0,1.5);
+ const vision=sense.vision,hasVision=vision&&typeof vision==='object',eyesOpen=!hasVision||vision.available!==false;
+ // These channels encode actual visible world objects. They are a synthetic
+ // sensory interface, not a claim of photoreceptor-level biological fidelity.
+ const left=hasVision?clamp(.06+clamp(vision.left)*1.35,0,1.5):clamp(.22+Math.max(0,-dx)*.75+Math.abs(dz)*.10,0,1.5);
+ const right=hasVision?clamp(.06+clamp(vision.right)*1.35,0,1.5):clamp(.22+Math.max(0,dx)*.75+Math.abs(dz)*.10,0,1.5);
  const sleep=sense.sleeping?.22:1,visibility=clamp(1-Number(sense.precipitation||0)*.55-Number(sense.weather_danger||0)*.18,.2,1),sunset=clamp(sense.sunset_quality)*.18;
  for(const [key,drive]of [['opticLeft',left],['opticRight',right]]){
-  const list=graph.groups[key];for(let k=0;k<list.length;k++)input[list[k]]=((drive+(key==='opticLeft'?(k%17)/17:((k*7)%19)/19)*.08)*visibility+sunset)*sleep;
+  const list=graph.groups[key];for(let k=0;k<list.length;k++)input[list[k]]=eyesOpen?((drive+(key==='opticLeft'?(k%17)/17:((k*7)%19)/19)*.08)*visibility+sunset)*sleep:0;
  }
  const channels=[clamp(sense.hunger/100),clamp((100-sense.energy)/100),clamp(sense.stress/100),clamp(sense.excitement/100),clamp(sense.loneliness/100),clamp((100-sense.health)/100),clamp(sense.social_signal),clamp((Number(sense.reward||0)+1)*.5),clamp(sense.weather_danger),clamp(sense.precipitation),clamp(sense.wind),clamp(sense.sunset_quality)];
+ if(hasVision)channels.push(eyesOpen?clamp(vision.threat):0,eyesOpen?clamp(vision.social):0);
  const list=graph.groups.sensory;
  for(let k=0;k<list.length;k++)input[list[k]]=(.08+channels[k%channels.length]*1.35)*sleep;
 }

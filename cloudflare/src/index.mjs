@@ -266,7 +266,7 @@ export class CivilizationWorld extends DurableObject {
 
   async getNeuralInputs(){
     await this.ready;
-    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:[]};await this.materializeLocalDocument();return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:getNeuralAgents()};});
+    return this.withLock(async()=>{if(this.localHost&&this.localHost.expiresAt>Date.now())return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:[]};await this.materializeLocalDocument();return {worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,agents:getNeuralAgents({refreshPerception:true})};});
   }
   async applyNeuralBatch(batch){
     await this.ready;

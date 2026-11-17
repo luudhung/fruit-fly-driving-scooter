@@ -87,7 +87,7 @@ async function advance(){
   const now=performance.now(),elapsed=Math.min(10,Math.max(0,(now-lastTick)/1000));
   if(elapsed<.5)return;
   lastTick=now;
-  await tick({gameSeconds:elapsed*Number(getRawState().timeScale||120),syncBrain:false,serialized:true});
+  await tick({gameSeconds:elapsed*Number(getRawState().timeScale||120),syncBrain:false,serialized:true,perceptionBudget:256});
   getRawState().updatedAt=new Date().toISOString();publish();
  }catch(error){send('error',{message:String(error)});}
  finally{busy=false;}

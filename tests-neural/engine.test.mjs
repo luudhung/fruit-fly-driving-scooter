@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {packConnectome} from '../tools/pack-connectome.mjs';
-import {parsePackedGraph,createNeuralState,stepNeuralGraph,runNeuralBatch,neuralSnapshotBytes} from '../cloudflare/src/neural/engine.mjs';
+import {parsePackedGraph,createNeuralState,stepNeuralGraph,runNeuralBatch,neuralSnapshotBytes,encodeSensoryInput} from '../cloudflare/src/neural/engine.mjs';
 import {freshState,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,getRawState} from '../worker/civilization-engine.mjs';
 function fixture(){
  const n=6,rows=[[[3,2],[0,-.5],[3,0]],[[0,4],[2,.25]],[[1,-2],[5,1]],[[2,8]],[[3,2]],[[4,.5]]],e=rows.reduce((a,v)=>a+v.length,0);
@@ -55,6 +55,20 @@ test('different body/world inputs produce different measured neural states',()=>
  const {graph:g}=graph(),a=createNeuralState(g),b=createNeuralState(g);
  runNeuralBatch(g,a,sense,64);runNeuralBatch(g,b,{...sense,hunger:0,sleeping:true},64);
  assert.notDeepEqual(new Uint8Array(a.buffer),new Uint8Array(b.buffer));
+});
+
+test('observed visual sides drive the optic input instead of an unseen navigation target, while closed eyes suppress it',()=>{
+ const {graph:original}=graph();
+ const g={...original,groups:{...original.groups,opticLeft:Uint32Array.of(1),opticRight:Uint32Array.of(4),sensory:Uint32Array.of(0,2,3,5)}};
+ const a=createNeuralState(g),b=createNeuralState(g),vision={available:true,left:1,right:0,threat:.7,social:.4};
+ encodeSensoryInput(g,a,{...sense,vision,target_dx:-80});
+ encodeSensoryInput(g,b,{...sense,vision,target_dx:80});
+ assert.ok(a.ext[1]>a.ext[4]);assert.deepEqual(a.ext,b.ext,'a hidden desired destination cannot change what the eyes see');
+ runNeuralBatch(g,a,{...sense,vision},32);
+ runNeuralBatch(g,b,{...sense,vision:{...vision,left:0,right:1}},32);
+ assert.notDeepEqual(new Uint8Array(a.buffer),new Uint8Array(b.buffer),'visible left/right scenes have a real causal effect on the simulated neural state');
+ encodeSensoryInput(g,a,{...sense,vision:{available:false,left:1,right:1}});
+ assert.equal(a.ext[1],0);assert.equal(a.ext[4],0);
 });
 test('full-brain counters require real outputs for all living residents and reject older checkpoints',()=>{
  const s=freshState(),agents=getNeuralAgents();assert.equal(agents.length,RESIDENT_TARGET);assert.equal(getNeuralStatus().allBrainsReady,false);
