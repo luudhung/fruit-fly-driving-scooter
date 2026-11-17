@@ -90,34 +90,91 @@ export async function loadSnapshot(storage, {mapResident=null}={}) {
   };
 }
 
-export async function saveSnapshot(storage, state, lastWallClockMs) {
-  const stream = streamFrom(snapshotJson(state)).pipeThrough(new CompressionStream("gzip"));
-  const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
-  const chunks = Math.ceil(compressed.byteLength / CHUNK_SIZE);
-  if (chunks > MAX_CHUNKS) throw new Error(`Civilization snapshot needs ${chunks} chunks`);
-  const stats = {chunks, compressedBytes: compressed.byteLength};
-
-  // Publish the new metadata and all its chunks together. A failed write
-  // leaves the previous complete checkpoint available.
-  await storage.transaction(async transaction => {
-    const oldMeta = await transaction.get(META_KEY);
-    for (let index = 0; index < chunks; index++) {
-      const start = index * CHUNK_SIZE;
-      await transaction.put(chunkKey(index), compressed.slice(start, start + CHUNK_SIZE).buffer, {noCache: true});
+async function saveSnapshotStream(storage,json,world,lastWallClockMs){
+  const stream=json.pipeThrough(new CompressionStream("gzip"));
+  const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
+  const chunks=Math.ceil(compressed.byteLength/CHUNK_SIZE);
+  if(chunks>MAX_CHUNKS)throw new Error(`Civilization snapshot needs ${chunks} chunks`);
+  const stats={chunks,compressedBytes:compressed.byteLength};
+  // Compression completes before any base chunks are replaced. Transactional
+  // publication keeps either complete generation readable after a failed write.
+  await storage.transaction(async transaction=>{
+    const oldMeta=await transaction.get(META_KEY);
+    for(let index=0;index<chunks;index++){
+      const start=index*CHUNK_SIZE;
+      await transaction.put(chunkKey(index),compressed.slice(start,start+CHUNK_SIZE).buffer,{noCache:true});
     }
-    for (let index = chunks; index < Number(oldMeta?.chunks || 0); index++) {
-      await transaction.delete(chunkKey(index));
-    }
-    await transaction.put(META_KEY, {
-      version: 2,
-      codec: "gzip-json",
-      ...stats,
-      simulationAgeSeconds: state.simulationAgeSeconds,
-      lastWallClockMs,
-      savedAtMs: Date.now(),
-    });
+    for(let index=chunks;index<Number(oldMeta?.chunks||0);index++)await transaction.delete(chunkKey(index));
+    await transaction.put(META_KEY,{version:2,codec:"gzip-json",...stats,
+      simulationAgeSeconds:world.simulationAgeSeconds,lastWallClockMs,savedAtMs:Date.now()});
   });
   return stats;
+}
+
+export async function saveSnapshot(storage,state,lastWallClockMs){
+  return saveSnapshotStream(storage,streamFrom(snapshotJson(state)),state,lastWallClockMs);
+}
+
+/** The v2 archive decoder retains only its header, one framed resident and the
+ * decompression buffer. Consumers must not collect historical brain records. */
+async function* storedResidentRecords(saved){
+  if(saved.meta.version!==2){
+    // Read compatibility for pre-framed checkpoints. Every newly written base
+    // is v2, including a mapped compaction of this legacy format.
+    const legacy=await new Response(saved.json).json();
+    for(const resident of legacy.flies)yield resident;
+    return;
+  }
+  let buffer='',lineIndex=0,finished=false;
+  for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
+    buffer+=text;let end;
+    while((end=buffer.indexOf('\n'))!==-1){
+      const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
+      if(finished)throw Error('Unexpected archived snapshot data');
+      if(lineIndex===0){JSON.parse(line+'}');lineIndex++;continue;}
+      if(lineIndex===1){
+        if(line!==',"flies":['&&line!=='"flies":[')throw Error('Invalid resident list');
+        lineIndex++;continue;
+      }
+      if(line===']}'){finished=true;continue;}
+      yield JSON.parse(line.startsWith(',')?line.slice(1):line);
+    }
+  }
+  if(!finished||buffer)throw Error('Incomplete archived snapshot');
+}
+
+export async function* archiveRecordStream(storage){
+  const saved=await readStoredSnapshot(storage);
+  if(saved)yield* storedResidentRecords(saved);
+}
+
+async function* mappedResidentRecords(saved,actors){
+  const seen=new Set();
+  if(saved)for await(const old of storedResidentRecords(saved)){
+    if(seen.has(old.id))throw Error(`Duplicate archived resident: ${old.id}`);
+    seen.add(old.id);
+    yield Object.hasOwn(actors,old.id)?actors[old.id]:old;
+  }
+  for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield actor;
+}
+
+async function* mappedSnapshotJson(saved,document){
+  const {flies,...world}=document.world,header=JSON.stringify(world);
+  yield encoder.encode(header.slice(0,-1)+'\n');
+  yield encoder.encode((header.length>2?',':'')+'"flies":[\n');
+  let count=0;
+  for await(const resident of mappedResidentRecords(saved,document.actors)){
+    yield encoder.encode((count++?',':'')+JSON.stringify(resident)+'\n');
+  }
+  yield encoder.encode(']}\n');
+}
+
+/** Compact a current live document over the archived base without hydrating
+ * historical models into the engine. Deaths/births replace or append by stable
+ * ID; every omitted historical resident and private brain remains untouched. */
+export async function saveSnapshotMapped(storage,document,lastWallClockMs){
+  const saved=await readStoredSnapshot(storage);
+  return saveSnapshotStream(storage,streamFrom(mappedSnapshotJson(saved,document)),document.world,lastWallClockMs);
 }
 
 export async function exportSnapshot(storage, worldId) {
@@ -138,29 +195,10 @@ export async function exportSnapshot(storage, worldId) {
 export async function exportSnapshotMapped(storage,worldId,document){
   const saved=await readStoredSnapshot(storage);
   if(!saved)throw Error('No saved civilization snapshot');
-  const actors=document.actors,seen=new Set(),head=JSON.stringify({exportedAt:new Date().toISOString(),worldId,state:document.world});
+  const head=JSON.stringify({exportedAt:new Date().toISOString(),worldId});
   return streamFrom((async function*(){
-    yield encoder.encode(head.slice(0,-2)+',"flies":[');
-    let count=0;
-    if(saved.meta.version!==2){
-      const base=await new Response(saved.json).json();
-      for(const old of base.flies){seen.add(old.id);yield encoder.encode((count++?',':'')+JSON.stringify(actors[old.id]||old));}
-    }else{
-      let buffer='',lineIndex=0,finished=false;
-      for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
-        buffer+=text;let end;
-        while((end=buffer.indexOf('\n'))!==-1){
-          const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
-          if(lineIndex++<2)continue;
-          if(line===']}'){finished=true;continue;}
-          if(finished)throw Error('Unexpected archived snapshot data');
-          const old=JSON.parse(line.startsWith(',')?line.slice(1):line);seen.add(old.id);
-          yield encoder.encode((count++?',':'')+JSON.stringify(actors[old.id]||old));
-        }
-      }
-      if(!finished||buffer)throw Error('Incomplete archived snapshot');
-    }
-    for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield encoder.encode((count++?',':'')+JSON.stringify(actor));
-    yield encoder.encode(']}}');
+    yield encoder.encode(head.slice(0,-1)+',"state":');
+    yield* mappedSnapshotJson(saved,document);
+    yield encoder.encode('}');
   })());
 }

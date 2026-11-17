@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {randomBytes} from "node:crypto";
 import {gzipSync} from "node:zlib";
-import {exportSnapshot, exportSnapshotMapped, loadSnapshot, saveSnapshot} from "../cloudflare/src/civilization-snapshot.mjs";
+import {exportSnapshot, exportSnapshotMapped, loadSnapshot, saveSnapshot, saveSnapshotMapped, archiveRecordStream} from "../cloudflare/src/civilization-snapshot.mjs";
 
 class SnapshotStorage {
   entries = new Map();
@@ -75,4 +75,63 @@ test('mapped exports retain every untouched archived model and merge acknowledge
  const exported=await new Response(await exportSnapshotMapped(storage,'W',doc)).json();
  assert.equal(exported.state.simulationAgeSeconds,700);assert.deepEqual(exported.state.flies,[archived,a,c]);
  assert.deepEqual((await loadSnapshot(storage)).state,state,'export does not rewrite archives');
+});
+
+test('mapped compaction streams a multichunk archive and preserves old brains, current deaths and new births exactly once',async()=>{
+ const storage=new SnapshotStorage();
+ const archive=Array.from({length:64},(_,i)=>({id:`HIST-${i}`,alive:i>=60,brain:{id:`BRAIN-${i}`,privateMemory:randomBytes(36000).toString('base64')+' 🪰\n'}}));
+ archive.push({id:'constructor',alive:false,brain:{id:'OLD-CONSTRUCTOR',privateMemory:'historical identity'}});
+ const old={worldId:'W',simulationAgeSeconds:100,policy:{currency:'H$'},flies:archive};
+ await saveSnapshot(storage,old,111);
+ const deceased={...archive[60],alive:false,health:0,causeOfDeath:'old age',brain:{id:'BRAIN-60',privateMemory:'actual final memories'}};
+ const newborn={id:'NEW-BABY',alive:true,parents:['HIST-61'],brain:{id:'NEW-BRAIN',privateMemory:'new independent brain'}};
+ const special={id:'__proto__',alive:true,brain:{id:'SPECIAL-BRAIN'}};
+ const doc={world:{worldId:'W',simulationAgeSeconds:999,policy:{currency:'H$',name:'North & Hansdrex 🪰'}},actors:Object.fromEntries([[deceased.id,deceased],[newborn.id,newborn],[special.id,special]])};
+ const stats=await saveSnapshotMapped(storage,doc,222);
+ assert.ok(stats.chunks>1);
+ const loaded=await loadSnapshot(storage);
+ assert.equal(loaded.lastWallClockMs,222);assert.equal(loaded.state.simulationAgeSeconds,999);
+ assert.deepEqual(loaded.state.policy,doc.world.policy);
+ const expected=[...archive.slice(0,60),deceased,...archive.slice(61),newborn,special];
+ assert.deepEqual(loaded.state.flies,expected);
+ assert.equal(new Set(loaded.state.flies.map(f=>f.id)).size,expected.length);
+ assert.deepEqual((await new Response(await exportSnapshot(storage,'W')).json()).state,loaded.state);
+ await saveSnapshotMapped(storage,doc,333);
+ assert.deepEqual((await loadSnapshot(storage)).state.flies,expected,'repeated compaction does not duplicate births or archived deaths');
+ let records=0;
+ for await(const record of archiveRecordStream(storage)){assert.deepEqual(record,expected[records++]);}
+ assert.equal(records,expected.length);
+});
+
+test('failed mapped snapshot publication atomically retains the last complete archive and clock',async()=>{
+ class AtomicStorage extends SnapshotStorage{
+  failKey=null;
+  async transaction(write){
+   const draft=new SnapshotStorage();draft.entries=new Map(this.entries);
+   const parent=this,put=draft.put.bind(draft);
+   draft.put=async(key,value)=>{if(key===parent.failKey)throw Error('injected durable write failure');return put(key,value);};
+   await write(draft);this.entries=draft.entries;
+  }
+ }
+ const storage=new AtomicStorage(),dead={id:'D',alive:false,brain:{id:'BD',memory:'do not lose this archive'}},a={id:'A',alive:true,brain:{id:'BA'}};
+ const old={simulationAgeSeconds:100,flies:[dead,a]};await saveSnapshot(storage,old,111);
+ const meta=structuredClone(storage.entries.get('snapshot:meta'));
+ const doc={world:{simulationAgeSeconds:200},actors:{A:{...a,alive:false},B:{id:'B',alive:true,brain:{id:'BB'}}}};
+ storage.failKey='snapshot:meta';await assert.rejects(saveSnapshotMapped(storage,doc,222),/injected durable write failure/);
+ assert.deepEqual(storage.entries.get('snapshot:meta'),meta);
+ assert.deepEqual((await loadSnapshot(storage)).state,old);
+ assert.equal((await loadSnapshot(storage)).lastWallClockMs,111);
+ storage.failKey=null;await saveSnapshotMapped(storage,doc,222);
+ assert.deepEqual((await loadSnapshot(storage)).state.flies,[dead,doc.actors.A,doc.actors.B]);
+});
+
+test('mapped compaction upgrades legacy JSON and can create an empty or first current base',async()=>{
+ const storage=new SnapshotStorage(),old={simulationAgeSeconds:10,flies:[{id:'D',alive:false,brain:{id:'BD'}},{id:'A',alive:true,brain:{id:'BA'}}]};
+ await storage.put('snapshot:meta',{version:1,chunks:1,lastWallClockMs:1});
+ await storage.put('snapshot:chunk:0',gzipSync(JSON.stringify(old)));
+ const doc={world:{simulationAgeSeconds:20},actors:{A:{id:'A',alive:true,x:15,brain:{id:'BA'}}}};
+ await saveSnapshotMapped(storage,doc,2);assert.equal(storage.entries.get('snapshot:meta').version,2);
+ assert.deepEqual((await loadSnapshot(storage)).state.flies,[old.flies[0],doc.actors.A]);
+ const first=new SnapshotStorage();await saveSnapshotMapped(first,{world:{simulationAgeSeconds:0},actors:{}},3);
+ assert.deepEqual((await loadSnapshot(first)).state,{simulationAgeSeconds:0,flies:[]});
 });

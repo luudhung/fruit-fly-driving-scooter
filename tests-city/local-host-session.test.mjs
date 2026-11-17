@@ -10,14 +10,18 @@ function fixture(){
  let state={worldId:'WORLD-A',mapVersion:36,simulationAgeSeconds:10000,timeScale:120,flies:[
   {id:'A',alive:true,x:0,z:0,health:100,brain:{id:'B'}},
   {id:'D',alive:false,x:2,z:3,health:0,brain:{id:'ARCHIVED'}},
- ]},ticks=0,saves=0;
+ ]},ticks=0,saves=0,loads=[],mappedSaves=0,mappedGate=null,failMapped=false;
+ state.flies[1].brain.memory={episodes:[{at:9000,text:'Archived resident lifetime memory'}]};
+ state.history=[{type:'death',residentId:'D',at:9000}];
  let source=fs.readFileSync(new URL('../cloudflare/src/index.mjs',import.meta.url),'utf8');
  source=source.replace(/^export \{FlyWire[^\n]*\n/m,'').replace(/^import[\s\S]*?from\s+["'][^"']+["'];\n/gm,'');
  source=source.slice(0,source.indexOf('\nexport default')).replace('export class CivilizationWorld','class CivilizationWorld');
- const savedBase=structuredClone(state),baseSavedAt=Date.now();
+ let savedBase=structuredClone(state),baseSavedAt=Date.now();
  const deps={...Delta,...Journal,MAP_VERSION:36,LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint,DurableObject:class{},
- loadSnapshot:async()=>({state:structuredClone(savedBase),lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}}),
- saveSnapshot:async()=>{saves++;return{};},exportSnapshot:()=>'',freshState:()=>state,
+ loadSnapshot:async(_storage,{mapResident}={})=>{loads.push(mapResident);const snapshot=structuredClone(savedBase);if(mapResident)snapshot.flies=snapshot.flies.map(mapResident).filter(Boolean);return {state:snapshot,lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}};},
+ saveSnapshot:async()=>{saves++;return{};},exportSnapshot:()=>Journal.localHostExportStream(savedBase,Delta.projectLocalDocument(savedBase),'WORLD-A'),
+ saveSnapshotMapped:async(_storage,document)=>{mappedSaves++;if(mappedGate)await mappedGate;if(failMapped){failMapped=false;throw Error('mapped publication failed');}const merged=await new Response(Journal.localHostExportStream(savedBase,document,'WORLD-A')).json();savedBase=merged.state;baseSavedAt=Date.now();return{chunks:1};},
+ exportSnapshotMapped:(_storage,worldId,document)=>Journal.localHostExportStream(savedBase,document,worldId),freshState:()=>state,
  restoreState:s=>{state=s;},getRawState:()=>state,getState:()=>({}),snapshotLooksUsable:()=>true,setNeuralSyncEnabled:()=>{},
  countries:{requestConflict:command=>{if(!commands.some(c=>c.requestId===command.requestId))commands.push(command);return {accepted:true,requestId:command.requestId};}},getSimulationConfig:()=>({gameSecondsPerRealSecond:120}),neuralActors:()=>state.flies.filter(f=>f.alive),
  tick:async()=>{ticks++;},getNeuralAgents:()=>[],applyNeuralOutputs:()=>({}),markNeuralCycleFailed:()=>{},getNeuralStatus:()=>({})};
@@ -46,8 +50,67 @@ function fixture(){
   return response;
  };
  const restart=version=>{const nextDeps={...deps,MAP_VERSION:version,restoreState:s=>{state=s;state.mapVersion=version;}};const Next=new Function(...Object.keys(nextDeps),source+'\nreturn CivilizationWorld;')(...Object.values(nextDeps));return new Next(ctx,{NEURAL_ENABLED:'0'});};
- return {world,claim,post,save,restart,metadata,commands,failNext:()=>{failTransaction=true;},get state(){return state;},get ticks(){return ticks;},get saves(){return saves;}};
+ return {world,claim,post,save,restart,metadata,commands,loads,get savedBase(){return savedBase;},failNext:()=>{failTransaction=true;},failNextMapped:()=>{failMapped=true;},holdMapped(){let release;mappedGate=new Promise(r=>{release=r;});return release;},get mappedSaves(){return mappedSaves;},get state(){return state;},get ticks(){return ticks;},get saves(){return saves;}};
 }
+
+const assertArchiveRetained=t=>{
+ assert.equal(t.state.flies.some(f=>f.id==='D'),false,'historical brain models stay out of live engine/service maps');
+ assert.equal(t.savedBase.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assert.deepEqual(t.savedBase.flies.find(f=>f.id==='D').brain.memory.episodes,[{at:9000,text:'Archived resident lifetime memory'}]);
+ assert.deepEqual(t.savedBase.history,[{type:'death',residentId:'D',at:9000}]);
+};
+
+test('cold background startup always streams only living residents while retaining the full durable archive',async()=>{
+ const t=fixture();await t.world.ready;
+ assert.equal(t.loads.length,1);assert.equal(typeof t.loads[0],'function');
+ assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assertArchiveRetained(t);
+});
+
+const recentDeath=i=>({id:'RECENT-DEAD-'+i,alive:false,x:i,z:2,health:0,brain:{id:'RECENT-BRAIN-'+i,memory:{episodes:[{at:10000,text:'Final lifetime memory '+i}]}}});
+
+test('thirty-two recent deaths compact in their own alarm work unit and prune only after durable publication',async()=>{
+ const t=fixture();await t.world.ready;
+ t.state.flies.push(...Array.from({length:31},(_,i)=>recentDeath(i)));
+ assert.equal(await t.world.compactHistoryIfDue(),false);assert.equal(t.mappedSaves,0);
+ t.state.flies.push(recentDeath(31));t.state.flies[0].x=52;
+ await t.world.persistIfDue(true);assert.ok(t.metadata.has('local-save:meta'));
+ const unblock=t.holdMapped(),reads=t.loads.length,beforeTicks=t.ticks;
+ const alarm=t.world.alarm();
+ for(let i=0;i<30&&!t.mappedSaves;i++)await new Promise(r=>setTimeout(r,1));
+ assert.equal(t.mappedSaves,1);assert.ok(t.metadata.has('local-save:meta'),'the only durable recent deaths cannot be deleted before replacement publication');
+ assert.equal(t.state.flies.filter(f=>!f.alive).length,32);assert.equal(t.savedBase.flies.some(f=>f.id==='RECENT-DEAD-0'),false);
+ unblock();await alarm;
+ assert.equal(t.ticks,beforeTicks,'archive gzip and simulation ticking occupy different alarm events');
+ assert.equal(t.loads.length,reads,'compaction streams the durable base without hydrating its archive into the engine');
+ assert.equal(t.metadata.has('local-save:meta'),false);assert.equal(t.world.localJournalMeta,null);
+ assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assert.equal(t.state.flies[0].x,52);assertArchiveRetained(t);
+ for(let i=0;i<32;i++){
+  const dead=t.savedBase.flies.find(f=>f.id==='RECENT-DEAD-'+i);
+  assert.equal(dead.alive,false);assert.deepEqual(dead.brain,recentDeath(i).brain);assert.ok(t.world.baseKnownIds.has(dead.id));
+ }
+ assert.deepEqual([...t.world.baseAliveIds],['A']);
+ const cold=t.restart(36);await cold.ready;
+ assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assert.equal(t.state.flies[0].x,52);assertArchiveRetained(t);
+ assert.equal(t.savedBase.flies.filter(f=>!f.alive).length,33);assert.equal(t.saves,0);
+});
+
+test('failed archive publication retains the journal and all recent brain records for a safe retry',async()=>{
+ const t=fixture();await t.world.ready;t.state.flies.push(...Array.from({length:32},(_,i)=>recentDeath(i)));
+ await t.world.persistIfDue(true);const journal=structuredClone(t.metadata.get('local-save:meta'));
+ t.failNextMapped();await assert.rejects(t.world.compactHistoryIfDue(),/mapped publication failed/);
+ assert.deepEqual(t.metadata.get('local-save:meta'),journal);assert.equal(t.state.flies.filter(f=>!f.alive).length,32);
+ assert.equal(t.savedBase.flies.some(f=>f.id==='RECENT-DEAD-0'),false);assert.equal(t.ticks,0);
+ assert.equal(await t.world.compactHistoryIfDue(),true);assert.equal(t.savedBase.flies.filter(f=>!f.alive).length,33);
+ assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assertArchiveRetained(t);
+});
+
+test('a live browser owner prevents background history compaction even above its threshold',async()=>{
+ const t=fixture();await t.world.ready;const {lease}=await t.claim();
+ t.state.flies.push(...Array.from({length:32},(_,i)=>recentDeath(i)));
+ assert.equal(await t.world.compactHistoryIfDue(),false);await t.world.alarm();
+ assert.equal(t.mappedSaves,0);assert.equal(t.ticks,0);assert.equal(t.world.localHost.token,lease.token);
+ assert.equal(t.state.flies.filter(f=>!f.alive).length,32);assert.ok(t.metadata.has('local-save:meta'));
+});
 
 test('an active browser lease pauses idle simulation and excludes a second writer',async()=>{
  const t=fixture();await t.world.ready;
@@ -64,7 +127,7 @@ test('an active browser lease pauses idle simulation and excludes a second write
  assert.equal((await t.post('heartbeat',{...first.lease,token:'wrong'})).status,409);
 });
 
-test('checkpoint release preserves archive and identities, saves once, and fences late browser writes',async()=>{
+test('checkpoint release journals progress, preserves archived identities and fences late browser writes',async()=>{
  const t=fixture();await t.world.ready;
  const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=9;
  const checkpoint={...lease,sequence:1,state,release:true};
@@ -73,7 +136,7 @@ test('checkpoint release preserves archive and identities, saves once, and fence
  await t.world.materializeLocalDocument();
  assert.equal(t.state.simulationAgeSeconds,10120);
  assert.equal(t.state.flies[0].x,9);
- assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assertArchiveRetained(t);
  assert.equal(t.saves,0,'local saves journal deltas instead of recompressing the archive');
  assert.equal((await t.save(checkpoint)).status,409);
  t.world.lastWallClockMs=Date.now()-4000;await t.world.alarm();assert.ok(t.ticks>0);
@@ -177,7 +240,7 @@ test('an acknowledged browser save is replayed before a later map migration and 
  assert.equal((await t.save({...lease,sequence:1,state})).status,200);
  const upgraded=t.restart(37);await upgraded.ready;
  assert.equal(t.state.simulationAgeSeconds,10120);assert.equal(t.state.mapVersion,37);assert.equal(t.state.flies[0].x,17);
- assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assertArchiveRetained(t);
  assert.equal(upgraded.localHost.leaving,true);assert.equal(upgraded.localDocument,null);
 });
 
@@ -199,7 +262,7 @@ test('a failed initial durable claim cannot leave a phantom local owner or mutab
 });
 
 
-test('recent deaths before claim survive lazy archive hydration without reviving the old base resident',async()=>{
+test('recent deaths before claim survive deferred engine adoption without reviving the old base resident',async()=>{
  const t=fixture();await t.world.ready;
  t.state.flies[0].alive=false;t.state.flies[0].health=0;
  t.state.flies.push({id:'C',alive:true,x:2,z:3,health:100,brain:{id:'BC'}});
@@ -207,21 +270,40 @@ test('recent deaths before claim survive lazy archive hydration without reviving
  state.simulationAgeSeconds+=120;assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
  await t.world.materializeLocalDocument();
  assert.equal(t.state.flies.find(f=>f.id==='A').alive,false);assert.equal(t.state.flies.find(f=>f.id==='A').health,0);
- assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');assert.equal(t.state.flies.find(f=>f.id==='C').brain.id,'BC');
+ assertArchiveRetained(t);assert.equal(t.state.flies.find(f=>f.id==='C').brain.id,'BC');
+ t.world.lastPersistMs=0;await t.world.persistIfDue(true);
+ const cold=t.restart(36);await cold.ready;
+ assert.equal(t.state.flies.find(f=>f.id==='A').alive,false,'background journal replay cannot revive a recent death from the old full base');
+ assert.equal(t.state.flies.find(f=>f.id==='C').brain.id,'BC');assertArchiveRetained(t);assert.equal(t.saves,0);
+});
+
+test('full exports retain archived identities, models and history while overlaying the latest living checkpoint',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=46;
+ assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
+ const reads=t.loads.length;
+ const response=await t.world.fetch(new Request('https://city/api/civilization/export'));
+ assert.equal(response.status,200);const full=(await response.json()).state;
+ assert.equal(full.flies.find(f=>f.id==='A').x,46);assert.equal(full.simulationAgeSeconds,10120);
+ assert.equal(full.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assert.deepEqual(full.flies.find(f=>f.id==='D').brain.memory,t.savedBase.flies.find(f=>f.id==='D').brain.memory);
+ assert.deepEqual(full.history,t.savedBase.history);assert.equal(t.loads.length,reads);assert.equal(t.saves,0);assertArchiveRetained(t);
 });
 
 
-test('an expired host is hydrated before a neural RPC can persist, so archives can never be written as a trimmed city',async()=>{
+test('an expired host adopts living progress before neural persistence without loading or recompressing archived brains',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=24;
  assert.equal((await t.save({...lease,sequence:1,state})).status,200);
  t.world.localHost.expiresAt=Date.now()-1;t.world.lastPersistMs=0;
- await t.world.applyNeuralBatch({outputs:[]});
- assert.equal(t.state.flies.find(f=>f.id==='A').x,24);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
- assert.equal(t.world.archiveDormant,false);assert.equal(t.saves,1);
+ const reads=t.loads.length;await t.world.applyNeuralBatch({outputs:[]});
+ assert.equal(t.state.flies.find(f=>f.id==='A').x,24);assertArchiveRetained(t);
+ assert.equal(t.loads.length,reads,'neural RPC must not reload the dead archive');assert.equal(t.saves,0,'background durability uses a living overlay instead of full archive gzip');
+ assert.ok(t.metadata.get('local-save:meta'));assert.equal(t.metadata.has('localHostLease'),false);
+ const replay=await Journal.loadLocalHostJournal(t.world.ctx.storage,t.savedBase,0);
+ assert.equal(replay.document.actors.A.x,24);assert.equal(replay.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
 });
 
 
-test('release acknowledges durable progress before archive hydration, then the next alarm restores every archived identity',async()=>{
+test('release acknowledges before engine adoption and the next alarm resumes without loading the dead archive',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=31;
  let releaseHydration,started=false;const gate=new Promise(r=>{releaseHydration=r;});
  const hydrate=t.world.materializeLocalDocument.bind(t.world);
@@ -230,17 +312,17 @@ test('release acknowledges durable progress before archive hydration, then the n
  assert.ok(response,'a release response waited for the large archive');assert.equal(response.status,200);assert.equal(started,false);
  assert.equal(t.metadata.get('localHostLease'),undefined);assert.equal(t.world.localDocument.world.simulationAgeSeconds,10120);
  const alarm=t.world.alarm();for(let i=0;i<30&&!started;i++)await new Promise(r=>setTimeout(r,1));assert.equal(started,true);
- releaseHydration();await alarm;
- assert.equal(t.state.flies.find(f=>f.id==='A').x,31);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ const reads=t.loads.length;releaseHydration();await alarm;
+ assert.equal(t.state.flies.find(f=>f.id==='A').x,31);assertArchiveRetained(t);assert.equal(t.loads.length,reads);assert.equal(t.saves,0);
 });
 
-test('queued commands survive a durable release and a cold restart before deferred archive hydration',async()=>{
+test('queued commands survive a durable release and a cold restart before deferred engine adoption',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
  const command={requestId:'RELEASE-COMMAND-1',fromCountryId:'hansdrex',toCountryId:'north-city',quick:true};
  t.world.localHost.commands=[command];state.simulationAgeSeconds+=120;
  assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
- assert.deepEqual(t.commands,[],'release must not restore the entire engine before responding');
+ assert.deepEqual(t.commands,[],'release must acknowledge before adopting the engine document');
  assert.deepEqual(t.metadata.get('local-save:meta').pendingCommands,[command]);
  const cold=t.restart(36);await cold.ready;await cold.materializeLocalDocument();
- assert.deepEqual(t.commands,[command]);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+ assert.deepEqual(t.commands,[command]);assertArchiveRetained(t);
 });

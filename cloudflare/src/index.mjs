@@ -4,7 +4,7 @@ import {loadLocalHostJournal,clearLocalHostJournal,saveLocalHostBase,appendLocal
 import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
-import {loadSnapshot, saveSnapshot, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
+import {loadSnapshot, saveSnapshot, saveSnapshotMapped, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
 import {handleConflictControl} from '../../worker/conflict-control.mjs';
 import {
   freshState,
@@ -61,11 +61,10 @@ export class CivilizationWorld extends DurableObject {
     this.baseKnownIds=new Set();this.baseAliveIds=new Set();
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
-      const hasJournal=Boolean(await this.ctx.storage.get('local-save:meta'));
       const storedKnown=new Set(),storedAlive=new Set();
-      const mapResident=hasJournal?f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;}:null;
+      const mapResident=f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;};
       const saved=await loadSnapshot(this.ctx.storage,{mapResident});
-      this.archiveDormant=hasJournal;
+      this.archiveDormant=true;
       if(saved&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
       let base;
       if(saved){
@@ -131,21 +130,13 @@ export class CivilizationWorld extends DurableObject {
   }
 
   async materializeLocalDocument(){
-    if(!this.localDocument&&!this.archiveDormant)return;
-    const document=this.journalDocument(this.localDocument||projectLocalDocument(getRawState())),locations=getRawState().locations;
-    // First release the engine's old living objects and service maps. Only then
-    // stream archived records, replacing old live models during parsing.
-    let archived=this.archiveDormant?[]:getRawState().flies.filter(f=>!document.actors[f.id]);
-    restoreState({...localDocumentState(document),locations});
-    if(this.archiveDormant){
-      const saved=await loadSnapshot(this.ctx.storage,{mapResident:f=>document.actors[f.id]||f});
-      if(!saved)throw Error('Missing archived city base');
-      archived=saved.state.flies.map(f=>document.actors[f.id]||f);
+    if(this.localDocument){
+      const document=this.journalDocument(this.localDocument),locations=getRawState().locations;
+      // Historical brains are already durable in the framed base. Neither
+      // owner expiry nor background cognition needs to load them back into RAM.
+      restoreState({...localDocumentState(document),locations});
+      this.localDocument=null;this.localObserver=null;
     }
-    const seen=new Set(archived.map(f=>f.id)),flies=archived;
-    for(const [id,f]of Object.entries(document.actors))if(!seen.has(id)){flies.push(f);seen.add(id);}
-    restoreState({...document.world,flies,locations});
-    this.archiveDormant=false;this.localDocument=null;this.localObserver=null;
     // Release acknowledges the journal first. Replay accepted commands only
     // after this later archive hydration, retaining receipts across a crash.
     for(const command of this.localJournalMeta?.pendingCommands||[])countries.requestConflict(command);
@@ -176,9 +167,11 @@ export class CivilizationWorld extends DurableObject {
     // alarm would jump over daily events and age residents before they can act.
     const sampledSeconds = Math.min(elapsedRealSeconds, Math.max(MAX_RECOVERY_SECONDS, this.alarmIntervalMs() / 1000 * 2));
     const skippedRealSeconds = elapsedRealSeconds - sampledSeconds;
-    const population = neuralActors().length;
-    const decisionBudget = Math.max(4, Math.min(24, Math.floor(6000/Math.max(1,population))));
-    const maxSteps = reason === "alarm" ? Math.min(this.idleMaxSteps(),decisionBudget) : decisionBudget;
+    // One complete social step advances the elapsed clock. Repeating the full
+    // population pass 4–6 times caused the free DO's alarm CPU watchdog to reset
+    // this world before its progress could be saved.
+    const decisionBudget = 1;
+    const maxSteps = decisionBudget;
     const steps = Math.min(
       maxSteps,
       Math.max(1, Math.floor(sampledSeconds)),
@@ -212,16 +205,31 @@ export class CivilizationWorld extends DurableObject {
     const now = Date.now();
     if (!force && now - this.lastPersistMs < ACTIVE_PERSIST_INTERVAL_MS) return this.storageStats;
     await this.materializeLocalDocument();
-    this.storageStats = await saveSnapshot(
-      this.ctx.storage,
-      getRawState(),
-      this.lastWallClockMs,
-    );
+    const observer=getState({observer:true,compactObserver:true});
+    const document=this.journalDocument(projectLocalDocument(localHostSnapshot(getRawState())));
+    this.localJournalMeta=await saveLocalHostBase(this.ctx.storage,document,null,{
+      observer,lastWallClockMs:this.lastWallClockMs,epoch:this.localEpoch,
+      sequence:this.localJournalMeta?.sequence||0,
+    });
     this.lastPersistMs = now;
-    this.baseKnownIds=new Set(getRawState().flies.map(f=>f.id));
-    this.baseAliveIds=new Set(getRawState().flies.filter(f=>f.alive).map(f=>f.id));
-    if(this.localJournalMeta){await clearLocalHostJournal(this.ctx.storage);this.localJournalMeta=null;}
     return this.storageStats;
+  }
+
+  async compactHistoryIfDue(){
+    if(this.localHost&&this.localHost.expiresAt>Date.now())return false;
+    await this.materializeLocalDocument();
+    const state=getRawState(),dead=state.flies.filter(f=>!f.alive);
+    if(dead.length<32)return false;
+    const document=this.journalDocument(projectLocalDocument(state));
+    // This is a separate alarm work unit: stream the old archive, replace only
+    // current identities, then evict completed deaths without dropping history.
+    this.storageStats=await saveSnapshotMapped(this.ctx.storage,document,this.lastWallClockMs);
+    await clearLocalHostJournal(this.ctx.storage);this.localJournalMeta=null;
+    for(const id of Object.keys(document.actors))this.baseKnownIds.add(id);
+    const living=state.flies.filter(f=>f.alive);
+    this.baseAliveIds=new Set(living.map(f=>f.id));
+    restoreState({...state,flies:living});this.lastPersistMs=Date.now();
+    return true;
   }
 
   async alarm() {
@@ -230,6 +238,7 @@ export class CivilizationWorld extends DurableObject {
       this.nextAlarmAtMs=Date.now()+this.alarmIntervalMs();
       await this.ctx.storage.setAlarm(this.nextAlarmAtMs);
       try {
+        if(await this.compactHistoryIfDue())return;
         await this.advanceTo(Date.now(), "alarm");
         await this.persistIfDue(false);
       } catch (error) {
@@ -454,11 +463,11 @@ export class CivilizationWorld extends DurableObject {
       }
 
       if (url.pathname === "/api/civilization/export") {
-        if(this.localDocument){
+        if(this.localDocument||this.archiveDormant){
           // Re-read the durable accepted document so an asynchronous export is
           // isolated from later handoff/engine ticks and never drops archives.
           const journal=await loadLocalHostJournal(this.ctx.storage,getRawState());
-          const document=journal&&!journal.stale?journal.document:this.localDocument;
+          const document=journal&&!journal.stale?journal.document:this.journalDocument(projectLocalDocument(localHostSnapshot(getRawState())));
           return new Response(await exportSnapshotMapped(this.ctx.storage,this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,document),{headers:corsHeaders({'content-type':'application/json; charset=utf-8'})});
         }
         await this.persistIfDue(true);
