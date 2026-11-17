@@ -99,12 +99,12 @@ test('school lessons require actual funded teacher attendance and improve only c
  const earned=teacher.money;t.step(600,{hour:20});assert.equal(teacher.money,earned,'a teacher staying on campus outside the shift earns nothing');
 });
 
-test('private facilities fund their own repairs and utility plants retain utility funding after damage',()=>{
+test('disaster repairs of private facilities and utility plants use public recovery funds without charging their owners',()=>{
  const t=setup(),owner=t.s.flies[0];
  const record=(id,type,x,ownerId=null)=>({id,facilityType:type,usage:type,kind:'civic',name:type,x,z:0,w:20,d:18,h:18,capacity:20,stage:'damaged',health:40,progress:1,frontage:{x:x-16,z:0},ownerId,fundingAccountId:type==='power-plant'?'power-grid':null});
  const privateId='CIVIC-PRIVATE-REPAIR',publicId='CIVIC-UTILITY-REPAIR';t.s.urbanWorld.buildings[privateId]=record(privateId,'workshop',1000,owner.id);t.s.urbanWorld.buildings[publicId]=record(publicId,'power-plant',1060);t.urban.init();
- const treasury=t.s.treasury.cash,wealth=owner.money+owner.savings,p=t.urban.submitProject(privateId);assert.ok(p);assert.equal(p.funding.type,'resident');assert.equal(owner.money+owner.savings,wealth-p.budget);assert.equal(t.s.treasury.cash,treasury);
- const plant=t.s.utilities.powerPlant.cash,q=t.urban.submitProject(publicId);assert.ok(q);assert.equal(q.funding.accountId,'power-grid');assert.equal(t.s.utilities.powerPlant.cash,plant-q.budget);assert.equal(t.s.treasury.cash,treasury);
+ const treasury=t.s.treasury.cash,wealth=owner.money+owner.savings,p=t.urban.submitProject(privateId);assert.ok(p);assert.equal(p.funding.type,'public');assert.equal(p.funding.accountId,'treasury');assert.equal(owner.money+owner.savings,wealth);assert.equal(t.s.treasury.cash,treasury-p.budget);
+ const plant=t.s.utilities.powerPlant.cash,q=t.urban.submitProject(publicId);assert.ok(q);assert.equal(q.funding.accountId,'treasury');assert.equal(t.s.utilities.powerPlant.cash,plant);assert.equal(t.s.treasury.cash,treasury-p.budget-q.budget);
 });
 
 

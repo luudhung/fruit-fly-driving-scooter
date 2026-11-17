@@ -10,7 +10,7 @@ import type {FireServiceSnapshot} from '../worker/fire-service.mjs';
 import * as THREE from 'three';
 import {BUILDINGS,ROADS,applyUrbanGeometry,type UrbanBuildingRecord,type UrbanFlood} from '../worker/city-map.mjs';
 export type UrbanRoad={id:string;x:number;z:number;w:number;d:number;stage:string;progress?:number;projectId?:string};
-export type UrbanWorldSnapshot={roads?:UrbanRoad[];completedRoads?:number;fireService?:FireServiceSnapshot;buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
+export type UrbanWorldSnapshot={workforce?:{target:number;assigned:number;onsite:number;activeSites:number};roads?:UrbanRoad[];completedRoads?:number;fireService?:FireServiceSnapshot;buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
 type Registered={group:THREE.Group;originalMaterials:Map<THREE.Material,THREE.Color>;height:number;privateMaterials?:boolean};
 /** Only the viewer animates particles and machinery; durable world outcomes come from the server. */
 export class UrbanWorldRenderer{
