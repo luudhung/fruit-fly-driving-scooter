@@ -69,6 +69,8 @@ test('checkpoint release preserves archive and identities, saves once, and fence
  const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=9;
  const checkpoint={...lease,sequence:1,state,release:true};
  const receipt=await t.save(checkpoint);assert.equal(receipt.status,200);
+ assert.equal(t.world.localHost,null);
+ await t.world.materializeLocalDocument();
  assert.equal(t.state.simulationAgeSeconds,10120);
  assert.equal(t.state.flies[0].x,9);
  assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
@@ -203,6 +205,7 @@ test('recent deaths before claim survive lazy archive hydration without reviving
  t.state.flies.push({id:'C',alive:true,x:2,z:3,health:100,brain:{id:'BC'}});
  const {lease,state}=await t.claim();assert.deepEqual(state.flies.map(f=>f.id),['C']);
  state.simulationAgeSeconds+=120;assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
+ await t.world.materializeLocalDocument();
  assert.equal(t.state.flies.find(f=>f.id==='A').alive,false);assert.equal(t.state.flies.find(f=>f.id==='A').health,0);
  assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');assert.equal(t.state.flies.find(f=>f.id==='C').brain.id,'BC');
 });
@@ -215,4 +218,29 @@ test('an expired host is hydrated before a neural RPC can persist, so archives c
  await t.world.applyNeuralBatch({outputs:[]});
  assert.equal(t.state.flies.find(f=>f.id==='A').x,24);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
  assert.equal(t.world.archiveDormant,false);assert.equal(t.saves,1);
+});
+
+
+test('release acknowledges durable progress before archive hydration, then the next alarm restores every archived identity',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].x=31;
+ let releaseHydration,started=false;const gate=new Promise(r=>{releaseHydration=r;});
+ const hydrate=t.world.materializeLocalDocument.bind(t.world);
+ t.world.materializeLocalDocument=async()=>{started=true;await gate;return hydrate();};
+ const response=await Promise.race([t.save({...lease,sequence:1,state,release:true}),new Promise(r=>setTimeout(()=>r(null),100))]);
+ assert.ok(response,'a release response waited for the large archive');assert.equal(response.status,200);assert.equal(started,false);
+ assert.equal(t.metadata.get('localHostLease'),undefined);assert.equal(t.world.localDocument.world.simulationAgeSeconds,10120);
+ const alarm=t.world.alarm();for(let i=0;i<30&&!started;i++)await new Promise(r=>setTimeout(r,1));assert.equal(started,true);
+ releaseHydration();await alarm;
+ assert.equal(t.state.flies.find(f=>f.id==='A').x,31);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
+});
+
+test('queued commands survive a durable release and a cold restart before deferred archive hydration',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
+ const command={requestId:'RELEASE-COMMAND-1',fromCountryId:'hansdrex',toCountryId:'north-city',quick:true};
+ t.world.localHost.commands=[command];state.simulationAgeSeconds+=120;
+ assert.equal((await t.save({...lease,sequence:1,state,release:true})).status,200);
+ assert.deepEqual(t.commands,[],'release must not restore the entire engine before responding');
+ assert.deepEqual(t.metadata.get('local-save:meta').pendingCommands,[command]);
+ const cold=t.restart(36);await cold.ready;await cold.materializeLocalDocument();
+ assert.deepEqual(t.commands,[command]);assert.equal(t.state.flies.find(f=>f.id==='D').brain.id,'ARCHIVED');
 });

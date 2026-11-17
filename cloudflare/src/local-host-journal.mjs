@@ -43,11 +43,11 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0){
 export async function clearLocalHostJournal(storage){
  await storage.transaction(async tx=>{const meta=await tx.get(META);for(const key of values(meta))await tx.delete(key);await tx.delete(META);});
 }
-export async function saveLocalHostBase(storage,document,lease,{observer=null,lastWallClockMs=Date.now(),savedAtMs=Date.now(),sequence=lease?.sequence||0,epoch=lease?.epoch||0}={}){
+export async function saveLocalHostBase(storage,document,lease,{observer=null,lastWallClockMs=Date.now(),savedAtMs=Date.now(),sequence=lease?.sequence||0,epoch=lease?.epoch||0,pendingCommands=[]}={}){
  const bytes=new Uint8Array(await gzip(overlayStream(document,observer))),generation=crypto.randomUUID();
  const overlayKeys=Array.from({length:Math.ceil(bytes.byteLength/CHUNK)},(_,i)=>`local-save:overlay:${generation}:${i}`);
  const meta={version:1,generation,worldId:document.world.worldId,mapVersion:document.world.mapVersion,epoch,
-  overlayKeys,overlaySequence:sequence,entries:[],sequence,age:document.world.simulationAgeSeconds,lastWallClockMs,savedAtMs,journalBytes:0};
+  overlayKeys,overlaySequence:sequence,entries:[],sequence,age:document.world.simulationAgeSeconds,lastWallClockMs,savedAtMs,journalBytes:0,pendingCommands};
  await storage.transaction(async tx=>{
   const old=await tx.get(META);
   for(const [i,key]of overlayKeys.entries())await tx.put(key,bytes.slice(i*CHUNK,(i+1)*CHUNK).buffer);
@@ -63,11 +63,11 @@ export async function appendLocalHostDelta(storage,document,body,lease,observer)
  const entry={baseSequence:body.baseSequence,sequence:body.sequence,patch:body.patch,observer:observer||null};
  const bytes=await gzip(new Blob([JSON.stringify(entry)]).stream());
  if(previous.entries.length>=MAX_ENTRIES||previous.journalBytes+bytes.byteLength>MAX_JOURNAL_BYTES){
-  return saveLocalHostBase(storage,document,lease,{observer,lastWallClockMs:Date.now(),sequence:body.sequence,epoch:body.epoch});
+  return saveLocalHostBase(storage,document,lease,{observer,lastWallClockMs:Date.now(),sequence:body.sequence,epoch:body.epoch,pendingCommands:body.releaseCommands||[]});
  }
  const key=`local-save:delta:${previous.generation}:${body.sequence}`,now=Date.now();
  const meta={...previous,sequence:body.sequence,age:document.world.simulationAgeSeconds,lastWallClockMs:now,savedAtMs:now,
-  entries:[...previous.entries,{key,sequence:body.sequence}],journalBytes:previous.journalBytes+bytes.byteLength};
+  pendingCommands:body.releaseCommands||previous.pendingCommands||[],entries:[...previous.entries,{key,sequence:body.sequence}],journalBytes:previous.journalBytes+bytes.byteLength};
  await storage.transaction(async tx=>{
   const actual=await tx.get(META);
   if(!actual||actual.generation!==previous.generation||actual.sequence!==body.baseSequence)throw Error('local save commit lost its base');

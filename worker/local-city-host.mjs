@@ -112,7 +112,7 @@ self.onmessage=async({data})=>{
    await request('/api/civilization/local/leave',{token:owner.token,epoch:owner.epoch}).catch(()=>{});
    session=null;baseline=null;pendingCheckpoint=null;
   }
-  send('released');
+  send('released',{saved:complete});
  }
  if(data.type==='snapshot')publish();
 };

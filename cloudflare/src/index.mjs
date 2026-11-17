@@ -146,6 +146,9 @@ export class CivilizationWorld extends DurableObject {
     for(const [id,f]of Object.entries(document.actors))if(!seen.has(id)){flies.push(f);seen.add(id);}
     restoreState({...document.world,flies,locations});
     this.archiveDormant=false;this.localDocument=null;this.localObserver=null;
+    // Release acknowledges the journal first. Replay accepted commands only
+    // after this later archive hydration, retaining receipts across a crash.
+    for(const command of this.localJournalMeta?.pendingCommands||[])countries.requestConflict(command);
   }
 
   journalDocument(document){
@@ -362,14 +365,14 @@ export class CivilizationWorld extends DurableObject {
           const document=this.journalDocument(nextDocument);
           // This small atomic journal write is the acknowledgement boundary.
           // Full historical archives are never encoded in a five-second save.
-          const meta=await appendLocalHostDelta(this.ctx.storage,document,body,body.release?null:updated,observer);
+          const journalBody=body.release?{...body,releaseCommands:updated.commands}:body;
+          const meta=await appendLocalHostDelta(this.ctx.storage,document,journalBody,body.release?null:updated,observer);
           this.localDocument=nextDocument;this.localObserver=observer;this.localJournalMeta=meta;
           this.lastWallClockMs=meta.lastWallClockMs;this.lastCheckpointError=null;
           this.localHost=body.release?null:updated;
-          if(body.release){
-            await this.materializeLocalDocument();
-            for(const command of updated.commands)countries.requestConflict(command);
-          }
+          // A release is already durable and fenced. Do not hydrate the large
+          // archive while this request still pins its patch/observer buffers;
+          // the next alarm, claim or neural RPC materializes after they are freed.
           return json({ok:true,sequence:body.sequence,savedAt:meta.savedAtMs,commands:updated.commands});
         }catch(error){
           this.lastCheckpointError={at:now,error:String(error)};
