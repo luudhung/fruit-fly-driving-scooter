@@ -39,7 +39,7 @@ test('five funded new projects yield their workers and slots to recovery, retain
  t.step();
  const repair=t.s.urbanWorld.projects.find(p=>p.buildingId===b.id);
  assert.ok(repair,'recovery receives a project slot despite five existing developments');
- assert.equal(repair.kind,'rebuild');assert.equal(repair.funding.type,'household');
+ assert.equal(repair.kind,'rebuild');assert.equal(repair.funding.type,'public');assert.equal(repair.funding.accountId,'treasury');
  for(const p of t.s.urbanWorld.projects.filter(p=>newIds.includes(p.id))){
   assert.equal(p.recoveryPaused,true);assert.equal(p.workerIds.length,0);assert.equal(p.materialsOrdered,20);assert.equal(p.materialsDelivered,0);assert.equal(p.spent,100);assert.equal(p.progress,.2);
  }
@@ -57,13 +57,14 @@ test('five funded new projects yield their workers and slots to recovery, retain
  assert.ok(Math.abs(supply(t.s)-initial)<1e-6);
 });
 
-test('unfunded household damage and a fire still burning do not suspend all other work indefinitely',()=>{
+test('unfunded national recovery and a fire still burning do not suspend all other work indefinitely',()=>{
  const t=fixture();fiveNewProjects(t);
  const owner=t.s.flies[0],b=t.home;t.s.housing.households.HH={id:'HH',unitId:b.id,members:[owner.id]};
  Object.assign(owner,{householdId:'HH',housingUnitId:b.id,money:0,savings:0});
+ t.s.treasury.cash=0;
  t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0};
  t.step();assert.ok(t.s.urbanWorld.projects.filter(p=>p.kind==='new').every(p=>!p.recoveryPaused));
- owner.money=10000;Object.assign(t.s.urbanWorld.buildings[b.id],{stage:'unsafe',health:50});t.s.urbanWorld.fires.push({id:'BURNING',buildingId:b.id,containedAt:null,detected:false,intensity:18,teamIds:[],waterUsed:0,startedAt:t.s.simulationAgeSeconds,lastAt:t.s.simulationAgeSeconds,spreadAttemptAt:1e12});
+ t.s.treasury.cash=50000;Object.assign(t.s.urbanWorld.buildings[b.id],{stage:'unsafe',health:50});t.s.urbanWorld.fires.push({id:'BURNING',buildingId:b.id,containedAt:null,detected:false,intensity:18,teamIds:[],waterUsed:0,startedAt:t.s.simulationAgeSeconds,lastAt:t.s.simulationAgeSeconds,spreadAttemptAt:1e12});
  t.step();assert.ok(t.s.urbanWorld.projects.filter(p=>p.kind==='new').every(p=>!p.recoveryPaused));
 });
 
@@ -75,9 +76,9 @@ test('one requested restoration refunds only unused escrow once, keeps new sites
  p.spent=30;p.targetHeight=b.h+50;t.s.businesses['civic-escrow'].cash-=30;t.s.businesses['civic-materials'].cash+=30;
  t.s.urbanWorld.buildings['CIVIC-UNFINISHED']={id:'CIVIC-UNFINISHED',x:850,z:300,w:10,d:12,h:18,kind:'civic',stage:'cleared',health:100,progress:0};
  delete t.s.urbanWorld.ownerRestoration;
- const before=owner.money+owner.savings,total=supply(t.s);t.restore();
+ const before=owner.money+owner.savings,treasury=t.s.treasury.cash,total=supply(t.s);t.restore();
  const restoredOwner=t.s.flies.find(f=>f.id===owner.id),saved=t.s.urbanWorld.projects.find(q=>q.id===p.id);
- assert.equal(saved.stage,'complete');assert.equal(saved.refunded,p.budget-30);assert.equal(restoredOwner.money+restoredOwner.savings,before+p.budget-30);
+ assert.equal(saved.stage,'complete');assert.equal(saved.refunded,p.budget-30);assert.equal(restoredOwner.money+restoredOwner.savings,before);assert.equal(t.s.treasury.cash,treasury+p.budget-30);
  assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);assert.equal(t.s.urbanWorld.buildings[b.id].health,100);assert.equal(restoredOwner.displacedFrom,null);
  assert.equal(t.s.urbanWorld.buildings['CIVIC-UNFINISHED'].stage,'cleared');assert.ok(Math.abs(supply(t.s)-total)<1e-6);
  const balance=restoredOwner.money+restoredOwner.savings;t.restore();assert.equal(t.s.flies.find(f=>f.id===owner.id).money+t.s.flies.find(f=>f.id===owner.id).savings,balance);

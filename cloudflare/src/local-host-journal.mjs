@@ -62,11 +62,12 @@ export async function appendLocalHostDelta(storage,document,body,lease,observer)
  if(!previous||previous.epoch!==body.epoch||previous.sequence!==body.baseSequence)throw Error('local save base changed');
  const entry={baseSequence:body.baseSequence,sequence:body.sequence,patch:body.patch,observer:observer||null};
  const bytes=await gzip(new Blob([JSON.stringify(entry)]).stream());
+ const stateAtMs=Number.isFinite(body.stateAtMs)?Math.min(Date.now(),Math.max(Number(previous.lastWallClockMs||0),body.stateAtMs)):Date.now();
  if(previous.entries.length>=MAX_ENTRIES||previous.journalBytes+bytes.byteLength>MAX_JOURNAL_BYTES){
-  return saveLocalHostBase(storage,document,lease,{observer,lastWallClockMs:Date.now(),sequence:body.sequence,epoch:body.epoch,pendingCommands:body.releaseCommands||[]});
+  return saveLocalHostBase(storage,document,lease,{observer,lastWallClockMs:stateAtMs,sequence:body.sequence,epoch:body.epoch,pendingCommands:body.releaseCommands||[]});
  }
  const key=`local-save:delta:${previous.generation}:${body.sequence}`,now=Date.now();
- const meta={...previous,sequence:body.sequence,age:document.world.simulationAgeSeconds,lastWallClockMs:now,savedAtMs:now,
+ const meta={...previous,sequence:body.sequence,age:document.world.simulationAgeSeconds,lastWallClockMs:stateAtMs,savedAtMs:now,
   pendingCommands:body.releaseCommands||previous.pendingCommands||[],entries:[...previous.entries,{key,sequence:body.sequence}],journalBytes:previous.journalBytes+bytes.byteLength};
  await storage.transaction(async tx=>{
   const actual=await tx.get(META);

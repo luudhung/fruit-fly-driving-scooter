@@ -39,6 +39,17 @@ test('rolling living overlays bound journal rows and preserve the exact latest s
  const cold=await loadLocalHostJournal(db,s);assert.deepEqual(cold.document,doc);assert.equal(cold.meta.sequence,40);assert.equal(cold.state.totalTransactions,40);
  await clearLocalHostJournal(db);assert.equal(await db.get('local-save:meta'),undefined);assert.equal([...db.map.keys()].filter(k=>k.startsWith('local-save:')).length,0);
 });
+
+test('capture time survives both delta writes and rolling compaction independently of receipt time',async()=>{
+ const db=storage(),s=base(),lease=owner(),at=Date.now()-10000;let doc=aliveDoc(s);
+ await saveLocalHostBase(db,doc,lease,{lastWallClockMs:at});
+ for(let sequence=1;sequence<=13;sequence++){
+  const next=change(doc,sequence),stateAtMs=at+sequence*100;
+  await appendLocalHostDelta(db,next,{epoch:4,sequence,baseSequence:sequence-1,stateAtMs,patch:diffLocalDocument(doc,next)},{...lease,sequence},null);
+  const cold=await loadLocalHostJournal(db,s);assert.equal(cold.lastWallClockMs,stateAtMs);assert.ok(cold.savedAtMs>=at+10000);doc=next;
+ }
+ assert.equal((await loadLocalHostJournal(db,s)).meta.entries.length,0,'the thirteenth write exercised compaction');
+});
 test('a final release checkpoint compacts with its actual sequence and clears ownership atomically',async()=>{
  const db=storage(),s=base(),lease=owner();let doc=aliveDoc(s);await saveLocalHostBase(db,doc,lease);
  for(let sequence=1;sequence<=13;sequence++){const next=change(doc,sequence);await appendLocalHostDelta(db,next,{epoch:4,sequence,baseSequence:sequence-1,patch:diffLocalDocument(doc,next)},sequence===13?null:{...lease,sequence},null);doc=next;}

@@ -202,6 +202,18 @@ test('claiming an expired session between alarms advances from its latest durabl
  assert.ok(next.state.simulationAgeSeconds>=state.simulationAgeSeconds+480);assert.equal(t.ticks,1);
 });
 
+test('checkpoint clock tracks the captured simulation step, including upload latency, rather than resetting to receipt time',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
+ const anchor=Date.now()-6000;
+ t.world.localHost.startedAt=anchor;
+ t.world.localJournalMeta.lastWallClockMs=anchor;
+ const stored=t.metadata.get('local-save:meta');stored.lastWallClockMs=anchor;
+ state.simulationAgeSeconds+=120;
+ assert.equal((await t.save({...lease,sequence:1,state,stateAtMs:Date.now()+1e9})).status,200,'client supplied timing cannot override the server lease clock');
+ assert.equal(t.metadata.get('local-save:meta').lastWallClockMs,anchor+1000);
+ assert.ok(t.metadata.get('local-save:meta').savedAtMs>=anchor+6000);
+});
+
 test('invalid bodies and checkpoint sequences do not evict a valid host',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
  const broken=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-delta+gzip'},body:'not gzip'}));

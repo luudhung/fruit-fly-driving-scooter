@@ -158,7 +158,7 @@ export class CivilizationWorld extends DurableObject {
       await this.ctx.storage.delete('localHostLease');
     }
     const elapsedRealSeconds = Math.max(0, (nowMs - this.lastWallClockMs) / 1000);
-    if (elapsedRealSeconds < 0.75) return { elapsedRealSeconds, steps: 0 };
+    if (elapsedRealSeconds < (reason==='local_claim'&&this.localJournalMeta?0.001:0.75)) return { elapsedRealSeconds, steps: 0 };
 
     const raw = getRawState();
     if (!snapshotLooksUsable(raw)) throw new Error("Invalid civilization state before tick");
@@ -380,7 +380,11 @@ export class CivilizationWorld extends DurableObject {
           const document=this.journalDocument(nextDocument);
           // This small atomic journal write is the acknowledgement boundary.
           // Full historical archives are never encoded in a five-second save.
-          const journalBody=body.release?{...body,releaseCommands:updated.commands}:body;
+          // The receipt time is later than the captured simulation step. Anchor
+          // catch-up to the server-issued lease clock, never to the upload's
+          // completion time or the client's wall clock.
+          const stateAtMs=Math.min(now,lease.startedAt+Math.max(0,Number(nextDocument.world.simulationAgeSeconds)-lease.baseAge)/Math.max(1,Number(this.localDocument.world.timeScale||120))*1000);
+          const journalBody={...body,stateAtMs,...(body.release?{releaseCommands:updated.commands}:{})};
           const meta=await appendLocalHostDelta(this.ctx.storage,document,journalBody,body.release?null:updated,observer);
           this.localDocument=nextDocument;this.localObserver=observer;this.localJournalMeta=meta;
           this.lastWallClockMs=meta.lastWallClockMs;this.lastCheckpointError=null;
