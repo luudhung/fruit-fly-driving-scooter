@@ -1,3 +1,4 @@
+import {northF1MovementBlocked} from '../worker/north-f1-closure.mjs';
 import {NORTH_MILITARY_WALLS} from '../worker/country-map.mjs';
 import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
 type CollisionBox={x:number;y:number;z:number;w:number;h:number;d:number};
@@ -74,6 +75,7 @@ function collides(x:number,z:number,feet:number){
 }
 /** First-person walking, gravity, step-up collision and Minecraft-style creative flight. */
 export class PlayerController{
+ trackClosed=false;
  x=8;y=1.9;z=-35.4;flying=false;grounded=false;verticalVelocity=0;
  private readonly jumpTap=new FlightDoubleTap();
  private metroLift:{x:number;z:number;target:number}|null=null;
@@ -93,6 +95,9 @@ export class PlayerController{
   const count=Math.max(1,Math.ceil(Math.min(.1,dt)/.008)),step=Math.min(.1,dt)/count;
   for(let i=0;i<count;i++)this.advance(step,input);
  }
+ private courseBlocked(x:number,z:number,y:number){
+  return this.trackClosed&&northF1MovementBlocked({x:this.x,z:this.z,y:this.feet},{x,z,y},RADIUS);
+ }
  private advance(dt:number,input:PlayerInput){
   this.liftCooldown=Math.max(0,this.liftCooldown-dt);
   if(this.flying)this.metroLift=null;
@@ -111,6 +116,7 @@ export class PlayerController{
   }
   if(this.metroLift){
    const lift=this.metroLift,delta=lift.target-this.feet,step=Math.sign(delta)*Math.min(Math.abs(delta),dt*3.2);
+   if(this.courseBlocked(lift.x,lift.z,this.feet+step)){this.metroLift=null;this.liftCooldown=1.2;return;}
    this.x=lift.x;this.z=lift.z;this.y+=step;this.verticalVelocity=0;this.grounded=true;
    if(Math.abs(delta)<.015||Math.abs(step)>=Math.abs(delta)){this.y=lift.target+PLAYER_EYE;this.metroLift=null;this.liftCooldown=1.2;}return;
   }
@@ -125,17 +131,18 @@ export class PlayerController{
    const canStep=!this.flying&&(this.grounded||this.verticalVelocity<=0&&feet-support(this.x,this.z,feet)<=STEP+EPS);
    const ground=support(x,z,feet+(canStep?STEP:0));
    const candidate=canStep?Math.max(feet,ground):feet;
-   if(!collides(x,z,candidate)){this.x=x;this.z=z;this.y=candidate+PLAYER_EYE;}
+   if(!collides(x,z,candidate)&&!this.courseBlocked(x,z,candidate)){this.x=x;this.z=z;this.y=candidate+PLAYER_EYE;}
   };
   attempt(Math.max(-WORLD_HALF+1,Math.min(WORLD_HALF-1,this.x+dx)),this.z);
   attempt(this.x,Math.max(-WORLD_HALF+1,Math.min(WORLD_HALF-1,this.z+dz)));
   if(this.flying){
    const dy=((input.ascend?1:0)-(input.descend?1:0))*speed*.7*dt;
-   if(!collides(this.x,this.z,this.feet+dy))this.y=Math.min(520,this.y+dy);
+   if(!collides(this.x,this.z,this.feet+dy)&&!this.courseBlocked(this.x,this.z,this.feet+dy))this.y=Math.min(520,this.y+dy);
    const ground=support(this.x,this.z,this.feet);this.y=Math.max(ground+PLAYER_EYE,this.y);return;
   }
   const previous=this.feet;this.verticalVelocity=Math.max(-45,this.verticalVelocity-20*dt);
   const next=previous+this.verticalVelocity*dt,ground=support(this.x,this.z,previous);
+  if(this.courseBlocked(this.x,this.z,Math.max(ground,next))){this.verticalVelocity=0;return;}
   if(next<=ground&&this.verticalVelocity<=0){this.y=ground+PLAYER_EYE;this.verticalVelocity=0;this.grounded=true;}
   else if(!collides(this.x,this.z,next)){this.y=next+PLAYER_EYE;this.grounded=false;}
   else{this.verticalVelocity=0;}

@@ -1,4 +1,6 @@
 import {LocalCitySession} from './local-city-session.ts';
+import {createCityLabelSprite,setCityLabelText} from './city-label-texture.ts';
+import {HansdrexStorefrontRenderer} from './hansdrex-storefront-renderer.ts';
 import {NorthF1Renderer,type NorthF1View} from './north-f1-renderer.ts';
 import {buildCivicFacility} from './civic-facility-renderer.ts';
 import {MAIN_SCHOOL_CAMPUSES} from '../worker/education-map.mjs';
@@ -222,7 +224,7 @@ type NationalSummary = {residents:number;working:number;traveling:number;indoors
 type CivilizationSnapshot = {
   runtime?:{platform?:string;sampledCatchup?:{snapshotAgeSeconds?:number}};
   spaceProgram?:SpaceProgramView|null;
-  northF1?:NorthF1View|null;
+  northF1?:(NorthF1View & {foreignVisitors?:FlyState[]})|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
   international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
   nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
@@ -236,7 +238,7 @@ type CivilizationSnapshot = {
   civicConflict?:CivicSnapshot;
   urbanWorld?:UrbanWorldSnapshot;
   sportsLuxury?:SportsLuxurySnapshot;
-  cityVisitors?:(Parameters<CityVisitorsRenderer["sync"]>[0]&{visitors:FlyState[];totalArrivals:number;totalDepartures:number;taxiCompleted:number;reputation:number;photoCount:number;airportTraffic?:{flights:VisitorAircraft[];landed:number;departed:number;waiting:number};photos?:ResidentPhotoRecord[];hotelRooms:Array<{id:string;capacity:number;occupied:number}>});
+  cityVisitors?:(Parameters<CityVisitorsRenderer["sync"]>[0]&{visitors:FlyState[];totalArrivals:number;totalDepartures:number;taxiCompleted:number;reputation:number;photoCount:number;airportTraffic?:{flights:VisitorAircraft[];landed:number;departed:number;waiting:number;airline?:{name:string;oneWayFare:number;roundTripFare:number;arrivalVisa:number;revenue:number}};photos?:ResidentPhotoRecord[];hotelRooms:Array<{id:string;capacity:number;occupied:number}>});
   authoritative: boolean;
   mapVersion?:number;
   roadTraffic?:{drivingCars:number;targetDrivingCars:number;carOwners:number;parkedCars:number;recklessDrivers:number;chaosActive:boolean;incidents:RoadIncident[]};
@@ -503,7 +505,6 @@ function refreshConnectionHealth(){
   connection.title='Simulation runs in a worker on this device. Durable progress saves every 5 real seconds.';
   return;
  }
-
  const health=connectionHealth.view(Date.now(),navigator.onLine!==false);
  if(health.reason!=="live"){
   const alive=snapshot?.flies?.filter(f=>f.alive).length||residentDirectory.count||0;
@@ -599,12 +600,13 @@ function renderInspector(fly: FlyState | null) {
   const social=document.getElementById('fly-social-life');
   if(social){const r=fly.relationships;social.textContent=r?`${r.friends.length} bạn · ${r.friends.slice(0,3).join(', ')||'chưa thân'} · chăm sóc ${Math.round(r.profile.careMinutes)} phút${r.task?` · ${r.task.kind==='care'?'đang chăm':'đang thăm'} ${r.task.targetId}`:''}`:'—';}
   flyIdEl.textContent = fly.id + (fly.pregnant ? " · pregnant" : "");
-  flyBrainIdEl.textContent = fly.brainId || "legacy brain pending";
+  const itineraryVisitor=fly.kind==='visitor'&&!fly.brainId;
+  flyBrainIdEl.textContent = fly.brainId || (itineraryVisitor?'Visitor travel itinerary':"legacy brain pending");
   flyBrainHistoryEl.textContent = `${num(fly.brainDecisionCount || 0)} decisions · ${num(fly.brainMemoryCount || 0)} memories`;
   const fc = fly.fullConnectome;
   flyConnectomeEl.textContent = fc?.connected && fc.fullConnectome
     ? `${num(fc.neurons)} neurons · ${num(fc.edges)} edges`
-    : "connecting…";
+    : itineraryVisitor?'Travel and spending model':"connecting…";
   flyNeuralStepsEl.textContent = fc?.connected
     ? `${num(fc.neuralStepsTotal)} · ${num(fc.activeNeurons)} active${fc.steppedThisSync ? " · stepped" : " · cached"}`
     : "—";
@@ -714,8 +716,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const leader=f1?.activeRace?Math.min(f1.activeRace.totalLaps,1+Math.floor(Math.max(0,...f1.activeRace.cars.map(c=>c.progress??0)))):0;
       const race=f1?f1.activeRace?`Grand Prix · vòng ${leader}/${f1.activeRace.totalLaps} · ${num(f1.activeRace.cars.length)} xe đang đua · ${num(f1.trackCrowd?.total??0)} khán giả đã vào sân`
         :`Grand Prix · ${num(f1.races)} cuộc đua · kỳ tới ngày ${Math.floor(f1.nextAt/86400)} lúc ${flightTime(f1.nextAt)}`:'';
+      const trackClosed=f1?.trackClosure&&s.simulationAgeSeconds>=f1.trackClosure.startsAt&&s.simulationAgeSeconds<f1.trackClosure.endsAt
+        ?'Đường đua đang đóng với xe và người đi bộ':'';
       const raceFinances=f1?`Doanh thu vé Grand Prix ${num(f1.revenue)} H$ · ${num(f1.charterArrivals)} khách charter đã tới / ${num(f1.charterDepartures)} đã về`:'';
-      board.textContent=[residents,finances,jobs,exchanges,race,raceFinances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
+      board.textContent=[residents,finances,jobs,exchanges,race,trackClosed,raceFinances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
   }
   const space=document.getElementById('spaceworks-activity');
@@ -788,13 +792,13 @@ function renderSnapshot(s: CivilizationSnapshot) {
   }));
   if (!rows.length) events.textContent = "Civilization is running; no recent events.";
 
-  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[])];
+  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[]),...(s.northF1?.foreignVisitors||[])];
   latestFlyStates = new Map(actors.map((fly) => [fly.id, fly]));
   syncFlyMeshes(actors);
-  updateHeliTourState(s.flies || []);
+  updateHeliTourState(actors);
   updateMetroStationOccupancy(actors);
   personalCars.sync(s.flies || [],s.roadTraffic?.incidents);
-  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);refreshStreetSurfaceLayout();newYorkVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
+  if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);refreshStreetSurfaceLayout();newYorkVisuals.sync(s.urbanWorld.buildings);storefrontVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
   governmentVisuals.sync(s.publicServices);
@@ -1035,7 +1039,9 @@ function updateSocietyBoard(s:CivilizationSnapshot){
  const urban=document.getElementById("urban-activity"),visitors=document.getElementById("visitor-activity"),sports=document.getElementById("sports-activity");
  const district=document.getElementById("riverside-residents");if(district&&s.districts)district.textContent=`Tiểu khu châu Âu: ${s.districts.riverside.residents} dân · Phía Bắc: ${s.districts.airport?.residents||0} dân · Phía Tây: ${s.districts.west?.residents||0} dân`;
  if(urban)urban.textContent=s.urbanWorld?`🔥 ${s.urbanWorld.fires.length} đám cháy · ${s.urbanWorld.projects.length} công trình · ${s.urbanWorld.completedProjects||0} hoàn thành · ${s.urbanWorld.floods.length} vùng ngập`:"Đang kết nối cứu hỏa & xây dựng…";
- if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length} khách · ${s.cityVisitors.totalDepartures} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
+  if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length+(s.northF1?.foreignVisitors?.length||0)} khách · ${s.cityVisitors.totalDepartures+(s.northF1?.charterDepartures||0)} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
+  const airline=s.cityVisitors?.airportTraffic?.airline;
+  if(visitors&&airline)visitors.textContent+=`\n${airline.name} · ${num(airline.oneWayFare)} H$/chiều · khứ hồi + nhập cảnh ${num(airline.roundTripFare+airline.arrivalVisa)} H$ · doanh thu ${num(airline.revenue)} H$`;
  const civic=document.getElementById("civic-activity");if(civic)civic.textContent=s.civicConflict?`Xã hội: ${s.civicConflict.active.length} cuộc tập hợp · ${s.civicConflict.peacefulResolutions} hòa giải · niềm tin ${s.civicConflict.confidence}%`:"";
  if(sports)sports.textContent=s.sportsLuxury?`Thể thao: ${s.sportsLuxury.matchesCompleted} trận · ${s.sportsLuxury.tennisSessions} lượt tennis · ${s.sportsLuxury.helicopters.length} trực thăng riêng · ${s.sportsLuxury.privateFlights} chuyến`:"Đang kết nối thể thao…";
 }
@@ -1338,7 +1344,7 @@ const marinaBay=buildMarinaBay(cityRoot,makeCanvasSprite);urbanVisuals.registerB
 for(const b of BUILDINGS.filter(b=>b.kind==="destination")){
  if(b.id==="power"||b.id==="firestation")continue;
  const paris=b.x>480&&b.x<880&&Math.abs(b.z)<260;
- const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>25,sign:b.name?.replace("Hansdrex ","").toUpperCase()});
+ const g=paris?buildParisBuilding(b,graphics.windowStride):addBuilding(b.x,b.z,b.w,b.d,b.h,Math.abs(b.x*17+b.z),{glass:b.h>25,sign:b.name?.toUpperCase()});
  g.userData.buildingId=b.id;if(!paris)batchableFacades.push(g);
  if(paris){cityRoot.add(g);const label=makeCanvasSprite(b.name||b.id,18,2);label.position.set(0,3.3,b.d/2+.3);g.add(label);}
  urbanVisuals.registerBuilding(b.id,g);
@@ -1418,6 +1424,7 @@ renderer.domElement.dataset.metroPlatforms=String(metroVisuals.stations.length);
 buildTrees();
 buildContactShadows(cityRoot,BUILDINGS.filter(b=>b.kind!=="house"));
 const newYorkVisuals=new NewYorkArchitecture(cityRoot,BUILDINGS);
+const storefrontVisuals=new HansdrexStorefrontRenderer(cityRoot);
 renderer.domElement.dataset.streetLights='0';
 renderer.domElement.dataset.realStreetLights='0';
 renderer.domElement.dataset.roadLighting='material';
@@ -1452,47 +1459,12 @@ type FlyVisual = {
 };
 
 
-function makeCanvasSprite(text: string, fontSize = 54, scale = 2.2): THREE.Sprite {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `700 ${fontSize}px system-ui, Apple Color Emoji, Segoe UI Emoji`;
-  ctx.fillStyle = "white";
-  ctx.shadowColor = "rgba(0,0,0,.55)";
-  ctx.shadowBlur = 8;
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
-  sprite.scale.set(scale * 2, scale, 1);
-  sprite.userData.text = text;
-  return sprite;
+function makeCanvasSprite(text:string,fontSize=54,scale=2.2):THREE.Sprite {
+ return createCityLabelSprite(text,fontSize,scale);
 }
 
-function updateSpriteText(sprite: THREE.Sprite, text: string) {
-  if (sprite.userData.text === text) return;
-  const old = (sprite.material as THREE.SpriteMaterial).map;
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 54px system-ui, Apple Color Emoji, Segoe UI Emoji";
-  ctx.fillStyle = "white";
-  ctx.shadowColor = "rgba(0,0,0,.55)";
-  ctx.shadowBlur = 8;
-  ctx.fillText(text, 128, 64);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  (sprite.material as THREE.SpriteMaterial).map = texture;
-  (sprite.material as THREE.SpriteMaterial).needsUpdate = true;
-  old?.dispose();
-  sprite.userData.text = text;
+function updateSpriteText(sprite:THREE.Sprite,text:string){
+ setCityLabelText(sprite,text);
 }
 
 function flyStatusEmoji(fly: FlyState) {
@@ -1971,6 +1943,7 @@ function animate(now = performance.now()) {
     weatherFlash.intensity = 0;
   }
 
+  player.trackClosed=playerCar.trackClosed=northF1Visuals.trackIsClosed(gameNow);
   updateFreeCamera(dt,now);
 
   sportsVisuals.setView(camera,id=>cityFacadeBatches.isBuildingVisible(id));

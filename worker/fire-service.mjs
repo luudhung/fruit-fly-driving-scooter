@@ -1,3 +1,4 @@
+import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES,ROADS,UNDERPASSES,roadTravelY} from './city-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
@@ -21,8 +22,8 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  const accountFor=e=>depotFor(e)?.budget?.()||(!depotFor(e)?raw().treasury:null);
  const rosterIds=()=>[...new Set([...data().roster,...depots.flatMap(d=>['fire','ambulance'].flatMap(kind=>d.staffIds?.(kind)||[]))])];
  const countryRouters=new Map();
- function geometryRevision(){const u=raw().urbanWorld||{};return Object.values(u.buildings||{}).map(b=>`${b.id}:${b.stage}:${b.h}`).join('|')+';'+(u.floods||[]).map(f=>`${f.x},${f.z},${f.depth}`).join('|');}
- function routeInCountry(from,to,country){if(!countryRouters.has(country))countryRouters.set(country,createVehicleRouter({roads:()=>emergencyRoads(country),underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:geometryRevision,clearSegment:(a,b)=>clearSegment(a,b)&&emergencyCountrySegment(country,a,b)}));return countryRouters.get(country).route(from,to,'car');}
+ function geometryRevision(){const u=raw().urbanWorld||{};return (isNorthF1TrackClosed(raw())?'closed:':'open:')+Object.values(u.buildings||{}).map(b=>`${b.id}:${b.stage}:${b.h}`).join('|')+';'+(u.floods||[]).map(f=>`${f.x},${f.z},${f.depth}`).join('|');}
+ function routeInCountry(from,to,country){if(!countryRouters.has(country))countryRouters.set(country,createVehicleRouter({roads:()=>emergencyRoads(country),underpasses:()=>UNDERPASSES,roadTravelY,navigationRevision:geometryRevision,clearSegment:(a,b)=>clearSegment(a,b)&&emergencyCountrySegment(country,a,b)&&(!isNorthF1TrackClosed(raw())||!northF1MovementBlocked(a,b,2))}));return countryRouters.get(country).route(from,to,'car');}
  function domesticRoute(e,from,to){return routeInCountry(from,to,countryFor(e));}
  function retreatRoute(e){
   const home=stationExit(e),own=countryFor(e),foreign=countryAt(e);if(foreign===own)return domesticRoute(e,e,home);
@@ -30,7 +31,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   return choices.sort((a,b)=>routeLength(a,e)-routeLength(b,e))[0]||[];
  }
  function routeLength(route,from){let distance=0,p=from;for(const q of route){distance+=dist(p,q);p=q;}return distance;}
- function allowedMove(e,a,b){if(e.repatriating&&countryAt(a)!==countryFor(e))return countryAt(b)===countryAt(a)||countryAt(b)===countryFor(e);return emergencyCountrySegment(countryFor(e),a,b);}
+ function allowedMove(e,a,b){if(isNorthF1TrackClosed(raw())&&northF1MovementBlocked(a,b,2))return false;if(e.repatriating&&countryAt(a)!==countryFor(e))return countryAt(b)===countryAt(a)||countryAt(b)===countryFor(e);return emergencyCountrySegment(countryFor(e),a,b);}
  function syncDepots(){
   const d=data();for(const depot of depots){if(!loc(depot.stationId))continue;for(const spec of depot.definitions?.()||[]){if(fleet().some(e=>e.id===spec.id))continue;const budget=depot.budget?.();if(!budget||Number(budget.cash||0)<spec.purchaseCost)continue;const operator=raw().businesses[depot.operationsAccountId]||={cash:0,inventory:0,sector:'emergency-services',countryId:depot.countryId};budget.cash-=spec.purchaseCost;operator.cash+=spec.purchaseCost;raw().totalTransactions=Number(raw().totalTransactions||0)+1;d.procurementPaid=Number(d.procurementPaid||0)+spec.purchaseCost;const vehicle={...spec,depotId:depot.id,countryId:depot.countryId,owned:true,purchasedAt:now(),phase:'idle',x:spec.home.x,y:1.1,z:spec.home.z,crewIds:[],route:[],routeIndex:0,completedTrips:0,fuel:100,water:spec.kind==='fire'?depot.waterCapacity:0,waterCapacity:spec.kind==='fire'?depot.waterCapacity:0,headingHome:spec.heading||0};(spec.kind==='fire'?d.engines:d.ambulances).push(vehicle);}}
  }
@@ -166,7 +167,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   if(!e.route?.length)return true;let time=Math.max(0,dt)/Math.max(1,Number(raw().timeScale||120));e.blocked=false;
   for(let hop=0;hop<64&&time>1e-6;hop++){
    const p=e.route[e.routeIndex];if(!p){e.traveling=false;return true;}const dx=p.x-e.x,dz=p.z-e.z,len=Math.hypot(dx,dz);e.targetX=p.x;e.targetZ=p.z;
-   if(len<.05){e.x=p.x;e.z=p.z;e.y=p.y??1.1;e.routeIndex++;continue;}
+   if(len<.05){if(!allowedMove(e,e,p)){e.blocked=true;break;}e.x=p.x;e.z=p.z;e.y=p.y??1.1;e.routeIndex++;continue;}
    const speed=EMERGENCY_RULES.speed*motorwaySpeedMultiplier(e);e.speed=speed;
    let step=Math.min(len,time*speed);const ux=dx/len,uz=dz/len;
    if(index){const limit=index({...e,alive:true,traveling:true,transitMode:'car'},{x:e.x+ux*step,z:e.z+uz*step});if(limit<step){step=limit;e.blocked=true;}}
@@ -205,7 +206,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  function recoverVehicleRoute(e,phase){
   if(now()<Number(e.retryRouteAt||0))return;
   e.retryRouteAt=now()+600;
-  const remaining=e.route.slice(e.routeIndex),blocked=remaining.some((p,i)=>!clearSegment(i?remaining[i-1]:e,p));
+  const remaining=e.route.slice(e.routeIndex),blocked=remaining.some((p,i)=>{const a=i?remaining[i-1]:e;return !clearSegment(a,p)||!allowedMove(e,a,p);});
   // Leave short queues to the traffic simulation. Replan when the road actually
   // closes or a queue hasn't moved for an extended time.
   if(!blocked&&now()-e.lastProgressAt<3600)return;

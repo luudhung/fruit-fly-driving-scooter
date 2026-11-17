@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
 import {AIRPORT,ISLAND,SEA,RIVER,DISTRICT_RIVERS,SKYLINE_PLOTS} from '../worker/city-map.mjs';
-import {createAirportGroundLayout,AIRPORT_SPARE_PLANE,AIRPORT_GROUND_LEVELS} from './airport-ground-layout.ts';
+import {createAirportGroundLayout,AIRPORT_GROUND_LEVELS} from './airport-ground-layout.ts';
 import {subtractRects} from './surface-rectangles.ts';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 const stone=new THREE.MeshStandardMaterial({color:0xc8c5b9,roughness:.65,metalness:.12});
@@ -33,6 +33,9 @@ export function buildHansdrexTower(root:THREE.Group,make:Sign){
  cylinder(g,.52,.9,8,211,metal);
  for(let i=0;i<8;i++)cylinder(g,.20-i*.02,.24-i*.02,4.3,217+i*4.3,i%2?stone:new THREE.MeshStandardMaterial({color:0xd55243,roughness:.6}),10);
  cylinder(g,.04,.13,3,248.5,metal);ring(g,.4,249, warm,.09);
+ box(g,3.65,.21,1,0,3.18,5.22,metal);
+ box(g,2.78,2.73,.16,0,1.42,5.05,towerGlass);
+ sign(g,make,'TOWER OBSERVATION DECK',0,3.85,5.62,23,1.3);
  sign(g,make,'HANSDREX TOWER · 250 M',0,258,0,31,1.5);batchStaticMeshes(g);root.add(g);
 }
 export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
@@ -66,16 +69,16 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  }
  const groundMaterials={concrete,asphalt,white,yellow};
  for(const floor of createAirportGroundLayout()){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(floor.w,floor.d),groundMaterials[floor.material]);mesh.rotation.x=-Math.PI/2;mesh.position.set(floor.x,floor.topY,floor.z);g.add(mesh);}
- runway(AIRPORT.runway,'09  HANSDREX CITY AIRPORT  27');
+ for(const [index,strip]of AIRPORT.runways.entries())runway(strip,index===0?'09L  HANSDREX CITY AIRPORT  27R':'09R  HANSDREX CITY AIRPORT  27L');
  for(const t of [AIRPORT.terminal,ISLAND.terminal]){
   box(g,t.w,6,t.d,t.x,3,t.z,glass);box(g,t.w+4,.8,t.d+5,t.x,6.4,t.z,stone);
   for(let i=-2;i<=2;i++)box(g,.5,6,.6,t.x+i*t.w/5,3,t.z+t.d/2+.4,metal);
   box(g,t.w+8,.5,8,t.x,4.7,t.z+t.d/2+3,metal);
  }
  sign(g,make,'HCA · HANSDREX CITY AIRPORT',-180,16,-390,66,2.3);
- sign(g,make,'ISLAND DEPARTURES · CHECK IN 30 MIN EARLY',-180,10,-376,54,1.5);
+ sign(g,make,'HANSDREX AIRLINE · DEPARTURES & ARRIVALS',-180,10,-376,54,1.5);
  // Control tower, hangar, ground-service road and parking bays.
- box(g,6,24,6,-245,12,-417,stone);box(g,12,5,12,-245,27,-417,glass);box(g,14,.7,14,-245,30,-417,metal);
+ const tower=AIRPORT.controlTower;box(g,6,24,6,tower.x,12,tower.z,stone);box(g,12,5,12,tower.x,27,tower.z,glass);box(g,14,.7,14,tower.x,30,tower.z,metal);
  box(g,46,13,32,-310,6.5,-441,metal);box(g,39,9,.4,-310,4.5,-424.8,glass);
  const pad=AIRPORT.helipad;
  const circle=new THREE.Mesh(new THREE.RingGeometry(8.78,9.22,40),yellow);circle.rotation.x=-Math.PI/2;circle.position.set(pad.x,AIRPORT_GROUND_LEVELS.paint,pad.z);g.add(circle);
@@ -101,7 +104,7 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  sign(g,make,'HAWAII CITY · PALM BEACH RESORT',170,34,846,96,3.1);
  sign(g,make,'HWI · INTERNATIONAL ARRIVALS',65,13,785,48,1.5);
  batchStaticMeshes(g);root.add(g);
- // One 15-seat high-wing twin-turboprop, matching the server's scheduled aircraft.
+ // One ten-seat high-wing twin-turboprop, matching the server's scheduled aircraft.
  const plane=new THREE.Group(),whitePaint=new THREE.MeshStandardMaterial({color:0xe5edeb,roughness:.32,metalness:.35});
  const fuselage=new THREE.Mesh(new THREE.SphereGeometry(1,16,10),whitePaint);fuselage.scale.set(1.3,1.4,7.7);plane.add(fuselage);
  box(plane,19,.3,2.7,0,1.1,.8,whitePaint);box(plane,7,.25,1.8,0,1,-5.4,whitePaint);box(plane,.25,3,2.4,0,2,-5.4,teal);
@@ -112,7 +115,6 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
   const prop=new THREE.Group();box(prop,.18,4,.15,0,0,0,metal);box(prop,4,.18,.15,0,0,0,metal);prop.position.set(side*4,1,3.1);plane.add(prop);
  }
  for(const x of [-1.5,1.5]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.35,10),asphalt);wheel.rotation.z=Math.PI/2;wheel.position.set(x,-1.55,-.5);plane.add(wheel);}
- sign(plane,make,'HANSDREX AIR · HCA ↔ HIA',0,5,0,37,1.3);
- const spare=plane.clone();spare.position.set(AIRPORT_SPARE_PLANE.x,AIRPORT_SPARE_PLANE.y,AIRPORT_SPARE_PLANE.z);spare.rotation.y=Math.PI/2;root.add(spare);
+ sign(plane,make,'HANSDREX AIRLINE · HCA ↔ HWI',0,5,0,37,1.3);
  root.add(plane);return {plane,propellers:plane.children.filter(c=>c instanceof THREE.Group)};
 }

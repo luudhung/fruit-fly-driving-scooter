@@ -1,6 +1,7 @@
+import {AIRPORT} from '../worker/city-map.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {VISITOR_STANDS,visitorStands, VISITOR_TAXIWAY_Z, visitorAircraftPose, type VisitorAircraft} from '../worker/visitor-aviation.mjs';
+import {visitorStands, visitorAircraftPose, type VisitorAircraft} from '../worker/visitor-aviation.mjs';
 
 function coloredGeometry(parts: Array<{geometry:THREE.BufferGeometry;color:number}>) {
  const geometries=parts.map(({geometry,color})=>{
@@ -40,27 +41,25 @@ export function airlinerGeometry() {
 
 function makeApron() {
  const parts:Array<{geometry:THREE.BufferGeometry;color:number}>=[];
- const ground=(x:number,z:number,w:number,d:number,color:number,y=.24)=>
+ const ground=(x:number,z:number,w:number,d:number,color:number,y=.30)=>
   parts.push({geometry:new THREE.BoxGeometry(w,.05,d).translate(x,y,z),color});
- const asphalt=0x343f45,yellow=0xf6cb5f,white=0xf5ebcd;
- ground(-180,VISITOR_TAXIWAY_Z,270,12,asphalt,.145);
- for(const x of [-308,-52])ground(x,-495,12,46,asphalt,.145);
- ground(-180,VISITOR_TAXIWAY_Z,259,.18,yellow);
- ground(-180,-414,118,4,0x889293,.19);
- ground(-180,-405,4,20,0x889293,.19);
- for(const x of [-308,-52])ground(x,-495,.18,44,yellow);
- const digits=[[0,1,2,3,4,5],[1,2],[0,1,6,4,3],[0,1,6,2,3],[5,6,1,2]];
- visitorStands('city').forEach(({x,z},index)=>{
-  ground(x,z,25,23,0x525d60,.18);
+ const yellow=0xf6cb5f,white=0xf5ebcd;
+ // Taxi surfaces belong to the shared airport ground layout; stand markings
+ // use their own higher tier and never duplicate the runway/taxi asphalt.
+ ground(AIRPORT.apron.x,-414,228,4,0x889293,.21);
+ ground(AIRPORT.terminal.x,-405,4,20,0x889293,.21);
+ const digits=[[0,1,2,3,4,5],[1,2],[0,1,6,4,3],[0,1,6,2,3],[5,6,1,2],[0,5,6,2,3],[0,5,6,4,2,3],[0,1,2],[0,1,2,3,4,5,6],[0,1,2,3,5,6]];
+ AIRPORT.stands.forEach(({x,z},index)=>{
+  ground(x,z,25,23,0x525d60,.225);
   for(const side of [-1,1])ground(x+side*12,z,.18,23,yellow);
   ground(x,z+11.5,24,.19,yellow);
-  ground(x,(z+VISITOR_TAXIWAY_Z)/2,.17,z-VISITOR_TAXIWAY_Z,yellow);
+  const laneEdge=AIRPORT.taxiwayZ+6;ground(x,(z+laneEdge)/2,.17,z-laneEdge,yellow);
   ground(x,z+8,4,.23,white);
-  ground(x-6,-422,2,16,0x889293,.19);
+  ground(x-6,(-414+z+4)/2,2,-414-z-4,0x889293,.26);
   const segments=[[0,-1.15,1,.13],[.49,-.55,.13,1],[.49,.55,.13,1],[0,1.15,1,.13],[-.49,.55,.13,1],[-.49,-.55,.13,1],[0,0,1,.13]];
   for(const i of digits[index+1]){const [dx,dz,w,d]=segments[i];ground(x+dx,z+9.6+dz,w,d,white);}
  });
- return new THREE.Mesh(coloredGeometry(parts),new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));
+ const mesh=new THREE.Mesh(coloredGeometry(parts),new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));mesh.name='Hansdrex Airline · eight marked stands';return mesh;
 }
 
 function boardingStairsGeometry() {
@@ -86,16 +85,17 @@ export class VisitorAviationRenderer {
   root.add(makeApron());
   const geometry=airlinerGeometry();
   const material=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.55,metalness:.08});
-  const slots=[...VISITOR_STANDS,...visitorStands('north')];
+  // Eight city parking bays, North bays and simultaneous runway/approach traffic.
+  const slots=Array.from({length:Math.max(16,AIRPORT.stands.length+visitorStands('north').length+6)});
   this.aircraft=slots.map(()=>{
    const mesh=new THREE.Mesh(geometry,material);
-   mesh.visible=false;
+   mesh.name='International passenger aircraft';mesh.visible=false;
    root.add(mesh);
    return mesh;
   });
   const stairsGeometry=boardingStairsGeometry();
   this.stairs=slots.map(()=>{
-   const mesh=new THREE.Mesh(stairsGeometry,material);mesh.visible=false;root.add(mesh);return mesh;
+   const mesh=new THREE.Mesh(stairsGeometry,material);mesh.name='International boarding stairs';mesh.visible=false;root.add(mesh);return mesh;
   });
  }
 
@@ -104,9 +104,11 @@ export class VisitorAviationRenderer {
  }
 
  update(gameNow:number) {
+  const rank=(phase:string)=>phase==='parked'?0:phase.startsWith('taxi')?1:phase==='landing'||phase==='takeoff'?2:phase==='holding'?4:3;
+  const visible=this.flights.map(flight=>({flight,pose:visitorAircraftPose(gameNow,flight)})).filter((entry):entry is {flight:VisitorAircraft;pose:NonNullable<ReturnType<typeof visitorAircraftPose>>}=>Boolean(entry.pose)).sort((a,b)=>rank(a.pose.phase)-rank(b.pose.phase));
   for(const [index,mesh] of this.aircraft.entries()){
-   const flight=this.flights[index];
-   const pose=flight&&visitorAircraftPose(gameNow,flight);
+   const entry=visible[index],flight=entry?.flight,pose=entry?.pose;
+   mesh.userData.flightId=flight?.id||null;
    mesh.visible=Boolean(pose);
    const stairs=this.stairs[index];stairs.visible=Boolean(pose?.phase==='parked');
    if(stairs.visible&&pose)stairs.position.set(pose.x,0,pose.z);

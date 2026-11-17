@@ -22,3 +22,4 @@ export const NORTH_F1_PIT_POINTS:readonly NorthF1Point[];
 export const NORTH_F1_PIT_WIDTH:number;
 export function northF1PitPose(fraction:number,side?:number):NorthF1Point&{y:number;yaw:number};
 export function northF1RacePose(sample:{progress:number;pit:number|null},lane:number,pitBoxIndex:number,legacy?:boolean):NorthF1Point&{y:number;yaw:number};
+export const NORTH_F1_AIRPORT_FOOTBRIDGE:Array<NorthF1Point&{y:number}>;

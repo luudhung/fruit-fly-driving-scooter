@@ -12,8 +12,8 @@ export const NORTH_F1_GRANDSTANDS=[
  stand('turn-one-stand','Turn One Grandstand',-486,-894,45,11,7,Math.PI),
  stand('city-stand','City Chicane Grandstand',-462,-850,11,45,7,Math.PI/2),
  stand('sports-stand','Sports Park Grandstand',-556,-658,11,36,7,Math.PI/2),
- stand('river-bend-stand','River Bend Grandstand',-884,-651,11,47,7,Math.PI/2),
- stand('airport-stand','Airport Straight Grandstand',-895,-725,11,52,7,Math.PI/2),
+ stand('river-bend-stand','River Bend Grandstand',-985,-623,47,11,7),
+ stand('airport-stand','Airport Straight Grandstand',-1054,-806,11,52,7,Math.PI/2),
 ];
 export const NORTH_F1_GARAGES=venue('team-garages','North City Grand Prix Pit Building',-637.5,-879,100,14,11);
 export const NORTH_F1_BUILDINGS=[...NORTH_F1_GRANDSTANDS,NORTH_F1_GARAGES];
@@ -31,13 +31,15 @@ const raceFacilities=[
 ];
 
 // The main straight is dedicated to racing. The eastern sector runs on West
-// Avenue and the city's 830/770 cross streets. The south straight hugs the river.
+// Avenue and the city's 830/770 cross streets. The west extension follows the
+// airport perimeter and stays outside the runway and commercial apron.
 const bends=[
  [-740,-915,0],[-496,-915,12],[-460,-923,12],[-430,-896,21],
  [-430,-830,14],[-370,-830,14],[-370,-770,15],[-430,-770,12],[-511,-775,13],
  [-533,-750,12],[-533,-670,12],[-532,-645,10],[-532,-622,12],
- [-561,-603,13],[-827,-603,18],[-863,-626,18],[-863,-873,21],
- [-844,-902,12],[-813,-915,11],
+ [-561,-603,13],[-1010,-603,20],[-1035,-626,18],[-1035,-1009,22],
+ [-1007,-1026,16],[-920,-1026,18],[-891,-1004,16],[-891,-949,14],
+ [-870,-930,13],[-826,-930,14],[-805,-915,11],
 ];
 
 function roundedLoop(){
@@ -145,3 +147,10 @@ export function northF1RacePose(sample,lane,pitBoxIndex,legacy=false){
  pose.z+=lane*merge*merge;
  return pose;
 }
+
+// Pedestrians cross the live course above the racing surface between the
+// airport gate and the northern fan plaza.
+export const NORTH_F1_AIRPORT_FOOTBRIDGE=[
+ {x:-906,z:-944,y:1.1},{x:-897,z:-944,y:7.2},
+ {x:-866,z:-944,y:7.2},{x:-854,z:-944,y:1.1},
+];

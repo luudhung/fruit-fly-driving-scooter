@@ -83,3 +83,13 @@ test('the steep North City switchback retains nearby landing support without ena
  }
  const airborne=new PlayerController();airborne.teleport(landing.x,landing.y-.9+PLAYER_EYE+1,landing.z);airborne.verticalVelocity=-.5;airborne.update(1/120,{...idle,forward:1,yaw:Math.PI/2});assert.ok(airborne.feet>landing.y-.9+.9);assert.equal(airborne.grounded,false);
 });
+
+test('a walking player cannot jump onto the Grand Prix circuit while it is closed',()=>{
+ const p=new PlayerController();p.teleport(-790,PLAYER_EYE+.2,-898);p.trackClosed=true;
+ run(p,3,{forward:1,yaw:Math.PI});
+ assert.ok(p.z>-907);
+ p.jumpDown(1000);p.jumpUp(1010);run(p,1,{forward:1,yaw:Math.PI});
+ assert.ok(p.z>-907);
+ p.trackClosed=false;run(p,3,{forward:1,yaw:Math.PI});
+ assert.ok(p.z< -916);
+});

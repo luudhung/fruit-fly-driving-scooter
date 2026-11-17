@@ -1,3 +1,4 @@
+import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {migrateNorthIndustry} from './industry-relocation.mjs';
 import {planIndustrialLabour} from './industrial-labor.mjs';
 import {createGarmentRetail} from './garment-retail.mjs';
@@ -11,6 +12,8 @@ import {INDUSTRIAL_PLANTS,INDUSTRIAL_DEPOT,INDUSTRIAL_ZONES,INDUSTRIAL_LOADING_B
 const DAY=86400,dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,Number(n)||0));
 const essential=new Set(['doctor','hospital-central','hospital-east','school','power','power-evening','power-night','grid-dispatch','firefighter','paramedic','transit','police','military']);
 const products={garments:{raw:'fabric',input:1,output:1,price:8,buyers:['corner-shop','night-market']},'food-production':{raw:'grain',input:1,output:2,price:3.8,buyers:['market','grocery','bakery','riverside-market']},'building-materials':{raw:'aggregate',input:1,output:1.5,price:5,buyers:['civic-materials']}};
+export const NORTH_F1_MERCH_ID='north-f1-merch';
+const f1MerchLocation='north-f1-grandstand', f1MerchTarget=160;
 const sourceId='industrial-raw-depot',escrowId='industrial-freight-escrow',supplierId='industrial-equipment-supplier';
 const launchAction='planning an industrial company',hireAction='applying for industrial work';
 
@@ -111,7 +114,28 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
   const supply=regionalDistribution&&raw().regionalFreight?.funded?regionalFreight.inputSource(spec.raw,b.locationId):null;
   return order(b,{kind:'input',quantity,buyerId:id,sellerId:supply?.sellerId||sourceId,sourceLocationId:supply?.locationId||sourceId,destinationId:b.locationId,product:spec.raw,unitPrice:supply?.unitPrice||2});
  }
- function requestSale(id,buyerId,quantity=60){const b=raw().enterprises?.[id],spec=products[b?.industrialSector];if(!b||!spec||data().orders.some(o=>o.companyId===id&&o.kind==='output'&&!['complete','cancelled'].includes(o.phase)))return null;const destinationId=raw().enterprises?.[buyerId]?.locationId||(buyerId==='civic-materials'?'construction':buyerId);return order(b,{kind:'output',quantity,buyerId,sellerId:id,sourceLocationId:b.locationId,destinationId,product:b.industrialSector,unitPrice:spec.price});}
+ function requestSale(id,buyerId,quantity=60){const b=raw().enterprises?.[id],spec=products[b?.industrialSector];if(!b||!spec||data().orders.some(o=>o.companyId===id&&o.kind==='output'&&!['complete','cancelled'].includes(o.phase)))return null;const destinationId=raw().enterprises?.[buyerId]?.locationId||raw().businesses?.[buyerId]?.locationId||(buyerId==='civic-materials'?'construction':buyerId);return order(b,{kind:'output',quantity,buyerId,sellerId:id,sourceLocationId:b.locationId,destinationId,product:b.industrialSector,unitPrice:spec.price});}
+ function maintainF1Merchandise(companies){
+  const event=raw().northF1?.event;
+  if(!event||!['scheduled','racing'].includes(event.status)||!loc(f1MerchLocation))return;
+  const store=account(NORTH_F1_MERCH_ID);
+  if(!store.locationId)Object.assign(store,{locationId:f1MerchLocation,sector:'clothing-retail',targetStock:f1MerchTarget});
+  if(now()<Number(store.nextProcurementAt||0))return;
+  store.nextProcurementAt=now()+3600;
+  if(!store.operatingCapitalFunded)store.operatingCapitalFunded=transfer(treasuryFor(f1MerchLocation),store,1800);
+  const incoming=data().orders.filter(o=>o.buyerId===NORTH_F1_MERCH_ID&&!o.paid).reduce((n,o)=>n+o.quantity,0);
+  let needed=Math.max(0,store.targetStock-store.inventory-incoming);
+  const sellers=companies.filter(b=>b.industrialSector==='garments'&&Number(b.openingAt||0)<=now()&&!unavailable(b.locationId)&&Number(b.inventory.finished)>=4&&loc(b.locationId))
+    .sort((a,b)=>dist(loc(a.locationId),loc(f1MerchLocation))-dist(loc(b.locationId),loc(f1MerchLocation)));
+  for(const seller of sellers){
+   if(needed<4)break;
+   const fee=12+dist(loc(seller.locationId),loc(f1MerchLocation))*.028;
+   const quantity=Math.min(needed,60,Math.floor((store.cash-fee)/products.garments.price));
+   if(quantity<4)continue;
+   const shipment=requestSale(seller.id,NORTH_F1_MERCH_ID,quantity);
+   if(shipment)needed-=shipment.quantity;
+  }
+ }
  function zone(id){if(id===sourceId)return 'west';return plant(id)?.zone||((loc(id)?.x||0)>480?'europe':(loc(id)?.z||0)<-440?'north':null);}
  function roadPath(a,b,sourceLocationId,destId){
   const za=zone(sourceLocationId),zb=zone(destId),anchors=[a];if(za&&zb&&za!==zb)anchors.push(INDUSTRIAL_ZONES[za].gateway,INDUSTRIAL_ZONES[zb].gateway);else if(za&&zb===null)anchors.push(INDUSTRIAL_ZONES[za].gateway);anchors.push(b);const points=[];
@@ -139,12 +163,14 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
   return true;
  }
  function moveTruck(t,seconds,headway){
+  const trackClosed=isNorthF1TrackClosed(raw());
+  const heldByRace=next=>trackClosed&&northF1MovementBlocked(t,next,2);
   let left=seconds/Math.max(1,Number(raw().timeScale||120));for(let hop=0;left>1e-7&&hop<64;hop++){
    const p=t.routeWaypoints[t.routeIndex];if(!p){t.traveling=false;t.vx=t.vz=0;return;}
-   const dx=p.x-t.x,dz=p.z-t.z,length=Math.hypot(dx,dz);if(length<.06){Object.assign(t,{x:p.x,z:p.z,y:p.y??1.1});t.routeIndex++;continue;}
+   const dx=p.x-t.x,dz=p.z-t.z,length=Math.hypot(dx,dz);if(length<.06){if(heldByRace(p)){t.motionSpeed=t.vx=t.vz=0;t.lastProgressAt=now();return;}Object.assign(t,{x:p.x,z:p.z,y:p.y??1.1});t.routeIndex++;continue;}
    const ux=dx/length,uz=dz/length;t.targetX=p.x;t.targetZ=p.z;t.heading=Math.atan2(ux,uz);const speed=10*motorwaySpeedMultiplier(t),requested=Math.min(length,left*speed),end={x:t.x+ux*requested,z:t.z+uz*requested};let step=requested;
    const barrier=signalBarrier(t,end,now()/Math.max(1,Number(raw().timeScale||120)));if(barrier)step=Math.min(step,barrier.distance);step=Math.min(step,headway(t,{x:t.x+ux*step,z:t.z+uz*step}));
-   const next={x:t.x+ux*step,z:t.z+uz*step};if(!clearSegment(t,next)){t.motionSpeed=0;return;}
+   const next={x:t.x+ux*step,z:t.z+uz*step};if(heldByRace({...next,y:p.y??1.1})){t.motionSpeed=t.vx=t.vz=0;t.lastProgressAt=now();return;}if(!clearSegment(t,next)){t.motionSpeed=0;return;}
    if(interceptMovement){const cargo=t.orderId?data().orders.find(o=>o.id===t.orderId):raw().regionalFreight?.jobs?.find(o=>o.id===t.jobId);const admission=interceptMovement(null,t,next,{mode:'freight',occupantIds:t.driverId?[t.driverId]:undefined,manifest:cargo?{id:cargo.id,quantity:cargo.quantity}:undefined,payerAccountId:t.ownerBusinessId||t.operator,entryId:cargo?`${cargo.id}:${t.phase}`:undefined});if(!admission.allowed){t.motionSpeed=0;t.borderWait=admission.reason;return;}t.borderWait=null;}
    t.vx=ux*step;t.vz=uz*step;t.x=next.x;t.z=next.z;t.y=p.y??1.1;t.motionSpeed=step<requested-.01?0:speed;if(step>.1)t.lastProgressAt=now();left-=step/speed;if(step<requested-.001)break;if(step>=length-.001)t.routeIndex++;
   }
@@ -198,7 +224,7 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
   const d=data();if(d.rawRestock&&now()>=d.rawRestock.arrival){for(const key of ['fabric','grain','aggregate'])d.rawStock[key]+=d.rawRestock.units;d.rawRestock=null;}
   if(!d.rawRestock&&now()>=d.nextRestockAt){const regional=Boolean(raw().regionalFreight?.funded);d.nextRestockAt=now()+(regional?21600:DAY);const units=Math.min(regional?800:400,Math.floor(account(sourceId).cash/6));if(units>0&&Object.values(d.rawStock).some(v=>v<(regional?1400:600))){transfer(account(sourceId),account(supplierId),units*6);d.externalOutflow+=units*6;d.rawRestock={units,arrival:now()+(regional?3600:21600)};}}
  }
- function tick(seconds,clock){syncDynamicPlants();const d=data();if(!loc(sourceId))return;const elapsed=Math.max(0,Math.min(1800,now()-Number(d.lastTickAt??now())));d.lastTickAt=now();for(const b of companies()){if(!actor(b.ownerId)?.alive){close(b);continue;}b.employees=b.employees.filter(id=>actor(id)?.alive&&actor(id).businessEmployeeOf===b.id);production(b,clock);decisions(b);}clothingRetail.tick(requestSale,companies());for(const o of d.orders)if(!o.paid&&now()>o.deadline)finishOrder(o,true);dispatch(clock);tickTrucks(elapsed,clock);if(regionalDistribution)regionalFreight.tick(elapsed);restock();d.orders=[...d.orders.filter(o=>!o.paid),...d.orders.filter(o=>o.paid&&now()-Number(o.completedAt||0)<DAY).slice(-32)];refreshPlants();}
+ function tick(seconds,clock){syncDynamicPlants();const d=data();if(!loc(sourceId))return;const elapsed=Math.max(0,Math.min(1800,now()-Number(d.lastTickAt??now())));d.lastTickAt=now();const activeCompanies=companies();for(const b of activeCompanies){if(!actor(b.ownerId)?.alive){close(b);continue;}b.employees=b.employees.filter(id=>actor(id)?.alive&&actor(id).businessEmployeeOf===b.id);production(b,clock);decisions(b);}const operating=activeCompanies.filter(b=>b.status==='operating');maintainF1Merchandise(operating);clothingRetail.tick(requestSale,operating);for(const o of d.orders)if(!o.paid&&now()>o.deadline)finishOrder(o,true);dispatch(clock);tickTrucks(elapsed,clock);if(regionalDistribution)regionalFreight.tick(elapsed);restock();d.orders=[...d.orders.filter(o=>!o.paid),...d.orders.filter(o=>o.paid&&now()-Number(o.completedAt||0)<DAY).slice(-32)];refreshPlants();}
  function snapshot(){const d=data(),regional=regionalFreight.snapshot();refreshPlants();return{clothingShops:clothingRetail.snapshot(),regionalFreight:regional,version:2,plants:Object.values(d.plants),rawStock:{...d.rawStock},companies:companies().map(b=>({id:b.id,name:b.name,ownerId:b.ownerId,plantId:b.industrialPlantId,zone:b.industrialZone,sector:b.industrialSector,cash:b.cash,inventory:{...b.inventory},employees:[...b.employees],productionUnits:b.productionUnits,revenueLifetime:b.revenueLifetime,wageOffer:b.wageOffer,labourPlan:b.labourPlan})),trucks:[...regional.trucks,...d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,driverId:t.driverId,orderId:t.orderId,motionSpeed:t.motionSpeed||0,routeWaypoints:t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12),at:now()}))],orders:d.orders.filter(o=>!o.paid).map(o=>({...o})),wagesPaid:d.wagesPaid,revenue:d.revenue,unitsProduced:d.unitsProduced,delivered:d.delivered,cancelled:d.cancelled,history:d.history,algorithmOnly:true};}
  return{clothingRetail,init,tick,addChoices,handleResident,snapshot,foundCompany,applyJob,requestInput,requestSale,finishOrder,roadPath};
 }

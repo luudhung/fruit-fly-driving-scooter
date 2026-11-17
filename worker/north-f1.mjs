@@ -1,3 +1,6 @@
+import {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
+import {createF1Charters} from './north-f1-charters.mjs';
+import {northF1ClosureWindow,isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {COUNTRY_IDS,NORTH_AIRPORT,countryAt} from './country-map.mjs';
 import {readyToDrive} from './life-skills.mjs';
@@ -10,8 +13,10 @@ const NORTH=COUNTRY_IDS.north,HANS=COUNTRY_IDS.hansdrex;
 const {spectator,paddock}=NORTH_F1_CIRCUIT;
 const ACCOUNT='north-f1';
 const WATCH='heading to the North City Grand Prix';
+const PREPARATION_HOURS=72;
+const driverCountry=(team,slot)=>team*2+slot<15?HANS:NORTH;
 const DRIVE='reporting for the North City Grand Prix';
-export const NORTH_F1_RULES={cadenceDays:5,startHour:19,laps:62,entryPrice:18,charterLimit:200};
+export const NORTH_F1_RULES={cadenceDays:5,startHour:19,laps:62,entryPrice:18,charterLimit:300};
 const TEAM_COLORS=[0xe83c42,0x17adca,0x24a97b,0xffa022,0x5641c8,0xe14d99,0x3b68f1,0xc5d138,0xf0f4f8,0x903b2b];
 const TEAM_NAMES=['Aurora GP','Northstar Racing','Riverline Works','Circuit Horizon','Midnight Motorsport','Apex Union','Beacon Racing','Polar Dynamics','Argent Grand Prix','Redleaf Engineering'];
 const signature=text=>{let key=2166136261;for(const c of String(text))key=Math.imul(key^c.charCodeAt(0),16777619);return (key>>>0)/4294967296;};
@@ -26,14 +31,14 @@ const healthy=f=>f.alive&&Number(f.health??80)>45&&!f.illness;
 const onSite=(f,site)=>!f.traveling&&!f.onPlane&&!f.onTrain&&f.currentLocationId===site.id&&distance(f,site)<35;
 
 export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities,payAndFinance,
- isUnavailable=()=>false,aviationAdmission,lawfulPresence=()=>true,travelCost=()=>({affordable:true,closed:false,entryFee:0})}){
+ isUnavailable=()=>false,aviationAdmission,interceptMovement,bookEventHotel,releaseEventHotel,visitEventAttraction,lawfulPresence=()=>true,travelCost=()=>({affordable:true,closed:false,entryFee:0})}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0);
  function account(id){
   const businesses=raw().businesses||={};
   return businesses[id]||={cash:0,inventory:0,sector:'sports-events',countryId:NORTH};
  }
  const data=()=>raw().northF1||={teams:TEAM_NAMES.map((name,i)=>({id:`NFR-${i+1}`,name,color:TEAM_COLORS[i],drivers:[]})),
-  nextAt:(Math.floor(now()/DAY)+2)*DAY+NORTH_F1_RULES.startHour*HOUR,nextRosterAt:0,reserveDrivers:[],event:null,history:[],races:0,cancelled:0,
+  nextAt:(Math.floor(now()/DAY)+3)*DAY+NORTH_F1_RULES.startHour*HOUR,nextRosterAt:0,reserveDrivers:[],event:null,history:[],races:0,cancelled:0,
   visits:0,hansdrexVisitors:0,visitors:0,northVisitors:0,revenue:0,ticketTax:0,prizes:0,charterArrivals:0,charterDepartures:0,externalInflow:0,externalOutflow:0};
  const durationEstimate=()=>NORTH_F1_CIRCUIT.lapLength*NORTH_F1_RULES.laps*Number(raw().timeScale||120)/(F1_TARGET_SPEED*.81)+900;
  const weatherClosed=()=>{const w=raw().weather||{};return w.condition==='thunderstorm'||Number(w.precipitation||0)>.64||Number(w.wind||0)>.73;};
@@ -44,38 +49,48 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    driverIds=new Set([...d.teams.flatMap(t=>t.drivers),...(d.reserveDrivers||[])]);
   }
  }
- function eligibleDriver(f){return Boolean(f&&healthy(f)&&homeCountry(f)===NORTH&&f.ageYears>=21&&f.ageYears<=68&&readyToDrive(f)
+ const charterService=createF1Charters({world,signature,admit:aviationAdmission,intercept:interceptMovement,account,
+  weatherClosed,movementBlocked:(from,to,margin)=>isNorthF1TrackClosed(raw())&&northF1MovementBlocked(from,to,margin),
+  bookHotel:bookEventHotel,releaseHotel:releaseEventHotel,visitAttraction:visitEventAttraction,attend});
+ function eligibleDriver(f){return Boolean(f&&healthy(f)&&[HANS,NORTH].includes(f.citizenshipCountryId)&&f.ageYears>=21&&f.ageYears<=68&&readyToDrive(f)
   &&!f.publicServiceRole&&!f.publicServiceDuty&&!f.nationalServiceDuty&&!f.facilityEmployment&&!f.industrialFreightDuty);}
  function rating(f,id=''){
   return Number(f.professionSkills?.racing||0)*.55+Number(f.traits?.resilience??.5)*.18+Number(f.traits?.ambition??.5)*.15
    + (String(f.vehicle||'').includes('car') ? .08 : 0)+signature(f.id+id)*.12;
  }
  function updateRoster(d){
-  if(now()<d.nextRosterAt||d.event&&now()>=d.event.startsAt-28*HOUR)return;
+  if(now()<d.nextRosterAt||d.event&&d.event.status!=='scheduled'||d.event&&(d.event.format!==2||now()>=d.event.startsAt-48*HOUR))return;
   d.nextRosterAt=now()+12*HOUR;directory(d);
   const signed=new Set();
-  for(const team of d.teams){
-   team.drivers=team.drivers.filter(id=>eligibleDriver(actorsById.get(id))&&!signed.has(id)&&Boolean(signed.add(id)));
-  }
-  const roster=[...actorsById.values()].filter(f=>eligibleDriver(f)&&!signed.has(f.id)).sort((a,b)=>{
-   const score=f=>rating(f)+(countryAt(f)===NORTH ? .42 : 0)-Math.min(.28,distance(f,paddock)/3500);
+  const roster=[...actorsById.values()].filter(eligibleDriver).sort((a,b)=>{
+   const score=f=>rating(f)+(countryAt(f)===NORTH?.25:0)-Math.min(.4,distance(f,paddock)/5000)
+    +Math.min(1,Number(f.energy||55)/100)*.16-(occupied(f,now())?.25:0);
    return score(b)-score(a)||a.id.localeCompare(b.id);
   });
-  for(const team of d.teams)while(team.drivers.length<2&&roster.length){
-   const f=roster.shift();team.drivers.push(f.id);signed.add(f.id);
-   remember(f,'north_f1_signed',{teamId:team.id});
+  for(const [index,team] of d.teams.entries()){
+   const previous=team.drivers;
+   team.drivers=[0,1].map(slot=>{
+    const country=driverCountry(index,slot),prior=actorsById.get(previous[slot]);
+    const driver=[prior,...roster].find(f=>eligibleDriver(f)&&f.citizenshipCountryId===country&&!signed.has(f.id));
+    if(!driver)return null;
+    signed.add(driver.id);
+    if(prior!==driver)remember(driver,'north_f1_signed',{teamId:team.id});
+    return driver.id;
+   });
   }
-  d.reserveDrivers=roster.slice(0,16).map(f=>f.id);
+  const reserves=country=>roster.filter(f=>f.citizenshipCountryId===country&&!signed.has(f.id)).slice(0,country===HANS?22:12).map(f=>f.id);
+  d.reserveDrivers=[...reserves(HANS),...reserves(NORTH)];
   driverIds=new Set([...signed,...d.reserveDrivers]);
  }
  function offer(f){
   const e=raw().northF1?.event;
-  if(!e||now()+36*HOUR<e.startsAt||now()>=e.endsAt||e.status==='cancelled'||f?.lastNorthF1Ticket===e.id)return null;
+  if(!e||now()+PREPARATION_HOURS*HOUR<e.startsAt||now()>=e.endsAt||e.status==='cancelled'||f?.lastNorthF1Ticket===e.id)return null;
   return {id:e.id,startsAt:e.startsAt,endsAt:e.endsAt,siteId:spectator.id,price:e.price};
  }
  function ticket(f,e,kind){
   const price=e.price;
-  if(wallet(f)<price||e.audience.total>=NORTH_F1_CIRCUIT.capacity)return false;
+  const limit=kind==='visitors'?NORTH_F1_RULES.charterLimit:kind==='north'?e.northFanTarget:e.fanTarget;
+  if(wallet(f)<price+(f.kind==='visitor'&&!f.legacyAirlineContract&&!f.returnFarePaid?200:0)||limit!=null&&e.audience[kind]>=limit||e.audience.total>=NORTH_F1_CIRCUIT.capacity)return false;
   const cash=Math.min(Math.max(0,Number(f.money||0)),price);
   f.money=Number(f.money||0)-cash;f.savings=Number(f.savings||0)-(price-cash);
   f.expensesLifetime=Number(f.expensesLifetime||0)+price;
@@ -97,6 +112,14 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
     ||!lawfulPresence(f,NORTH)||isUnavailable(spectator.id,f))return false;
   const kind=f.kind==='visitor'?'visitors':homeCountry(f)===HANS?'hansdrex':'north';
   if(!ticket(f,e,kind))return false;
+  if(signature(e.id+f.id+'merch')<.66){
+   const rack=raw().businesses?.['north-f1-merch'],price=14;
+   if(rack?.inventory>=1&&wallet(f)>=price+Math.max(105,f.kind==='visitor'&&!f.legacyAirlineContract&&!f.returnFarePaid?200:0)){
+    const cash=Math.min(f.money||0,price);f.money-=cash;f.savings=Number(f.savings||0)-(price-cash);
+    f.expensesLifetime=Number(f.expensesLifetime||0)+price;rack.inventory--;rack.cash+=price;
+    data().merchSales=Number(data().merchSales||0)+1;raw().totalTransactions++;
+   }
+  }
   remember(f,'north_f1_attendance',{raceId:e.id,price:e.price,nation:homeCountry(f)});
   return true;
  }
@@ -105,10 +128,11 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   const home=homeCountry(f);
   if(home!==HANS&&home!==NORTH)return null;
   const interest=signature(f.id+e.id);
-  if(home===HANS?(!e.fanInvites[f.id]||e.audience.hansdrex>=e.fanTarget):interest>=.46)return null;
+  if(home===HANS?(!e.fanInvites[f.id]||e.audience.hansdrex>=e.fanTarget)
+    :e.format===2?(!e.northInvites[f.id]||e.audience.north>=e.northFanTarget):interest>=.30)return null;
   const travel=travelCost(f,NORTH);
   if(travel.closed||!travel.affordable||wallet(f)<e.price+Number(travel.entryFee||0)+8)return null;
-  const lead=Math.min(29*HOUR,5*HOUR+distance(f,spectator)*Number(raw().timeScale||120)/(String(f.vehicle||'').includes('car')?3.7:1.6));
+  const lead=Math.min((home===HANS?52:24)*HOUR,(home===HANS?16:4)*HOUR+distance(f,spectator)*Number(raw().timeScale||120)/(String(f.vehicle||'').includes('car')?3.7:1.6));
   return {home,interest,departure:e.startsAt-lead-signature(e.id+f.id)*4*HOUR};
  }
  function fitForOuting(f){
@@ -145,7 +169,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   const eAvailable=e&&e.status!=='cancelled'&&now()<e.endsAt;
   let duty=f.f1Duty;
   if(duty&&(occupied(f,now())||!healthy(f))){f.f1Duty=null;f.actionUntil=0;return false;}
-  if(duty?.role==='fan'&&(!eAvailable||duty.raceId!==e?.id)&&homeCountry(f)===HANS&&countryAt(f)===NORTH){
+  if((duty?.role==='fan'||duty?.role==='driver')&&(!eAvailable||duty.raceId!==e?.id)&&homeCountry(f)===HANS&&countryAt(f)===NORTH){
    duty.role='return';duty.leaveAt=now()+signature(duty.raceId+f.id+'return')*HOUR*2;
   }
   if(duty?.role==='return'){
@@ -156,15 +180,15 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   }
   if(duty&&(duty.raceId!==e?.id||!eAvailable)){f.f1Duty=null;f.actionUntil=0;return false;}
   if(!duty&&eAvailable&&!f.traveling&&!f.onTrain&&!f.onPlane&&!occupied(f,now())&&healthy(f)&&Number(f.f1RetryAt||0)<=now()){
-   if(driver&&e.status==='scheduled'&&now()>=e.startsAt-28*HOUR&&now()<e.startsAt+HOUR/2&&countryAt(f)!==COUNTRY_IDS.hawaii&&Number(f.energy??50)>12){
+   if(driver&&e.status==='scheduled'&&now()>=e.startsAt-(e.format===2?70:28)*HOUR&&now()<e.startsAt&&countryAt(f)!==COUNTRY_IDS.hawaii&&Number(f.energy??50)>12){
     duty=f.f1Duty={raceId:e.id,role:'driver'};
    }else if(f.action===WATCH||f.pendingAction===WATCH){
     duty=f.f1Duty={raceId:e.id,role:'fan'};
-   }else if(now()<e.startsAt&&now()>=e.startsAt-34*HOUR&&fitForOuting(f)){
+   }else if(now()<e.startsAt&&now()>=e.startsAt-57*HOUR&&fitForOuting(f)){
     const plan=fanPlan(f,e);
     // The weekend draw gives the main group a planned outing. Still catch less
     // keen residents through the ordinary competing activities in addChoices.
-    if(plan&&now()>=plan.departure&&(plan.home===HANS||plan.interest<.30))duty=f.f1Duty={raceId:e.id,role:'fan'};
+    if(plan&&now()>=plan.departure)duty=f.f1Duty={raceId:e.id,role:'fan'};
    }
   }
   if(!duty)return false;
@@ -185,6 +209,9 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    f.recoveringEnergy=resting;
    f.action=resting?'resting indoors':car?'driving in the North City Grand Prix':'preparing the team car in the Grand Prix paddock';
   }else{
+   const waiting=now()<e.startsAt-3*HOUR&&Number(f.energy??50)<58;
+   f.recoveringEnergy=waiting;f.indoors=waiting;
+   if(waiting){f.action='resting indoors';care(f,clock);return true;}
    if(f.lastNorthF1Ticket!==e.id&&now()>=e.startsAt-5*HOUR&&!attend(f)){f.f1Duty=null;f.f1RetryAt=now()+HOUR;return false;}
    f.action=now()<e.startsAt?'waiting for the Grand Prix in the stands':'watching the North City Grand Prix';
   }
@@ -244,7 +271,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
  function processCharters(d,e){
   const scale=Number(raw().timeScale||120);
   for(const flight of e.charters){
-   if(flight.departed)continue;
+   if(flight.departed||flight.tenPassengerTour)continue;
    if(!flight.landed&&now()>=flight.parkedAt){
     if(weatherClosed()){
      flight.inboundAt=visitorRunwaySlot(now()+900,INBOUND_SECONDS,trafficDuringRace(e,flight),'north');
@@ -304,13 +331,17 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
  }
  function openRace(d){
   const start=d.nextAt,price=Math.round(NORTH_F1_RULES.entryPrice*Math.max(.6,Math.min(2,Number(raw().centralBank?.priceLevel||1))));
-  const id=`NORTH-GP-${Math.floor(start/DAY)+1}`,hansdrexInterest=.57+signature(id+'fans')*.06;
-  const hans=(raw().flies||[]).filter(f=>f.alive&&homeCountry(f)===HANS);
-  const target=Math.round(hans.length*hansdrexInterest);
-  const invites=hans.filter(f=>healthy(f)&&!f.publicServiceRole&&f.ageYears>=16&&wallet(f)>=price+8+(f.citizenshipCountryId===NORTH?0:50))
-   .map(f=>({id:f.id,rank:signature(id+f.id)})).sort((a,b)=>a.rank-b.rank).slice(0,Math.ceil(target*1.18));
-  d.event={id,startsAt:start,endsAt:start+durationEstimate(),charterShowUntil:start+HOUR,price,status:'scheduled',audience:counts(),charters:[],ticketPayers:[],
-   hansdrexInterest,fanTarget:target,fanInvites:Object.fromEntries(invites.map(row=>[row.id,true]))};
+  const id=`NORTH-GP-${Math.floor(start/DAY)+1}`,hansdrexInterest=.20+signature(id+'fans')*.10;
+  const residents=(raw().flies||[]).filter(f=>f.alive);
+  const draw=(country,share)=>{
+   const list=residents.filter(f=>homeCountry(f)===country),target=list.length?Math.max(1,Math.round(list.length*share)):0;
+   const candidates=list.filter(f=>healthy(f)&&!driverIds.has(f.id)&&!f.publicServiceRole&&f.ageYears>=16&&wallet(f)>=price+8+(f.citizenshipCountryId===NORTH?0:50));
+   const invitations=candidates.map(f=>[f.id,signature(id+f.id)]).sort((a,b)=>a[1]-b[1]).slice(0,target);
+   return {target,invites:Object.fromEntries(invitations.map(([key])=>[key,true]))};
+  };
+  const hans=draw(HANS,hansdrexInterest),north=draw(NORTH,.30);
+  d.event={id,format:2,startsAt:start,endsAt:start+durationEstimate(),charterShowUntil:start+HOUR,price,status:'scheduled',audience:counts(),charters:[],ticketPayers:[],
+   hansdrexInterest,fanTarget:hans.target,fanInvites:hans.invites,northFanTarget:north.target,northInvites:north.invites};
  }
  function refundTickets(d,e){
   const recipients=new Map(actorsById);
@@ -336,10 +367,13 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   const drivers=[],substitutions=[],qualifiedTeams=new Map();
   const available=id=>{const f=actorsById.get(id);return f&&healthy(f)&&!occupied(f,now())&&onSite(f,paddock)?f:null;};
   const reserves=(d.reserveDrivers||[]).map(available).filter(Boolean);
-  for(const team of d.teams){
+  for(const [index,team] of d.teams.entries()){
    const pair=[];
    for(let slot=0;slot<2;slot++){
-    const regular=available(team.drivers[slot]),f=regular||reserves.shift();
+    const country=e.format===2?driverCountry(index,slot):null,rawDriver=available(team.drivers[slot]);
+    const regular=rawDriver&&(!country||rawDriver.citizenshipCountryId===country)?rawDriver:null;
+    const reserve=reserves.findIndex(f=>!country||f.citizenshipCountryId===country);
+    const f=regular||(reserve>=0?reserves.splice(reserve,1)[0]:null);
     if(f){
      drivers.push({f,team});pair.push(f.id);
      if(!regular)substitutions.push({f,team});
@@ -348,7 +382,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    qualifiedTeams.set(team.id,pair);
   }
   const trackClosed=weatherClosed()||isUnavailable(paddock.id);
-  if(!trackClosed&&drivers.length<20&&now()<e.startsAt+HOUR/2)return;
+  if(e.format!==2&&!trackClosed&&drivers.length<20&&now()<e.startsAt+HOUR/2)return;
   if(now()>=e.endsAt||trackClosed||drivers.length<20){
    e.status='cancelled';d.cancelled++;
    refundTickets(d,e);
@@ -357,13 +391,13 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   }
   for(const team of d.teams)team.drivers=qualifiedTeams.get(team.id);
   for(const {f,team} of substitutions)remember(f,'north_f1_qualified',{raceId:e.id,teamId:team.id,substitute:true});
-  e.status='racing';e.greenAt=now();
+  e.status='racing';e.greenAt=e.format===2?e.startsAt:now();
   drivers.sort((a,b)=>rating(b.f,e.id)-rating(a.f,e.id));
   e.cars=drivers.map(({f,team},i)=>{
    const gridGap=Math.floor(i/2)*8+2,seed=signature(e.id+f.id+'tyres'),pace=.94+rating(f,e.id)*.19;
    const pitBox=d.teams.indexOf(team)*2+team.drivers.indexOf(f.id);
    const motion=planF1Motion(NORTH_F1_CIRCUIT,{startAt:e.greenAt,timeScale:Number(raw().timeScale||120),laps:NORTH_F1_RULES.laps,pace,seed,gridGap,pitBoxProgress:NORTH_F1_PIT_BOXES[pitBox].progress});
-   return {id:`${e.id}-CAR-${i+1}`,teamId:team.id,driverId:f.id,color:team.color,pitBox,lane:i%2?1.65:-1.65,...motion};
+   return {id:`${e.id}-CAR-${i+1}`,teamId:team.id,driverId:f.id,countryId:f.citizenshipCountryId,color:team.color,pitBox,lane:i%2?1.65:-1.65,...motion};
   });
   e.endsAt=Math.max(...e.cars.map(c=>c.finishedAt));
   emit('north_f1_start',`The North City Grand Prix started under the lights with ${drivers.length} drivers.`,{raceId:e.id,grid:drivers.length});
@@ -389,18 +423,25 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
  function tick(){
   const d=data();
   updateRoster(d);
-  if(d.event&&now()>=d.event.endsAt&&['complete','cancelled'].includes(d.event.status)&&d.event.charters.every(f=>f.departed)){
-   d.nextAt=d.event.startsAt+NORTH_F1_RULES.cadenceDays*DAY;d.event=null;
+  d.previousTours||=[];
+  for(const previous of d.previousTours)charterService.tick(previous);
+  d.previousTours=d.previousTours.filter(previous=>previous.charters.some(f=>!f.departed));
+  if(d.event&&now()>=d.event.endsAt&&['complete','cancelled'].includes(d.event.status)){
+   const old=d.event,pending=old.charters.some(f=>!f.departed);
+   if(!pending||old.format===2&&d.previousTours.length<2){
+    if(pending)d.previousTours.push(old);
+    d.nextAt=old.startsAt+NORTH_F1_RULES.cadenceDays*DAY;d.event=null;
+   }
   }
-  if(!d.event&&now()>=d.nextAt-36*HOUR){
+  if(!d.event&&now()>=d.nextAt-PREPARATION_HOURS*HOUR){
    while(now()>=d.nextAt+durationEstimate())d.nextAt+=NORTH_F1_RULES.cadenceDays*DAY;
-   if(now()>=d.nextAt-36*HOUR)openRace(d);
+   if(now()>=d.nextAt-PREPARATION_HOURS*HOUR)openRace(d);
   }
   const e=d.event;
   if(!e)return;
-  makeCharters(e);
+  if(e.format===2)charterService.make(e);else {makeCharters(e);if(e.charterPlanned)charterService.migrate(e);}
   if(now()>=e.startsAt){directory(d);startRace(d,e);}
-  processCharters(d,e);
+  if(e.format===2)charterService.tick(e);else {processCharters(d,e);charterService.tick(e);}
   if(e.status==='racing')for(const c of e.cars){
    const driver=actorsById.get(c.driverId);
    if(c.retiredAt==null&&now()<c.finishedAt&&!healthy(driver||{}))c.retiredAt=now();
@@ -408,8 +449,24 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   finishRace(d,e);
  }
  function charters(){
-  return (raw().northF1?.event?.charters||[]).filter(f=>!f.departed&&now()<(f.exitAt??Infinity))
-   .map(({guests,...f})=>({...f,passengerIds:f.boardAt!=null&&now()>=f.boardAt?guests.filter(g=>g.phase!=='inbound').map(g=>g.id):[]}));
+  const d=raw().northF1;
+  return [...(d?.event?.charters||[]),...(d?.previousTours||[]).flatMap(e=>e.charters)].filter(f=>!f.departed)
+   .flatMap(({guests,returnLeg,...f})=>[...(!f.aircraftGone&&Number.isFinite(f.inboundAt)&&now()<(f.exitAt??Infinity)?[{...f,carrierId:HANSDREX_AIRLINE.id,carrierName:HANSDREX_AIRLINE.name,oneWayFare:HANSDREX_AIRLINE.oneWayFare,passengerIds:[]}]:[]),
+    ...(returnLeg&&!returnLeg.aircraftGone&&Number.isFinite(returnLeg.inboundAt)?[{...returnLeg,carrierId:HANSDREX_AIRLINE.id,carrierName:HANSDREX_AIRLINE.name,oneWayFare:HANSDREX_AIRLINE.oneWayFare,passengerIds:returnLeg.passengerIds||[]}]:[])]);
+ }
+ function foreignVisitors(){
+  const d=raw().northF1;
+  return [d?.event,...(d?.previousTours||[])].filter(Boolean).flatMap(e=>e.charters.flatMap(f=>f.guests.map(guest=>({guest,event:e}))))
+   .filter(({guest:f})=>!['departed','denied','cancelled'].includes(f.phase)&&Number.isFinite(f.x)&&Number.isFinite(f.z)).map(({guest:f,event:e})=>({
+    id:f.id,name:f.name||f.id,kind:'visitor',alive:true,sex:f.sex==='F'||f.sex==='M'?f.sex:signature(f.id+'sex')<.5?'F':'M',ageYears:f.ageYears||30,generation:1,
+    x:f.x,y:f.y??1.1,z:f.z,vx:f.vx||0,vz:f.vz||0,action:f.action||'visiting the Grand Prix',
+    currentLocationId:f.currentLocationId||null,targetLocationId:f.leg?.destination||null,traveling:Boolean(f.leg||f.motion),
+    hunger:20,energy:85,stress:10,happiness:75,excitement:80,loneliness:10,health:95,
+    money:f.money||0,savings:f.savings||0,debt:0,affection:0,children:[],parents:[],
+    onPlane:Boolean(f.onPlane),indoors:Boolean(f.indoors),visitorPhase:f.phase,citizenshipCountryId:'outside',originCountryId:'outside',
+    homeX:f.x,homeZ:f.z,entryAirportId:f.entryAirportId||null,
+    motion:f.leg?{at:now(),speed:e.tourPaths?.[f.leg.key]?.[f.leg.index]?.mode==='car'?11:2.8,mode:e.tourPaths?.[f.leg.key]?.[f.leg.index]?.mode||'walk',blocked:false,points:(e.tourPaths?.[f.leg.key]||[]).slice(f.leg.index,f.leg.index+8)}:f.motion||null,routeWaypoints:f.leg?(e.tourPaths?.[f.leg.key]||[]).slice(f.leg.index):[],routeIndex:0,
+   }));
  }
  function snapshot(){
   const d=raw().northF1;if(!d)return null;
@@ -419,20 +476,21 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    cars:e.cars.filter(c=>c.retiredAt==null&&now()<c.finishedAt+240).map(c=>{
     const motion=f1MotionWindow(c.segments,now()),sample=sampleF1Motion(motion,now());
     const segment=motion[0];
-    return {id:c.id,teamId:c.teamId,driverId:c.driverId,color:c.color,lane:c.lane,pitBox:c.pitBox,lapsPerSecond:(segment.progressTo-segment.progressFrom)/(segment.end-segment.start),
+    return {id:c.id,teamId:c.teamId,driverId:c.driverId,countryId:c.countryId,color:c.color,lane:c.lane,pitBox:c.pitBox,lapsPerSecond:(segment.progressTo-segment.progressFrom)/(segment.end-segment.start),
      progressAt:now(),...sample,motion};
    })};
   const history=d.history.at(-1)||null;
-  return {teams:d.teams,activeRace,trackCrowd,lastRace:history,races:d.races,cancelled:d.cancelled,
+  return {teams:d.teams.map(t=>({...t,drivers:t.drivers.filter(Boolean)})),activeRace,trackClosure:northF1ClosureWindow(e),trackCrowd,lastRace:history,races:d.races,cancelled:d.cancelled,
    nextAt:e&&now()<e.endsAt?e.startsAt:e?e.startsAt+NORTH_F1_RULES.cadenceDays*DAY:d.nextAt,
    revenue:d.revenue,ticketTax:d.ticketTax,prizes:d.prizes,visits:d.visits,hansdrexVisitors:d.hansdrexVisitors,northVisitors:d.northVisitors,
    visitors:d.visitors,charterArrivals:d.charterArrivals,charterDepartures:d.charterDepartures,charterDemand:e?.charterDemand||history?.charterDemand||0,
+   northFanTarget:e?.northFanTarget||0,merchSales:Number(d.merchSales||0),hotelBookings:Number(d.hotelBookings||0),hansdrexSightVisits:Number(d.hansdrexSightVisits||0),
    fanTarget:e?.fanTarget||history?.fanTarget||0,fanInvited:e?Object.keys(e.fanInvites).length:history?.fanInvited||0,
-   raceStatus:e?.status||'scheduled',charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
+   foreignVisitors:foreignVisitors(),raceStatus:e?.status||'scheduled',charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
  }
  function liquidCash(){
   let cash=0;
-  for(const flight of raw().northF1?.event?.charters||[]){
+  for(const e of [raw().northF1?.event,...(raw().northF1?.previousTours||[])])for(const flight of e?.charters||[]){
    for(const guest of flight.guests)if(!['inbound','denied','cancelled','departed'].includes(guest.phase))cash+=wallet(guest);
   }
   return cash;

@@ -10,7 +10,8 @@ test('North receives ten actual reserved passengers from a distant aircraft, not
  const t=fixture();assert.ok(t.visitors.queueAircraft(MIN_VISITOR_PASSENGERS,'north'));const flight=t.s.cityVisitors.airportTraffic.flights[0],ids=flight.arrivalPassengerIds.slice();assert.equal(ids.length,10);assert.ok(t.s.cityVisitors.visitors.every(v=>v.onPlane&&v.citizenshipCountryId==='outside'));assert.ok(visitorAircraftPose(flight.inboundAt,flight).y>200);
  t.s.simulationAgeSeconds=flight.parkedAt;t.step();assert.equal(t.countries.snapshot().visaRevenue,0);assert.equal(t.visitors.snapshot().totalArrivals,0);
  t.s.simulationAgeSeconds=visitorArrivalPath(flight,9,120).at(-1).at;t.step();assert.equal(t.visitors.snapshot().totalArrivals,10);assert.equal(t.countries.snapshot().visaRevenue,500);assert.ok(t.s.cityVisitors.visitors.every(v=>v.x===NORTH_AIRPORT.gate.x&&v.z===NORTH_AIRPORT.gate.z&&v.travelGoals.includes('hansdrex')&&v.travelGoals.includes('north-city')));
- const cash=t.countries.snapshot().visaRevenue;t.restore();t.step();assert.equal(t.countries.snapshot().visaRevenue,cash);assert.deepEqual(t.s.cityVisitors.airportTraffic.flights[0].arrivalPassengerIds,ids);
+ const cash=t.countries.snapshot().visaRevenue,identity=t.s.cityVisitors.visitors.map(v=>[v.id,v.brain.id,v.arrivalFlightId]);t.restore();t.step();assert.equal(t.countries.snapshot().visaRevenue,cash);assert.deepEqual(t.s.cityVisitors.visitors.map(v=>[v.id,v.brain.id,v.arrivalFlightId]),identity);assert.deepEqual(t.s.cityVisitors.visitors.filter(v=>v.arrivalFlightId===flight.id).map(v=>v.id),ids);
+ assert.equal(t.s.cityVisitors.airportTraffic.flights.some(f=>f.id===flight.id),false,'completed empty aircraft metadata is released after all ten guests clear immigration');
 });
 
 test('a North-arriving outside brain physically visits both countries, pays two entry visas and departs from the country actually reached',()=>{

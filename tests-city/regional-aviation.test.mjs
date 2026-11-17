@@ -14,7 +14,7 @@ function fixture(from='north',count=1){
  return{get s(){return s;},get air(){return air;},get countries(){return countries;},restore(){s=structuredClone(s);build();},at(time){s.simulationAgeSeconds=time;},arrive(f,leg,index=0){const p=COUNTRY_AIRPORTS.find(p=>p.id===leg.to),stand=p.stands.at(-1),path=visitorArrivalPath({airportId:p.id,standId:stand.id,arrivalStand:stand,inboundAt:leg.departure,parkedAt:leg.arrival},index,120);s.simulationAgeSeconds=path.at(-1).at+1;air.handleResident(f,{hour:12});}};
 }
 
-test('all six airport pairs have 15-seat schedules and actual runway/taxi/flight/immigration trajectories',()=>{
+test('all six airport pairs have ten-seat schedules and actual runway/taxi/flight/immigration trajectories',()=>{
  for(const from of COUNTRY_AIRPORTS)for(const to of COUNTRY_AIRPORTS){if(from===to)continue;
   const t=fixture(from.id),f=t.s.flies[0],total=supply(t.s);assert.ok(t.air.book(f,to.id));assert.equal(supply(t.s),total);const trip=f.countryAirTrip,flight=trip.outbound;
   assert.ok(flight.departure>=t.s.simulationAgeSeconds+AVIATION.checkInSeconds);assert.equal(flight.to,to.id);
@@ -26,11 +26,11 @@ test('all six airport pairs have 15-seat schedules and actual runway/taxi/flight
  }
 });
 
-test('both manifests reject seat sixteen, keep identity/fare/hotel escrow on restore and never touch legacy paid trips',()=>{
- const t=fixture('north',16),total=supply(t.s);for(const f of t.s.flies.slice(0,15))assert.ok(t.air.book(f,'city'));
- assert.equal(t.air.book(t.s.flies[15],'city'),false);assert.equal(t.s.flies[15].money,500);assert.equal(t.s.businesses['regional-flight-escrow'].cash,15*134);assert.equal(supply(t.s),total);
- const identities=t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]);t.restore();assert.deepEqual(t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]),identities);assert.equal(t.s.businesses['regional-flight-escrow'].cash,15*134);
- const legacy=t.s.flies[15];legacy.airTrip={phase:'outbound-wait',outbound:nextRegionalFlight(t.s.simulationAgeSeconds,'city','island'),inbound:nextRegionalFlight(t.s.simulationAgeSeconds+86400,'island','city'),cost:134};assert.equal(t.air.book(legacy,'island'),false);assert.equal(legacy.airTrip.cost,134);
+test('both manifests reject seat eleven, keep identity/fare/hotel escrow on restore and never touch legacy paid trips',()=>{
+ const t=fixture('north',11),total=supply(t.s);assert.equal(AVIATION.seats,10);for(const f of t.s.flies.slice(0,10))assert.ok(t.air.book(f,'city'));
+ assert.equal(t.air.book(t.s.flies[10],'city'),false);assert.equal(t.s.flies[10].money,500);assert.equal(t.s.businesses['regional-flight-escrow'].cash,10*134);assert.equal(supply(t.s),total);
+ const identities=t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]);t.restore();assert.deepEqual(t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]),identities);assert.equal(t.s.businesses['regional-flight-escrow'].cash,10*134);
+ const legacy=t.s.flies[10];legacy.airTrip={phase:'outbound-wait',outbound:nextRegionalFlight(t.s.simulationAgeSeconds,'city','island'),inbound:nextRegionalFlight(t.s.simulationAgeSeconds+86400,'island','city'),cost:134};assert.equal(t.air.book(legacy,'island'),false);assert.equal(legacy.airTrip.cost,134);
 });
 
 test('a deceased passenger releases both seats and their real room, and unused escrow joins the settled estate only once',()=>{

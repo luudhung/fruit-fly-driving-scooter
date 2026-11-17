@@ -34,3 +34,21 @@ test('an idle licensed truck physically returns from a motorway to legal depot p
 test('funded national warehouses do not buy already-full stock merely to keep trucks animated',()=>{
  const s=freshState(),d=s.regionalFreight;s.industrialEconomy.nextRestockAt=1e12;for(const id of REGIONAL_HUBS.slice(1)){d.stocks[id]={fabric:240,grain:240,aggregate:240};for(const product of ['fabric','grain','aggregate']){s.industrialEconomy.rawStock[product]-=240;s.businesses[`regional-warehouse-${id}`].cash-=480;s.businesses['industrial-raw-depot'].cash+=480;}}const stock=goods(s),money=liquidMoneySupply(),accounts=REGIONAL_HUBS.slice(1).map(id=>s.businesses[`regional-warehouse-${id}`].cash);for(let i=0;i<30;i++){s.simulationAgeSeconds+=120;industrialEconomy.tick(120,{hour:2,minute:0});}assert.equal(d.jobs.length,0);assert.equal(d.delivered,0);assert.equal(goods(s),stock);assert.deepEqual(REGIONAL_HUBS.slice(1).map(id=>s.businesses[`regional-warehouse-${id}`].cash),accounts);assert.ok(Math.abs(liquidMoneySupply()-money)<1e-6);
 });
+
+
+test('trucks reposition to depots when no orders exist without inventing cargo or delivery receipts',()=>{
+ const s=freshState(),d=s.regionalFreight;
+ s.industrialEconomy.nextRestockAt=1e12;d.nextDispatchAt=1e12;
+ const start=new Map(d.trucks.map(t=>[t.id,{x:t.x,z:t.z}]));
+ const stock=goods(s),money=liquidMoneySupply(),moving=new Set();
+ for(let i=0;i<65;i++){
+  s.simulationAgeSeconds+=120;industrialEconomy.tick(120,{hour:2,minute:0});
+  for(const t of d.trucks)if(t.phase==='repositioning'&&Math.hypot(t.x-start.get(t.id).x,t.z-start.get(t.id).z)>10)moving.add(t.id);
+ }
+ assert.ok(moving.size>=8,`Only ${moving.size} fleet trucks repositioned`);
+ assert.equal(d.jobs.length,0);
+ assert.equal(d.delivered,0);
+ assert.equal(goods(s),stock);
+ assert.ok(d.repositionCosts>0);
+ assert.ok(Math.abs(liquidMoneySupply()-money)<1e-6);
+});

@@ -35,9 +35,13 @@ test('booking reserves both flight legs and full board, transfers exact funds in
  const poor=guest(s,1);poor.money=100;poor.savings=0;assert.equal(bookIslandHoliday(poor),false);assert.equal(poor.money,100);
  assert.equal(f.airTrip.inbound.from,'island');assert.ok(f.airTrip.inbound.departure>f.airTrip.outbound.arrival);
 });
-test('15-seat inventory prevents overselling the outbound and reserved return flight',()=>{
- const s=setup();for(let i=0;i<15;i++)assert.equal(bookIslandHoliday(guest(s,i)),true);
- const sixteenth=guest(s,15);assert.equal(bookIslandHoliday(sixteenth),false);assert.equal(sixteenth.money,500);
+test('ten-seat inventory prevents overselling either reserved flight leg',()=>{
+ const s=setup();assert.equal(AVIATION.seats,10);
+ for(let i=0;i<10;i++)assert.equal(bookIslandHoliday(guest(s,i)),true);
+ const eleventh=guest(s,10);assert.equal(bookIslandHoliday(eleventh),false);assert.equal(eleventh.money,500);
+ const trips=s.flies.filter(f=>f.airTrip);assert.equal(trips.length,10);
+ assert.equal(new Set(trips.map(f=>f.airTrip.outbound.id)).size,1);
+ assert.equal(new Set(trips.map(f=>f.airTrip.inbound.id)).size,1);
 });
 test('weather cancellation refunds escrow in full and never sells an uncovered return',()=>{
  const s=setup(),f=guest(s);bookIslandHoliday(f);const departure=f.airTrip.outbound.departure,total=liquidMoneySupply();

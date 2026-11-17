@@ -6,7 +6,7 @@ import {NORTH_AIRPORT,NORTH_LANDMARK,countryAt} from '../worker/country-map.mjs'
 
 const homes=()=>BUILDINGS.filter(b=>b.id.startsWith('AIRPORT-APT-'));
 const m8=()=>METRO_LINES.find(line=>line.id==='M8');
-const airside=p=>contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4);
+const airside=p=>AIRPORT.runways.some(runway=>contains(runway,p,10))||AIRPORT.taxiways.some(taxiway=>contains(taxiway,p,4))||contains(AIRPORT.apron,p,4);
 function assertPublicWalk(route){
  assert.ok(route.length>1,'a real public route must exist');
  for(let i=1;i<route.length;i++){
@@ -83,8 +83,15 @@ test('North City has domestic airport interchanges and public border crossings i
  assertPublicWalk(pedestrianRoute(entrance(homes()[0]),park));
 });
 
-test('the airport walk lattice routes public crossings around the runway instead of directly across it',()=>{
- assertPublicWalk(pedestrianRoute({x:-355,z:-520},{x:-5,z:-520}));
+test('the airport walk lattice routes public crossings around both runways and reserves end-around taxi lanes for aircraft',()=>{
+ // The old endpoints are now aircraft-only bypass lanes for the northern strip.
+ // Public pedestrians use the actual access-boulevard sidewalks outside airside.
+ assert.deepEqual(pedestrianRoute({x:-355,z:-520},{x:-5,z:-520}),[]);
+ for(const z of [-520,-470]){
+  const west={x:-373.8,z},east={x:56.2,z};
+  assertPublicWalk(pedestrianRoute(west,east));
+  assertPublicWalk(pedestrianRoute(east,west));
+ }
 });
 
 test('Westborough homes have two nearby lines and interchange journeys to the core, airport and Riverside',()=>{

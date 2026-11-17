@@ -12,9 +12,13 @@ export class RegionalAviationRenderer{
  }
  sync(snapshot:{flights?:readonly Manifest[]}|undefined){this.flights=snapshot?.flights||[];}
  update(now:number){
-  for(const [i,mesh]of this.planes.entries()){
-   const flight=this.flights[i];mesh.visible=Boolean(flight?.passengerIds?.length&&now>=flight.departure-300&&now<=flight.arrival+900);
-   if(!mesh.visible)continue;const pose=flightPose(now,flight);mesh.position.set(pose.x,pose.y,pose.z);mesh.rotation.y=pose.heading;
+  let visible=0;
+  for(const flight of this.flights){
+   if(!flight.passengerIds?.length||now<flight.departure-300||now>flight.arrival+900)continue;
+   if(visible===this.planes.length)break;
+   const mesh=this.planes[visible++],pose=flightPose(now,flight);
+   mesh.visible=true;mesh.position.set(pose.x,pose.y,pose.z);mesh.rotation.y=pose.heading;
   }
+  for(let i=visible;i<this.planes.length;i++)this.planes[i].visible=false;
  }
 }

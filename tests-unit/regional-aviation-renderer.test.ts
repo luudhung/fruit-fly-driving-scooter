@@ -13,3 +13,17 @@ test('regional aircraft render only real paid manifests and share a fixed geomet
  renderer.sync({flights:[{...flight,passengerIds:[]}]});renderer.update(flight.departure+600);assert.equal(scene.children.filter(m=>m.visible).length,0);
  let lights=0;scene.traverse(o=>{if(o instanceof THREE.Light)lights++;});assert.equal(lights,0);
 });
+
+test('future regional manifests do not consume the mesh pool ahead of a real active passenger flight',()=>{
+ const scene=new THREE.Group(),renderer=new RegionalAviationRenderer(scene);
+ const current={...nextRegionalFlight(0,'north','city')!,regional:true,passengerIds:['PAID-PASSENGER']};
+ const future=Array.from({length:30},(_,i)=>({...current,id:`FUTURE-${i}`,departure:current.departure+86400+i*3600,arrival:current.arrival+86400+i*3600}));
+ renderer.sync({flights:[...future,current]});renderer.update(current.departure+600);
+ const visible=scene.children.filter(mesh=>mesh.visible);
+ assert.equal(visible.length,1);
+ const pose=flightPose(current.departure+600,current);
+ assert.deepEqual(visible[0].position.toArray(),[pose.x,pose.y,pose.z]);
+ renderer.update(current.arrival+901);
+ assert.equal(scene.children.filter(mesh=>mesh.visible).length,0);
+ assert.equal(scene.children.length,12);
+});

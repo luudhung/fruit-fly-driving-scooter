@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createIndustrialEconomy} from '../worker/industrial-economy.mjs';
+import {createIndustrialEconomy,NORTH_F1_MERCH_ID} from '../worker/industrial-economy.mjs';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_PLANTS,INDUSTRIAL_ROADS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_LOADING_BAYS,MAX_FREIGHT_TRUCKS} from '../worker/industry-map.mjs';
 import {BUILDINGS,ROADS,LOCATIONS,WATER,applyUrbanGeometry,overlaps,pedestrianRoute,clearSegment} from '../worker/city-map.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_RESERVED} from '../worker/government-map.mjs';
@@ -110,4 +110,30 @@ test('an unboarded private pickup reassigns the same funded consignment to the l
 
 test('a director can decline recapitalization and exhausted collateral never draws unbacked credit',()=>{
  for(const blocked of ['unwilling','collateral','bank']){const t=fixture(),b=t.found(0,'INDUSTRY-west-2'),f=t.s.flies[0];Object.assign(b,{cash:0,loanBalance:blocked==='collateral'?1000:0,openingAt:0,nextOrderAt:0,nextFinanceAt:1e12,inventory:{raw:40,finished:0}});Object.assign(f,{money:100,savings:400,creditScore:750});if(blocked==='unwilling'){f.savings=4000;f.traits.ambition=0;f.traits.thrift=0;}if(blocked==='bank')t.s.bank.reserves=50;const before=cash(t.s),reserve=t.s.bank.reserves,debt=b.loanBalance;t.service.tick(0,{hour:2});assert.equal(b.cash,0,blocked);assert.equal(t.s.bank.reserves,reserve,blocked);assert.equal(b.loanBalance,debt,blocked);assert.ok(Math.abs(cash(t.s)-before)<1e-6);}
+});
+
+
+test('the Grand Prix shop orders real finished garments and receives stock only after physical delivery',()=>{
+ const t=fixture({sovereign:true,regionalDistribution:true}),supplier=t.found(0,'INDUSTRY-north-1');
+ Object.assign(supplier,{openingAt:0,nextFinanceAt:1e12,nextOrderAt:1e12,inventory:{raw:0,finished:42}});
+ t.s.industrialEconomy.nextRestockAt=1e12;t.s.regionalFreight.nextDispatchAt=1e12;
+ t.s.northF1={event:{status:'scheduled',startsAt:t.s.simulationAgeSeconds+24*3600,endsAt:t.s.simulationAgeSeconds+36*3600}};
+ const total=cash(t.s),north=t.s.businesses['treasury:north-city'],budget=north.cash,initialRevenue=supplier.revenueLifetime;
+ t.service.tick(0,{hour:2});
+ const shop=t.s.businesses[NORTH_F1_MERCH_ID],order=t.s.industrialEconomy.orders.find(o=>o.buyerId===NORTH_F1_MERCH_ID);
+ assert.equal(shop.locationId,'north-f1-grandstand');
+ assert.equal(north.cash,budget-1800);
+ assert.ok(order);
+ assert.equal(order.quantity,42);
+ assert.equal(shop.inventory,0);
+ assert.equal(supplier.inventory.finished,0);
+ for(let i=0;i<1000&&shop.inventory===0;i++){
+  t.s.simulationAgeSeconds+=120;
+  t.service.tick(120,{hour:2});
+ }
+ assert.equal(order.phase,'complete');
+ assert.equal(shop.inventory,42);
+ assert.equal(supplier.revenueLifetime-initialRevenue,42*8);
+ assert.equal(north.cash,budget-1800);
+ assert.ok(Math.abs(cash(t.s)-total)<1e-6);
 });

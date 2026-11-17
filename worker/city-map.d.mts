@@ -1,3 +1,4 @@
+import type {HansdrexStorefront,TowerObservation} from './hansdrex-tourism-map.mjs';
 export type Point={x:number;z:number};
 export type Rect=Point&{w:number;d:number};
 export type Road=Rect&{id?:string;motorway?:boolean;motorwayAccess?:boolean;lanes?:number;median?:number};
@@ -9,7 +10,7 @@ export const SKY_LOUNGE:Point&{y:number};
 export const PETRONAS_TOWERS:{west:Point;east:Point;w:number;d:number;h:number;bridgeY:number};
 export const LUXURY_RESIDENCES:Array<{id:string;name:string;capacity:number;purchaseValue:number}>;
 export const SKYLINE_REDEVELOPMENTS:Record<string,string>;
-export const AIRPORT:{terminal:Rect;gate:Point;runway:Rect;apron:Rect;helipad:Point&{y:number};heliAccess:Point};
+export const AIRPORT:typeof import('./hansdrex-airport-map.mjs').HANSDREX_AIRPORT;
 export const ISLAND:{x:number;z:number;rx:number;rz:number;runway:Rect;terminal:Rect;gate:Point;resort:Rect;beach:Point};
 export const SEA:Rect;
 export function onIsland(p:Point,margin?:number):boolean;
@@ -33,6 +34,7 @@ export const FERRIS_WHEEL:{x:number;z:number;y:number;radius:number;seats:number
 export function wheelCabin(seconds:number,seat:number):Point&{y:number};
 export const WATER:Rect[],ROADS:Road[],BRIDGES:Rect[],BUILDINGS:Building[],APARTMENTS:Building[],HOUSE_LOTS:Building[];
 export const AVENUES:number[],STREETS:number[];
+export const HANSDREX_STOREFRONTS:HansdrexStorefront[],TOWER_OBSERVATION:TowerObservation;
 export const LOCATIONS:Array<Point&{id:string;type:string;name:string}>;
 export const METRO_LINES:MetroLine[];
 export const WALKWAYS:Array<{a:Point;b:Point}>;

@@ -1,3 +1,4 @@
+import {northF1MovementBlocked,northF1PointRestricted} from '../worker/north-f1-closure.mjs';
 import * as THREE from 'three';
 import {ROADS,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,BUILDINGS,WORLD_HALF,contains,blocked,roadTravelY,effectiveBuildingHeight,urbanGeometryRevision} from '../worker/city-map.mjs';
 import {PLAYER_EYE} from './player-controller.ts';
@@ -86,7 +87,7 @@ function approach(value:number,target:number,step:number){return value<target?Ma
 /** Local observer vehicle: independent of the city's resident and traffic simulation. */
 export class PlayerCar{
  x:number=PLAYER_CAR_PARKING.x;z:number=PLAYER_CAR_PARKING.z;heading:number=PLAYER_CAR_PARKING.heading;ground:number=PLAYER_CAR_PARKING.ground;
- speed=0;steering=0;pitch=0;active=false;
+ speed=0;steering=0;pitch=0;active=false;trackClosed=false;
  private readonly world:CarWorld;
  constructor(world:CarWorld=cityWorld){this.world=world;}
  // A fresh page constructs the car by the bridge; re-entry keeps its parked pose.
@@ -104,6 +105,10 @@ export class PlayerCar{
   const pitch=ahead===null||behind===null?0:Math.atan2(ahead-behind,1.4);
   this.pitch+=(pitch-this.pitch)*-Math.expm1(-12*duration);
  }
+ private canDrive(x:number,z:number,heading:number,ground:number){
+  if(this.trackClosed&&northF1MovementBlocked({x:this.x,z:this.z,y:this.ground},{x,z,y:ground},Math.hypot(CAR_HALF_WIDTH,CAR_HALF_LENGTH)))return false;
+  return this.world.clear(x,z,heading,ground);
+ }
  private advance(dt:number,input:CarInput){
   const throttle=Math.max(-1,Math.min(1,input.throttle||0)),steer=Math.max(-1,Math.min(1,input.steer||0));
   const motorwayBoost=motorwaySpeedMultiplier(this),forwardLimit=15*motorwayBoost;
@@ -118,7 +123,7 @@ export class PlayerCar{
   // Positive steering is right, consistent with D / the right mobile arrow.
   const turn=-this.speed/2.7*Math.tan(this.steering*.48)*dt/(1+Math.abs(this.speed)*.055);
   let heading=this.heading+turn,x=this.x+Math.sin(heading)*this.speed*dt,z=this.z+Math.cos(heading)*this.speed*dt,ground=this.world.ground(x,z,this.ground);
-  if(ground===null||!this.world.clear(x,z,heading,ground)){
+  if(ground===null||!this.canDrive(x,z,heading,ground)){
    // Keep the free component of motion at contact; a rejected turn must not lock reverse escape.
    const travel=Math.abs(this.speed*dt),dx=Math.sin(this.heading)*this.speed*dt,dz=Math.cos(this.heading)*this.speed*dt;
    const candidates=[{x:this.x+dx,z:this.z+dz},{x:this.x+dx,z:this.z},{x:this.x,z:this.z+dz}];
@@ -126,7 +131,7 @@ export class PlayerCar{
    for(const p of candidates){
     if(Math.hypot(p.x-this.x,p.z-this.z)<=1e-7)continue;
     const candidateGround=this.world.ground(p.x,p.z,this.ground);
-    if(candidateGround!==null&&this.world.clear(p.x,p.z,this.heading,candidateGround)){free={...p,ground:candidateGround};break;}
+    if(candidateGround!==null&&this.canDrive(p.x,p.z,this.heading,candidateGround)){free={...p,ground:candidateGround};break;}
    }
    if(!free){this.speed=0;return;}
    this.speed*=Math.min(1,Math.hypot(free.x-this.x,free.z-this.z)/Math.max(1e-7,travel));
@@ -138,11 +143,11 @@ export class PlayerCar{
   const side=.38,forward=-.30*Math.cos(this.pitch)-1.45*Math.sin(this.pitch);
   return {x:this.x+side*Math.cos(this.heading)+forward*Math.sin(this.heading),y:this.ground+1.45*Math.cos(this.pitch)-.30*Math.sin(this.pitch),z:this.z-side*Math.sin(this.heading)+forward*Math.cos(this.heading)};
  }
- exitPosition(){return carExitPosition(this.x,this.z,this.ground);}
+ exitPosition(){return carExitPosition(this.x,this.z,this.ground,this.trackClosed);}
 }
 
 /** Find the nearest dry sidewalk beside the current road, at the car's own level. */
-export function carExitPosition(x:number,z:number,ground:number){
+export function carExitPosition(x:number,z:number,ground:number,trackClosed=false){
  const candidates:Array<{x:number;z:number}>=[];
  for(const b of BRIDGES)if(contains(b,{x,z})&&ground>-.1)for(const side of [-1,1])candidates.push({x,z:b.z+side*6.1});
  for(const r of ROADS){
@@ -156,7 +161,7 @@ export function carExitPosition(x:number,z:number,ground:number){
   let floor=.2;
   const tunnel=UNDERPASSES.find(t=>Math.abs(p.x-t.x)<t.w/2+2.6&&Math.abs(p.z-t.z)<t.halfLength);
   if(tunnel&&ground<-.1){const d=Math.abs(p.z-tunnel.z);floor=.2-tunnel.depth*(d<=tunnel.coveredHalf?1:(tunnel.halfLength-d)/(tunnel.halfLength-tunnel.coveredHalf));}
-  if(Math.abs(floor-ground)>.55||pavedAtLevel(p,floor,.35))continue;
+  if(Math.abs(floor-ground)>.55||pavedAtLevel(p,floor,.35)||trackClosed&&northF1PointRestricted({...p,y:floor},.35))continue;
   let safe=true;const n=Math.ceil(Math.hypot(p.x-x,p.z-z)/.3);
   for(let i=1;i<=n;i++)if(blocked({x:x+(p.x-x)*i/n,z:z+(p.z-z)*i/n})){safe=false;break;}
   if(safe)return {...p,y:floor+PLAYER_EYE};

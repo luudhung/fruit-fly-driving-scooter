@@ -1,8 +1,10 @@
+import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {createSpaceProgram} from './space-program.mjs';
 import {createNorthF1} from './north-f1.mjs';
 import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
+import {relocateHansdrexAirport} from './hansdrex-airport-map.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
 import {createInternationalLife} from './international-life.mjs';
@@ -524,9 +526,12 @@ const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember
 const urbanWorld=createUrbanWorld(cityServices);
 const spaceProgram=createSpaceProgram({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f)});
 const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
-const northF1=createNorthF1({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),northAccount:()=>countries.countryAccount('north-city'),lawfulPresence:(f,id)=>countries.lawfulPresence(f,id),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),travelCost:(f,id)=>countries.travelCost(f,id)});
+const northF1=createNorthF1({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),northAccount:()=>countries.countryAccount('north-city'),lawfulPresence:(f,id)=>countries.lawfulPresence(f,id),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),travelCost:(f,id)=>countries.travelCost(f,id),
+ interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),
+ bookEventHotel:(f,nights)=>cityVisitors.reserveEventRoom(f,nights),releaseEventHotel:f=>cityVisitors.releaseEventRoom(f),
+ visitEventAttraction:(f,id,clock)=>cityVisitors.visitEventAttraction?.(f,id,clock)});
 const sportsLuxury=createSportsLuxury({...cityServices,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
-const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),raceFlights:()=>northF1.charters(),requestRaceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
+const cityVisitors=createCityVisitors({...cityServices,brainRandom:brainRand,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options),raceFlights:()=>northF1.charters(),requestRaceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),advanceHeliTour:simulateHeliTour,createVisitor:(name,index)=>createFly(index,null,{id:`VIS-${String(index).padStart(6,'0')}`,name,visitor:true})});
 const regionalAviation=createRegionalAviationSystem({...cityServices,weatherDanger,
  raceOffer:f=>northF1.offer(f),attendRace:f=>northF1.attend(f),
  schoolAccepting:id=>!urbanWorld.isUnavailable(id)&&(id==='school'||state.flies.some(f=>f.alive&&f.facilityEmployment?.buildingId===id)),
@@ -549,6 +554,7 @@ function syncDistrictHousingPrices(){
 }
 function initCityServices(){
  relocateNorthTower(state);
+ relocateHansdrexAirport(state);
  syncDistrictHousingPrices();state.emergencyServicesEnabled=true;migrateNorthIndustry(state);publicServices.initializeCadre();urbanWorld.init();normalizeHousingCapacities(state.housing,BUILDINGS);restoreHospitalityPremises(state);sportsLuxury.init();cityVisitors.init();regionalAviation.init();civicConflict.init();residentRelationships.init();publicServices.init();
  if(!state.nationalResidenceMigration?.version){
   const beforeIds=new Set(state.flies.map(f=>f.id)),moneyBefore=liquidMoneySupply();
@@ -3135,6 +3141,14 @@ function validBoardingPlatform(waypoint,lineId){
   return Math.hypot(waypoint.x-platform.x,waypoint.z-platform.z,(waypoint.y??0)-platform.y)<.01;
 }
 function residentCountryAdmission(fly,next){
+  const driving=['car','scooter'].includes(fly.transitMode);
+  if(isNorthF1TrackClosed(state)&&northF1MovementBlocked(fly,next,driving?1.5:.32)){
+    fly.vx=fly.vz=0;fly.motionSpeed=0;
+    fly.trafficStatus='waiting outside the closed Grand Prix circuit';
+    fly.trafficHoldUntil=state.simulationAgeSeconds+activeGameStepSeconds;
+    fly.travelStuckTicks=0;
+    return false;
+  }
   const admission=countries.interceptMovement(fly,fly,next,{mode:['car','scooter'].includes(fly.transitMode)?fly.transitMode:'walk'});
   if(admission.allowed){fly.countryBorderHold=null;return true;}
   fly.vx=fly.vz=0;fly.travelStuckTicks=0;
@@ -3341,7 +3355,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
   const stationAccess=fly.transitMode==='walk'&&(activeWp?.stage?.startsWith('station-')||activeWp?.stage==='interchange-walk');
   const clear=stationAccess?clearMetroAccessSegment(fly,{...nextPosition,y:nextY}):clearSegment(fly,nextPosition);
   if(!clear){if(fly.transitMode==="car"){roadLife.park(fly);fly.carPosition=null;roadLife.arrived(fly);}fly.vx=fly.vz=0;fly.traveling=false;fly.actionUntil=0;fly.action="replanning a blocked route";return;}
-  if(!residentCountryAdmission(fly,nextPosition))return;
+  if(!residentCountryAdmission(fly,{...nextPosition,y:nextY}))return;
   fly.x=nextPosition.x;fly.z=nextPosition.z;fly.y=nextY;
   if(["car","scooter"].includes(fly.transitMode))fly.carPosition={x:fly.x,z:fly.z};
 
@@ -3615,7 +3629,7 @@ function simulateHeliTour(fly,clock){
     return true;
   }
   if(fly.currentLocationId!=="heliport"||fly.traveling||fly.action!=="taking a Hansdrex helicopter sightseeing tour")return false;
-  const active=state.flies.filter(f=>f.alive&&f.heliPassenger&&f.heliTourUntil>now).length;
+  const active=neuralActors().filter(f=>f.alive&&f.heliPassenger&&f.heliTourUntil>now).length;
   if(active>=AVIATION.heliSeats||(state.helicopterFlight&&now>=state.helicopterFlight.startsAt&&now<state.helicopterFlight.endsAt)){
     fly.action="waiting for the next airport helicopter";fly.actionUntil=now+900;return true;
   }

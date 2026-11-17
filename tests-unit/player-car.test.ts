@@ -172,3 +172,11 @@ test('exiting at the curb and bridge produces a dry sidewalk supported by the wa
   for(const [x,z]of [[430,50],[15,-112],[500,600]]){walker.teleport(x,1.05,z);assert.equal(walker.swimming,true);}
   walker.teleport(430,1.05,50,true);assert.equal(walker.swimming,false);
  });
+
+test('the player car stops outside the closed circuit, then crosses after reopening',()=>{
+ const car=new PlayerCar(open);car.enter();car.x=-790;car.z=-897;car.heading=Math.PI;car.trackClosed=true;
+ run(car,4,{throttle:1,steer:0});
+ assert.ok(car.z>-906&&car.z< -902);assert.equal(car.speed,0);
+ car.trackClosed=false;run(car,3,{throttle:1,steer:0});
+ assert.ok(car.z< -920);
+});

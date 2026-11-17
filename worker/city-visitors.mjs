@@ -1,11 +1,14 @@
+import {createHansdrexTourism} from './hansdrex-tourism.mjs';
+import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
 import {motorwaySpeedMultiplier} from './motorway.mjs';
 import {COMBINED_CAP} from './population-limits.mjs';
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {countryAt,COUNTRY_IDS,COUNTRY_AIRPORTS} from './country-map.mjs';
-import {airportById,tourismFares} from './aviation.mjs';
+import {airportById} from './aviation.mjs';
+import {HANSDREX_AIRLINE,hansdrexAirlineAccount,hansdrexAirlineSummary,chargeHansdrexFare,hansdrexReturnFare} from './hansdrex-airline.mjs';
 import {syncHospitalityHotels,hospitalityAccount,recordHospitalitySale,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
-import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_STANDS, VISITOR_TOUCHDOWN_SECONDS, MIN_VISITOR_PASSENGERS, visitorStands,visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwaySlot} from './visitor-aviation.mjs';
+import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_TOUCHDOWN_SECONDS, MIN_VISITOR_PASSENGERS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,legacyVisitorStand} from './visitor-aviation.mjs';
 
 const MAX_VISITORS=40,MAX_TAXIS=6,HOUR=3600,DAY=86400;
 const cap=(v,a=0,b=100)=>Math.max(a,Math.min(b,Number.isFinite(v)?v:a));
@@ -15,10 +18,11 @@ const location=id=>LOCATIONS.find(l=>l.id===id);
 const departurePort=v=>airportById(v.departureAirportId||v.entryAirportId||'city');
 const atAirport=v=>v.currentLocationId===departurePort(v).locationId&&dist(v,departurePort(v).terminal)<45;
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
+const hansHotels={'hotel':56,'riverside-hotel':42,'marina-bay':128};
 function busy(f,now=0){return f.countryAirTrip||f.countryFlightPlan||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
 
 /** Persisted finite visitors, physical taxi trips and compact scene records. No pixel rendering on server. */
-export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false,isWorkCommitted=()=>false,aviationAdmission,interceptMovement,requestRegionalTrip,raceFlights=()=>[],requestRaceOffer=()=>null,attendRace=()=>false}){
+export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},remember=()=>{},startJourney,moveFly,createVisitor,needsAndActivities,payAndFinance,isUnavailable=()=>false,isWorkCommitted=()=>false,aviationAdmission,interceptMovement,requestRegionalTrip,raceFlights=()=>[],requestRaceOffer=()=>null,attendRace=()=>false,advanceHeliTour}){
  const international=Boolean(aviationAdmission||interceptMovement);
  const raw=()=>world();
  const now=()=>Number(raw().simulationAgeSeconds||0);
@@ -41,9 +45,15 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   const cash=Math.min(Math.max(0,Number(f.money||0)),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings||0))-(cost-cash);to.cash=Number(to.cash||0)+cost;
   f.expensesLifetime=Number(f.expensesLifetime||0)+cost;if(cost)raw().totalTransactions=Number(raw().totalTransactions||0)+1;return true;
  }
+ const tourism=createHansdrexTourism({world,isUnavailable,transfer,emit,remember,advanceHeliTour});
+ function visitEventAttraction(v,id,clock){return tourism.tryVisit(v,id,clock);}
  function init(){
-  const s=data();business('city-taxi-escrow');business('city-tourism');business('city-media');
-  s.hotels||={};s.hotels['marina-bay']||={id:'marina-bay',capacity:24,pricePerNight:28,rooms:{}};
+  const s=data();business('city-taxi-escrow');business('city-tourism');business('city-media');hansdrexAirlineAccount(raw());
+  s.hotels||={};
+  for(const [id,capacity] of Object.entries(hansHotels)){
+   const hotel=s.hotels[id]||={id,capacity,pricePerNight:id==='marina-bay'?28:18,rooms:{}};
+   if(!hotel.enterpriseId)hotel.capacity=Math.max(hotel.capacity,capacity);
+  }
   if(location('north-hotel'))s.hotels['north-hotel']||={id:'north-hotel',capacity:16,pricePerNight:16,rooms:{}};
   syncHospitalityHotels(raw(),{isUnavailable});
   for(const id of Object.keys(s.hotels)){business(id);s.hotels[id].rooms||={};}
@@ -51,10 +61,12 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   s.airportTraffic||={nextFlightId:1,flights:[],landed:0,departed:0};
   for(const flight of s.airportTraffic.flights){
    flight.airportId||='city';
+   flight.arrivalStand||=legacyVisitorStand(flight);
+   flight.carrierId||=HANSDREX_AIRLINE.id;flight.carrierName||=HANSDREX_AIRLINE.name;
    if(flight.unloaded&&flight.landedAt==null)flight.landedAt=flight.parkedAt;
    flight.kind||=flight.arrivingGuests>0?'passenger':'ferry';
   }
-  for(const v of s.visitors){v.kind='visitor';v.taxiPassenger=Boolean(v.taxiPassenger);v.entryAirportId||='city';v.departureAirportId||=v.entryAirportId;v.originCountryId||='outside';v.citizenshipCountryId||='outside';v.travelGoals||=['hansdrex','north-city'];v.travelGoalsCompleted||=[];v.siteCountryVisits||={};}
+  for(const v of s.visitors){v.kind='visitor';v.taxiPassenger=Boolean(v.taxiPassenger);v.entryAirportId||='city';v.departureAirportId||=v.entryAirportId;v.originCountryId||='outside';v.citizenshipCountryId||='outside';v.travelGoals||=['hansdrex','north-city'];v.travelGoalsCompleted||=[];v.siteCountryVisits||={};if(international&&!v.returnFarePaid){v.returnFareReserve=hansdrexReturnFare(v);v.visitorReservedBudget=Math.max(Number(v.visitorReservedBudget||0),v.returnFareReserve+100);}}
   if(international&&!s.internationalTourVersion){for(const v of s.visitors)if(v.airportFlightId)v.visitorMedicalException='grandfathered booked departure';s.internationalTourVersion=1;}
   // Reservations and committed trips resume from stored phases; never recharge in init.
   return s;
@@ -71,20 +83,42 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   v.hotelId=hotelId;v.hotelPaid=cost;v.hotelReserved=true;
   return true;
  }
+ function roomHotels(countryId){
+  return Object.values(data().hotels).filter(h=>!h.closed&&location(h.id)&&countryAt(location(h.id))===countryId&&!isUnavailable(h.id)&&Object.keys(h.rooms).length<h.capacity);
+ }
+ function reserveEventRoom(v,nights){
+  if(v.eventHotelId&&data().hotels[v.eventHotelId]?.rooms?.[v.id])return true;
+  const from=Number.isFinite(v.x)&&Number.isFinite(v.z)?v:AIRPORT.gate;
+  const choices=roomHotels(COUNTRY_IDS.hansdrex).sort((a,b)=>dist(from,location(a.id))-dist(from,location(b.id)));
+  for(const hotel of choices){
+   const cost=Math.round(Number(hotel.pricePerNight||18)*level()*nights*100)/100;
+   if(money(v)<cost+Math.max(0,Number(v.visitorReservedBudget??110))||!reserveRoom(v,hotel.id,nights))continue;
+   v.eventHotelId=hotel.id;
+   hotel.rooms[v.id].kind='grand-prix';
+   return true;
+  }
+  return false;
+ }
+ function releaseEventRoom(v){
+  const hotel=data().hotels[v.eventHotelId];
+  if(hotel?.rooms?.[v.id]?.kind==='grand-prix')delete hotel.rooms[v.id];
+  v.eventHotelId=null;
+ }
  function spawnVisitor(options={}){
   const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=COMBINED_CAP||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
   const entry=airportById(options.airportId||'city');if(!entry)return null;
-  const available=Object.values(s.hotels).filter(h=>!h.closed&&location(h.id)&&countryAt(location(h.id))===entry.countryId&&!isUnavailable(h.id)&&Object.keys(h.rooms).length<h.capacity);
+  // The ordinary holiday package stays in Hansdrex regardless of entry airport.
+  const available=roomHotels(COUNTRY_IDS.hansdrex);
   if(!available.length)return null;
   const index=s.nextVisitorId++,id=`VIS-${String(index).padStart(6,'0')}`,name=`Visitor ${index}`;
   const v=options.preparedVisitor||createVisitor(name,index);if(!v?.brain?.id)return null;
-  const duration=Number(options.staySeconds||DAY*(3+Math.floor(rng()*3))),budget=Number(options.budget||Math.round((620+rng()*500)*level()));
+  const duration=Number(options.staySeconds||DAY*(3+Math.floor(rng()*3))),budget=Number(options.budget||Math.round((1100+rng()*700)*level()));
   Object.assign(v,{id,name,kind:'visitor',alive:true,departed:false,causeOfDeath:null,visitorArrivedAt:now(),departAt:now()+duration,
    money:budget,savings:0,debt:0,jobId:null,jobTitle:'visiting Hansdrex',wage:0,vehicle:null,vehicleLoan:null,ownsHome:false,homeId:'hotel',
    householdId:null,housingUnitId:null,businessId:null,businessEmployeeOf:null,partnerId:null,pregnancyDueAt:null,children:[],parents:[],
    x:entry.gate.x,y:1.1,z:entry.gate.z,targetX:entry.gate.x,targetZ:entry.gate.z,vx:0,vz:0,
    currentLocationId:entry.locationId,targetLocationId:entry.locationId,traveling:false,indoors:false,onTrain:false,onPlane:false,heliPassenger:false,
-   citizenshipCountryId:'outside',originCountryId:'outside',entryAirportId:entry.id,departureAirportId:entry.id,travelGoals:['hansdrex','north-city'],travelGoalsCompleted:[],siteCountryVisits:{},visitorReservedBudget:190,
+   citizenshipCountryId:'outside',originCountryId:'outside',entryAirportId:entry.id,departureAirportId:'city',travelGoals:entry.id==='north'?['hansdrex','north-city']:['hansdrex'],hansHoliday:true,travelGoalsCompleted:[],siteCountryVisits:{},visitorReservedBudget:international?350:190,returnFareReserve:international?200:0,
    hunger:20,thirst:15,energy:90,health:95,happiness:70,stress:10,loneliness:15,transitMode:'walk',transitStage:null,
    routeWaypoints:[],routeIndex:0,action:'arrived at the city airport',visitorPhase:'arrival',expensesLifetime:0,nextVisitAt:now(),placesVisited:[],photoInterest:rng()>.3});
   const h=available[Math.floor(rng()*available.length)];
@@ -106,7 +140,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   if(v.immigrationClearedAt!=null)return;
   const port=airportById(v.entryAirportId||'city');
   if(international){
-   if(!v.arrivalFarePaid){const fare=tourismFares(level()).oneWay;if(money(v)<fare+100||!transfer(v,fare,business('visitor-airline')))return false;v.arrivalFarePaid=fare;}
+   if(!v.arrivalFarePaid&&!chargeHansdrexFare(raw(),v,'inbound',{reference:v.arrivalFlightId||`external-${v.id}`}))return false;
    const admission=aviationAdmission?.(v,{airportId:port.id,flightId:v.arrivalFlightId||`external-${v.id}`,toCountryId:port.countryId});
    if(admission&&!admission.allowed){Object.assign(v,{x:port.terminal.x,z:port.terminal.z,y:1.1,onPlane:false,indoors:true,traveling:false,visitorPhase:'airport-arrival',action:'waiting for airport immigration clearance'});return false;}
   }
@@ -157,18 +191,24 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  function localMotion(f,gameSeconds,headway){
   if(!f.traveling)return true;
   f.trafficStatus=null;f.trafficHoldUntil=0;f.signalEncounter=null;
+  const trackClosed=isNorthF1TrackClosed(raw());
   let left=Math.max(0,gameSeconds)/Math.max(1,Number(raw().timeScale||120));
   for(let hop=0;left>1e-6&&hop<48;hop++){
    const p=f.routeWaypoints?.[f.routeIndex];if(!p){f.traveling=false;f.vx=f.vz=0;return true;}
    f.targetX=p.x;f.targetZ=p.z;f.transitMode=p.mode||'walk';const dx=p.x-f.x,dz=p.z-f.z,length=Math.hypot(dx,dz),speed=f.transitMode==='car'?11*motorwaySpeedMultiplier(f):2.5;
-   if(length<.05){f.x=p.x;f.z=p.z;f.y=p.y??1.1;f.routeIndex++;continue;}
+   const waitingForF1=next=>trackClosed&&northF1MovementBlocked(f,next,f.transitMode==='car'?1.5:.32);
+   if(length<.05&&!waitingForF1({...p,y:p.y??1.1})){f.x=p.x;f.z=p.z;f.y=p.y??1.1;f.routeIndex++;continue;}
+   if(length<.05){f.vx=f.vz=f.motionSpeed=0;f.trafficStatus='waiting outside the closed Grand Prix circuit';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
    const ux=dx/length,uz=dz/length;let step=Math.min(length,left*speed),stop=false;
    if(f.transitMode==='car'){
     const barrier=signalBarrier(f,{x:f.x+ux*step,z:f.z+uz*step},now()/Math.max(1,Number(raw().timeScale||120)));
     if(barrier){step=Math.min(step,barrier.distance);stop=true;f.trafficStatus='waiting at red light';}
     const limit=headway?headway(f,{x:f.x+ux*step,z:f.z+uz*step}):step;if(limit<step){step=limit;stop=true;f.trafficStatus='queuing behind traffic';}
    }
-   let next={x:f.x+ux*step,z:f.z+uz*step};if(!clearSegment(f,next)){f.vx=f.vz=0;f.trafficStatus='route temporarily blocked';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
+   let next={x:f.x+ux*step,z:f.z+uz*step};if(waitingForF1({...next,y:p.y??1.1})){
+    f.vx=f.vz=f.motionSpeed=0;f.trafficStatus='waiting outside the closed Grand Prix circuit';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;
+   }
+   if(!clearSegment(f,next)){f.vx=f.vz=0;f.trafficStatus='route temporarily blocked';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
    if(interceptMovement){const taxi=data().taxiJobs.find(j=>j.driverId===f.id&&j.phase==='riding'),admission=interceptMovement(f,{x:f.x,z:f.z},next,{mode:f.transitMode==='car'?'car':'walk',commit:true,occupantIds:taxi?[f.id,taxi.passengerId]:[f.id]});if(admission&&!admission.allowed){if(admission.position)Object.assign(f,admission.position);f.trafficStatus=admission.reason||'waiting at international customs';f.vx=f.vz=0;return false;}if(admission?.position)next=admission.position;}
    f.vx=next.x-f.x;f.vz=next.z-f.z;f.x=next.x;f.z=next.z;f.y=p.y??1.1;f.motionSpeed=speed;
    if(f.transitMode==='car')f.carPosition={x:f.x,z:f.z};
@@ -270,6 +310,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    emit('visitor_fatality',`${v.id} died during a visit; the room was released and the estate returned abroad.`,{visitorId:v.id,cause:v.causeOfDeath||'fatal injuries'});return;
   }
   if(v.visitorPhase==='inbound-flight'||v.visitorPhase==='airport-arrival')return;
+  if(tourism.advance(v,clock))return;
   const tourComplete=!international||v.visitorMedicalException||v.travelGoals?.every(id=>v.travelGoalsCompleted?.includes(id));
   if(v.airportFlightId||v.visitorPhase==='airport-wait'&&atAirport(v)&&tourComplete)return;
   if(v.visitorPhase==='airport-wait')v.visitorPhase='departing';
@@ -308,7 +349,11 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    const complete=v.travelGoals?.every(id=>v.travelGoalsCompleted?.includes(id));
    if(complete){
     if(requestRegionalTrip&&!v.hawaiiOptionalAttempt&&money(v)>650&&Number(v.traits?.ambition||.5)>.6){v.hawaiiOptionalAttempt=true;if(rng()<.25&&requestRegionalTrip(v,'island',{staySeconds:DAY})){v.visitorPhase='optional-hawaii';v.departAt=now()+DAY*3;return;}}
-    const port=COUNTRY_AIRPORTS.find(p=>p.countryId===at&&p.id!=='island');if(port)v.departureAirportId=port.id;v.departAt=Math.min(v.departAt,Number(v.nextCountryVisitAt||now()+3600));
+    if(v.hansHoliday)v.departureAirportId='city';
+   else{
+    const port=COUNTRY_AIRPORTS.find(p=>p.countryId===at&&p.id!=='island');if(port)v.departureAirportId=port.id;
+    v.departAt=Math.min(v.departAt,Number(v.nextCountryVisitAt||now()+3600));
+   }
    }
    else if(now()>=v.departAt&&!v.visitorMedicalException)v.departAt=now()+DAY;
   }
@@ -321,6 +366,10 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    v.visitorPhase='departing';travelVisitor(v,departurePort(v).locationId,'returning to the airport for departure');return;
   }
   if(v.visitorPhase==='arrival'){
+   if(international&&v.entryAirportId==='north'&&countryAt(v)===COUNTRY_IDS.north&&!v.travelGoalsCompleted?.includes(COUNTRY_IDS.north)){
+    const race=requestRaceOffer(v),destination=race&&now()>=race.startsAt-20*HOUR?race.siteId:'airport-park';
+    travelVisitor(v,destination,'visiting North City before checking in at the Hansdrex hotel');return;
+   }
    v.visitorPhase='checking-in';travelVisitor(v,v.hotelId,'travelling to the reserved city hotel');return;
   }
   if(v.hunger>=40&&purchaseHospitalityMeal(raw(),v,v.currentLocationId)){
@@ -328,23 +377,30 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    remember(v,'restaurant_meal',{locationId:v.currentLocationId});return;
   }
   if(v.currentLocationId===v.hotelId){
-   const room=data().hotels[v.hotelId].rooms[v.id];if(room&&!room.checkedIn){room.checkedIn=true;room.checkedInAt=now();v.visitorPhase='staying';emit('hotel_checkin',`${v.id} checked into ${v.hotelId}.`,{visitorId:v.id,hotelId:v.hotelId});}
+   const room=data().hotels[v.hotelId]?.rooms?.[v.id];if(room&&!room.checkedIn){room.checkedIn=true;room.checkedInAt=now();v.visitorPhase='staying';emit('hotel_checkin',`${v.id} checked into ${v.hotelId}.`,{visitorId:v.id,hotelId:v.hotelId});}
    if(clock.hour>=21||clock.hour<7||v.energy<35){v.action='resting in a prepaid city hotel room';v.indoors=true;v.sleeping=true;v.energy=cap(v.energy+hours*18);v.hunger=Math.min(v.hunger,25);v.thirst=Math.min(v.thirst,20);v.stress=cap(v.stress-hours*4);return;}
    v.sleeping=false;
   }
-  const race=requestRaceOffer(v);
-  if(race&&clock.hour>=7&&v.energy>=35&&money(v)>=race.price+v.visitorReservedBudget&&countryAt(v)===COUNTRY_IDS.north){
-   if(v.currentLocationId===race.siteId){
+  const race=requestRaceOffer(v),inNorth=countryAt(v)===COUNTRY_IDS.north;
+  if(race&&v.energy>=35&&money(v)>=race.price+v.visitorReservedBudget){
+   if(v.currentLocationId===race.siteId&&inNorth){
     if(attendRace(v)){v.action='watching the North City Grand Prix';v.northRaceStayUntil=race.endsAt;}
-   }else if(now()>=race.startsAt-7*HOUR&&now()<race.endsAt&&location(race.siteId)){
-    travelVisitor(v,race.siteId,'visiting the North City Grand Prix');return;
+    else if(now()<race.startsAt){v.action='waiting at the North City Grand Prix entrance';return;}
+   }else if((inNorth||v.traits?.sociability>=.62)&&now()>=race.startsAt-(inNorth?8:22)*HOUR&&now()<race.startsAt&&location(race.siteId)){
+    v.hansOutingId=null;travelVisitor(v,race.siteId,'visiting the North City Grand Prix');return;
    }
   }
   if(Number(v.northRaceStayUntil||0)>now()){v.action='watching the North City Grand Prix';return;}
+  if(v.hansOutingId){
+   const target=v.hansOutingId;v.hansOutingId=null;
+   if(tourism.tryVisit(v,target,clock))return;
+  }
   if(international&&now()>=Number(v.nextCountryVisitAt||0)){
    const here=countryAt(v),next=(v.travelGoals||[]).includes(here)&&!v.travelGoalsCompleted?.includes(here)?here:(v.travelGoals||[]).find(id=>!v.travelGoalsCompleted?.includes(id));
    if(next){const destination=next===COUNTRY_IDS.north?'airport-park':'park';if(location(destination)){travelVisitor(v,destination,'following a prepaid two-country sightseeing plan');v.nextVisitAt=now()+1800;return;}}
-   else if(countryAt(v)!==countryAt(location(v.hotelId))&&now()<v.departAt){v.action='resting after visiting both countries before the return flight';v.energy=cap(v.energy+hours*6);return;}
+   else if(countryAt(v)!==countryAt(location(v.hotelId))&&now()<v.departAt){
+    travelVisitor(v,v.hotelId,'returning to the Hansdrex hotel after a visit to North City');return;
+   }
   }
   if(now()<v.nextVisitAt)return;
   if(v.hunger>=45){
@@ -359,6 +415,11 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    v.nextVisitAt=now()+3600+rng()*3600;v.action='enjoying a city attraction';return;
   }
   if(clock.hour>=20||v.energy<40||v.hunger>65){travelVisitor(v,v.hotelId,'returning to the hotel');v.nextVisitAt=now()+1800;return;}
+  const outing=tourism.nextOuting(v,clock,rng());
+  if(outing){
+   if(v.currentLocationId===outing){if(tourism.tryVisit(v,outing,clock))return;}
+   else {v.hansOutingId=outing;travelVisitor(v,outing,'going to a booked Hansdrex attraction');v.nextVisitAt=now()+1800;return;}
+  }
   const places=scenery.filter(id=>location(id)&&!isUnavailable(id,v)&&!v.placesVisited.slice(-3).includes(id));
   if(!places.length)return;
   const id=places[Math.floor(rng()*places.length)];travelVisitor(v,id,'visiting a city attraction');v.nextVisitAt=now()+1800;
@@ -420,16 +481,16 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   if(event&&event.endsAt>now())add(event.locationId,'joining the riverbank photo club',32+f.loneliness*.5+Number(f.traits?.sociability||.5)*20);
   if(money(f)>350&&f.ageYears>=18&&Number(f.traits?.thrift||.5)<.45&&f.currentLocationId&&location(f.currentLocationId)&&clock.hour>=7&&clock.hour<21&&!f.vehicle)add(f.currentLocationId,'calling a city taxi',8+f.stress*.25);
  }
- function airportAdmissionCapacity(airportId='city'){
+ function airportAdmissionCapacity(){
   const s=data(),active=s.visitors.filter(v=>v.alive&&!v.departed).length;
-  const country=airportById(airportId).countryId,rooms=Object.values(s.hotels).filter(h=>!h.closed&&location(h.id)&&countryAt(location(h.id))===country&&!isUnavailable(h.id))
+  const rooms=roomHotels(COUNTRY_IDS.hansdrex)
    .reduce((sum,h)=>sum+Math.max(0,h.capacity-Object.keys(h.rooms).length),0);
   return Math.max(0,Math.min(MAX_VISITORS-active,COMBINED_CAP-residents().length-active,rooms));
  }
  function reserveManifest(flight){
   if(flight.arrivalPassengerIds)return true;
-  const count=Math.max(MIN_VISITOR_PASSENGERS,Number(flight.arrivingGuests||0));
-  if(!createVisitor||airportAdmissionCapacity(flight.airportId||'city')<count)return false;
+  const count=MIN_VISITOR_PASSENGERS;
+  if(!createVisitor||airportAdmissionCapacity()<count)return false;
   const start=data().nextVisitorId;
   const seeds=Array.from({length:count},(_,index)=>createVisitor(`Visitor ${start+index}`,start+index));
   if(seeds.some(seed=>!seed?.brain?.id))return false;
@@ -445,17 +506,18 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  }
  function queueAircraft(guests,airportId='city'){
   const traffic=data().airportTraffic;
-  const stand=visitorStands(airportId).find(p=>!traffic.flights.some(f=>f.standId===p.id&&(f.airportId||'city')===airportId));
-  if(!stand)return false;
-  if(guests>0&&airportAdmissionCapacity(airportId)<MIN_VISITOR_PASSENGERS)return false;
+  if(guests>0&&airportAdmissionCapacity()<MIN_VISITOR_PASSENGERS)return false;
   const sector=AIRPORT_SECTORS[Math.floor(rng()*AIRPORT_SECTORS.length)];
   const direction=sector==='east'?-1:sector==='west'?1:rng()<.5?-1:1;
-  const inboundAt=runwaySlot(now()+180,INBOUND_SECONDS,airportId);
-  const flight={id:`${airportId==='city'?'HCA':'NCA'}-${traffic.nextFlightId++}`,airportId,standId:stand.id,sector,direction,inboundAt,
-   parkedAt:inboundAt+INBOUND_SECONDS,arrivingGuests:guests,unloaded:false,passengerIds:[],
+  const flight={id:`${airportId==='city'?'HCA':'NCA'}-${traffic.nextFlightId++}`,airportId,sector,direction,
+   carrierId:HANSDREX_AIRLINE.id,carrierName:HANSDREX_AIRLINE.name,oneWayFare:HANSDREX_AIRLINE.oneWayFare,
+   arrivingGuests:guests>0?MIN_VISITOR_PASSENGERS:0,unloaded:false,passengerIds:[],
    kind:guests>0?'passenger':'ferry',arrivalPassengerIds:guests>0?undefined:[],
    boardAt:null,outboundAt:null,exitAt:null};
+  if(!reserveAircraft(flight,now()+180))return false;
   if(guests>0&&!reserveManifest(flight))return false;
+  // The aircraft rotates after its ten passengers have left the stairs. Their
+  // walk through immigration continues independently of the parked aircraft.
   traffic.flights.push(flight);
   return true;
  }
@@ -463,10 +525,42 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   const weather=raw().weather||{};
   return weather.condition==='thunderstorm'||Number(weather.precipitation||0)>=.7||Number(weather.wind||0)>.72;
  }
- function runwaySlot(time,duration,airportId,except){
+ function airportFlights(airportId,except){
   const flights=[...data().airportTraffic.flights,...raceFlights()].filter(f=>f!==except&&(f.airportId||'city')===airportId);
   for(const plane of raw().nationalServices?.aircraft||[])if(plane.airportId===airportId&&plane.flight)flights.push({inboundAt:plane.flight.departure,parkedAt:plane.flight.arrival,outboundAt:null,exitAt:null});
-  return visitorRunwaySlot(time,duration,flights,airportId);
+  return flights;
+ }
+ function runwaySlot(time,duration,airportId,except){
+  if(duration===OUTBOUND_SECONDS&&except?.runwayId)return visitorRunwaySlot(time,duration,airportFlights(airportId,except),airportId,except.runwayId);
+  const reservation=visitorRunwayReservation(time,duration,airportFlights(airportId,except),airportId);
+  if(except)except.runwayId=reservation.runwayId;
+  return reservation.at;
+ }
+ function scheduleTurnaround(flight,otherFlights=airportFlights(flight.airportId||'city',flight)){
+  const count=Number(flight.arrivingGuests||0),stairs=count?visitorArrivalPath(flight,count-1,Number(raw().timeScale||120))[1]?.at:flight.parkedAt;
+  const earliest=Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600);
+  flight.outboundAt=visitorRunwaySlot(earliest,OUTBOUND_SECONDS,[...otherFlights,flight],flight.airportId||'city',flight.runwayId);
+  flight.boardAt=flight.outboundAt-420;flight.exitAt=flight.outboundAt+OUTBOUND_SECONDS;
+  flight.expectedStandReleaseAt=flight.outboundAt+140;
+ }
+ function rescheduleArrival(flight,earliest){
+  if(!reserveAircraft(flight,earliest))return false;
+  if(flight.arrivalPassengerIds?.length)flight.arrivalCompleteAt=visitorArrivalPath(flight,flight.arrivalPassengerIds.length-1,Number(raw().timeScale||120)).at(-1)?.at;
+  return true;
+ }
+ function reserveAircraft(flight,earliest){
+  const airport=flight.airportId||'city',others=airportFlights(airport,flight);
+  let stay=21600;
+  for(let tries=0;tries<40;tries++){
+   const reservation=visitorStandReservation(earliest,others,airport,stay);if(!reservation)return false;
+   const candidate={...flight,inboundAt:reservation.at,parkedAt:reservation.at+INBOUND_SECONDS,runwayId:reservation.runwayId,
+    standId:reservation.stand.id,arrivalStand:reservation.stand,outboundAt:null,boardAt:null,exitAt:null};
+   scheduleTurnaround(candidate,others);
+   const actualStay=candidate.expectedStandReleaseAt-candidate.parkedAt;
+   if(actualStay>stay){stay=actualStay;continue;}
+   Object.assign(flight,candidate);return true;
+  }
+  return false;
  }
  function updateAirport(){
   const s=data(),traffic=s.airportTraffic,time=now(),closed=airportClosed();
@@ -475,19 +569,17 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    // Upgrade a scheduled legacy 1–3 guest service before it reaches the runway.
    // Existing people and completed arrivals are never regenerated.
    if(!f.unloaded&&!f.arrivalPassengerIds&&f.arrivingGuests>0&&!reserveManifest(f)){
-    f.inboundAt=runwaySlot(time+900,INBOUND_SECONDS,f.airportId||'city',f);
-    f.parkedAt=f.inboundAt+INBOUND_SECONDS;continue;
+    rescheduleArrival(f,time+900);continue;
    }
    if(closed&&!f.unloaded&&time>=f.inboundAt&&previous<f.inboundAt+VISITOR_TOUCHDOWN_SECONDS){
     const pose=visitorAircraftPose(Math.max(f.inboundAt,previous),f);
     if(pose)f.hold={x:pose.x,y:pose.y,z:pose.z,at:time};
-    f.inboundAt=runwaySlot(time+900,INBOUND_SECONDS,f.airportId||'city',f);
-    f.parkedAt=f.inboundAt+INBOUND_SECONDS;
-    if(f.arrivalPassengerIds?.length)f.arrivalCompleteAt=visitorArrivalPath(f,f.arrivalPassengerIds.length-1,Number(raw().timeScale||120)).at(-1)?.at;
+    rescheduleArrival(f,time+900);
    }
    if(closed&&f.outboundAt!=null&&time>=f.outboundAt&&previous<f.outboundAt){
     f.outboundAt=runwaySlot(time+900,OUTBOUND_SECONDS,f.airportId||'city',f);
     f.exitAt=f.outboundAt+OUTBOUND_SECONDS;
+    f.expectedStandReleaseAt=f.outboundAt+140;
    }
    if(!f.landedAt&&time>=f.parkedAt){f.landedAt=time;traffic.landed++;}
    let allOffPlane=true;
@@ -517,29 +609,33 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
      Object.assign(visitor,{airportFlightId:null,onPlane:false,visitorPhase:'departing'});
      continue;
     }
+    if(!visitor.onPlane&&international&&!chargeHansdrexFare(raw(),visitor,'outbound',{reference:f.id})){
+     Object.assign(visitor,{airportFlightId:null,visitorPhase:'airport-wait',action:'waiting until the return ticket is funded'});continue;
+    }
     if(time>=f.exitAt){depart(visitor);continue;}
     visitor.onPlane=true;visitor.indoors=true;visitor.visitorPhase='return-flight';
     visitor.transitMode='airplane';visitor.action=time<f.outboundAt?'boarded at the international stand':'flying out of Hansdrex';
     if(pose)Object.assign(visitor,{x:pose.x,y:pose.y,z:pose.z});
    }
-   if(time>=f.exitAt&&!f.departureCounted){traffic.departed++;f.departureCounted=true;}
+   if(f.exitAt!=null&&time>=f.exitAt){f.aircraftGone=true;if(!f.departureCounted){traffic.departed++;f.departureCounted=true;}}
   }
-  traffic.flights=traffic.flights.filter(f=>f.exitAt==null||time<f.exitAt);
+  traffic.flights=traffic.flights.filter(f=>f.exitAt==null||time<f.exitAt||(f.arrivalPassengerIds||[]).some(id=>s.visitors.some(v=>v.id===id&&v.alive&&!v.departed&&v.immigrationClearedAt==null)));
   if(closed)return;
   const waiting=s.visitors.filter(v=>v.alive&&!v.departed&&v.visitorPhase==='airport-wait'&&!v.airportFlightId&&!v.ambulanceDuty&&!v.onAmbulance&&atAirport(v)&&(!international||v.visitorMedicalException||v.travelGoals?.every(id=>v.travelGoalsCompleted?.includes(id))))
    .sort((a,b)=>a.airportQueuedAt-b.airportQueuedAt);
   for(const f of traffic.flights){
-   if(!f.unloaded||f.outboundAt!=null||time<Math.max(f.parkedAt+900,Number(f.arrivalCompleteAt||0)))continue;
-   if(!waiting.length&&time<f.parkedAt+3600)continue;
-   const passengers=waiting.filter(v=>departurePort(v).id===(f.airportId||'city')).slice(0,15).filter(v=>!international||v.returnFarePaid||transfer(v,tourismFares(level()).oneWay,business('visitor-airline')));
-   for(const v of passengers){if(international)v.returnFarePaid||=tourismFares(level()).oneWay;const i=waiting.indexOf(v);if(i>=0)waiting.splice(i,1);}
-   f.outboundAt=runwaySlot(time+720,OUTBOUND_SECONDS,f.airportId||'city',f);
-   f.boardAt=f.outboundAt-420;f.exitAt=f.outboundAt+OUTBOUND_SECONDS;
-   f.passengerIds=passengers.map(v=>v.id);
+   if(!f.unloaded||f.aircraftGone)continue;
+   if(f.outboundAt==null)scheduleTurnaround(f);
+   if(time>=f.outboundAt)continue;
+   f.passengerIds||=[];
+   const seats=Math.max(0,HANSDREX_AIRLINE.seats-f.passengerIds.length);
+   const passengers=waiting.filter(v=>departurePort(v).id===(f.airportId||'city')&&(!international||v.returnFarePaid||money(v)>=hansdrexReturnFare(v))).slice(0,seats);
+   for(const v of passengers){const i=waiting.indexOf(v);if(i>=0)waiting.splice(i,1);}
+   f.passengerIds.push(...passengers.map(v=>v.id));
    for(const v of passengers){v.airportFlightId=f.id;v.action=`waiting to board ${f.id}`;}
   }
   // A return flight can operate even when all hotel rooms are occupied.
-  for(const airport of ['city','north'])if(waiting.some(v=>departurePort(v).id===airport)&&!traffic.flights.some(f=>(f.airportId||'city')===airport&&f.outboundAt==null))queueAircraft(0,airport);
+  for(const airport of ['city','north'])if(waiting.some(v=>departurePort(v).id===airport)&&!traffic.flights.some(f=>(f.airportId||'city')===airport&&!f.aircraftGone&&time<f.outboundAt&&(f.passengerIds||[]).length<HANSDREX_AIRLINE.seats))queueAircraft(0,airport);
  }
  function tick(gameSeconds,clock){
   init();const s=data(),dt=Math.max(0,Number(gameSeconds||0));
@@ -548,7 +644,8 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   updateAirport();
   s.visitors=s.visitors.filter(v=>!v.departed);
   if(now()>=s.nextArrivalAt){
-   const airport=international&&s.lastArrivalAirportId!=='north'?'north':'city',capacity=airportAdmissionCapacity(airport);
+   const outsideCityOption=international&&Boolean(requestRaceOffer({}))&&s.lastArrivalAirportId!=='north'&&rng()<.2;
+   const airport=outsideCityOption?'north':'city',capacity=airportAdmissionCapacity();
    if(!airportClosed()&&capacity>=MIN_VISITOR_PASSENGERS&&rng()<.35+s.reputation/140&&queueAircraft(MIN_VISITOR_PASSENGERS,airport))s.lastArrivalAirportId=airport;
    s.nextArrivalAt=now()+Math.round((7200+rng()*12600)*(1.4-s.reputation/140));
   }
@@ -556,13 +653,13 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  }
  function snapshot(){
   const s=data(),airport=s.airportTraffic;return {
-   airportTraffic:airport?{flights:[...airport.flights,...raceFlights()],landed:airport.landed,departed:airport.departed,waiting:s.visitors.filter(v=>v.visitorPhase==='airport-wait').length}:undefined,
-   capacity:MAX_VISITORS,totalArrivals:s.totalArrivals,totalDepartures:s.totalDepartures,reputation:Math.round(s.reputation*10)/10,
+   airportTraffic:airport?{flights:[...airport.flights,...raceFlights()],airline:hansdrexAirlineSummary(raw()),landed:airport.landed,departed:airport.departed,waiting:s.visitors.filter(v=>v.visitorPhase==='airport-wait').length}:undefined,
+   capacity:MAX_VISITORS,tourism:tourism.snapshot(),totalArrivals:s.totalArrivals,totalDepartures:s.totalDepartures,reputation:Math.round(s.reputation*10)/10,
    externalInflow:s.externalInflow,externalOutflow:s.externalOutflow,visitorFatalities:Number(s.visitorFatalities||0),hotelRooms:Object.values(s.hotels).map(h=>({id:h.id,capacity:h.capacity,occupied:Object.keys(h.rooms).length})),
    taxiCompleted:s.taxiCompleted,taxiRevenue:s.taxiRevenue,taxiCancelled:s.taxiCancelled,
    taxiJobs:s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).map(j=>({id:j.id,driverId:j.driverId,passengerId:j.passengerId,destinationId:j.destinationId,phase:j.phase,fare:j.fare,x:actor(j.driverId)?.x,z:actor(j.driverId)?.z})),
-   visitors:s.visitors.filter(v=>v.alive&&!v.departed).map(v=>({citizenshipCountryId:v.citizenshipCountryId,originCountryId:v.originCountryId,entryAirportId:v.entryAirportId,departureAirportId:v.departureAirportId,travelGoals:v.travelGoals,travelGoalsCompleted:v.travelGoalsCompleted,siteCountryVisits:v.siteCountryVisits,countryPresence:v.countryPresence,id:v.id,name:v.name,kind:'visitor',alive:true,ageYears:v.ageYears,generation:v.generation,sex:v.sex,x:v.x,y:v.y,z:v.z,vx:v.vx,vz:v.vz,money:v.money,savings:v.savings,action:v.action,traveling:v.traveling,indoors:v.indoors,sleeping:v.sleeping,onTrain:v.onTrain,onPlane:v.onPlane,transitMode:v.transitMode,metroLineId:v.metroLineId,heliPassenger:false,taxiPassenger:v.taxiPassenger,currentLocationId:v.currentLocationId,targetLocationId:v.targetLocationId,movementTrace:(v.movementTrace||[]).slice(-8),motion:v.traveling&&!v.onTrain?{at:now(),speed:Number(v.motionSpeed||Math.hypot(v.vx,v.vz)||2.5),mode:v.transitMode,blocked:Number(v.trafficHoldUntil||0)>now(),points:(v.routeWaypoints||[]).slice(v.routeIndex||0,(v.routeIndex||0)+8).filter(p=>p.mode===v.transitMode).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}:null,health:v.health,hunger:v.hunger,energy:v.energy,stress:v.stress,happiness:v.happiness,excitement:v.excitement,loneliness:v.loneliness,children:[],parents:[],homeId:v.hotelId,hotelId:v.hotelId,departAt:v.departAt,brainId:v.brain.id})),
+   visitors:s.visitors.filter(v=>v.alive&&!v.departed).map(v=>({citizenshipCountryId:v.citizenshipCountryId,originCountryId:v.originCountryId,entryAirportId:v.entryAirportId,departureAirportId:v.departureAirportId,travelGoals:v.travelGoals,travelGoalsCompleted:v.travelGoalsCompleted,siteCountryVisits:v.siteCountryVisits,countryPresence:v.countryPresence,id:v.id,name:v.name,kind:'visitor',alive:true,ageYears:v.ageYears,generation:v.generation,sex:v.sex,x:v.x,y:v.y,z:v.z,vx:v.vx,vz:v.vz,money:v.money,savings:v.savings,action:v.action,traveling:v.traveling,indoors:v.indoors,sleeping:v.sleeping,onTrain:v.onTrain,onPlane:v.onPlane,transitMode:v.transitMode,metroLineId:v.metroLineId,heliPassenger:Boolean(v.heliPassenger),heliTourStartedAt:v.heliTourStartedAt,heliTourUntil:v.heliTourUntil,taxiPassenger:v.taxiPassenger,currentLocationId:v.currentLocationId,targetLocationId:v.targetLocationId,movementTrace:(v.movementTrace||[]).slice(-8),motion:v.traveling&&!v.onTrain?{at:now(),speed:Number(v.motionSpeed||Math.hypot(v.vx,v.vz)||2.5),mode:v.transitMode,blocked:Number(v.trafficHoldUntil||0)>now(),points:(v.routeWaypoints||[]).slice(v.routeIndex||0,(v.routeIndex||0)+8).filter(p=>p.mode===v.transitMode).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}:null,health:v.health,hunger:v.hunger,energy:v.energy,stress:v.stress,happiness:v.happiness,excitement:v.excitement,loneliness:v.loneliness,children:[],parents:[],homeId:v.hotelId,hotelId:v.hotelId,departAt:v.departAt,brainId:v.brain.id})),
    photoCount:s.photoCount,photos:s.photos.slice(-16),communityEvent:s.club.event||s.lastCommunityEvent||null};
  }
- return {init,tick,handleResident,addChoices,snapshot,visitors:()=>data().visitors.filter(v=>v.alive&&!v.departed),spawnVisitor,reserveRoom,requestTaxi,finishTaxi,takePhoto,depart,queueAircraft};
+ return {init,tick,handleResident,addChoices,snapshot,visitors:()=>data().visitors.filter(v=>v.alive&&!v.departed),spawnVisitor,reserveRoom,reserveEventRoom,releaseEventRoom,visitEventAttraction,requestTaxi,finishTaxi,takePhoto,depart,queueAircraft};
 }

@@ -1,6 +1,7 @@
+import {northF1ClosureActive,type NorthF1TrackClosure} from '../worker/north-f1-closure.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {NORTH_F1_CIRCUIT,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS,NORTH_F1_PIT_APRON,NORTH_F1_PIT_BOXES,NORTH_F1_PIT_BOX_LENGTH,NORTH_F1_PIT_BOX_WIDTH,NORTH_F1_PIT_POINTS,NORTH_F1_PIT_WIDTH,northF1RacePose,northF1Pose,type NorthF1Point} from '../worker/north-f1-map.mjs';
+import {NORTH_F1_CIRCUIT,NORTH_F1_AIRPORT_FOOTBRIDGE,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS,NORTH_F1_PIT_APRON,NORTH_F1_PIT_BOXES,NORTH_F1_PIT_BOX_LENGTH,NORTH_F1_PIT_BOX_WIDTH,NORTH_F1_PIT_POINTS,NORTH_F1_PIT_WIDTH,northF1RacePose,northF1Pose,type NorthF1Point} from '../worker/north-f1-map.mjs';
 import {sampleF1Motion,type F1MotionSegment} from '../worker/north-f1-motion.mjs';
 
 const ROAD_LEVEL=.248;
@@ -19,6 +20,7 @@ export type NorthF1View={
  charterArrivals:number;
  charterDepartures:number;
  raceStatus:string;
+ trackClosure?:NorthF1TrackClosure|null;
  charterShuttles?:{route:{duration:number;points:ShuttlePoint[]};groups:Array<{id:string;arrivalAt:number;returnAt:number}>}|null;
  lastRace?:{audience?:Audience;winnerId?:string}|null;
 };
@@ -56,6 +58,7 @@ function addBatch(parent:THREE.Group,parts:THREE.BufferGeometry[],material:THREE
 export class NorthF1Renderer {
  readonly root=new THREE.Group();
  readonly buildings=new Map<string,THREE.Group>();
+ private readonly closure=new THREE.Group();
  private readonly body:THREE.InstancedMesh;
  private readonly dark:THREE.InstancedMesh;
  private readonly pitCrews:THREE.InstancedMesh;
@@ -71,6 +74,23 @@ export class NorthF1Renderer {
  constructor(parent:THREE.Group,sign:(text:string,fontSize?:number,scale?:number)=>THREE.Sprite){
   this.root.name='North City Waterfront Grand Prix';parent.add(this.root);
   const {points,width}=NORTH_F1_CIRCUIT;
+  // Conspicuous marshals' barriers stand across the public approaches,
+  // just outside the swept course so they never cover the racing line.
+  this.closure.name='Grand Prix road closures';
+  this.closure.visible=false;
+  this.root.add(this.closure);
+  const warning:THREE.BufferGeometry[]=[],whiteStripes:THREE.BufferGeometry[]=[];
+  const roadGates=[[-430,-907,9.5,0],[-430,-823,9.5,0],[-430,-782,9.5,0],[-430,-758,9.5,0],
+   [-370,-837,9.5,0],[-370,-762,9.5,0],[-419,-890,9,Math.PI/2],[-362,-830,9,Math.PI/2],
+   [-362,-770,9,Math.PI/2],[-547,-600,8,Math.PI/2],[-553,-594,8,0]];
+  for(const [x,z,span,angle] of roadGates){
+   for(const side of [-1,1])warning.push(box(.22,1,.38,side*span*.45,.71,0).rotateY(angle).translate(x,0,z));
+   warning.push(box(span, .38,.24,0,.95,0).rotateY(angle).translate(x,0,z));
+   for(let i=0;i<6;i++)whiteStripes.push(box(span/12,.34,.26,(i-2.5)*span/6,.95,0).rotateY(angle).translate(x,0,z));
+  }
+  addBatch(this.closure,warning,finish(0xe04331));
+  addBatch(this.closure,whiteStripes,finish(0xffebda));
+
   const asphalt=new THREE.MeshStandardMaterial({color:0x39434e,emissive:0x526680,emissiveIntensity:.39,roughness:.88,side:THREE.DoubleSide});
   const concrete=new THREE.MeshStandardMaterial({color:0x93a2ad,roughness:.84});
   const metal=new THREE.MeshStandardMaterial({color:0x344d62,roughness:.72});
@@ -207,6 +227,21 @@ export class NorthF1Renderer {
    if(!band.length)break;
    this.seats.push(...band.slice(0,NORTH_F1_CIRCUIT.capacity-this.seats.length));
   }
+  const bridgeParts:THREE.BufferGeometry[]=[];
+  for(let i=1;i<NORTH_F1_AIRPORT_FOOTBRIDGE.length;i++){
+   const a=NORTH_F1_AIRPORT_FOOTBRIDGE[i-1],b=NORTH_F1_AIRPORT_FOOTBRIDGE[i];
+   const count=i===2?1:18;
+   for(let step=0;step<count;step++){
+    const t=(step+.5)/count,x=THREE.MathUtils.lerp(a.x,b.x,t),y=THREE.MathUtils.lerp(a.y,b.y,t);
+    bridgeParts.push(box(Math.abs(b.x-a.x)/count+.06,.18,2.7,x,y-.9,a.z));
+   }
+   for(const side of [-1,1]){
+    const beam=box(Math.hypot(b.x-a.x,b.y-a.y),.10,.1);
+    beam.rotateZ(Math.atan2(b.y-a.y,b.x-a.x)).translate((a.x+b.x)/2,(a.y+b.y)/2+.2,a.z+side*1.4);
+    bridgeParts.push(beam);
+   }
+  }
+  addBatch(this.root,bridgeParts,concrete);
   const bodyParts=[box(1.36,.44,3.1,0,.39),box(.68,.38,3.7,0,.44),box(1.68,.08,.46,0,.27,1.7),box(1.58,.11,.22,0,.79,-1.64)];
   const wheels=[box(.7,.22,.88,0,.61,-.32),...[-1,1].flatMap(x=>[-1,1].map(z=>box(.36,.52,.61,x*.77,.30,z*1.17)))];
   const vehicleShape=(parts:THREE.BoxGeometry[])=>{const geometry=mergeGeometries(parts)!;parts.forEach(p=>p.dispose());return geometry;};
@@ -226,7 +261,12 @@ export class NorthF1Renderer {
   this.legacyPitBoxes.clear();
   data?.teams.forEach((team,index)=>team.drivers.forEach((id,slot)=>this.legacyPitBoxes.set(id,index*2+slot)));
  }
+ trackIsClosed(gameNow:number){
+  const race=this.data?.activeRace;
+  return northF1ClosureActive(this.data?.trackClosure??race,gameNow);
+ }
  update(gameNow:number,camera:THREE.Camera){
+  this.closure.visible=this.trackIsClosed(gameNow);
   const cx=camera.position.x+655,cz=camera.position.z+770;
   const near=cx*cx+cz*cz<850*850;
   const active=this.data?.activeRace;

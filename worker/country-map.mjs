@@ -1,3 +1,4 @@
+import {HANSDREX_AIRPORT} from './hansdrex-airport-map.mjs';
 // Pure geography shared by the world, immigration and viewer; never imports city-map.
 export const COUNTRY_IDS={hansdrex:'hansdrex',north:'north-city',hawaii:'hawaii'};
 export const HAWAII_ISLAND={x:100,z:790,rx:260,rz:2*205*135/260};
@@ -19,7 +20,7 @@ export function countryForHome(unitId,homePoint){
 export const homeCountry=countryForHome;
 const airport=(id,countryId,terminal,gate,runway,apron,stands)=>({id,countryId,locationId:id==='city'?'airport':id==='island'?'island-airport':'north-airport',terminal,gate,runway,apron,stands});
 export const COUNTRY_AIRPORTS=[
- airport('city',COUNTRY_IDS.hansdrex,{x:-180,z:-390,w:60,d:20},{x:-180,z:-378},{x:-180,z:-520,w:320,d:22},{x:-180,z:-443,w:140,d:65},[-215,-180,-145].map((x,i)=>({id:`CITY-STAND-${i+1}`,x,z:-443}))),
+ {id:'city',countryId:COUNTRY_IDS.hansdrex,locationId:'airport',...HANSDREX_AIRPORT},
  airport('north',COUNTRY_IDS.north,{x:-908,z:-820,w:36,d:64},{x:-886,z:-820},{x:-1000,z:-820,w:22,d:340},{x:-950,z:-820,w:44,d:150},[-780,-820,-860].map((z,i)=>({id:`NORTH-STAND-${i+1}`,x:-950,z}))),
  airport('island',COUNTRY_IDS.hawaii,{x:65,z:785,w:30,d:16},{x:65,z:795},{x:145,z:742,w:240,d:16},{x:145,z:765,w:180,d:30},[120,170].map((x,i)=>({id:`HAWAII-STAND-${i+1}`,x,z:765}))),
 ];

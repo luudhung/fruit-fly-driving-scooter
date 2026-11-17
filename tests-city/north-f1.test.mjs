@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createNorthF1,NORTH_F1_RULES} from '../worker/north-f1.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS,NORTH_F1_PIT_APRON,NORTH_F1_PIT_BOXES,NORTH_F1_PIT_BOX_LENGTH,NORTH_F1_PIT_BOX_WIDTH,northF1PitPose,northF1Pose,northF1RacePose} from '../worker/north-f1-map.mjs';
 import {F1_TARGET_SPEED,planF1Motion,sampleF1Motion} from '../worker/north-f1-motion.mjs';
+import {createCityVisitors} from '../worker/city-visitors.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
 
 const DAY=86400,HOUR=3600;
@@ -11,14 +12,18 @@ function fixture(actors=[]){
  const state={simulationAgeSeconds:DAY*.1,timeScale:120,weather:{},businesses:{},treasury:{cash:0},totalTransactions:0,flies:actors};
  const intl=createInternationalLife({world:()=>state,redistribute:false,nationalEconomy:false});
  const north=intl.countryAccount('north-city');
- const system=createNorthF1({world:()=>state,northAccount:()=>north,travelCost:intl.travelCost,lawfulPresence:intl.lawfulPresence,aviationAdmission:intl.aviationAdmission});
+ const visitors=createCityVisitors({world:()=>state});
+ visitors.init();
+ const system=createNorthF1({world:()=>state,northAccount:()=>north,travelCost:intl.travelCost,lawfulPresence:intl.lawfulPresence,aviationAdmission:intl.aviationAdmission,
+  interceptMovement:intl.interceptMovement,bookEventHotel:visitors.reserveEventRoom,releaseEventHotel:visitors.releaseEventRoom});
  const step=at=>{state.simulationAgeSeconds=at;system.tick();};
  system.tick();step(state.northF1.nextAt-36*HOUR);
- return {state,system,intl,north,step,event:state.northF1.event};
+ const totalCash=()=>state.treasury.cash+Object.values(state.businesses).reduce((sum,b)=>sum+Number(b.cash||0),0)+state.flies.reduce((sum,f)=>sum+Number(f.money||0)+Number(f.savings||0),0)+system.liquidCash();
+ return {state,system,intl,north,step,event:state.northF1.event,totalCash,initialCash:totalCash()};
 }
 function driver(i){
  return {id:`DRIVER-${i}`,alive:true,ageYears:32,health:95,money:180,savings:30,traits:{ambition:.7,resilience:.7},
-  x:paddock.x,z:paddock.z,homeX:paddock.x,homeZ:paddock.z,currentLocationId:paddock.id,citizenshipCountryId:'north-city'};
+  x:paddock.x,z:paddock.z,homeX:paddock.x,homeZ:paddock.z,currentLocationId:paddock.id,citizenshipCountryId:i<15?'hansdrex':'north-city'};
 }
 function patron(id,x,z){
  return {id,alive:true,ageYears:27,health:92,money:150,savings:0,x,z,homeX:x,homeZ:z,citizenshipCountryId:'hansdrex'};
@@ -33,6 +38,10 @@ test('North GP professional field has ten real teams, twenty local drivers, a si
  assert.equal(event.startsAt%DAY,19*HOUR);
  step(event.startsAt);
  assert.equal(system.snapshot().activeRace.cars.length,20);
+ assert.equal(system.snapshot().activeRace.startsAt,event.startsAt);
+ const field=system.snapshot().activeRace.cars;
+ assert.equal(field.filter(c=>c.countryId==='hansdrex').length,15);
+ assert.equal(field.filter(c=>c.countryId==='north-city').length,5);
  assert.equal(NORTH_F1_RULES.laps,62);
  assert.equal(new Set(state.northF1.event.cars.map(c=>c.pitBox)).size,20);
  for(const c of state.northF1.event.cars){
@@ -104,9 +113,40 @@ test('a grandstand ticket requires physically arriving, and is charged only once
  assert.equal(f.countryEntryReceipts[0].fee,50);
 });
 
+test('three hundred physically present foreign fans can buy tickets without consuming either national quota',()=>{
+ const hansFans=Array.from({length:12},(_,i)=>({...patron('HANS-LOCAL-'+i,0,0),homeX:0,homeZ:0}));
+ const northFans=Array.from({length:12},(_,i)=>({...patron('NORTH-LOCAL-'+i,spectator.x,spectator.z),citizenshipCountryId:'north-city',homeX:spectator.x,homeZ:spectator.z}));
+ const {system,intl,event,step,state}=fixture([...Array.from({length:20},(_,i)=>driver(i)),...hansFans,...northFans]);
+ step(event.startsAt-HOUR);
+ assert.equal(NORTH_F1_RULES.charterLimit,300);
+ assert.ok(event.fanTarget>0&&event.northFanTarget>0);
+ const present=(f,id)=>{
+  assert.ok(intl.aviationAdmission(f,{airportId:'north',flightId:id,toCountryId:'north-city'}).allowed);
+  Object.assign(f,{x:spectator.x,z:spectator.z,y:1.1,currentLocationId:spectator.id,traveling:false,onPlane:false,onTrain:false});
+  return f;
+ };
+ assert.ok(system.attend(present(hansFans[0],'local-flight')));
+ Object.assign(northFans[0],{currentLocationId:spectator.id,traveling:false});
+ assert.ok(system.attend(northFans[0]));
+ const quotas={hansdrex:event.audience.hansdrex,north:event.audience.north};
+ const guests=Array.from({length:301},(_,i)=>({...patron('OUTSIDE-FAN-'+i,0,0),kind:'visitor',citizenshipCountryId:'outside',originCountryId:'outside',money:1000,returnFareReserve:200}));
+ for(const f of guests.slice(0,300))assert.ok(system.attend(present(f,'visitor-flight-'+Math.floor(Number(f.id.split('-').at(-1))/10))),f.id);
+ assert.equal(event.audience.visitors,300);
+ assert.equal(event.audience.total,302);
+ assert.ok(event.audience.total<NORTH_F1_CIRCUIT.capacity);
+ assert.deepEqual({hansdrex:event.audience.hansdrex,north:event.audience.north},quotas);
+ const revenue=state.northF1.revenue,firstMoney=guests[0].money;
+ assert.equal(system.attend(guests[0]),false,'the same visitor cannot buy a duplicate entry');
+ assert.equal(system.attend(present(guests[300],'extra-visitor-flight')),false,'the foreign quota stops at300');
+ assert.equal(guests[0].money,firstMoney);
+ assert.equal(state.northF1.revenue,revenue);
+ assert.equal(guests.slice(0,300).filter(f=>f.lastNorthF1Ticket===event.id).length,300);
+});
+
 test('the starter refunds sold tickets when the track is unsafe, and refunds only once',()=>{
  const fan={...patron('NORTH-FAN',spectator.x,spectator.z),citizenshipCountryId:'north-city',currentLocationId:spectator.id};
  const {state,system,step,event,north}=fixture([fan,...Array.from({length:20},(_,i)=>driver(i))]);
+ const beforeTreasury=north.cash;
  step(event.startsAt-HOUR);
  assert.ok(system.attend(fan));
  assert.equal(fan.money,150-event.price);
@@ -114,33 +154,57 @@ test('the starter refunds sold tickets when the track is unsafe, and refunds onl
  step(event.startsAt);
  assert.equal(event.status,'cancelled');
  assert.equal(fan.money,150);
- assert.equal(north.cash,0);
+ assert.ok(north.cash>=beforeTreasury);
+ assert.equal(system.snapshot().ticketTax,0);
  assert.equal(system.snapshot().revenue,0);
  assert.equal(system.snapshot().visits,0);
  step(event.startsAt+1);
  assert.equal(fan.money,150);
 });
 
-test('charter fans fly to the race, clear passport control, visit the venue and leave on the calendar day with conserved cash',()=>{
- const {system,intl,north,event,step,state}=fixture(Array.from({length:20},(_,i)=>driver(i)));
+test('200–300 overseas fans arrive through both airports and choose day trips or paid Hansdrex stays',()=>{
+ const {system,intl,event,step,state,totalCash,initialCash}=fixture(Array.from({length:20},(_,i)=>driver(i)));
  const endDay=Math.floor(event.startsAt/DAY)*DAY+DAY;
- for(let at=event.startsAt-13*HOUR;at<=endDay;at+=120)step(at);
- const report=system.snapshot();
- assert.ok(report.charterArrivals>=120&&report.charterArrivals<=200,JSON.stringify({report,flights:event.charters.map(f=>[f.id,f.parkedAt,f.departed]),route:event.shuttleRoute?.duration}));
- assert.equal(report.charterArrivals,report.visitors);
- assert.equal(report.charterDepartures,report.charterArrivals);
- assert.equal(intl.snapshot().visaRevenue,50*report.charterArrivals);
- assert.ok(event.charters.every(f=>f.exitAt<=endDay&&f.departed));
- assert.ok(event.shuttleRoute.points.some(p=>p.mode==='shuttle'));
- assert.equal(system.liquidCash(),0);
- const cash=north.cash+state.businesses['north-f1'].cash+state.businesses['north-f1-charter-service'].cash;
- assert.ok(Math.abs(cash+state.northF1.externalOutflow-state.northF1.externalInflow)<1e-5);
+ for(let at=event.startsAt-72*HOUR;at<=event.startsAt+4*DAY;at+=240)step(at);
+ const report=system.snapshot(),flights=event.charters;
+ const guests=flights.flatMap(f=>f.guests);
+ assert.equal(flights.reduce((n,f)=>n+f.guests.length,0),event.charterDemand);
+ assert.ok(event.charterDemand>=200&&event.charterDemand<=300);
+ assert.ok(flights.every(f=>f.guests.length===10));
+ assert.deepEqual(new Set(flights.map(f=>f.airportId)),new Set(['city','north']));
+ assert.ok(flights.filter(f=>f.parkedAt<event.startsAt-DAY).length>=2);
+ assert.ok(guests.every(f=>f.phase!=='inbound'),JSON.stringify(flights.map(f=>({id:f.id,phase:f.guests[0].phase}))));
+ assert.equal(guests.filter(f=>f.phase==='departed').length,event.charterDemand,JSON.stringify(flights.map(f=>({id:f.id,time:f.outboundAt,phases:f.guests.reduce((a,v)=>(a[v.phase]=(a[v.phase]||0)+1,a),{}),at:f.guests.find(v=>v.phase!=='departed')?.currentLocationId}))));
+ assert.equal(guests.filter(f=>f.watched&&f.lastNorthF1Ticket===event.id).length,event.audience.visitors,'count only physically admitted spectators with paid entry');
+ assert.equal(event.audience.visitors,event.charterDemand,`Only ${report.visitors} charter visitors were counted at the circuit`);
+ assert.ok(report.hotelBookings>100);
+ assert.ok(report.hansdrexSightVisits>50);
+ assert.ok(flights.every(f=>f.exitAt<event.startsAt),'arrival aircraft vacate the stands before the race');
+ assert.ok(flights.every(f=>f.returnLeg?.exitAt>event.startsAt),'actual return equipment collects the guests after their visits');
+ assert.ok(guests.some(f=>f.nights===0)&&guests.some(f=>f.nights>0));
+ assert.ok(intl.snapshot().visaRevenue>=50*event.charterDemand);
+
+ assert.ok(Math.abs(totalCash()+state.northF1.externalOutflow-state.northF1.externalInflow-initialCash)<1e-5,
+ JSON.stringify({cash:totalCash(),out:state.northF1.externalOutflow,imported:state.northF1.externalInflow,initialCash}));
+
+});
+
+test('the local spectator lottery uses 20–30% of Hansdrex and 30% of North City',()=>{
+ const drivers=Array.from({length:20},(_,i)=>driver(i));
+ const hans=Array.from({length:100},(_,i)=>patron('H'+i,0,0));
+ const north=Array.from({length:100},(_,i)=>({...patron('N'+i,-300,-790),citizenshipCountryId:'north-city'}));
+ const {event}=fixture([...drivers,...hans,...north]);
+ const residents=[...drivers,...north,...hans],hansCount=residents.filter(f=>f.homeZ>=-570).length,northCount=residents.length-hansCount;
+ assert.ok(event.fanTarget>=Math.round(hansCount*.2)&&event.fanTarget<=Math.round(hansCount*.3));
+ assert.equal(event.northFanTarget,Math.round(northCount*.3));
+ assert.ok(Object.keys(event.fanInvites).length<=event.fanTarget);
+ assert.ok(Object.keys(event.northInvites).length<=event.northFanTarget);
 });
 
 test('North City circuit has a continuous main track, a separate pit lane and a clear street surface',async()=>{
  const {NORTH_F1_CIRCUIT,northF1Pose,northF1PitPose,onNorthF1Track}=await import('../worker/north-f1-map.mjs');
  const {BUILDINGS,WATER}=await import('../worker/city-map.mjs');
- assert.ok(NORTH_F1_CIRCUIT.lapLength>=1500);
+ assert.ok(NORTH_F1_CIRCUIT.lapLength>=1900);
  assert.ok(NORTH_F1_CIRCUIT.width>=16);
  const {pit}=NORTH_F1_CIRCUIT;
  for(const [at,progress] of [[0,pit.enter],[1,pit.exit]]){

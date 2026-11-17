@@ -1,3 +1,6 @@
+import {HANSDREX_AIRPORT} from './hansdrex-airport-map.mjs';
+import {northF1PointRestricted} from './north-f1-closure.mjs';
+import {buildHansdrexTourismMap} from './hansdrex-tourism-map.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT_BUILDINGS,SPACEPORT_LOCATIONS,SPACEPORT_ROADS} from './spaceport-map.mjs';
 import {NORTH_F1_BUILDINGS,NORTH_F1_LOCATIONS,NORTH_F1_ACCESS_ROADS} from './north-f1-map.mjs';
@@ -34,11 +37,7 @@ const districtTopology=districtRiverTopology(WORLD_HALF);
 export const DISTRICT_RIVERS=districtTopology.rivers;
 export const DISTRICT_BRIDGES=districtTopology.bridges;
 export const DISTRICT_PROMENADES=districtTopology.promenades;
-export const AIRPORT = {
- terminal:{x:-180,z:-390,w:60,d:20}, gate:{x:-180,z:-378},
- runway:{x:-180,z:-520,w:320,d:22}, apron:{x:-180,z:-443,w:140,d:65},
- helipad:{x:-85,z:-436,y:1}, heliAccess:{x:-85,z:-373},
-};
+export const AIRPORT = HANSDREX_AIRPORT;
 export const ISLAND = {
  ...HAWAII_ISLAND,
  runway:{x:145,z:742,w:240,d:16}, terminal:{x:65,z:785,w:30,d:16},
@@ -269,8 +268,8 @@ function place(b) {
 }
 place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
 // These existing landmark meshes also need authoritative ground collision footprints.
-place({id:'airport-control-tower',x:-245,z:-417,w:14,d:14,h:30,kind:'airport-service'});
-place({id:'airport-hangar',x:-310,z:-441,w:46,d:32,h:13,kind:'airport-service'});
+place({id:'airport-control-tower',...AIRPORT.controlTower,kind:'airport-service'});
+place({id:'airport-hangar',...AIRPORT.hangar,kind:'airport-service'});
 place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
 place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
 for(const loc of LOCATIONS) {
@@ -478,6 +477,10 @@ APARTMENTS.push(BUILDINGS.find(b=>b.id===NORTH_LANDMARK.id));
 for(const home of APARTMENTS){if(!home.luxury){const profile=districtProfile(home);home.baseRent=home.rent;home.rent=Math.round(home.rent*profile.housing*100)/100;home.purchaseValue=Math.round(home.purchaseValue*profile.property);}home.capacity=apartmentHouseholdCapacity(home.h);home.capacityUnit='households';}
 for(const home of HOUSE_LOTS){home.baseValue=Math.round(home.baseValue*districtProfile(home).property);home.capacity=1;home.capacityUnit='households';}
 
+const hansdrexTourism=buildHansdrexTourismMap(BUILDINGS,ROADS,WATER,SKYLINE_PLOTS.toronto);
+export const HANSDREX_STOREFRONTS=hansdrexTourism.storefronts,TOWER_OBSERVATION=hansdrexTourism.observation;
+LOCATIONS.push(...HANSDREX_STOREFRONTS.map(({id,name,type,x,z})=>({id,name,type,x,z})),{...TOWER_OBSERVATION});
+
 export function entrance(p) {
  const b=BUILDINGS.find(b=>contains(b,p,0.2));
  if(b)return {x:b.x,z:b.z+b.d/2+1.2};
@@ -602,7 +605,7 @@ const AIRPORT_WALK_PORTALS=[{x:-373.8,z:-540},{x:56.2,z:-540}];
 const WEST_WALK_PORTALS=DISTRICT_BRIDGES.filter(b=>b.riverId==='west-city-river'&&!b.motorway).map(b=>({x:b.x+b.w/2,z:b.z+6.2}));
 const NORTH_INDUSTRY_PORTALS=[{x:-466,z:-1006.4}];
 const publicDistrictPortals=region=>region.id==='north-industry'?NORTH_INDUSTRY_PORTALS:region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
-function airportAirside(p){return contains(AIRPORT.runway,p,10)||contains(AIRPORT.apron,p,4)||contains(NORTH_AIRPORT.runway,p,10)||contains(NORTH_AIRPORT.apron,p,4)||contains(ISLAND.runway,p,4);}
+function airportAirside(p){return AIRPORT.runways.some(runway=>contains(runway,p,10))||AIRPORT.taxiways.some(taxiway=>contains(taxiway,p,4))||contains(AIRPORT.apron,p,4)||contains(NORTH_AIRPORT.runway,p,10)||contains(NORTH_AIRPORT.apron,p,4)||contains(ISLAND.runway,p,4);}
 function publicMotorway(p){return nearbyGeometry(roadBins,p).some(road=>road.motorway&&contains(road,p,.35));}
 const costCache=new Map();
 const segmentCache=new Map();
@@ -859,7 +862,9 @@ for(const r of ROADS){
  const horizontal=r.w>r.d,half=(horizontal?r.w:r.d)/2,center=horizontal?r.x:r.z;
  for(let along=Math.ceil((center-half+12)/6)*6;along<center+half-12;along+=6)for(const side of [-1,1]){
   const p=horizontal?{x:along,z:r.z+side*(r.d/2-1.05)}:{x:r.x+side*(r.w/2-1.05),z:along};
-  if(UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+3&&Math.abs(p.z-t.z)<t.halfLength+8))continue;
+  // Race asphalt stays clear of curbside parking while it is public traffic.
+  // Existing parked cars are reassigned by the usual parking normalization.
+  if(northF1PointRestricted(p,1.5)||UNDERPASSES.some(t=>Math.abs(p.x-t.x)<t.w/2+3&&Math.abs(p.z-t.z)<t.halfLength+8))continue;
   const inNeighborhood=contains(RIVERSIDE,p,-8)||countryAt(p)===COUNTRY_IDS.north||onIsland(p)||contains(AIRPORT_GARDENS,p,-8)||contains(WEST_DISTRICT,p,-8)||INDUSTRIAL_BUILDINGS.some(b=>contains(b,p,30));
   if(Object.values(INDUSTRIAL_LOADING_BAYS).some(b=>Math.abs(p.x-b.x)<5&&Math.abs(p.z-b.z)<3))continue;
   if((!inNeighborhood&&(Math.abs(p.x)>335||Math.abs(p.z)>335))||blocked(p)||BRIDGES.some(b=>contains(b,p,4)))continue;
@@ -874,7 +879,7 @@ for(const r of ROADS){
   const lot=BUILDINGS.find(b=>b.id===r.servesLocationId);if(!lot)continue;
   const horizontal=r.w>r.d,side=Math.sign(horizontal?lot.z-r.frontage.z:lot.x-r.frontage.x)||1;
   const p={x:r.frontage.x+(horizontal?0:side*3.8),z:r.frontage.z+(horizontal?side*3.8:0)};
-  if(blocked(p))continue;
+  if(blocked(p)||northF1PointRestricted(p,1.5))continue;
   const id=`CURB-ACCESS-${r.servesLocationId}`;
   PARKING_SPACES.push({...p,id,spaceId:id,heading:horizontal?side*Math.PI/2:side<0?0:Math.PI,axis:horizontal?'x':'z',w:horizontal?5.5:2.2,d:horizontal?2.2:5.5,loading:true,servesLocationId:r.servesLocationId});
  }

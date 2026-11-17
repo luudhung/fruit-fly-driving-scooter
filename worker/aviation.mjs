@@ -1,8 +1,9 @@
 import {AIRPORT,ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_AIRPORT_ALIASES} from './country-map.mjs';
+export {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 
 // H$ prices are calibrated to the city's 4.4–7.4 H$/hour ordinary wages, not an FX conversion.
-export const AVIATION={seats:15,checkInSeconds:1800,flightSeconds:1200,heliSeats:3,heliSeconds:900};
+export const AVIATION={seats:10,checkInSeconds:1800,flightSeconds:1200,heliSeats:3,heliSeconds:900};
 export function tourismFares(priceLevel=1){
  const level=Math.min(10,Math.max(.25,Number(priceLevel)||1));
  return {oneWay:45*level,airportFee:6*level,roundTrip:90*level,resortNight:44*level,
@@ -18,7 +19,7 @@ export function nextFlight(now,from='city',minimumLead=AVIATION.checkInSeconds){
  throw new Error('No scheduled flight');
 }
 export function airportById(id){return COUNTRY_AIRPORTS.find(p=>p.id===(COUNTRY_AIRPORT_ALIASES[id]||id))||null;}
-/** Every pair has a durable 15-seat timetable; legacy city/island IDs stay valid. */
+/** Every pair has a durable ten-seat timetable; legacy city/island IDs stay valid. */
 export function nextRegionalFlight(now,from,to,minimumLead=AVIATION.checkInSeconds){
  from=airportById(from)?.id;to=airportById(to)?.id;if(!from||!to||from===to)return null;
  if(from==='city'&&to==='island'||from==='island'&&to==='city')return nextFlight(now,from,minimumLead);

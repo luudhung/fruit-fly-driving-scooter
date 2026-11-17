@@ -137,7 +137,7 @@ test('a real camera purchase transfers funds once and requires an outdoor living
 });
 
 test('Marina Bay hotel joins existing saves and charges its real nightly rate',()=>{
- const h=setup();assert.equal(h.state.cityVisitors.hotels['marina-bay'].capacity,24);delete h.state.cityVisitors.hotels['marina-bay'];h.system.init();assert.equal(h.state.cityVisitors.hotels['marina-bay'].pricePerNight,28);
+ const h=setup();assert.equal(h.state.cityVisitors.hotels['marina-bay'].capacity,128);delete h.state.cityVisitors.hotels['marina-bay'];h.system.init();assert.equal(h.state.cityVisitors.hotels['marina-bay'].pricePerNight,28);
  const p=person('MARINA-GUEST'),cash=p.money;assert.ok(h.system.reserveRoom(p,'marina-bay',2));assert.equal(p.money,cash-56);assert.equal(h.state.businesses['marina-bay'].cash,56);
 });
 

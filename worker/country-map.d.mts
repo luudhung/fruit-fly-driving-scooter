@@ -7,7 +7,7 @@ export const HAWAII_ISLAND:CountryPoint&{rx:number;rz:number};
 export function countryAt(point:CountryPoint):CountryId|null;
 export function countryForHome(unitId?:string|null,point?:CountryPoint):CountryId;
 export const homeCountry:typeof countryForHome;
-export type CountryAirport={id:string;countryId:CountryId;locationId:string;terminal:CountryRect;gate:CountryPoint;runway:CountryRect;apron:CountryRect;stands:Array<CountryPoint&{id:string}>};
+export type CountryAirport={id:string;countryId:CountryId;locationId:string;terminal:CountryRect;gate:CountryPoint;runway:CountryRect&{id?:string;taxiwayZ?:number;taxiBypassX?:number[];endAroundTaxi?:boolean};runways?:Array<CountryRect&{id:string;taxiwayZ?:number;taxiBypassX?:number[];endAroundTaxi?:boolean}>;taxiwayZ?:number;taxiBypassX?:number[];apron:CountryRect;stands:Array<CountryPoint&{id:string}>};
 export const COUNTRY_AIRPORTS:CountryAirport[];
 export const COUNTRY_AIRPORT_ALIASES:Record<string,string>;
 export const NORTH_AIRPORT:CountryAirport;
