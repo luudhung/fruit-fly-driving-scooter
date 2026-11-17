@@ -143,7 +143,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   return false;
  }
  function migrate(e){
-  if(e.tenPassengerVersion)return;
+  if(e.tenPassengerVersion){routeFutureVisitors(e);return;}
   e.tenPassengerVersion=1;
   const flights=[];
   for(const flight of e.charters||[]){
@@ -160,14 +160,27 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    }
   }
   e.charters=flights;
+  routeFutureVisitors(e);
+ }
+ function routeFutureVisitors(e){
+  if(e.airportItineraryVersion)return;
+  for(const flight of e.charters||[]){
+   if(flight.landed||flight.departed||Number.isFinite(flight.inboundAt)&&flight.inboundAt<=now()||flight.guests.some(f=>f.phase!=='inbound'||f.immigrationClearedAt!=null))continue;
+   const airport=flight.guests.every(f=>!f.nights)?'north':'city';
+   if(flight.airportId===airport)continue;
+   Object.assign(flight,{airportId:airport,inboundAt:null,parkedAt:null,outboundAt:null,exitAt:null,earliestAt:Math.max(now()+60,Number(flight.earliestAt)||now()+60)});
+   for(const key of ['standId','arrivalStand','runwayId','disembarkAt','standReleasedAt','expectedStandReleaseAt','tookOff','aircraftGone'])delete flight[key];
+   for(const f of flight.guests)f.entryAirportId=airport;
+  }
+  e.airportItineraryVersion=1;
  }
  function make(e){
   if(e.charterPlanned){migrate(e);return;}
-  e.charterPlanned=true;e.tenPassengerVersion=1;
+  e.charterPlanned=true;e.tenPassengerVersion=1;e.airportItineraryVersion=1;
   e.charterDemand=200+Math.min(10,Math.floor(signature(e.id+'crowd')*11))*10;
   const count=e.charterDemand/10,shortCount=Math.max(1,Math.round(count*.25));
   for(let i=0;i<count;i++){
-   const short=i>=count-shortCount,airport=short?'north':i%2?'north':'city',id=e.id+'-TOUR-'+(i+1);
+   const short=i>=count-shortCount,airport=short?'north':'city',id=e.id+'-TOUR-'+(i+1);
    const day=Math.floor(e.startsAt/DAY)*DAY;
    const earliest=short?e.startsAt-(10+signature(id+'hour')*4)*HOUR:e.startsAt-(44+signature(id+'hour')*23)*HOUR;
    const flight={...carrier,id,airportId:airport,sector:sectors[Math.floor(signature(id)*3)],direction:signature(id+'wind')<.5?-1:1,

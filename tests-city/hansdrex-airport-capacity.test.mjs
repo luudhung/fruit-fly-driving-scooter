@@ -11,6 +11,7 @@ import {NORTH_F1_CIRCUIT} from '../worker/north-f1-map.mjs';
 import {createCityVisitors} from '../worker/city-visitors.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
 import {MIN_VISITOR_PASSENGERS,visitorArrivalPath,visitorAircraftPose,visitorStands} from '../worker/visitor-aviation.mjs';
+import {showResidentBody} from '../src/actor-transport.ts';
 
 function internationalAirport(){
  let state={simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{},housing:{households:{},apartmentBlocks:[],houseLots:[]},treasury:{cash:10000},centralBank:{priceLevel:1},weather:{condition:'clear',precipitation:0,wind:0},totalTransactions:0};
@@ -64,6 +65,34 @@ test('ten separately identified foreign passengers pay 50 H$ once only after wal
  t.restore();t.tick(t.state.simulationAgeSeconds+120);
  assert.equal(t.admissions.length,10);assert.equal(t.state.internationalLife.visaRevenue,500);assert.equal(t.countries.countryAccount('hansdrex').cash,treasury+500);
  assert.equal(t.events.filter(event=>event.type==='visitor_arrival').length,10);
+});
+
+test('both Hansdrex and North expose all ten real disembarking passengers to the body renderer before immigration',()=>{
+ for(const airport of ['city','north']){
+  const t=internationalAirport();assert.equal(t.visitors.queueAircraft(10,airport),true);
+  const flight=t.state.cityVisitors.airportTraffic.flights[0],seen=new Set();
+  for(let index=0;index<10;index++){
+   const path=visitorArrivalPath(flight,index);t.tick(path[0].at+1);
+   const view=t.visitors.snapshot().visitors,passenger=view.find(f=>f.id===flight.arrivalPassengerIds[index]);
+   assert.ok(passenger);assert.equal(showResidentBody(passenger),true,airport+':'+index);
+   assert.equal(passenger.visitorPhase,'airport-arrival');assert.equal(passenger.transitMode,'walk');assert.equal(passenger.traveling,true);
+   seen.add(passenger.id);
+  }
+  assert.equal(seen.size,10);assert.equal(t.admissions.length,0);
+  t.tick(visitorArrivalPath(flight,9).at(-1).at+1);assert.equal(t.admissions.length,10);
+  assert.ok(t.admissions.every(a=>a.request.airportId===airport));
+ }
+});
+
+test('future long holidays change to Hansdrex and express race visits to North without rerouting airborne passengers or resetting their identities',()=>{
+ const make=(id,airportId,nights,inboundAt)=>({id,airportId,inboundAt,parkedAt:inboundAt+1020,outboundAt:inboundAt+2000,exitAt:inboundAt+3080,standId:'old',arrivalStand:{id:'old',x:0,z:0},guests:[{id:id+'-guest',phase:'inbound',entryAirportId:airportId,nights,money:1400}]});
+ const holiday=make('holiday','north',3,2000),express=make('express','city',0,2500),airborne=make('airborne','north',3,500);
+ const event={charterPlanned:true,tenPassengerVersion:1,charters:[holiday,express,airborne]},state={simulationAgeSeconds:1000,northF1:{event}},service=createF1Charters({world:()=>state});
+ const flying=JSON.stringify(airborne),identities=event.charters.map(f=>[f.id,f.guests[0].id,f.guests[0].money]);
+ service.make(event);assert.equal(holiday.airportId,'city');assert.equal(express.airportId,'north');assert.equal(JSON.stringify(airborne),flying);
+ for(const f of [holiday,express]){assert.equal(f.inboundAt,null);assert.equal(f.arrivalStand,undefined);assert.equal(f.guests[0].entryAirportId,f.airportId);}
+ assert.deepEqual(event.charters.map(f=>[f.id,f.guests[0].id,f.guests[0].money]),identities);
+ const once=JSON.stringify(event);service.make(event);assert.equal(JSON.stringify(event),once);
 });
 
 
@@ -215,6 +244,10 @@ test('Grand Prix foreign demand varies in complete ten-person manifests between 
   assert.ok(event);assert.ok(event.charterDemand>=200&&event.charterDemand<=300);assert.equal(event.charterDemand%10,0);
   assert.equal(event.charters.length,event.charterDemand/10);assert.ok(event.charters.length>=20&&event.charters.length<=30);
   assert.ok(event.charters.every(flight=>flight.arrivingGuests===10&&flight.guests.length===10));
+  const north=event.charters.filter(f=>f.airportId==='north'),hans=event.charters.filter(f=>f.airportId==='city');
+  assert.ok(Math.abs(hans.length-3*north.length)<=2,'complete ten-seat aircraft round the 3:1 tourism split');
+  assert.ok(hans.every(f=>f.guests.every(g=>g.nights>=2)&&f.earliestAt<event.startsAt-86400));
+  assert.ok(north.every(f=>f.guests.every(g=>g.nights===0)&&f.earliestAt>event.startsAt-86400));
   const people=event.charters.flatMap(flight=>flight.guests);
   assert.equal(new Set(people.map(person=>person.id)).size,event.charterDemand);
   assert.ok(people.every(person=>person.originCountryId==='outside'&&person.citizenshipCountryId==='outside'));

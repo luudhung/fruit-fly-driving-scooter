@@ -60,6 +60,7 @@ export function visitorArrivalPath(flight,index=0,timeScale=120) {
  if(flight.airportId&&flight.airportId!=='city'){
   const airport=visitorAirport(flight);
   add(airport.terminal.x-airport.terminal.w/2-2,1.1,stand.z+4,'apron');
+  add(airport.terminal.x-airport.terminal.w/2-2,1.1,airport.terminal.z,'apron');
   add(airport.terminal.x,1.1,airport.terminal.z,'immigration');
   add(airport.terminal.x,1.1,airport.terminal.z,'immigration',420);
   add(airport.gate.x,1.1,airport.gate.z,'complete');return path;

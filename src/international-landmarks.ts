@@ -4,6 +4,8 @@ import {NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
 import {createNorthGolfCourse} from './north-golf-course.ts';
 import {batchStaticMeshes} from './static-box-batches.ts';
+import {createPassengerTerminal} from './passenger-terminal.ts';
+import {subtractRects,type Rect} from './surface-rectangles.ts';
 import {NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LANDMARK,NORTH_FARM,NORTH_MILITARY,NORTH_MILITARY_WALLS,NORTH_WHITE_HOUSE,NORTH_SPORTS_PARK,HAWAII_APARTMENTS,HAWAII_COTTAGES,BORDER_CHECKPOINTS,BORDER_CUSTOMS_BUILDINGS,BORDER_CUSTOMS_DECKS,type CountryBuilding} from '../worker/country-map.mjs';
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 /** Immutable national premises. Dynamic people, vehicles and crop stocks stay in the simulation. */
@@ -26,7 +28,7 @@ export class InternationalLandmarks{
   this.sign=sign;
   this.root.name='International national infrastructure';parent.add(this.root);
   for(const b of [...NORTH_BUILDINGS,...HAWAII_COTTAGES,...HAWAII_APARTMENTS,...BORDER_CUSTOMS_BUILDINGS] as CountryBuilding[]){
-   const g=b.id===NORTH_LANDMARK.id?this.auroraTower():b.id===NORTH_FIRE_STATION.id?this.fireStation(b):this.premises(b);
+   const g=b.id===NORTH_LANDMARK.id?this.auroraTower():b.id===NORTH_FIRE_STATION.id?this.fireStation(b):b.id==='north-airport'?createPassengerTerminal(NORTH_AIRPORT,this.sign,{name:'North City International · Race Gateway',height:b.h}):this.premises(b);
    g.userData.buildingId=b.id;this.root.add(g);this.buildings.set(b.id,g);
   }
   this.stats.buildings=this.buildings.size;this.airport();this.farm();this.customs();this.armyPerimeter();this.sportsPark();
@@ -102,10 +104,14 @@ export class InternationalLandmarks{
  }
  private airport(){
   const g=new THREE.Group(),a=NORTH_AIRPORT;g.name='North airport runway and apron';
-  for(const r of [a.runway,a.apron])this.box(g,r.x,.12,r.z,r.w,.12,r.d,this.road);
-  this.box(g,a.runway.x,.19,a.runway.z,.25,.025,a.runway.d-16,this.paint);
+  const occupied:Rect[]=[];
+  for(const r of [a.runway,a.apron,{x:-974,z:-820,w:8,d:292},{x:-987,z:-900,w:26,d:8},...NORTH_F1_CHARTER_STANDS.map(p=>({...p,w:30,d:24}))]){
+   for(const part of subtractRects([r],occupied))this.box(g,part.x,.12,part.z,part.w,.12,part.d,this.road);
+   occupied.push(r);
+  }
+  for(let z=a.runway.z-a.runway.d/2+30;z<a.runway.z+a.runway.d/2-25;z+=18)this.box(g,a.runway.x,.2,z,.28,.025,8,this.paint);
   for(const z of [a.runway.z-a.runway.d/2+10,a.runway.z+a.runway.d/2-10])for(let x=-7;x<=7;x+=3.5)this.box(g,a.runway.x+x,.2,z,1.1,.025,8,this.paint);
-  for(const p of a.stands){this.box(g,p.x,.19,p.z,12,.02,.22,this.paint);this.box(g,p.x,.19,p.z,.22,.02,15,this.paint);}
+  for(const [index,p]of a.stands.entries()){this.box(g,p.x,.2,p.z,12,.02,.22,this.paint);this.box(g,p.x,.2,p.z,.22,.02,15,this.paint);this.label(g,`NCI ${index+1}`,p.x,.9,p.z+9,9,.7);}
   for(const [index,p] of NORTH_F1_CHARTER_STANDS.entries()){
    this.box(g,p.x,.19,p.z,13,.02,.22,this.paint);
    for(const side of [-1,1])this.box(g,p.x,.19,p.z+side*6,17,.02,.12,this.paint);
@@ -113,8 +119,9 @@ export class InternationalLandmarks{
   }
   for(const side of [-1,1]){this.box(g,NORTH_TRAINING_STAND.x+side*5,.19,NORTH_TRAINING_STAND.z,.12,.02,12,this.paint);this.box(g,NORTH_TRAINING_STAND.x,.19,NORTH_TRAINING_STAND.z+side*6,10,.02,.12,this.paint);}
   this.label(g,'TRAINING',NORTH_TRAINING_STAND.x,.8,NORTH_TRAINING_STAND.z,10,.8);
-  this.box(g,-974,.13,-820,8,.1,230,this.road);this.box(g,-987,.13,-900,26,.1,8,this.road);
-  this.label(g,'NORTH CITY INTERNATIONAL · NCI',a.terminal.x,16,a.terminal.z,a.terminal.d*.8,1.8);
+  this.box(g,-974,.2,-820,.16,.025,274,this.paint);
+  this.box(g,a.terminal.x-a.terminal.w/2-2,.22,a.terminal.z,1.5,.03,145,this.stone);
+  this.label(g,'ARRIVALS →',a.terminal.x-a.terminal.w/2-5,2.8,a.terminal.z,12,.9);
   batchStaticMeshes(g);this.root.add(g);
  }
  private farm(){

@@ -58,6 +58,7 @@ import {CitySky,skyLight,citySkyPalette,cityFogRange,sunDirection} from "./city-
 import {INTERSECTIONS} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
 import {showResidentBody} from './actor-transport.ts';
+import {selectResidentView} from './airport-arrival-view.ts';
 import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {ConnectionHealth,OBSERVER_TIMEOUT_MS,requestCitySnapshot} from "./connection-health.ts";
 import {CityClock,CITY_VIEW_PREDICTION_SECONDS} from "./city-clock.ts";
@@ -66,7 +67,7 @@ import {HARBOR_CAUSEWAYS} from "../worker/city-map.mjs";
 import {InstancedResidents} from "./instanced-residents";
 import {bindTouchControls,touchButtonSize,blockBrowserGestures} from "./touch-controls.ts";
 import { CameraSprint } from "./camera-sprint";
-import {SceneViewBudget,selectViewBudget} from './view-budget.ts';
+import {SceneViewBudget} from './view-budget.ts';
 import {PlayerCar,PlayerCarVisual,PLAYER_CAR_WORLD} from "./player-car.ts";
 import {PlayerController,PLAYER_EYE,setPlayerHelipads} from "./player-controller.ts";
 import {buildHansdrexTower,buildHansdrexEmpire,buildAirportAndIsland,updateLandmarkLighting} from "./city-landmarks";
@@ -84,7 +85,7 @@ type FlyState = CountryPerson & {
   district?:string;localAirQuality?:number;pollutionExposureYears?:number;environmentalAgePenalty?:number;
   relationships?:{friends:string[];ties:SocialTie[];profile:SocialProfile;task:{kind:string;targetId:string}|null}|null;
   onFireEngine?:boolean;onAmbulance?:boolean;
-  kind?:"resident"|"visitor"; taxiPassenger?:boolean; onPrivateHelicopter?:boolean;
+  kind?:"resident"|"visitor"; visitorPhase?:string; taxiPassenger?:boolean; onPrivateHelicopter?:boolean;
   motion?:MotionPlan|null;
   id: string;
   name: string;
@@ -1537,11 +1538,11 @@ function syncFlyMeshes(flies: FlyState[]) {
   residentView.setCamera(camera);
   const retained=new Set(flyVisuals.keys());
   const crewClock=presentationClock.read(performance.now());
-  const visible=selectViewBudget(flies,residentView,fly=>{
+  const visible=selectResidentView(flies,residentView,fly=>{
     if(!showResidentBody(fly))return null;
     const vessel=fly.militaryShipId&&militaryCrewShips.get(fly.id);
     return vessel?militaryCrewPose(crewClock,vessel,fly.id):flyVisuals.get(fly.id)?.current||fly;
-  },fly=>fly.id,retained,MAX_RENDERED_FLIES);
+  },retained,MAX_RENDERED_FLIES);
   let newVisuals=0;
   for (const fly of visible) {
     if (!fly.alive) continue;
