@@ -73,6 +73,25 @@ test('North GP professional field has ten real teams, twenty local drivers, a si
  assert.equal(state.northF1.nextAt,event.startsAt+5*DAY);
 });
 
+test('foreign visitor snapshots identify the active car leg and stop prediction before the walk back onto the pavement',()=>{
+ const {system,event}=fixture(),guest=event.charters[0].guests[0],key='airport>hotel';
+ Object.assign(guest,{phase:'visiting',x:0,y:1.1,z:-40,onPlane:false,indoors:false,motion:null,leg:{key,index:1,destination:'hotel',at:0}});
+ event.tourPaths||={};event.tourPaths[key]=[
+  {x:0,y:1.1,z:-40,mode:'walk'},
+  {x:0,y:1.1,z:-60,mode:'car'},
+  {x:0,y:1.1,z:-80,mode:'car'},
+  {x:4,y:1.1,z:-80,mode:'walk'},
+ ];
+ const view=()=>system.snapshot().foreignVisitors.find(f=>f.id===guest.id);
+ const driving=view();assert.equal(driving.transitMode,'car');assert.equal(driving.traveling,true);
+ assert.equal(driving.motion.mode,'car');assert.equal(driving.motion.points.length,2);
+ assert.ok(driving.motion.points.every(p=>p.mode==='car'));
+ assert.equal(driving.vehicle,undefined,'a temporary road trip is not permanent car ownership');
+ guest.leg.blocked=true;assert.equal(view().motion.blocked,true,'a blocked trip cannot predict through its obstacle');
+ guest.leg.index=3;assert.equal(view().transitMode,'walk');assert.equal(view().motion.points.length,1);
+ guest.leg=null;const arrived=view();assert.equal(arrived.transitMode,'walk');assert.equal(arrived.traveling,false);assert.equal(arrived.motion,null);
+});
+
 test('past protection records do not block actual residents from reporting to the paddock',()=>{
  const residents=Array.from({length:20},(_,i)=>driver(i));
  const {system,step,event}=fixture(residents);

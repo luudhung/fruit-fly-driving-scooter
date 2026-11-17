@@ -57,6 +57,7 @@ import {CityMotion,CITY_ROUTE_PREDICTION_SECONDS,type MotionPlan} from "./city-m
 import {CitySky,skyLight,citySkyPalette,cityFogRange,sunDirection} from "./city-sky.ts";
 import {INTERSECTIONS} from "../worker/traffic.mjs";
 import {PersonalCars,type RoadIncident} from "./personal-cars.ts";
+import {showResidentBody} from './actor-transport.ts';
 import {readCitySnapshot} from "./read-city-snapshot.ts";
 import {ConnectionHealth,OBSERVER_TIMEOUT_MS,requestCitySnapshot} from "./connection-health.ts";
 import {CityClock,CITY_VIEW_PREDICTION_SECONDS} from "./city-clock.ts";
@@ -804,7 +805,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   syncFlyMeshes(actors);
   updateHeliTourState(actors);
   updateMetroStationOccupancy(actors);
-  personalCars.sync(s.flies || [],s.roadTraffic?.incidents);
+  personalCars.sync(actors,s.roadTraffic?.incidents);
   if(s.urbanWorld){urbanVisuals.sync(s.urbanWorld);refreshStreetSurfaceLayout();newYorkVisuals.sync(s.urbanWorld.buildings);storefrontVisuals.sync(s.urbanWorld.buildings);cityFacadeBatches.sync();}
   if(s.urbanWorld?.fireService)emergencyVisuals.sync(s.urbanWorld.fireService);
   if(s.civicConflict)civicVisuals.sync(s.civicConflict);
@@ -1537,7 +1538,7 @@ function syncFlyMeshes(flies: FlyState[]) {
   const retained=new Set(flyVisuals.keys());
   const crewClock=presentationClock.read(performance.now());
   const visible=selectViewBudget(flies,residentView,fly=>{
-    if(!fly.alive||fly.onPlane||fly.heliPassenger||fly.onPrivateHelicopter||fly.onFireEngine||fly.onAmbulance||fly.taxiPassenger||fly.onTrain||fly.indoors||fly.traveling&&fly.transitMode==='car')return null;
+    if(!showResidentBody(fly))return null;
     const vessel=fly.militaryShipId&&militaryCrewShips.get(fly.id);
     return vessel?militaryCrewPose(crewClock,vessel,fly.id):flyVisuals.get(fly.id)?.current||fly;
   },fly=>fly.id,retained,MAX_RENDERED_FLIES);
@@ -1569,7 +1570,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     visual.lastTraceTime=trace.at(-1)?.t??visual.lastTraceTime;
     if(visual.route.length>12)visual.route=visual.route.slice(-8);
     if(visual.stationary){visual.route=[];visual.current.copy(visual.target);}
-    visual.group.visible=!fly.onPlane&&!fly.heliPassenger&&!fly.onPrivateHelicopter&&!fly.onFireEngine&&!fly.onAmbulance&&!fly.taxiPassenger&&!fly.onTrain&&!fly.indoors&&!(fly.traveling&&fly.transitMode==="car");
+    visual.group.visible=showResidentBody(fly);
     if(fly.currentLocationId==="rooftop"&&!fly.traveling)visual.group.visible=true;
     const ageScale = fly.ageYears < 18 ? 0.62 + fly.ageYears / 45 : fly.ageYears > 80 ? 0.9 : 1;
     const visibilityScale = graphicsPreset === "low" ? 1.55 : graphicsPreset === "medium" ? 1.35 : 1.18;

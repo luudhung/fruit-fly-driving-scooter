@@ -1,5 +1,5 @@
 import {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
-import {createF1Charters} from './north-f1-charters.mjs';
+import {createF1Charters,f1VisitorTravel} from './north-f1-charters.mjs';
 import {northF1ClosureWindow,isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {COUNTRY_IDS,NORTH_AIRPORT,countryAt} from './country-map.mjs';
@@ -460,12 +460,12 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
    .filter(({guest:f})=>!['departed','denied','cancelled'].includes(f.phase)&&Number.isFinite(f.x)&&Number.isFinite(f.z)).map(({guest:f,event:e})=>({
     id:f.id,name:f.name||f.id,kind:'visitor',alive:true,sex:f.sex==='F'||f.sex==='M'?f.sex:signature(f.id+'sex')<.5?'F':'M',ageYears:f.ageYears||30,generation:1,
     x:f.x,y:f.y??1.1,z:f.z,vx:f.vx||0,vz:f.vz||0,action:f.action||'visiting the Grand Prix',
-    currentLocationId:f.currentLocationId||null,targetLocationId:f.leg?.destination||null,traveling:Boolean(f.leg||f.motion),
+    currentLocationId:f.currentLocationId||null,targetLocationId:f.leg?.destination||null,
     hunger:20,energy:85,stress:10,happiness:75,excitement:80,loneliness:10,health:95,
     money:f.money||0,savings:f.savings||0,debt:0,affection:0,children:[],parents:[],
     onPlane:Boolean(f.onPlane),indoors:Boolean(f.indoors),visitorPhase:f.phase,citizenshipCountryId:'outside',originCountryId:'outside',
     homeX:f.x,homeZ:f.z,entryAirportId:f.entryAirportId||null,
-    motion:f.leg?{at:now(),speed:e.tourPaths?.[f.leg.key]?.[f.leg.index]?.mode==='car'?11:2.8,mode:e.tourPaths?.[f.leg.key]?.[f.leg.index]?.mode||'walk',blocked:false,points:(e.tourPaths?.[f.leg.key]||[]).slice(f.leg.index,f.leg.index+8)}:f.motion||null,routeWaypoints:f.leg?(e.tourPaths?.[f.leg.key]||[]).slice(f.leg.index):[],routeIndex:0,
+    ...f1VisitorTravel(e,f,now()),
    }));
  }
  function snapshot(){

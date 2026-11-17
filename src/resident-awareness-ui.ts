@@ -1,3 +1,4 @@
+import {isCarTrip} from './actor-transport.ts';
 export type ResidentVision={heading:number;lastObservedAt:number;available?:boolean;unavailableReason?:string|null;observations:Array<{id:string;kind:string;name?:string;x:number;y:number;z:number;distance:number;confidence:number;source:'seen';observedAt:number}>};
 export type ResidentAwareness={
  version?:number;algorithmOnly?:boolean;
@@ -33,7 +34,7 @@ export function residentAwarenessRows(actor:AwareResident|null,now:number){
  return {status:actor.alive?'Mô hình nhận biết và ký ức dựa trên trạng thái, sự kiện và vật thực sự nhìn thấy.':'Cư dân đã mất · dữ liệu cuối cùng được ghi nhận.',rows};
 }
 export function residentEyeAvailable(actor:AwareResident|null|undefined){
- return Boolean(actor?.alive&&actor.vision&&actor.vision.available!==false&&[actor.x,actor.y,actor.z,actor.vision.heading,actor.vision.lastObservedAt].every(Number.isFinite)&&!actor.indoors&&!actor.sleeping&&!actor.eyesClosed&&!actor.onTrain&&!actor.onPlane&&!actor.heliPassenger&&!actor.onPrivateHelicopter&&!actor.onFireEngine&&!actor.onAmbulance&&!actor.taxiPassenger&&!(actor.traveling&&actor.transitMode==='car'));
+ return Boolean(actor?.alive&&actor.vision&&actor.vision.available!==false&&[actor.x,actor.y,actor.z,actor.vision.heading,actor.vision.lastObservedAt].every(Number.isFinite)&&!actor.indoors&&!actor.sleeping&&!actor.eyesClosed&&!actor.onTrain&&!actor.onPlane&&!actor.heliPassenger&&!actor.onPrivateHelicopter&&!actor.onFireEngine&&!actor.onAmbulance&&!actor.taxiPassenger&&!isCarTrip(actor));
 }
 export type ViewerCameraState={x:number;y:number;z:number;yaw:number;pitch:number;fov:number;following:boolean};
 export function residentEyeVerticalFov(aspect:number){return Math.min(80,2*Math.atan(Math.tan(55*Math.PI/180)/Math.max(.1,Number.isFinite(aspect)?aspect:1))*180/Math.PI);}

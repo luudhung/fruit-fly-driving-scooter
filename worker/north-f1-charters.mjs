@@ -14,6 +14,18 @@ const sectors=['west','north','east'];
 const carrier={carrierId:HANSDREX_AIRLINE.id,carrierName:HANSDREX_AIRLINE.name,oneWayFare:HANSDREX_AIRLINE.oneWayFare};
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 
+/** Keep the current mode and its prediction window together at walk/car boundaries. */
+export function f1VisitorTravel(event,guest,at){
+ const leg=guest.leg,route=leg?(event.tourPaths?.[leg.key]||[]):[];
+ if(!leg)return {traveling:Boolean(guest.motion),transitMode:guest.motion?.mode||'walk',motion:guest.motion||null,routeWaypoints:[],routeIndex:0};
+ const transitMode=route[leg.index]?.mode==='car'?'car':'walk',points=[];
+ for(let i=leg.index;i<route.length&&points.length<8;i++){
+  if((route[i].mode==='car'?'car':'walk')!==transitMode)break;
+  points.push(route[i]);
+ }
+ return {traveling:true,transitMode,motion:{at,speed:transitMode==='car'?11:2.8,mode:transitMode,blocked:Boolean(leg.blocked),points},routeWaypoints:route.slice(leg.index),routeIndex:0};
+}
+
 export function createF1Charters({world,signature,admit,intercept,weatherClosed,movementBlocked,account,bookHotel,releaseHotel,visitAttraction,attend}){
  const now=()=>Number(world().simulationAgeSeconds||0);
  const scale=()=>Number(world().timeScale||120);
@@ -85,25 +97,28 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   if(!destination||f.currentLocationId===destination)return false;
   const key=route(e,f,destination);
   if(!key){f.retryAt=now()+600;return false;}
-  f.leg={key,destination,index:0,at:now()};f.traveling=true;f.motion=null;f.action='travelling to '+destination;return true;
+  f.leg={key,destination,index:0,at:now()};f.transitMode=e.tourPaths[key][0]?.mode||'walk';f.traveling=true;f.motion=null;f.action='travelling to '+destination;return true;
  }
  function move(e,f){
   const leg=f.leg,route=e.tourPaths[leg.key];
   let left=Math.min(1200,Math.max(0,now()-leg.at))/scale();
   leg.at=now();
+  leg.blocked=false;f.vx=f.vz=0;
   for(let i=0;i<30&&left>0&&leg.index<route.length;i++){
    const p=route[leg.index],d=distance(f,p);
    if(d<.015){leg.index++;continue;}
    const speed=p.mode==='car'?11:2.8,step=Math.min(d,left*speed);
    const next={x:f.x+(p.x-f.x)*step/d,z:f.z+(p.z-f.z)*step/d,y:p.y};
-   if(movementBlocked?.(f,next,p.mode==='car'?1:.25))return;
-   if(countryAt(f)!==countryAt(next)&&intercept?.(f,f,next,{mode:p.mode})?.allowed===false)return;
+   f.transitMode=p.mode;
+   if(movementBlocked?.(f,next,p.mode==='car'?1:.25)){leg.blocked=true;return;}
+   if(countryAt(f)!==countryAt(next)&&intercept?.(f,f,next,{mode:p.mode})?.allowed===false){leg.blocked=true;return;}
+   f.vx=(p.x-f.x)/d*speed;f.vz=(p.z-f.z)/d*speed;
    Object.assign(f,next);left-=step/speed;
    if(step>=d-.01)leg.index++;
   }
   if(leg.index>=route.length){
-   f.currentLocationId=leg.destination;f.leg=null;f.traveling=false;
-  }
+   f.currentLocationId=leg.destination;f.leg=null;f.traveling=false;f.transitMode='walk';f.vx=f.vz=0;
+  }else f.transitMode=route[leg.index]?.mode||'walk';
  }
  function traffic(e,id,except){
   const city=world().cityVisitors?.airportTraffic?.flights||[];

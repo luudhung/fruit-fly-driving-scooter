@@ -3,11 +3,12 @@ import {SceneViewBudget,selectViewBudget} from './view-budget.ts';
 import {signalBarrier,createVehicleIndex,type TrafficActor} from '../worker/traffic.mjs';
 import * as THREE from 'three';
 import {PARKING_SPACES,clearSegment} from '../worker/city-map.mjs';
+import {isCarTrip} from './actor-transport.ts';
 
-type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;x:number;y?:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;y?:number;z:number;t:number}>};
+type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;traveling?:boolean;transitMode?:string;indoors?:boolean;onPlane?:boolean;onTrain?:boolean;heliPassenger?:boolean;onPrivateHelicopter?:boolean;onFireEngine?:boolean;onAmbulance?:boolean;taxiPassenger?:boolean;x:number;y?:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;y?:number;z:number;t:number}>};
 type Car={id:string;motion?:CityMotion;hasMotion?:boolean;signalPermit?:boolean;color:THREE.Color;x:number;y:number;z:number;heading:number;pitch:number;targetX:number;targetY:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;y?:number;z:number}>;actor:TrafficActor};
 export type RoadIncident={id:string;x:number;z:number;repairAt:number};
-const position=(f:Driver)=>!f.alive||!f.vehicle?.includes('car')?null:f.traveling&&f.transitMode==='car'?f:f.parkedCar||null;
+const position=(f:Driver)=>!f.alive?null:isCarTrip(f)?f:f.vehicle?.includes('car')?f.parkedCar||null:null;
 
 /** Only a bounded nearby view creates motion objects or submits GPU instances. */
 export class PersonalCars{
@@ -55,7 +56,7 @@ export class PersonalCars{
  setView(camera:THREE.Camera){this.camera=camera;}
  sync(drivers:Driver[],incidents:RoadIncident[]=[]){this.drivers=drivers;this.incidents=incidents;this.dirty=true;}
  private syncDriver(f:Driver,car:Car,fresh:boolean){
-  const driving=Boolean(f.traveling&&f.transitMode==='car'),p=position(f)!;
+  const driving=isCarTrip(f),p=position(f)!;
   const heading=driving&&Math.abs(f.vx)+Math.abs(f.vz)>.01?Math.atan2(f.vx,f.vz):f.parkedCar?.heading||0;
   if(fresh||!driving||!car.driving){car.route.length=0;car.x=p.x;car.y=driving?(f.y??1.1):1.1;car.z=p.z;car.heading=heading;car.pitch=0;}
   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route.length=0;car.x=q.x;car.y=q.y??1.1;car.z=q.z;}}
@@ -76,7 +77,7 @@ export class PersonalCars{
    valid.add(f.id);
    const sleeping=this.dormant.get(f.id);
    if(sleeping){this.syncDriver(f,sleeping,false);if(sleeping.hasMotion&&sleeping.motion){sleeping.x=sleeping.motion.x;sleeping.y=sleeping.motion.y;sleeping.z=sleeping.motion.z;}}
-   const car=this.cars.get(f.id)||sleeping,driving=Boolean(f.traveling&&f.transitMode==='car');
+   const car=this.cars.get(f.id)||sleeping,driving=isCarTrip(f);
    // Interest must follow what the camera actually sees. A delayed snapshot can
    // lag behind a predicted car; culling against it would
    // discard a visible ID and restart its animation when the snapshot catches up.
