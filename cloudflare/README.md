@@ -75,8 +75,8 @@ runs the city engine; the Durable Object pauses city and neural background work.
 Only one device owns the shared simulation at a time. Other viewers read its
 latest checkpoint. Rendering always stays on each viewer's device.
 
-The owner sends a small heartbeat every 5 seconds and a compressed complete
-checkpoint every 20 seconds. Each accepted checkpoint is saved durably, including
+The owner sends a small heartbeat every 5 seconds and a compressed progress delta
+every 5 real seconds. Each accepted checkpoint is saved durably, including
 new births, deaths, finances and journeys. Historical residents remain archived
 on the server. Session metadata is durable across Object eviction. Monotonic
 sequence numbers make retries idempotent, and expired owners cannot overwrite a

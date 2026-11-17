@@ -1,7 +1,9 @@
 import {restoreState,getRawState,getState,tick,setNeuralSyncEnabled,countries} from './civilization-engine.mjs';
-import {LOCAL_HOST_HEARTBEAT_MS,LOCAL_HOST_CHECKPOINT_MS,localHostCheckpointStream} from './local-host-state.mjs';
+import {LOCAL_HOST_HEARTBEAT_MS,LOCAL_HOST_CHECKPOINT_MS} from './local-host-state.mjs';
+import {projectLocalDocument,diffLocalDocument} from './local-host-delta.mjs';
 setNeuralSyncEnabled(false);
 let api='',session=null,running=false,busy=false,selectedId=null,checkpointBusy=false,controlBusy=false,lastSave=0,lastTick=0;
+let baseline=null,pendingCheckpoint=null,latestPublished=null;
 const send=(type,extra={})=>postMessage({type,...extra});
 const processedCommands=new Set();
 function applyCommands(commands=[]){
@@ -15,29 +17,42 @@ function applyCommands(commands=[]){
 async function request(path,body,compressed=false){
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),55000);
  try{
-  const response=await fetch(api+path,{method:'POST',cache:'no-store',headers:{'content-type':compressed?'application/x-city-checkpoint+gzip':'application/json'},body:compressed?body:JSON.stringify(body),signal:controller.signal});
+  const response=await fetch(api+path,{method:'POST',cache:'no-store',headers:{'content-type':compressed?'application/x-city-delta+gzip':'application/json'},body:compressed?body:JSON.stringify(body),signal:controller.signal});
   if(path.endsWith('/claim')&&response.ok){
    const token=response.headers.get('x-city-host-token'),epoch=Number(response.headers.get('x-city-host-epoch'));
    if(token&&Number.isSafeInteger(epoch))send('lease',{lease:{token,epoch}});
   }
-  if(response.status===409){session=null;running=false;send('fenced');throw Error('local session transferred');}
+  if(response.status===409){session=null;running=false;baseline=null;pendingCheckpoint=null;send('fenced');throw Error('local session transferred');}
   if(!response.ok)throw Error('session HTTP '+response.status);
   return await response.json();
  }finally{clearTimeout(timeout);}
 }
 async function save(release=false){
- if(!session||checkpointBusy)return false;
+ if(!session||!baseline||checkpointBusy)return false;
  checkpointBusy=true;
+ const owner=session;
  try{
-  const raw=getRawState(),sequence=session.sequence+1;
-  const stream=localHostCheckpointStream(raw,{token:session.token,epoch:session.epoch,sequence,release,acknowledgedCommands:[...processedCommands]});
-  const packed=await new Response(stream.pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-  const receipt=await request('/api/civilization/local/checkpoint',packed,true);
-  applyCommands(receipt.commands);
-  if(session){session.sequence=receipt.sequence;lastSave=Date.now();}
-  send('saved',{savedAt:lastSave});
-  if(release){running=false;session=null;}
-  return true;
+  do{
+   if(!pendingCheckpoint){
+    const document=structuredClone(projectLocalDocument(getRawState()));
+    const sequence=owner.sequence+1;
+    const payload={token:owner.token,epoch:owner.epoch,sequence,baseSequence:owner.sequence,release,observer:latestPublished,acknowledgedCommands:[...processedCommands],patch:diffLocalDocument(baseline,document)};
+    const packed=await new Response(new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    pendingCheckpoint={document,sequence,packed,release};
+   }
+   const packet=pendingCheckpoint;
+   const receipt=await request('/api/civilization/local/checkpoint',packet.packed,true);
+   if(session!==owner)return false;
+   if(receipt.sequence!==packet.sequence)throw Error('checkpoint sequence was not acknowledged');
+   baseline=packet.document;owner.sequence=receipt.sequence;pendingCheckpoint=null;lastSave=Date.now();
+   applyCommands(receipt.commands);
+   send('saved',{savedAt:lastSave,savedAge:baseline.world.simulationAgeSeconds});
+   if(packet.release){running=false;session=null;baseline=null;return true;}
+   // A lost regular-save response must first be retried verbatim; closing then
+   // sends a separate final delta from that acknowledged base to the latest step.
+   if(!release)return true;
+  }while(session===owner);
+  return false;
  }catch(error){console.warn('[local-city checkpoint]',String(error));send('sync-pending',{message:String(error)});return false;}
  finally{checkpointBusy=false;}
 }
@@ -45,21 +60,24 @@ async function start(){
  if(controlBusy||session)return;
  controlBusy=true;
  try{
-  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:2});
+  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:3});
   if(!result.granted){send('observer');return;}
-  session=result.lease;processedCommands.clear();
+  session=result.lease;processedCommands.clear();pendingCheckpoint=null;
+  // Capture the agreed server base before restoration adds local runtime data.
+  baseline=structuredClone(projectLocalDocument(result.state));
   restoreState(result.state);
   lastTick=performance.now();lastSave=Date.now();running=true;
   send('started',{lease:{token:session.token,epoch:session.epoch}});publish();
  }catch(error){
   if(session)void request('/api/civilization/local/leave',{token:session.token,epoch:session.epoch}).catch(()=>{});
-  session=null;running=false;send('unavailable',{message:String(error)});
+  session=null;running=false;baseline=null;pendingCheckpoint=null;send('unavailable',{message:String(error)});
  }
  finally{controlBusy=false;}
 }
 function publish(){
  const snapshot=getState({observer:true,compactObserver:true,selectedId});
  snapshot.runtime={platform:'browser-worker',sampledCatchup:{snapshotAgeSeconds:0}};
+ latestPublished=snapshot;
  send('snapshot',{snapshot});
 }
 async function advance(){
@@ -70,8 +88,7 @@ async function advance(){
   if(elapsed<.5)return;
   lastTick=now;
   await tick({gameSeconds:elapsed*Number(getRawState().timeScale||120),syncBrain:false,serialized:true});
-  getRawState().updatedAt=new Date().toISOString();
-  publish();
+  getRawState().updatedAt=new Date().toISOString();publish();
  }catch(error){send('error',{message:String(error)});}
  finally{busy=false;}
 }
@@ -80,11 +97,9 @@ async function heartbeat(){
  controlBusy=true;
  try{
   const result=await request('/api/civilization/local/heartbeat',{token:session.token,epoch:session.epoch});
-  applyCommands(result.commands);
-  send('contact');
+  applyCommands(result.commands);send('contact');
  }catch(error){send('sync-pending',{message:String(error)});}
  finally{controlBusy=false;}
- if(running&&Date.now()-lastSave>=LOCAL_HOST_CHECKPOINT_MS)void save();
 }
 self.onmessage=async({data})=>{
  if(data.type==='start'){api=data.api;selectedId=data.selectedId||null;await start();}
@@ -95,7 +110,7 @@ self.onmessage=async({data})=>{
   const owner=session,complete=await save(true);
   if(!complete&&owner&&session===owner){
    await request('/api/civilization/local/leave',{token:owner.token,epoch:owner.epoch}).catch(()=>{});
-   session=null;
+   session=null;baseline=null;pendingCheckpoint=null;
   }
   send('released');
  }
@@ -103,3 +118,5 @@ self.onmessage=async({data})=>{
 };
 setInterval(()=>{void advance();},750);
 setInterval(()=>{void heartbeat();},LOCAL_HOST_HEARTBEAT_MS);
+// This cadence is real wall time, independent of network heartbeat latency.
+setInterval(()=>{if(running)void save();},LOCAL_HOST_CHECKPOINT_MS);

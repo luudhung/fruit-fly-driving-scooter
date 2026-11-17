@@ -1,6 +1,6 @@
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
-import {NORTH_F1_RESERVED,NORTH_F1_GARAGES} from './north-f1-map.mjs';
+import {NORTH_F1_RESERVED,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS} from './north-f1-map.mjs';
 import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MILITARY,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {CIVIC_FACILITY_CATALOG,facilitySpec,isNonResidentialUsage,nationalDevelopmentDemand,civicFacilities,DEVELOPMENT_REVIEW_INTERVAL} from './civic-development.mjs';
@@ -16,7 +16,9 @@ import {validDevelopmentLot,planAccessRoad,MIN_ALLEY} from './urban-roads.mjs';
 import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,contains,overlaps,entrance,blocked,applyUrbanGeometry} from './city-map.mjs';
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
 const live=f=>f.alive&&f.ageYears>=18&&f.ageYears<76&&f.health>35;
-const MAX_FIRES=3,MAX_PROJECTS=5,MAX_NORTH_PROJECTS=2,DAY=86400;
+const MAX_FIRES=3,MAX_PROJECTS=5,MAX_NORTH_PROJECTS=2,MAX_RECOVERY_PROJECTS=8,MAX_NORTH_RECOVERY_PROJECTS=4,DAY=86400;
+const BLUEPRINT_FIELDS=['x','z','w','d','h','kind','color','roofColor','facadeColor','style','roofStyle','seed'];
+const initialBlueprints=new Map(BUILDINGS.map(b=>[b.id,Object.fromEntries(BLUEPRINT_FIELDS.filter(k=>b[k]!==undefined).map(k=>[k,b[k]]))]));
 const NORTH=COUNTRY_IDS.north;
 const materialSupplier=country=>country===NORTH?'north-civic-materials':'civic-materials';
 const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:'construction';
@@ -36,7 +38,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  const activeProject=p=>ongoing(p)&&!p.recoveryPaused;
  const ownership=b=>b?.countryId||b?.warRecovery?.countryId||countryAt(b);
  const projectCountry=p=>p.countryId||ownership(u().buildings[p.buildingId]||building(p.buildingId));
- const projectLimit=country=>country===NORTH?MAX_NORTH_PROJECTS:MAX_PROJECTS;
+ const projectLimit=country=>country===NORTH?(recoveryPriority(NORTH)?MAX_NORTH_RECOVERY_PROJECTS:MAX_NORTH_PROJECTS):(recoveryPriority(COUNTRY_IDS.hansdrex)?MAX_RECOVERY_PROJECTS:MAX_PROJECTS);
  const territoriesMatch=(a,b)=>(a===NORTH)===(b===NORTH);
  const hasSlot=country=>u().projects.filter(p=>activeProject(p)&&territoriesMatch(projectCountry(p),country)).length<projectLimit(country);
 
@@ -50,6 +52,16 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const b=building(id);if(!b)return null;
   return u().buildings[id] ||= {id:b.id,x:b.x,z:b.z,w:b.w,d:b.d,h:b.h,kind:b.kind,...(b.countryId?{countryId:b.countryId}:{}),health:100,stage:'operational',progress:1,ownerId:null,lastDamageAt:0};
  }
+ function rememberBlueprint(b){
+  const original=initialBlueprints.get(b.id);
+  if(original)b.originalBlueprint={...original};
+  else if(!b.originalBlueprint)b.originalBlueprint=Object.fromEntries(BLUEPRINT_FIELDS.filter(k=>b[k]!==undefined).map(k=>[k,b[k]]));
+  if(Number.isFinite(b.originalBlueprint.h))b.originalHeight=b.originalBlueprint.h;
+ }
+ function restoreBlueprint(b){
+  rememberBlueprint(b);
+  Object.assign(b,b.originalBlueprint);
+ }
  function addLocation(id,p,name){
   let l=LOCATIONS.find(v=>v.id===id);if(!l){l={id,type:'job',name,x:p.x,z:p.z};LOCATIONS.push(l);}else Object.assign(l,{x:p.x,z:p.z});
   return l;
@@ -62,10 +74,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const s=raw();s.urbanWorld ||= {version:1,buildings:{},fires:[],projects:[],floods:[],nextFireAt:now()+DAY*.55,nextGrowthAt:now()+DAY*.7,nextFloodCheckAt:now()+1800,nextProjectId:1,nextIncidentId:1,lastTickAt:now(),completedProjects:0,extinguishedFires:0,displaced:0,materialsDelivered:0,safety:{water:16000,stationCash:0},history:[]};
   const v=s.urbanWorld;v.buildings ||= {};v.fires ||= [];v.projects ||= [];v.floods ||= [];v.history ||= [];v.roads ||= [];v.growthCursor=Number(v.growthCursor||0);v.safety ||= {water:16000,stationCash:0};v.development ||= {version:1,nextReviewAt:now()+DEVELOPMENT_REVIEW_INTERVAL,reviews:0,lastDemand:[],decisions:[]};
   for(const name of ['civic-escrow','civic-materials','civic-recovery'])account(name);
-  if(!v.northF1VenueVersion){
-   const garage=v.buildings[NORTH_F1_GARAGES.id];
-   if(garage){const {x,z,w,d}=NORTH_F1_GARAGES;Object.assign(garage,{x,z,w,d});}
-   v.northF1VenueVersion=1;
+  if(Number(v.northF1VenueVersion||0)<2){
+   for(const b of [NORTH_F1_GARAGES,...NORTH_F1_GRANDSTANDS]){
+    const stored=v.buildings[b.id];
+    if(stored)Object.assign(stored,{x:b.x,z:b.z,w:b.w,d:b.d});
+   }
+   v.northF1VenueVersion=2;
   }
   if(!v.mainEducationVersion){
    for(const campus of MAIN_SCHOOL_CAMPUSES)Object.assign(stateFor(campus.id),campus,{fundingAccountId:'treasury'});
@@ -93,10 +107,10 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   if(!v.materialStockInitialized){account('civic-materials').inventory=2000;v.materialStockInitialized=true;}
   byId=new Map(people().map(f=>[f.id,f]));
-  const activeSites=new Set([...v.fires.map(f=>`CIVIC-FIRE-${f.id}`),...v.projects.filter(p=>p.stage!=='complete').map(p=>`CIVIC-SITE-${p.id}`)]);
-  for(let i=LOCATIONS.length-1;i>=0;i--)if((LOCATIONS[i].id.startsWith('CIVIC-FIRE-')||LOCATIONS[i].id.startsWith('CIVIC-SITE-'))&&!activeSites.has(LOCATIONS[i].id))LOCATIONS.splice(i,1);
+  const activeSites=new Set([...v.fires.map(f=>`CIVIC-FIRE-${f.id}`),...v.projects.filter(p=>p.stage!=='complete').map(p=>`CIVIC-SITE-${p.id}`),...v.projects.filter(p=>ongoing(p)&&p.materialCache?.quantity>0).map(p=>`CIVIC-CARGO-${p.id}`)]);
+  for(let i=LOCATIONS.length-1;i>=0;i--)if((LOCATIONS[i].id.startsWith('CIVIC-FIRE-')||LOCATIONS[i].id.startsWith('CIVIC-SITE-')||LOCATIONS[i].id.startsWith('CIVIC-CARGO-'))&&!activeSites.has(LOCATIONS[i].id))LOCATIONS.splice(i,1);
   for(const fire of v.fires){const b=building(fire.buildingId)||v.buildings[fire.buildingId];if(b)taskSite(`CIVIC-FIRE-${fire.id}`,b);}
-  for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b)taskSite(`CIVIC-SITE-${p.id}`,b);}
+  for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b){if(p.kind!=='new')rememberBlueprint(b);taskSite(`CIVIC-SITE-${p.id}`,b);if(p.materialCache?.quantity>0)addLocation(`CIVIC-CARGO-${p.id}`,p.materialCache,'Reserved construction material pickup');}}
   // Completed location pins are reconstructed from durable buildings on a cold Worker start.
   for(const b of Object.values(v.buildings))if(b.id?.startsWith('CIVIC-')&&b.stage==='operational')addLocation(b.id,b.frontage||b,b.name||'Resident-built premises');
  }
@@ -121,7 +135,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function ignite(buildingId,reason='electrical fault'){
   ensure();if(u().fires.length>=MAX_FIRES||u().fires.some(f=>f.buildingId===buildingId))return null;
   const b=stateFor(buildingId);if(!b||['collapsed','cleared','construction'].includes(b.stage)||['landmark','mansion','airport'].includes(b.kind))return null;
-  b.originalHeight=Number(b.originalHeight||b.h);
+  rememberBlueprint(b);
   const fire={id:`FIRE-${u().nextIncidentId++}`,buildingId,reason,startedAt:now(),lastAt:now(),intensity:18,detected:false,teamIds:[],waterUsed:0,spreadAttemptAt:now()+3600};u().fires.push(fire);
   report('fire_started',`A fire started at ${buildingId}: ${reason}.`,{buildingId,incidentId:fire.id});evacuate(b,'fire');setStage(b,'unsafe');return fire;
  }
@@ -131,7 +145,20 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   startJourney(f,{id,action:task.type==='fire'?'responding to fire':'joining a construction crew'});
   if(!f.traveling&&!present(f,id)){f.urbanTask=null;return false;}return true;
  }
- function releaseTask(f){if(!f?.urbanTask)return;f.urbanTask=null;f.actionUntil=0;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;}
+ function releaseTask(f,keepJourney=false){
+  if(!f?.urbanTask)return;
+  const task=f.urbanTask,p=task.type==='build'&&u().projects.find(p=>p.id===task.id&&ongoing(p));
+  if(p&&Number(task.materials||0)>0){
+   // Reserved stock is still owned by this contract. Dropping a duty leaves a
+   // physical pickup, rather than deleting cargo or creating another invoice.
+   p.materialCache={x:f.x,z:f.z,quantity:Number(task.materials)};
+   addLocation(`CIVIC-CARGO-${p.id}`,p.materialCache,'Reserved construction material pickup');
+   task.materials=0;
+  }
+  f.urbanTask=null;
+  if(keepJourney)return;
+  f.actionUntil=0;f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;
+ }
  function present(f,targetId){
   if(!f?.alive||f.traveling)return false;
   // The movement engine confirms arrival at a legal entrance or sidewalk, which
@@ -143,18 +170,19 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function crewFor(fireOrProject,type,b,max){
   if(type==='fire'&&fireService.enabled())return;
   const ref=type==='fire'?fireOrProject.teamIds:fireOrProject.workerIds;
-  const country=ownership(b),localOnly=type==='build'&&(country===NORTH||b.kind==='customs');
+  const country=ownership(b),localOnly=type==='build';
   for(let i=ref.length-1;i>=0;i--){
    const f=byId.get(ref[i]),task=f?.urbanTask;
-   if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<8||f.hunger>95){
-    if(task?.id===fireOrProject.id){if(hasCountryCommitment(f,now())||isWorkCommitted(f))f.urbanTask=null;else releaseTask(f);}
+   if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86){
+    if(task?.id===fireOrProject.id){releaseTask(f,hasCountryCommitment(f,now())||isWorkCommitted(f));}
     ref.splice(i,1);
    }
   }
   if(now()<Number(fireOrProject.crewCheckAt||0)||ref.length>=max)return;
   fireOrProject.crewCheckAt=now()+600;
   const distance=f=>Math.hypot(f.x-b.x,f.z-b.z),skill=f=>Number(f.professionSkills?.[type==='fire'?'fireSafety':'construction']||0)+Number(f.traits?.empathy||0);
-  const candidates=raw().flies.filter(f=>available(f,now())&&(!localOnly||countryAt(f)===country)&&!isWorkCommitted(f)&&Number(f.urbanCrewRetryAt||0)<=now()).sort((a,c)=>(distance(a)-skill(a)*24)-(distance(c)-skill(c)*24));
+  const employment=f=>f.jobId==='construction'?2:!f.jobId&&!f.businessId&&!f.businessEmployeeOf?1:0;
+  const candidates=raw().flies.filter(f=>available(f,now())&&(!localOnly||countryAt(f)===country)&&!isWorkCommitted(f)&&Number(f.urbanCrewRetryAt||0)<=now()).sort((a,c)=>employment(c)-employment(a)||(distance(a)-skill(a)*24)-(distance(c)-skill(c)*24));
   for(const f of candidates.slice(0,12)){if(assignTask(f,{type,id:fireOrProject.id},b)){ref.push(f.id);if(ref.length>=max)break;}}
  }
  function payCrew(ids,budget,seconds,maxPayment=Infinity){
@@ -247,6 +275,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   ensure();
   const b=stateFor(buildingId);if(!b||u().fires.some(f=>f.buildingId===buildingId&&!f.containedAt))return null;
   const country=ownership(b);
+  if(kind!=='new')rememberBlueprint(b);
   if(kind==='new'&&recoveryPriority(country))return null;
   if(kind!=='new')prioritizeRecovery();
   if(!hasSlot(country)||u().projects.some(p=>p.buildingId===buildingId&&ongoing(p)))return null;
@@ -381,7 +410,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    const supplier=account(materialSupplier(country));
    if(supplier.inventory<p.materialsRequired){p.pauseReason='supplier out of materials';return;}
    if(account('civic-escrow').cash<materialCost){p.pauseReason='material invoice not funded';return;}
-   const paid=transfer(account('civic-escrow'),account('civic-materials'),materialCost);
+   const paid=transfer(account('civic-escrow'),supplier,materialCost);
    if(paid+1e-6<materialCost){p.pauseReason='material invoice not funded';return;}
    p.spent+=paid;supplier.inventory-=p.materialsRequired;p.materialDepotId=materialDepot(country);p.materialsOrdered=p.materialsRequired;p.deliveryDueAt=now()+1800;
    // One crew member physically collects the ordered stock before it can reach the worksite.
@@ -389,7 +418,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   if(p.materialsDelivered<p.materialsRequired){
    const courier=byId.get(p.courierId);
-   if(!courier?.alive||courier.urbanTask?.id!==p.id){const replacement=onsite[0];replacement.urbanTask.phase='collecting';replacement.urbanTask.deliveryFor=p.id;p.courierId=replacement.id;startJourney(replacement,{id:p.materialDepotId||'construction',action:'collecting construction materials'});}
+   if(!courier?.alive||courier.urbanTask?.id!==p.id||!p.workerIds.includes(courier.id)||!['collecting','delivering'].includes(courier.urbanTask.phase)){const replacement=onsite[0];replacement.urbanTask.phase='collecting';replacement.urbanTask.deliveryFor=p.id;p.courierId=replacement.id;startJourney(replacement,{id:p.materialCache?.quantity>0?`CIVIC-CARGO-${p.id}`:p.materialDepotId||materialDepot(country),action:'collecting construction materials'});}
    p.pauseReason='waiting for material delivery';return;
   }
   if(p.roadIds?.length&&Number(p.roadProgress||0)<1){
@@ -433,7 +462,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   else p.refunded=transfer(escrow,owner?{get cash(){return owner.money;},set cash(v){owner.money=v;}}:raw().treasury,refund);
  }
  function finishProject(p){
-  const b=stateFor(p.buildingId);if(!b||p.stage==='complete')return;p.stage='complete';p.completedAt=now();b.h=p.targetHeight;reopenBuilding(b);u().completedProjects++;
+  const b=stateFor(p.buildingId);if(!b||p.stage==='complete')return;p.stage='complete';p.completedAt=now();b.h=p.targetHeight;if(p.kind!=='new')restoreBlueprint(b);reopenBuilding(b);u().completedProjects++;
   refundProject(p);
   if(b.recovery?.projectId===p.id)b.recovery.status='restored';
   for(const id of p.workerIds)releaseTask(byId.get(id));
@@ -447,6 +476,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   report('construction_complete',`${b.id} passed inspection and reopened.`,{projectId:p.id,buildingId:b.id,ownerId:p.ownerId});
  }
  function reopenBuilding(b){
+  restoreBlueprint(b);
   b.health=100;b.progress=1;setStage(b,'operational');
   if(b.warRecovery?.active){b.warRecovery.active=false;b.warRecovery.restoredAt=now();}
   for(const f of raw().flies)if(f.displacedFrom?.buildingId===b.id){f.displacedFrom=null;f.actionUntil=0;u().displaced=Math.max(0,u().displaced-1);rememberEvent(f,'home_restored',{buildingId:b.id});}
@@ -523,7 +553,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  function handleResident(f,clock){
   if(fireService.handleResident(f,clock))return true;
   if(facilityOperations.handleResident(f,clock))return true;
-  if(hasCountryCommitment(f,now())||isWorkCommitted(f)){if(f.urbanTask)f.urbanTask=null;return false;}
+  if(hasCountryCommitment(f,now())||isWorkCommitted(f)){if(f.urbanTask)releaseTask(f,true);return false;}
   if(f.urbanFloodEscape){
    const e=f.urbanFloodEscape,dx=e.x-f.x,dz=e.z-f.z,dist=Math.hypot(dx,dz),elapsed=Math.max(0,now()-e.lastAt);e.lastAt=now();
    const step=Math.min(dist,elapsed/120*1.4);if(dist>.1){f.x+=dx/dist*step;f.z+=dz/dist*step;}
@@ -542,8 +572,16 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(!f.urbanTask)return false;
   const task=f.urbanTask,job=task.type==='fire'?u().fires.find(v=>v.id===task.id&&!v.containedAt):u().projects.find(v=>v.id===task.id&&!['complete','cancelled'].includes(v.stage));
   if(!job||job.recoveryPaused||!f.alive||f.health<20||f.energy<5||f.hunger>96||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession){releaseTask(f);return false;}
-  const depot=job.materialDepotId||(job.materialsOrdered?'construction':materialDepot(projectCountry(job)));
+  const depot=job.materialCache?.quantity>0?`CIVIC-CARGO-${job.id}`:job.materialDepotId||(job.materialsOrdered?'construction':materialDepot(projectCountry(job)));
   const destination=task.phase==='collecting'?depot:task.targetId;
+  if(!present(f,destination)){
+   const progress=task.travelProgress;
+   if(!progress||progress.destination!==destination||Math.hypot(f.x-progress.x,f.z-progress.z)>.5){task.travelProgress={x:f.x,z:f.z,at:now(),destination};}
+   else if(!f.onTrain&&!f.onPlane&&now()-progress.at>6*3600){f.urbanCrewRetryAt=now()+3600;releaseTask(f);return false;}
+   // Restore an owned site/supply itinerary that a lower-priority outing
+   // replaced, while allowing a committed passenger to finish the current ride.
+   if(f.traveling&&f.targetLocationId!==destination&&!f.onTrain&&!f.onPlane){f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;task.nextRouteAt=0;}
+  }else task.travelProgress=null;
   if(!f.traveling&&!present(f,destination)&&now()>=Number(task.nextRouteAt||0)){
    if(Number(task.routeFailures||0)>=3){f.urbanCrewRetryAt=now()+3600;releaseTask(f);return false;}
    task.routeFailures=Number(task.routeFailures||0)+1;task.nextRouteAt=now()+600;
@@ -551,7 +589,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    startJourney(f,{id:destination,action:task.phase==='collecting'?'collecting construction materials':task.phase==='delivering'?'delivering construction materials':'returning to the civic site',mode:site&&Math.hypot(f.x-site.x,f.z-site.z)<70?'walk':undefined});
   }
   if(task.type==='build'&&task.phase==='collecting'&&!f.traveling&&f.currentLocationId===depot){
-   task.phase='delivering';task.routeFailures=0;task.nextRouteAt=0;task.materials=job.materialsOrdered-job.materialsDelivered;startJourney(f,{id:task.targetId,action:'delivering construction materials'});
+   task.phase='delivering';task.routeFailures=0;task.nextRouteAt=0;task.materials=job.materialCache?.quantity>0?job.materialCache.quantity:job.materialsOrdered-job.materialsDelivered;job.materialCache=null;startJourney(f,{id:task.targetId,action:'delivering construction materials'});
   }else if(task.type==='build'&&task.phase==='delivering'&&present(f,task.targetId)&&now()>=Number(job.deliveryDueAt||0)){
    job.materialsDelivered=Math.min(job.materialsOrdered,job.materialsDelivered+Number(task.materials||0));u().materialsDelivered+=Number(task.materials||0);task.materials=0;task.phase='onsite';report('materials_delivered',`${f.id} delivered materials to ${job.buildingId}.`,{projectId:job.id,materials:job.materialsDelivered});
   }
@@ -580,7 +618,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   u().warDamageReceipts||={};if(u().warDamageReceipts[projectileId])return false;
   u().warDamageReceipts[projectileId]={buildingId,countryId,at:now(),damage};const keys=Object.keys(u().warDamageReceipts);for(const key of keys.slice(0,-256))delete u().warDamageReceipts[key];
   for(const p of u().projects.filter(p=>p.buildingId===buildingId&&ongoing(p))){p.stage='cancelled';p.cancelledAt=now();p.cancelReason='new war damage';refundProject(p);for(const id of p.workerIds){const f=byId.get(id);if(f?.urbanTask?.id!==p.id)continue;if(f.onTrain||f.onPlane)f.urbanTask=null;else releaseTask(f);}}
-  b.originalHeight=Number(b.originalHeight||b.h);b.health=clamp(b.health-Math.max(0,Number(damage)||0));b.lastDamageAt=now();b.warRecovery={active:true,countryId,fundingAccountId,conflictId,at:now(),projectileIds:[...(b.warRecovery?.projectileIds||[]),projectileId].slice(-24)};
+  rememberBlueprint(b);b.health=clamp(b.health-Math.max(0,Number(damage)||0));b.lastDamageAt=now();b.warRecovery={active:true,countryId,fundingAccountId,conflictId,at:now(),projectileIds:[...(b.warRecovery?.projectileIds||[]),projectileId].slice(-24)};
   evacuate(b,'war impact');setStage(b,b.health<18?'collapsed':'damaged');
   if(fire&&b.health>=18){const incident=ignite(buildingId,'war projectile impact');if(incident){incident.countryId=countryId;incident.fundingAccountId=fundingAccountId;incident.projectileId=projectileId;}}
   apply();report('war_building_damage',`A projectile damaged ${buildingId}; ${countryId} is responsible for its recovery budget.`,{buildingId,projectileId,countryId,conflictId});return true;

@@ -123,8 +123,8 @@ test('damaged customs and North barracks receive matching country budgets even w
  t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
  const barracks=BUILDINGS.find(b=>b.id==='north-army'),northBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-W'),hansBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-E');
  for(const b of [barracks,northBooth,hansBooth])t.s.urbanWorld.buildings[b.id]={...b,health:4,stage:'collapsed'};
- const hansPlots=BUILDINGS.filter(b=>b.x>530&&b.z>0&&b.kind==='apartment').slice(0,5);
- assert.equal(hansPlots.length,5);
+ const hansPlots=BUILDINGS.filter(b=>b.x>530&&b.z>0&&!['landmark','customs'].includes(b.kind)).slice(0,8);
+ assert.equal(hansPlots.length,8);
  for(const b of hansPlots){t.s.urbanWorld.buildings[b.id]={...b,health:10,stage:'collapsed'};assert.ok(t.urban.submitProject(b.id));}
  const hans=t.s.treasury.cash,budget=north.cash;t.step();
  const projects=t.s.urbanWorld.projects.filter(p=>[barracks.id,northBooth.id].includes(p.buildingId));
@@ -134,4 +134,71 @@ test('damaged customs and North barracks receive matching country budgets even w
  assert.ok(north.cash<budget);
  assert.ok(t.s.businesses['north-civic-materials'].inventory>=projects[0].materialsRequired);
  assert.ok(!t.s.urbanWorld.projects.some(p=>p.buildingId===hansBooth.id));
+});
+
+
+test('a repair reclaims a displaced optional itinerary without discarding the paid contract',()=>{
+ const t=setup(),b=t.target;t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ t.s.urbanWorld.buildings[b.id]={...b,health:60,stage:'damaged',progress:1};
+ const p=t.urban.submitProject(b.id);t.step();const f=t.s.flies.find(f=>f.id===p.workerIds[0]);
+ const site=f.urbanTask.targetId;f.urbanTask.phase='onsite';const pin=LOCATIONS.find(l=>l.id===site);Object.assign(f,{x:pin.x+50,z:pin.z+50,targetLocationId:'park',traveling:true,pendingAction:'sheltering from bad weather'});
+ t.urban.handleResident(f,{hour:12});
+ assert.equal(f.urbanTask.id,p.id);assert.equal(f.targetLocationId,site);assert.ok(f.urbanTask.routeFailures>0);
+});
+
+test('a stale courier assignment is replaced and reserved materials are not invoiced twice',()=>{
+ const t=setup(),b=t.target;t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ t.s.urbanWorld.buildings[b.id]={...b,health:60,stage:'damaged',progress:1};
+ const p=t.urban.submitProject(b.id);t.step();t.onsite(p);t.step();const f=t.s.flies.find(f=>f.id===p.courierId);
+ const invoice=t.s.businesses['civic-materials'].cash,quantity=p.materialsOrdered;
+ f.urbanTask.phase='onsite';Object.assign(f,{traveling:false,currentLocationId:f.urbanTask.targetId});t.step();
+ assert.ok(['collecting','delivering'].includes(t.s.flies.find(f=>f.id===p.courierId).urbanTask.phase));
+ assert.equal(p.materialsOrdered,quantity);assert.equal(t.s.businesses['civic-materials'].cash,invoice);
+});
+
+test('an exhausted delivery worker leaves paid cargo at a real pickup and a replacement delivers it after restore',()=>{
+ const t=setup(),b=t.target;t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ t.s.urbanWorld.buildings[b.id]={...b,health:60,stage:'damaged',progress:1};
+ let p=t.urban.submitProject(b.id);t.step();t.onsite(p);t.step();let courier=t.s.flies.find(f=>f.id===p.courierId);
+ t.urban.handleResident(courier,{hour:12});t.urban.handleResident(courier,{hour:12});
+ assert.equal(courier.urbanTask.phase,'delivering');assert.equal(courier.urbanTask.materials,p.materialsOrdered);
+ Object.assign(courier,{health:10,x:courier.x-15,z:courier.z-20});const drop={x:courier.x,z:courier.z},quantity=p.materialsOrdered,invoice=t.s.businesses['civic-materials'].cash;
+ t.urban.handleResident(courier,{hour:12});assert.equal(courier.urbanTask,null);assert.equal(p.materialCache.quantity,quantity);
+ t.restore();p=t.s.urbanWorld.projects.find(v=>v.id===p.id);const cache=LOCATIONS.find(l=>l.id===`CIVIC-CARGO-${p.id}`);assert.equal(cache.x,drop.x);assert.equal(cache.z,drop.z);
+ t.step();t.onsite(p);t.step();courier=t.s.flies.find(f=>f.id===p.courierId);assert.equal(courier.targetLocationId,cache.id);
+ t.urban.handleResident(courier,{hour:12});t.urban.handleResident(courier,{hour:12});t.step(1800);t.urban.handleResident(courier,{hour:12});
+ assert.equal(p.materialsDelivered,quantity);assert.equal(p.materialCache,null);assert.equal(t.s.businesses['civic-materials'].cash,invoice);
+});
+
+test('recovery dispatch stays inside the country and uses builders before residents with unrelated jobs',()=>{
+ const t=setup(),b=t.target;t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ t.s.urbanWorld.buildings[b.id]={...b,health:50,stage:'damaged',progress:1};
+ const foreign=t.s.flies[0],builder=t.s.flies[7];Object.assign(foreign,{x:-600,z:-800});Object.assign(builder,{x:600,z:200,jobId:'construction'});
+ for(const f of t.s.flies.slice(1,7))f.jobId='library';
+ const p=t.urban.submitProject(b.id);t.step();assert.equal(p.workerIds[0],builder.id);assert.ok(!p.workerIds.includes(foreign.id));
+});
+
+test('inspection restores the original geometry and colors rather than a damaged or resized replacement',()=>{
+ const t=setup(),b=t.target;t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ const expected={x:b.x,z:b.z,w:b.w,d:b.d,h:b.h,kind:b.kind};
+ t.s.urbanWorld.buildings[b.id]={...b,health:55,stage:'damaged',progress:1};let p=t.urban.submitProject(b.id);t.step();t.onsite(p);t.step();
+ const record=t.s.urbanWorld.buildings[b.id];assert.deepEqual(Object.fromEntries(Object.keys(expected).map(k=>[k,record.originalBlueprint[k]])),expected);
+ // Damage history can include a stale construction height; the durable blueprint wins.
+ record.h=3;record.w=4;record.d=4;p.targetHeight=3;
+ for(const id of p.workerIds){const f=t.s.flies.find(f=>f.id===id);t.urban.handleResident(f,{hour:12});t.urban.handleResident(f,{hour:12});}
+ t.step(1800);for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.onsite(p);
+ for(let i=0;i<100&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
+ assert.equal(p.stage,'complete');assert.deepEqual(Object.fromEntries(Object.keys(expected).map(k=>[k,record[k]])),expected);assert.equal(record.health,100);
+});
+
+test('a custom building blueprint keeps its facade, roof colors and style across cold restore and final inspection',()=>{
+ const t=setup();t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
+ const original={id:'CIVIC-CUSTOM-RESTORE',x:1000,z:120,w:18,d:16,h:36,kind:'civic',color:0x123456,roofColor:0x456789,facadeColor:0xabcdef,style:'paris',roofStyle:'mansard',seed:99};
+ t.s.urbanWorld.buildings[original.id]={...original,stage:'damaged',health:45,progress:1};applyUrbanGeometry({buildings:Object.values(t.s.urbanWorld.buildings)});
+ const p=t.urban.submitProject(original.id);assert.ok(p);t.restore();
+ const project=t.s.urbanWorld.projects.find(v=>v.id===p.id),record=t.s.urbanWorld.buildings[original.id];
+ Object.assign(record,{x:1004,z:122,w:8,d:8,h:5,color:0,roofColor:0,facadeColor:0,style:'damaged',roofStyle:'flat'});
+ project.stage='inspection';project.inspectionAt=t.s.simulationAgeSeconds;t.step();
+ for(const key of ['x','z','w','d','h','kind','color','roofColor','facadeColor','style','roofStyle','seed'])assert.equal(record[key],original[key],key);
+ assert.equal(record.health,100);assert.equal(record.stage,'operational');
 });

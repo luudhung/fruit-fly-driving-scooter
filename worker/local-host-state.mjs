@@ -1,6 +1,6 @@
 export const LOCAL_HOST_TTL_MS=120000;
 export const LOCAL_HOST_HEARTBEAT_MS=5000;
-export const LOCAL_HOST_CHECKPOINT_MS=20000;
+export const LOCAL_HOST_CHECKPOINT_MS=5000;
 
 /** Archived residents remain on the server. The browser receives every living
  * resident and the current simulation state required for deterministic ticks. */

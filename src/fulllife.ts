@@ -500,7 +500,7 @@ function refreshConnectionHealth(){
  if(localCity.active){
   const alive=snapshot?.flies?.filter(f=>f.alive).length||0;
   setConnection('authoritative',`${alive} ALIVE · RUNNING ON THIS DEVICE${localCity.syncing?' · SAVE PENDING':''}`);
-  connection.title='Simulation runs in a worker on this device. Heartbeat every 5 seconds, checkpoint every 20 seconds.';
+  connection.title='Simulation runs in a worker on this device. Durable progress saves every 5 real seconds.';
   return;
  }
 

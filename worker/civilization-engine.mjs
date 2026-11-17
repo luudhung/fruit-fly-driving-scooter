@@ -563,6 +563,7 @@ function initCityServices(){
 }
 function specialActivity(f,clock){
   if(f.fireEngineDuty||f.onFireEngine||f.ambulanceDuty||f.onAmbulance)return urbanWorld.handleResident(f,clock);
+  if(f.urbanTask&&urbanWorld.handleResident(f,clock))return true;
   if(nationalDefense.handleResident(f,clock))return true;
   if(regionalAviation.handleResident(f,clock))return true;
   if(countries.handleResident(f,clock))return true;
@@ -2003,7 +2004,7 @@ function isWorkCommitted(f){
   if(f.nationalServiceDuty)return true;
   if(f.publicServiceRole&&(f.publicServiceDuty||f.militaryFlightId||publicServices.onShift(f,gameClock())))return true;
   const duty=workCommitment(f,gameClock());
-  return Boolean(duty&&(duty.essential||duty.commuter)&&(duty.onShift||duty.soon)||f.recoveringEnergy||String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as'));
+  return Boolean(duty&&(duty.essential||duty.commuter)&&(duty.onShift||duty.soon)||f.recoveringEnergy||duty?.onShift&&(String(f.action||'').startsWith('working as')||String(f.pendingAction||'').startsWith('working as')));
 }
 function academyTeacher(){
   const id=state.education?.teacherId;

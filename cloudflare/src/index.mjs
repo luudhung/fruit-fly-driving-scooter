@@ -1,4 +1,7 @@
-import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint} from '../../worker/local-host-state.mjs';
+import {MAP_VERSION} from '../../worker/city-map.mjs';
+import {projectLocalDocument,applyLocalDelta,localDocumentState} from '../../worker/local-host-delta.mjs';
+import {loadLocalHostJournal,clearLocalHostJournal,saveLocalHostBase,appendLocalHostDelta,localHostExportStream} from './local-host-journal.mjs';
+import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {loadSnapshot, saveSnapshot, exportSnapshot} from "./civilization-snapshot.mjs";
@@ -54,29 +57,37 @@ export class CivilizationWorld extends DurableObject {
     this.storageStats = null;
     this.nextAlarmAtMs = null;
     this.queue = Promise.resolve();
-    this.localHost=null;this.localEpoch=0;
+    this.localHost=null;this.localEpoch=0;this.localDocument=null;this.localObserver=null;this.localJournalMeta=null;
+    this.baseKnownIds=new Set();this.baseAliveIds=new Set();
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
-      const saved = await loadSnapshot(this.ctx.storage);
-      if (saved) {
-        if (!snapshotLooksUsable(saved.state)) throw new Error("Invalid saved civilization state");
-        restoreState(saved.state);
-        this.storageStats = saved.stats;
-        this.lastWallClockMs = saved.lastWallClockMs;
-        this.lastPersistMs = saved.savedAtMs;
-      } else {
-        freshState();
-        this.lastWallClockMs = Date.now();
-        this.storageStats = await saveSnapshot(
-          this.ctx.storage,
-          getRawState(),
-          this.lastWallClockMs,
-        );
-        this.lastPersistMs = Date.now();
+      const saved=await loadSnapshot(this.ctx.storage);
+      if(saved&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
+      let base;
+      if(saved){
+        base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
+      }else{
+        freshState();base=getRawState();this.lastWallClockMs=Date.now();
+        this.storageStats=await saveSnapshot(this.ctx.storage,base,this.lastWallClockMs);this.lastPersistMs=Date.now();
       }
-      this.localHost=await this.ctx.storage.get("localHostLease")||null;
-      this.localEpoch=Number(this.localHost?.epoch||0);
-      if(this.localHost&&this.localHost.protocol!==2){
+      this.baseKnownIds=new Set(base.flies.map(f=>f.id));
+      this.baseAliveIds=new Set(base.flies.filter(f=>f.alive).map(f=>f.id));
+      // Reconstruct against the persisted schema BEFORE the engine migrates maps.
+      // A new map release must preserve every already-acknowledged browser save.
+      const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
+      this.localHost=await this.ctx.storage.get('localHostLease')||null;
+      this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
+      const compatibleOwner=this.localHost?.protocol===3&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
+      if(journal&&!journal.stale){
+        this.localJournalMeta=journal.meta;this.lastWallClockMs=journal.lastWallClockMs;
+        if(compatibleOwner&&this.localHost.expiresAt>Date.now()){
+          restoreState(base);this.localDocument=journal.document;this.localObserver=journal.observer;
+        }else restoreState(journal.state);
+      }else{
+        restoreState(base);
+        if(journal?.stale)await clearLocalHostJournal(this.ctx.storage);
+      }
+      if(this.localHost&&!compatibleOwner){
         this.localHost.leaving=true;this.localHost.expiresAt=Math.min(this.localHost.expiresAt,Date.now()+15000);
         await this.ctx.storage.put('localHostLease',this.localHost);
       }
@@ -115,9 +126,25 @@ export class CivilizationWorld extends DurableObject {
     this.nextAlarmAtMs=current;return current;
   }
 
+  materializeLocalDocument(){
+    if(!this.localDocument)return;
+    const incoming=localDocumentState(this.localDocument),current=getRawState(),records=new Map(incoming.flies.map(f=>[f.id,f]));
+    const ids=new Set(current.flies.map(f=>f.id)),flies=current.flies.map(f=>records.get(f.id)||f);
+    for(const f of incoming.flies)if(!ids.has(f.id))flies.push(f);
+    restoreState({...incoming,flies,locations:current.locations});
+    this.localDocument=null;this.localObserver=null;
+  }
+
+  journalDocument(document){
+    // Preserve deaths since the last full base without copying historical brains.
+    const recentDead=getRawState().flies.filter(f=>!f.alive&&(this.baseAliveIds.has(f.id)||!this.baseKnownIds.has(f.id)));
+    return {world:document.world,actors:{...Object.fromEntries(recentDead.map(f=>[f.id,f])),...document.actors}};
+  }
+
   async advanceTo(nowMs, reason = "request") {
     await this.ready;
     if(this.localHost&&this.localHost.expiresAt>nowMs)return {elapsedRealSeconds:0,steps:0,localHost:true};
+    this.materializeLocalDocument();
     if(this.localHost){
       for(const command of this.localHost.commands||[])countries.requestConflict(command);
       this.localHost=null;
@@ -165,6 +192,7 @@ export class CivilizationWorld extends DurableObject {
   }
 
   async persistIfDue(force = false) {
+    if(this.localHost&&this.localHost.expiresAt>Date.now())return this.storageStats;
     const now = Date.now();
     if (!force && now - this.lastPersistMs < ACTIVE_PERSIST_INTERVAL_MS) return this.storageStats;
     this.storageStats = await saveSnapshot(
@@ -173,6 +201,9 @@ export class CivilizationWorld extends DurableObject {
       this.lastWallClockMs,
     );
     this.lastPersistMs = now;
+    this.baseKnownIds=new Set(getRawState().flies.map(f=>f.id));
+    this.baseAliveIds=new Set(getRawState().flies.filter(f=>f.alive).map(f=>f.id));
+    if(this.localJournalMeta){await clearLocalHostJournal(this.ctx.storage);this.localJournalMeta=null;}
     return this.storageStats;
   }
 
@@ -199,7 +230,7 @@ export class CivilizationWorld extends DurableObject {
 
   hostingStatus(){
     const lease=this.localHost,active=Boolean(lease&&lease.expiresAt>Date.now());
-    return {active,mode:active?'browser':'background',sequence:lease?.sequence||0,expiresAt:lease?.expiresAt||null,lastCheckpointError:this.lastCheckpointError||null};
+    return {active,mode:active?'browser':'background',sequence:lease?.sequence||this.localJournalMeta?.sequence||0,savedAt:this.localJournalMeta?.savedAtMs||null,expiresAt:lease?.expiresAt||null,lastCheckpointError:this.lastCheckpointError||null};
   }
 
   async localHostingStatus(){
@@ -233,7 +264,7 @@ export class CivilizationWorld extends DurableObject {
       })});
     }
     if(url.pathname==='/health'){
-      const state=getRawState();
+      const state=this.localDocument?localDocumentState(this.localDocument):getRawState();
       if(url.searchParams.get('view')==='brief'){
         return json({ok:snapshotLooksUsable(state),worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,
           simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),snapshotAgeSeconds:advance.snapshotAgeSeconds,hosting:this.hostingStatus()});
@@ -241,6 +272,10 @@ export class CivilizationWorld extends DurableObject {
       return json({ok:snapshotLooksUsable(state),service:'fruit-fly-civilization-cloudflare',runtime:'cloudflare-durable-object',worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID,simulationStatus:state?'SYNTHETIC_CIVILIZATION_LIVE':'STARTING',population:state?.flies?.filter(f=>f.alive).length||0,simulationAgeSeconds:Number(state?.simulationAgeSeconds||0),persistence:'DURABLE_OBJECT_SQLITE',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance,hosting:this.hostingStatus(),storage:this.storageStats,neural:getNeuralStatus()});
     }
     const observer=url.searchParams.get('view')==='observer';
+    if(this.localDocument&&this.localObserver){
+      const payload={...this.localObserver,runtime:{platform:'cloudflare-durable-object',persistence:'sqlite-delta-journal',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance}};
+      return json(payload);
+    }
     const payload=getState({observer,compactObserver:observer&&url.searchParams.get('transport')==='compact',selectedId:url.searchParams.get('selected')});
     payload.runtime={platform:'cloudflare-durable-object',persistence:'sqlite-gzip-chunks',alarmIntervalMs:this.alarmIntervalMs(),nextAlarmAtMs,sampledCatchup:advance};
     return json(payload);
@@ -248,71 +283,75 @@ export class CivilizationWorld extends DurableObject {
 
   async localSession(request,url){
     await this.ready;
-    const path=url.pathname;
-    if(path.endsWith('/checkpoint')&&request.headers.get('content-type')!=='application/x-city-checkpoint+gzip')return json({error:'local_protocol_update_required'},409);
+    const path=url.pathname,checkpoint=path.endsWith('/checkpoint');
+    if(checkpoint&&request.headers.get('content-type')!=='application/x-city-delta+gzip')return json({error:'local_protocol_update_required'},409);
     let body;
     try{
-      // Decode outside the mutation queue so an upload cannot hold heartbeats.
-      const stream=path.endsWith('/checkpoint')
-        ?request.body.pipeThrough(new DecompressionStream('gzip')):request.body;
-      let bytes=0;
-      const limit=path.endsWith('/checkpoint')?64*1024*1024:4096;
-      const bounded=stream.pipeThrough(new TransformStream({transform(chunk,controller){
-        bytes+=chunk.byteLength;if(bytes>limit)throw Error('local request too large');controller.enqueue(chunk);
-      }}));
-      body=request.headers.get('content-type')==='application/x-city-checkpoint+gzip'?await readLocalHostCheckpoint(bounded):await new Response(bounded).json();
+      // Delta uploads are bounded and decoded before entering the mutation queue.
+      const stream=checkpoint?request.body.pipeThrough(new DecompressionStream('gzip')):request.body;
+      let bytes=0;const limit=checkpoint?12*1024*1024:4096;
+      const bounded=stream.pipeThrough(new TransformStream({transform(chunk,controller){bytes+=chunk.byteLength;if(bytes>limit)throw Error('local request too large');controller.enqueue(chunk);}}));
+      body=await new Response(bounded).json();
     }catch{return json({error:'invalid_local_request'},400);}
     return this.withLock(async()=>{
-      const now=Date.now(),claim=path.endsWith('/claim');
-      const lease=this.localHost;
+      const now=Date.now(),claim=path.endsWith('/claim'),lease=this.localHost;
       if(claim){
-        if(body.clientProtocol!==2)return json({granted:false,updateRequired:true});
+        if(body.clientProtocol!==3)return json({granted:false,updateRequired:true});
         if(lease&&lease.expiresAt>now)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
-        // Apply any accepted commands from an expired host before handing over.
+        this.materializeLocalDocument();
         for(const command of lease?.commands||[])countries.requestConflict(command);
         const raw=getRawState();
-        const next={protocol:2,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
-        await this.ctx.storage.put('localHostLease',next);
-        this.localHost=next;
-        return new Response(localHostClaimStream(raw,next).pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
+        // Build the initial observer BEFORE agreeing the base. Active reads then
+        // serve this record, so no observer normalizer mutates the shared base.
+        const initialObserver=getState({observer:true,compactObserver:true});
+        const document=projectLocalDocument(localHostSnapshot(raw));
+        const next={protocol:3,mapVersion:raw.mapVersion,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
+        const journalDocument=this.journalDocument(document);
+        this.localDocument=document;this.localObserver=initialObserver;
+        try{
+          this.localJournalMeta=await saveLocalHostBase(this.ctx.storage,journalDocument,next,{lastWallClockMs:this.lastWallClockMs,observer:initialObserver});
+        }catch(error){
+          this.localDocument=null;this.localObserver=null;this.localHost=null;
+          throw error;
+        }
+        this.localDocument=document;this.localHost=next;this.localObserver=initialObserver;
+        return new Response(localHostClaimStream(localDocumentState(document),next).pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
       }
       if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
       if(path.endsWith('/heartbeat')){
-        if(!lease.leaving)lease.expiresAt=now+LOCAL_HOST_TTL_MS;
-        await this.ctx.storage.put('localHostLease',lease);
-        return json({ok:true,expiresAt:lease.expiresAt,sequence:lease.sequence,commands:lease.commands||[]});
+        const renewed={...lease,expiresAt:lease.leaving?lease.expiresAt:now+LOCAL_HOST_TTL_MS};
+        await this.ctx.storage.put('localHostLease',renewed);this.localHost=renewed;
+        return json({ok:true,expiresAt:renewed.expiresAt,sequence:renewed.sequence,commands:renewed.commands||[]});
       }
       if(path.endsWith('/leave')){
-        // A tiny unload beacon gives the final checkpoint time to finish. If a
-        // mobile OS freezes the worker, the last durable save resumes shortly.
-        lease.leaving=true;
-        lease.expiresAt=Math.min(lease.expiresAt,now+15000);
-        await this.ctx.storage.put('localHostLease',lease);
+        const leaving={...lease,leaving:true,expiresAt:Math.min(lease.expiresAt,now+15000)};
+        await this.ctx.storage.put('localHostLease',leaving);this.localHost=leaving;
         return json({ok:true});
       }
-      if(path.endsWith('/checkpoint')){
-        if(!Number.isSafeInteger(body.sequence)||body.sequence<1)return json({error:'invalid_local_sequence'},400);
-        if(body.sequence<=lease.sequence)return json({ok:true,duplicate:true,sequence:lease.sequence});
+      if(checkpoint){
+        if(!Number.isSafeInteger(body.sequence)||body.sequence<1||!Number.isSafeInteger(body.baseSequence))return json({error:'invalid_local_sequence'},400);
+        if(body.sequence<=lease.sequence)return json({ok:true,duplicate:true,sequence:lease.sequence,commands:lease.commands||[]});
+        if(body.baseSequence!==lease.sequence||body.sequence!==lease.sequence+1)return json({error:'local_save_base_changed'},409);
         try{
-          const merged=mergeLocalHostCheckpoint(getRawState(),body.state,lease,now);
-          restoreState(merged);
-          // Commands accepted on another device are replayed idempotently;
-          // replacing the checkpoint must never erase a queued gameplay action.
-          for(const command of lease.commands||[])countries.requestConflict(command);
-          this.lastWallClockMs=now;
-          await this.persistIfDue(true);
-          this.lastCheckpointError=null;
-          lease.sequence=body.sequence;
+          if(!this.localDocument)throw Error('local delta base unavailable');
+          const nextDocument=applyLocalDelta(this.localDocument,body.patch);
+          // Validation reads canonical documents without mutating their agreed base.
+          mergeLocalHostCheckpoint(localDocumentState(this.localDocument),localDocumentState(nextDocument),lease,now);
           const acknowledged=new Set(Array.isArray(body.acknowledgedCommands)?body.acknowledgedCommands:[]);
-          lease.commands=(lease.commands||[]).filter(c=>!acknowledged.has(c.requestId));
+          const updated={...lease,sequence:body.sequence,commands:(lease.commands||[]).filter(c=>!acknowledged.has(c.requestId)),expiresAt:lease.leaving?lease.expiresAt:now+LOCAL_HOST_TTL_MS};
+          const observer=body.observer||this.localObserver;
+          const document=this.journalDocument(nextDocument);
+          // This small atomic journal write is the acknowledgement boundary.
+          // Full historical archives are never encoded in a five-second save.
+          const meta=await appendLocalHostDelta(this.ctx.storage,document,body,body.release?null:updated,observer);
+          this.localDocument=nextDocument;this.localObserver=observer;this.localJournalMeta=meta;
+          this.lastWallClockMs=meta.lastWallClockMs;this.lastCheckpointError=null;
+          this.localHost=body.release?null:updated;
           if(body.release){
-            await this.ctx.storage.delete('localHostLease');
-            this.localHost=null;
-          }else{
-            if(!lease.leaving)lease.expiresAt=now+LOCAL_HOST_TTL_MS;
-            await this.ctx.storage.put('localHostLease',lease);
+            this.materializeLocalDocument();
+            for(const command of updated.commands)countries.requestConflict(command);
           }
-          return json({ok:true,sequence:lease.sequence,commands:lease.commands||[]});
+          return json({ok:true,sequence:body.sequence,savedAt:meta.savedAtMs,commands:updated.commands});
         }catch(error){
           this.lastCheckpointError={at:now,error:String(error)};
           console.warn(JSON.stringify({event:'local_checkpoint_rejected',...this.lastCheckpointError}));
@@ -393,6 +432,7 @@ export class CivilizationWorld extends DurableObject {
       }
 
       if (url.pathname === "/api/civilization/export") {
+        if(this.localDocument)return new Response(localHostExportStream(getRawState(),this.localDocument,this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID),{headers:corsHeaders({'content-type':'application/json; charset=utf-8'})});
         await this.persistIfDue(true);
         const body = await exportSnapshot(this.ctx.storage, this.env.CIV_WORLD_ID || DEFAULT_WORLD_ID);
         return new Response(body, {
