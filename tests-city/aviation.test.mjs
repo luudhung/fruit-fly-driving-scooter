@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
-import {freshState,restoreState,bookIslandHoliday,simulateIslandHoliday,simulateHeliTour,liquidMoneySupply,startJourney,moveFly,gameClock} from '../worker/civilization-engine.mjs';
+import {freshState,restoreState,bookIslandHoliday,simulateIslandHoliday,simulateHeliTour,liquidMoneySupply,startJourney,moveFly,gameClock,regionalAviation} from '../worker/civilization-engine.mjs';
 import {AIRPORT,ISLAND,LOCATIONS,entrance,pedestrianRoute,clearSegment,blocked,BUILDINGS,atSea} from '../worker/city-map.mjs';
 import {createTourismSystem} from '../worker/tourism.mjs';
 import {nextFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
-import {countryAt} from '../worker/country-map.mjs';
+import {countryAt,NORTH_AIRPORT} from '../worker/country-map.mjs';
 import {INTERSECTIONS,signalBarrier} from '../worker/traffic.mjs';
 function setup(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};s.simulationAgeSeconds=7*3600;return s;}
 function guest(s,i=0){const f=s.flies[i];Object.assign(f,{money:500,savings:2000,ageYears:30,health:90,energy:90,traveling:false,indoors:true,currentLocationId:'airport',x:AIRPORT.terminal.x,z:AIRPORT.terminal.z,action:'taking a holiday on Hansdrex Island'});return f;}
@@ -21,6 +21,19 @@ test('Hawaii has 50 permanent households and no traffic signal stops after save 
  assert.deepEqual(restored.flies.filter(f=>f.alive&&f.residencyCountryId==='hawaii').map(f=>f.id),island.map(f=>f.id));
  assert.ok(INTERSECTIONS.every(p=>countryAt(p)!=='hawaii'));
  assert.equal(signalBarrier({x:65,z:826},{x:65,z:920},40),null);
+});
+test('an actual North pedestrian reaches Hansdrex airport through an accessible checkpoint before booking Hawaii',()=>{
+ const s=setup();
+ const f=s.flies.find(person=>person.citizenshipCountryId==='north-city'&&!person.publicServiceRole);
+ Object.assign(f,NORTH_AIRPORT.gate,{currentLocationId:NORTH_AIRPORT.locationId,traveling:false,indoors:false,money:2000,savings:2000,vehicle:null});
+ assert.equal(regionalAviation.request(f,'island'),true);
+ for(let i=0;i<850&&!f.countryAirTrip;i++){
+  s.simulationAgeSeconds+=120;
+  regionalAviation.handleResident(f,gameClock());
+ }
+ assert.ok(f.countryEntryReceipts.some(r=>r.via==='ground'&&r.toCountryId==='hansdrex'));
+ assert.equal(f.currentLocationId,'airport');
+ assert.equal(f.countryAirTrip.outbound.from,'city');assert.equal(f.countryAirTrip.outbound.to,'island');
 });
 test('expansion creates its current resident target and migrates a 100-person save once without changing old brains or assets',()=>{
  const s=setup();assert.equal(s.flies.filter(f=>f.alive).length,RESIDENT_TARGET+50);

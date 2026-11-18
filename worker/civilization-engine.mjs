@@ -3061,16 +3061,22 @@ function residentGroundTravelPlan(fly,dest,mode){
   const internationalMetro=plan.metro&&(plan.route||plan.metro.waypoints||[]).some(p=>economicCountryAt(p)!==from);
   if(internationalMetro)plan={mode:'walk',route:[]};
   if(foreign&&(plan.mode==='walk'||plan.mode==='metro'||!plan.route?.some(p=>p.mode==='car'||p.mode==='scooter'))){
-    const walking=countries.planJourney(fly,dest,{mode:'walk'});if(!walking.allowed)return {...walking,route:[]};
-    const route=[];let at=fly;
-    for(const target of [...walking.viaPoints,dest]){
-      const leg=target.stage==='border-entry'&&clearSegment(at,target)?[{...target,mode:'walk'}]:buildPedestrianRoute(at,target);
-      if(!leg.length&&Math.hypot(at.x-target.x,at.z-target.z)>.85)return {allowed:false,reason:'no reachable official border crossing',route:[]};
-      route.push(...leg.map(p=>({...p,mode:'walk'})));
-      if(target.stage&&route.length)Object.assign(route[route.length-1],{stage:target.stage,portId:target.portId});
-      at=target;
+    const excludedPorts=[];
+    while(true){
+      const walking=countries.planJourney(fly,dest,{mode:'walk',excludedPorts});
+      if(!walking.allowed||!walking.portId)return {...walking,route:[]};
+      const route=[];
+      let at=fly,reachable=true;
+      for(const target of [...walking.viaPoints,dest]){
+        const leg=target.stage==='border-entry'&&clearSegment(at,target)?[{...target,mode:'walk'}]:buildPedestrianRoute(at,target);
+        if(!leg.length&&Math.hypot(at.x-target.x,at.z-target.z)>.85){reachable=false;break;}
+        route.push(...leg.map(p=>({...p,mode:'walk'})));
+        if(target.stage&&route.length)Object.assign(route[route.length-1],{stage:target.stage,portId:target.portId});
+        at=target;
+      }
+      if(reachable){plan={mode:'walk',route};break;}
+      excludedPorts.push(walking.portId);
     }
-    plan={mode:'walk',route};
   }else if(internationalMetro)plan={mode:'walk',route:buildPedestrianRoute(fly,dest)};
   if(!foreign&&from==='north-city'&&plan.route?.length){
     // The street graph can attach a North-side bridge walker to the exact
