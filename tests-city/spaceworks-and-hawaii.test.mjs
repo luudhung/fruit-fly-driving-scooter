@@ -14,11 +14,13 @@ test('West City spaceworks and Hawaii apartments connect to dry ground without u
  assert.ok(SPACEPORT_ROADS.some(r=>r.z+r.d/2===-400));
  assert.ok(pedestrianRoute({x:-760,z:-396},entrance(SPACEPORT_BUILDINGS[0])).length);
  assert.ok(!WATER.some(w=>overlaps(w,SPACEPORT)));
- assert.equal(HAWAII_APARTMENTS.length,3);
+ assert.equal(HAWAII_APARTMENTS.filter(b=>b.seasonal).length,3);
+ assert.equal(HAWAII_APARTMENTS.filter(b=>b.primaryResidence).reduce((sum,b)=>sum+b.capacity,0),50);
  for(const b of HAWAII_APARTMENTS){
-  assert.ok(b.seasonal&&!b.primaryResidence&&b.capacity>0);
+  assert.ok(b.seasonal!==b.primaryResidence&&b.capacity>0);
   assert.ok(!ROADS.some(r=>overlaps(r,b,.45)),b.id);
-  assert.ok(pedestrianRoute(COUNTRY_AIRPORTS.find(a=>a.id==='island').gate,entrance(b)).every(p=>onIsland(p)));
+  const route=pedestrianRoute(COUNTRY_AIRPORTS.find(a=>a.id==='island').gate,entrance(b));
+  assert.ok(route.length>0&&route.every(p=>onIsland(p)),b.id);
  }
  for(const road of HAWAII_ROADS)for(const dx of [-road.w/2,road.w/2])for(const dz of [-road.d/2,road.d/2])assert.ok(onIsland({x:road.x+dx,z:road.z+dz}),road.id);
 });

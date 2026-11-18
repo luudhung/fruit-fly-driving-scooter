@@ -5,10 +5,25 @@ import {freshState,restoreState,bookIslandHoliday,simulateIslandHoliday,simulate
 import {AIRPORT,ISLAND,LOCATIONS,entrance,pedestrianRoute,clearSegment,blocked,BUILDINGS,atSea} from '../worker/city-map.mjs';
 import {createTourismSystem} from '../worker/tourism.mjs';
 import {nextFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
+import {countryAt} from '../worker/country-map.mjs';
+import {INTERSECTIONS,signalBarrier} from '../worker/traffic.mjs';
 function setup(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};s.simulationAgeSeconds=7*3600;return s;}
 function guest(s,i=0){const f=s.flies[i];Object.assign(f,{money:500,savings:2000,ageYears:30,health:90,energy:90,traveling:false,indoors:true,currentLocationId:'airport',x:AIRPORT.terminal.x,z:AIRPORT.terminal.z,action:'taking a holiday on Hansdrex Island'});return f;}
+test('Hawaii has 50 permanent households and no traffic signal stops after save and reload',()=>{
+ const s=setup(),island=s.flies.filter(f=>f.alive&&f.residencyCountryId==='hawaii');
+ assert.equal(island.length,50);
+ assert.equal(new Set(island.map(f=>f.householdId)).size,50);
+ for(const f of island){
+  assert.equal(countryAt(f),'hawaii');assert.match(f.housingUnitId,/^HAWAII-HOME-/);
+  assert.ok(s.housing.apartmentBlocks.find(b=>b.id===f.housingUnitId).occupants.includes(f.householdId));
+ }
+ const restored=restoreState(structuredClone(s));
+ assert.deepEqual(restored.flies.filter(f=>f.alive&&f.residencyCountryId==='hawaii').map(f=>f.id),island.map(f=>f.id));
+ assert.ok(INTERSECTIONS.every(p=>countryAt(p)!=='hawaii'));
+ assert.equal(signalBarrier({x:65,z:826},{x:65,z:920},40),null);
+});
 test('expansion creates its current resident target and migrates a 100-person save once without changing old brains or assets',()=>{
- const s=setup();assert.equal(s.flies.filter(f=>f.alive).length,RESIDENT_TARGET);
+ const s=setup();assert.equal(s.flies.filter(f=>f.alive).length,RESIDENT_TARGET+50);
  s.flies=s.flies.slice(0,100);delete s.airportExpansionVersion;s.mapVersion=13;
  const before=s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]);
  restoreState(s);assert.equal(s.flies.filter(f=>f.alive).length,500);
@@ -66,8 +81,8 @@ test('a paid holiday physically flies over sea, visits the resort and beach, sur
  assert.ok(Math.abs(liquidMoneySupply()-before)<1e-6);
 });
 test('flight schedule respects 30-minute check-in and aircraft stays above sea until island landing',()=>{
- assert.equal(nextFlight(7.5*3600).departure,8*3600);assert.equal(nextFlight(7.5*3600+1).departure,10*3600);
- assert.equal(nextFlight(21*3600,'city').departure,86400+8*3600);
+ assert.equal(nextFlight(7.5*3600).departure,8*3600);assert.equal(nextFlight(7.5*3600+1).departure,9*3600);
+ assert.equal(nextFlight(21*3600,'city').departure,22*3600);
  const flight=nextFlight(7*3600);
  for(let t=0;t<AVIATION.flightSeconds;t+=10){const p=flightPose(flight.departure+t,flight);if(atSea(p))assert.ok(p.y>20);}
 });

@@ -6,6 +6,7 @@ import {lifeSkillsLesson,readyToDrive} from './life-skills.mjs';
 import {relocateNorthTower} from './north-tower-relocation.mjs';
 import {relocateHansdrexAirport} from './hansdrex-airport-map.mjs';
 import {createResidentVision} from './resident-vision.mjs';
+import {settleHawaiiResidents} from './hawaii-settlement.mjs';
 import {createResidentSelfModel} from './resident-self-model.mjs';
 import {countryAt as economicCountryAt,countryForHome as economicHomeCountry} from './country-map.mjs';
 import {migrateDistrictRiverJourneys} from './district-river-migration.mjs';
@@ -74,6 +75,11 @@ const CENTRAL_RECRUITMENT='interviewing for a Main City job';
 const LOCAL_JOB_FLOORS={'riverside-office':4,'riverside-hotel':12,'riverside-market':3,'riverside-cafe':2,'marina-bay-day':3,'marina-bay-evening':3,'marina-bay-night':3};
 const CENTRAL_DAY_JOBS=new Set(['office','lab','central-finance','central-technology']);
 const JOBS = [
+  {id:'island-hotel-day',locationId:'island-resort',title:'Hawaii hotel concierge',publicOnly:true,employerId:'island-resort',wage:5.4,shiftStart:7,shiftEnd:15},
+  {id:'island-hotel-evening',locationId:'island-resort',title:'Hawaii hotel staff',publicOnly:true,employerId:'island-resort',wage:5.5,shiftStart:15,shiftEnd:23},
+  {id:'island-retail',locationId:'island-market',title:'Hawaii market vendor',publicOnly:true,employerId:'island-market',wage:4.7,shiftStart:8,shiftEnd:16},
+  {id:'island-food',locationId:'island-restaurant',title:'Hawaii restaurant staff',publicOnly:true,employerId:'island-restaurant',wage:4.9,shiftStart:11,shiftEnd:19},
+  {id:'island-airport-staff',locationId:'island-airport',title:'Hawaii airport worker',publicOnly:true,employerId:'regional-air',wage:5.2,shiftStart:6,shiftEnd:14},
   {id:'central-finance',locationId:'office',title:'financial operations analyst',wage:7.1,shiftStart:8,shiftEnd:16,publicOnly:true},
   {id:'central-technology',locationId:'lab',title:'technology services specialist',wage:7.4,shiftStart:9,shiftEnd:17,publicOnly:true},
   {id:'spaceworks-engineer',locationId:'spaceworks-assembly',title:'Spaceworks assembly engineer',wage:8.2,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
@@ -161,6 +167,8 @@ const BUSINESSES = {
   rooftop: { inventory: 999, cash: 2500, price: 9.0, sector: "nightlife" },
   "island-air": { inventory:999, cash:18000, price:45, sector:"aviation" },
   "island-resort": { inventory:999, cash:12000, price:44, sector:"tourism" },
+  'island-market':{inventory:120,cash:3000,price:2.4,sector:'food'},
+  'island-restaurant':{inventory:120,cash:3000,price:3.5,sector:'food'},
   "travel-escrow": { inventory:0, cash:0, price:0, sector:"escrow" },
   "heli-tour": { inventory: 999, cash: 12000, price: 185, sector: "luxury-tourism" },
   "vehicle-showroom": { inventory: 80, cash: 60000, price: 650, sector: "automotive" },
@@ -341,6 +349,7 @@ function availableApartmentBlock() {
 }
 
 function housingHomeLocation(block){
+  if(block.id.startsWith('HAWAII-HOME-'))return block.id;
   if(block.id.startsWith('AIRPORT-APT-'))return 'airport-gardens-homes';
   if(block.id.startsWith('WEST-'))return 'west-gardens-homes';
   if(block.x>480)return 'riverside-homes';
@@ -580,6 +589,7 @@ function initCityServices(){
   applyNationalResidences(state,{housingHomeLocation,remember:brainRemember,targetTotal:state.flies.filter(f=>f.alive).length,targetNorth:250});
  }
  countries.init();industrialEconomy.init();nationalDefenseWorld.init();nationalServices.init();nationalDefense.init();
+ settleHawaiiResidents(state,{createResident:()=>{const f=createFly(state.flies.length);seedSocioeconomicProfile(f);return f;},releaseHousingUnit,parkingPoint,liquidMoneySupply,remember:brainRemember,emit,jobs:JOBS.filter(j=>j.id.startsWith('island-'))});
  const mansion=state.urbanWorld?.buildings?.['hansdrex-mansion'];
  if(mansion&&!state.urbanWorld.projects?.some(p=>p.buildingId===mansion.id&&!['complete','cancelled'].includes(p.stage))){delete state.urbanWorld.buildings[mansion.id];for(const fire of state.urbanWorld.fires||[])if(fire.buildingId===mansion.id)fire.containedAt=state.simulationAgeSeconds||1;}
 }
@@ -630,7 +640,7 @@ function location(id) {
 }
 
 function homeLocations() {
-  return LOCATIONS.filter((l) => l.type === "home");
+  return LOCATIONS.filter((l) => l.type === "home"&&!l.id.startsWith('HAWAII-HOME-'));
 }
 
 function rand() {

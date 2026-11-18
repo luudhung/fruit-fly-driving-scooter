@@ -19,7 +19,13 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
   business.cash+=cost;f.expensesLifetime=Number(f.expensesLifetime||0)+cost;world().totalTransactions++;
   return true;
  }
- function seats(flight,except){return world().flies.filter(f=>f.alive&&f!==except&&f.airTrip&&[f.airTrip.outbound.id,f.airTrip.inbound.id].includes(flight.id)).length;}
+ function seats(flight,except){
+  const s=world();
+  return [...s.flies,...(s.cityVisitors?.visitors||[])].filter(f=>{
+   const trip=f.airTrip||f.countryAirTrip;
+   return f.alive&&f!==except&&(trip?.outbound?.id===flight.id||trip?.inbound?.id===flight.id);
+  }).length;
+ }
  function bookIslandHoliday(f){
   const s=world(),p=fares(),cost=p.roundTrip+p.resortNight;
   if(f.traveling||f.currentLocationId!=='airport'||!canHoliday(f)||weatherDanger()>.3)return false;

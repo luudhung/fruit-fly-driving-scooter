@@ -93,6 +93,8 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  runway(ISLAND.runway,'09  HWI · HAWAII CITY  27');
  // Low-rise resort with shaded verandas, villas, pool and a beach pier.
  const r=ISLAND.resort;box(g,r.w,9,r.d,r.x,5,r.z,stone);box(g,r.w+4,.7,r.d+4,r.x,10,r.z,gold);
+ sign(g,make,'HAWAII LOCAL MARKET',r.x-14,3.8,r.z-r.d/2-.2,16,.8);
+ sign(g,make,'ISLAND KITCHEN',r.x+10,3.8,r.z-r.d/2-.2,14,.8);
  for(const z of [-1,1])for(let i=-4;i<=4;i++){box(g,2.8,4,.1,r.x+i*4.5,5,r.z+z*(r.d/2+.1),glass);box(g,.2,7,.2,r.x+i*4.5,4,r.z+z*(r.d/2+3),metal);}
  slab(r.x,r.z+22,32,10,new THREE.MeshStandardMaterial({color:0x5bd4d1,roughness:.18}),.8);
  for(let i=0;i<26;i++){

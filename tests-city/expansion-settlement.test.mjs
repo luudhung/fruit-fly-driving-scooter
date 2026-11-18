@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {settleExpansionResidents,expansionSettlementPlan} from '../worker/expansion-settlement.mjs';
-import {RESIDENT_CAP,COMBINED_CAP,RESIDENT_TARGET} from '../worker/population-limits.mjs';
+import {RESIDENT_CAP,COMBINED_CAP,RESIDENT_TARGET,HAWAII_RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {freshState,restoreState,getState,getNeuralAgents,settleExpansionResidents as settleEngineExpansion,liquidMoneySupply} from '../worker/civilization-engine.mjs';
 import {BUILDINGS} from '../worker/city-map.mjs';
 
@@ -88,9 +88,9 @@ test('the real engine adds exactly 128 new district residents to an old checkpoi
 
 test('the enlarged fresh population remains within each neural shard batch and the adaptive checkpoint write budget',()=>{
  const state=freshState(),agents=getNeuralAgents(),shards=Array(16).fill(0);
- assert.equal(state.flies.filter(f=>f.alive).length,RESIDENT_TARGET);assert.equal(agents.length,RESIDENT_TARGET);
+ assert.equal(state.flies.filter(f=>f.alive).length,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET);assert.equal(agents.length,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET);
  for(const agent of agents)shards[Number(agent.brain_id.replace(/\D/g,''))%16]++;
- assert.ok(Math.max(...shards)<=64);
+ assert.ok(Math.max(...shards)<=Math.ceil(COMBINED_CAP/shards.length));
  const intervalMs=Math.max(360000,Math.ceil(COMBINED_CAP*86400/60000)*1000);
  assert.ok(COMBINED_CAP*86400000/intervalMs<=60000);
  assert.equal(new Set(agents.map(a=>a.brain_id)).size,agents.length);

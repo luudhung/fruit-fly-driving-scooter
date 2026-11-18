@@ -22,8 +22,8 @@ const MAX_SITE_CREW=25;
 const BLUEPRINT_FIELDS=['x','z','w','d','h','kind','color','roofColor','facadeColor','style','roofStyle','seed'];
 const initialBlueprints=new Map(BUILDINGS.map(b=>[b.id,Object.fromEntries(BLUEPRINT_FIELDS.filter(k=>b[k]!==undefined).map(k=>[k,b[k]]))]));
 const NORTH=COUNTRY_IDS.north;
-const materialSupplier=country=>country===NORTH?'north-civic-materials':'civic-materials';
-const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:'construction';
+const materialSupplier=country=>country===NORTH?'north-civic-materials':country===COUNTRY_IDS.hawaii?'hawaii-civic-materials':'civic-materials';
+const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:country===COUNTRY_IDS.hawaii?'island-airport':'construction';
 const publicTreasury=country=>country===COUNTRY_IDS.hansdrex?'treasury':`treasury:${country}`;
 const available=(f,now)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
@@ -40,8 +40,8 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  const activeProject=p=>ongoing(p)&&!p.recoveryPaused;
  const ownership=b=>b?.countryId||b?.warRecovery?.countryId||countryAt(b);
  const projectCountry=p=>p.countryId||ownership(u().buildings[p.buildingId]||building(p.buildingId));
- const projectLimit=country=>country===NORTH?(recoveryPriority(NORTH)?MAX_NORTH_RECOVERY_PROJECTS:MAX_NORTH_PROJECTS):(recoveryPriority(COUNTRY_IDS.hansdrex)?MAX_RECOVERY_PROJECTS:MAX_PROJECTS);
- const territoriesMatch=(a,b)=>(a===NORTH)===(b===NORTH);
+ const projectLimit=country=>country===COUNTRY_IDS.hansdrex?(recoveryPriority(country)?MAX_RECOVERY_PROJECTS:MAX_PROJECTS):(recoveryPriority(country)?MAX_NORTH_RECOVERY_PROJECTS:MAX_NORTH_PROJECTS);
+ const territoriesMatch=(a,b)=>a===b;
  const hasSlot=country=>u().projects.filter(p=>activeProject(p)&&territoriesMatch(projectCountry(p),country)).length<projectLimit(country);
 
  function account(id){return raw().businesses[id] ||= {cash:0,inventory:0,price:0,sector:'civic'};}
@@ -174,9 +174,9 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   return distance<9||(distance<55&&f.currentLocationId===targetId);
  }
  function crewFor(fireOrProject,type,b,max){
-  if(type==='fire'&&fireService.enabled())return;
+  if(type==='fire'&&fireService.enabled()&&ownership(b)!==COUNTRY_IDS.hawaii)return;
   const ref=type==='fire'?fireOrProject.teamIds:fireOrProject.workerIds;
-  const country=ownership(b),localOnly=type==='build';
+  const country=ownership(b),localOnly=type==='build'||country===COUNTRY_IDS.hawaii;
   for(let i=ref.length-1;i>=0;i--){
    const f=byId.get(ref[i]),task=f?.urbanTask;
    if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86){
@@ -254,12 +254,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   });
  }
  function prioritizeRecovery(){
-  const recoveringHans=recoveryPriority(COUNTRY_IDS.hansdrex),recoveringNorth=recoveryPriority(NORTH);
-  u().recoveryPriority=recoveringHans||recoveringNorth;
+  const recovering=new Set(Object.values(COUNTRY_IDS).filter(country=>recoveryPriority(country)));
+  u().recoveryPriority=recovering.size>0;
   for(const p of u().projects){
    if(!ongoing(p)||p.kind!=='new')continue;
    const country=projectCountry(p);
-   if(country===NORTH?recoveringNorth:recoveringHans){
+   if(recovering.has(country)){
     if(p.recoveryPaused)continue;
     p.recoveryPaused=true;p.priorityPausedAt??=now();p.pauseReason='disaster recovery priority';
     for(const id of p.workerIds||[]){const f=byId.get(id);if(f?.urbanTask?.id===p.id)releaseTask(f);}
@@ -538,7 +538,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   floodStep(dt);
   // Import stock in response to outstanding orders, including jobs larger
   // than the historic 800-unit refill. Each treasury pays its own depot bills.
-  for(const country of [COUNTRY_IDS.hansdrex,NORTH]){
+  for(const country of [COUNTRY_IDS.hansdrex,NORTH,COUNTRY_IDS.hawaii]){
    const supplier=account(materialSupplier(country));
    const demand=u().projects.filter(p=>activeProject(p)&&!p.materialsOrdered&&territoriesMatch(projectCountry(p),country))
     .reduce((max,p)=>Math.max(max,p.materialsRequired),0);

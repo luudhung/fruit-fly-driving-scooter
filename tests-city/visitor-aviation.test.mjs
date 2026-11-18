@@ -22,7 +22,7 @@ test('regional aircraft approach from different sectors, use the runway, and occ
 
 test('the runway scheduler leaves island flights and other aircraft exclusive clearance',()=>{
  const island=nextFlight(8*3600,'island',0);
- const start=visitorRunwaySlot(island.departure-30,INBOUND_SECONDS,[]);
+ const start=visitorRunwaySlot(island.arrival-420,INBOUND_SECONDS,[]);
  assert.ok(start>=island.arrival+120);
  const first={inboundAt:start,parkedAt:start+INBOUND_SECONDS,outboundAt:null,exitAt:null};
  const next=visitorRunwaySlot(start+90,INBOUND_SECONDS,[first]);

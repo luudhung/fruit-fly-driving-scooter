@@ -1,4 +1,5 @@
-export const RESIDENT_CAP:1040;
-export const COMBINED_CAP:1080;
+export const HAWAII_RESIDENT_TARGET:50;
+export const RESIDENT_CAP:1090;
+export const COMBINED_CAP:1130;
 export const NEW_DISTRICT_RESIDENTS:64;
 export const RESIDENT_TARGET:1000;

@@ -1,6 +1,6 @@
 import {NORTH_F1_CHARTER_STANDS} from './north-f1-map.mjs';
 import {AIRPORT} from './city-map.mjs';
-import {AVIATION,nextFlight,nextRegionalFlight,airportById} from './aviation.mjs';
+import {AVIATION,nextRegionalFlight,airportById} from './aviation.mjs';
 
 export const VISITOR_STANDS = AIRPORT.stands||Array.from({length:4},(_,i)=>({id:`INTL-${i+1}`,x:-225+i*30,z:-443}));
 export const INBOUND_SECONDS = 1020;
@@ -88,14 +88,17 @@ const GROUND_SEPARATION=60;
 const groundWindow=(start,duration)=>duration===OUTBOUND_SECONDS?[start,start+460]:[start+690,start+duration];
 function runwayOperations(start,after,flights,airportId){
  const primary=visitorRunways(airportId)[0]?.id,operations=[];
- for(const origin of airportId==='city'?['city','island']:[]){
-  let f=nextFlight(start-AVIATION.flightSeconds-SEPARATION,origin,0);
-  while(f.departure<after){operations.push({start:f.departure,end:f.arrival,runwayId:primary,ground:[f.departure,f.arrival]});f=nextFlight(f.departure+1,origin,0);}
- }
  for(const from of ['city','north','island'])for(const to of ['city','north','island']){
-  if(from===to||from!==airportId&&to!==airportId||from==='city'&&to==='island'||from==='island'&&to==='city')continue;
+  if(from===to||from!==airportId&&to!==airportId)continue;
   let f=nextRegionalFlight(start-AVIATION.flightSeconds-SEPARATION,from,to,0);
-  while(f&&f.departure<after){operations.push({start:f.departure,end:f.arrival,runwayId:primary,ground:[f.departure,f.arrival]});f=nextRegionalFlight(f.departure+1,from,to,0);}
+  while(f&&f.departure<after){
+   // Regional flights spend the first and last four of their twelve path
+   // segments on local taxi/runway movements, with the middle spent in flight.
+   const groundSeconds=AVIATION.flightSeconds/3;
+   const ground=from===airportId?[f.departure,f.departure+groundSeconds]:[f.arrival-groundSeconds,f.arrival];
+   operations.push({start:ground[0],end:ground[1],runwayId:primary,ground});
+   f=nextRegionalFlight(f.departure+1,from,to,0);
+  }
  }
  for(const f of flights){
   if((f.airportId||'city')!==airportId||f.aircraftGone)continue;

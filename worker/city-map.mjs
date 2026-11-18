@@ -223,6 +223,8 @@ export const LOCATIONS = [
   { id: "airport", type: "transit", name: "Hansdrex City Airport · HCA", x:AIRPORT.terminal.x,z:AIRPORT.terminal.z },
   { id: "island-airport", type: "transit", name: "Hansdrex Island Airport · HIA", x:ISLAND.terminal.x,z:ISLAND.terminal.z },
   { id: "island-resort", type: "resort", name: "Hansdrex Island Resort", x:ISLAND.resort.x,z:ISLAND.resort.z },
+  {id:'island-market',type:'food',name:'Hawaii Local Market',x:ISLAND.resort.x-14,z:ISLAND.resort.z-ISLAND.resort.d/2-3},
+  {id:'island-restaurant',type:'food',name:'Hawaii Resort Kitchen',x:ISLAND.resort.x+10,z:ISLAND.resort.z-ISLAND.resort.d/2-3},
   { id: "island-beach", type: "social", name: "Hansdrex Island · Palm Beach", ...ISLAND.beach },
 
   { id: "factory", type: "job", name: "Hansdrex Sugar Works", x: -285, z: 75 },
@@ -273,7 +275,7 @@ place({id:'airport-hangar',...AIRPORT.hangar,kind:'airport-service'});
 place({id:'island-airport',...ISLAND.terminal,h:6,kind:'airport'});
 place({id:'island-resort',...ISLAND.resort,h:13,kind:'resort'});
 for(const loc of LOCATIONS) {
- if(['airport','island-airport','island-resort'].includes(loc.id))continue;
+ if(['airport','island-airport','island-resort','island-market','island-restaurant'].includes(loc.id))continue;
  if(['home','transit','social'].includes(loc.type)&&!['cafe','tea-house','cinema'].includes(loc.id))continue;
  if(['park','rooftop','heliport','farm'].includes(loc.id))continue;
  const outer=Math.abs(loc.x)>180;
@@ -464,7 +466,7 @@ ROADS.push(...INDUSTRIAL_ROADS.map(r=>({...r})));
 ROADS.splice(0,ROADS.length,...districtRiverRoads(ROADS,districtTopology));
 // New countries append after existing lot generation; old titles never shift.
 BUILDINGS.push(...NORTH_BUILDINGS.map(b=>({...b})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({...b})),...SPACEPORT_BUILDINGS.map(b=>({...b})),...BORDER_CUSTOMS_BUILDINGS.map(b=>({...b})));
-LOCATIONS.push(...NORTH_LOCATIONS.map(l=>({...l})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({id:b.id,name:b.name,type:'seasonal-lodging',x:b.x,z:b.z})),...SPACEPORT_LOCATIONS.map(l=>({...l})));
+LOCATIONS.push(...NORTH_LOCATIONS.map(l=>({...l})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({id:b.id,name:b.name,type:b.primaryResidence?'home':'seasonal-lodging',x:b.x,z:b.z})),...SPACEPORT_LOCATIONS.map(l=>({...l})));
 ROADS.push(...NORTH_ROADS.map(r=>({...r})),...HAWAII_ROADS.map(r=>({...r})),...SPACEPORT_ROADS.map(r=>({...r})));
 BUILDINGS.push(...NORTH_F1_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...NORTH_F1_LOCATIONS.map(l=>({...l})));

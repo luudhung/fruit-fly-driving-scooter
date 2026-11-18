@@ -14,8 +14,9 @@ function fixture(from='north',count=1){
  return{get s(){return s;},get air(){return air;},get countries(){return countries;},restore(){s=structuredClone(s);build();},at(time){s.simulationAgeSeconds=time;},arrive(f,leg,index=0){const p=COUNTRY_AIRPORTS.find(p=>p.id===leg.to),stand=p.stands.at(-1),path=visitorArrivalPath({airportId:p.id,standId:stand.id,arrivalStand:stand,inboundAt:leg.departure,parkedAt:leg.arrival},index,120);s.simulationAgeSeconds=path.at(-1).at+1;air.handleResident(f,{hour:12});}};
 }
 
-test('all six airport pairs have ten-seat schedules and actual runway/taxi/flight/immigration trajectories',()=>{
+test('the four direct airport pairs have ten-seat schedules and actual runway/taxi/flight/immigration trajectories; North-Hawaii requires Hansdrex',()=>{
  for(const from of COUNTRY_AIRPORTS)for(const to of COUNTRY_AIRPORTS){if(from===to)continue;
+  if(from.id==='north'&&to.id==='island'||from.id==='island'&&to.id==='north'){assert.equal(nextRegionalFlight(0,from.id,to.id),null);continue;}
   const t=fixture(from.id),f=t.s.flies[0],total=supply(t.s);assert.ok(t.air.book(f,to.id));assert.equal(supply(t.s),total);const trip=f.countryAirTrip,flight=trip.outbound;
   assert.ok(flight.departure>=t.s.simulationAgeSeconds+AVIATION.checkInSeconds);assert.equal(flight.to,to.id);
   t.at(flight.departure+600);t.air.handleResident(f);assert.equal(f.onPlane,true);assert.ok(f.y>20);assert.deepEqual({x:f.x,y:f.y,z:f.z},{x:flightPose(t.s.simulationAgeSeconds,flight).x,y:flightPose(t.s.simulationAgeSeconds,flight).y,z:flightPose(t.s.simulationAgeSeconds,flight).z});
@@ -33,6 +34,25 @@ test('both manifests reject seat eleven, keep identity/fare/hotel escrow on rest
  const legacy=t.s.flies[10];legacy.airTrip={phase:'outbound-wait',outbound:nextRegionalFlight(t.s.simulationAgeSeconds,'city','island'),inbound:nextRegionalFlight(t.s.simulationAgeSeconds+86400,'island','city'),cost:134};assert.equal(t.air.book(legacy,'island'),false);assert.equal(legacy.airTrip.cost,134);
 });
 
+test('a North traveller checks in for Hawaii only after reaching Hansdrex airport',()=>{
+ const t=fixture('north'),f=t.s.flies[0],airport=COUNTRY_AIRPORTS.find(p=>p.id==='city');
+ const air=createRegionalAviationSystem({world:()=>t.s,aviationAdmission:t.countries.aviationAdmission,
+  startJourney:(person,choice)=>{person.traveling=true;person.targetLocationId=choice.id;}});
+ assert.equal(air.book(f,'island'),false);
+ assert.equal(air.request(f,'island'),true);
+ assert.equal(f.targetLocationId,airport.locationId);assert.equal(f.countryAirTrip,undefined);
+ Object.assign(f,airport.gate,{traveling:false,currentLocationId:airport.locationId});
+ air.handleResident(f);
+ assert.equal(f.countryAirTrip.outbound.from,'city');assert.equal(f.countryAirTrip.outbound.to,'island');
+ assert.equal(f.countryAirTrip.inbound.to,'city');assert.equal(f.countryFlightPlan,null);
+ for(let hour=0;hour<24;hour++){
+  t.at(hour*3600+300);
+  const [flight]=air.snapshot().flights;
+  assert.equal(flight.departure,hour*3600);assert.equal(flight.from,'city');assert.equal(flight.to,'island');
+  assert.equal(flight.scheduled,true);
+ }
+});
+
 test('a deceased passenger releases both seats and their real room, and unused escrow joins the settled estate only once',()=>{
  const t=fixture('north',2),f=t.s.flies[0],heir=t.s.flies[1];f.children=[heir.id];assert.ok(t.air.book(f,'city'));const before=heir.savings;
  f.alive=false;f.estateSettled=true;t.air.tick();assert.equal(f.countryAirTrip,null);assert.equal(t.s.businesses['regional-flight-escrow'].cash,0);assert.equal(heir.savings,before+134);assert.equal(t.s.cityVisitors.hotels.hotel.rooms[f.id],undefined);
@@ -41,7 +61,7 @@ test('a deceased passenger releases both seats and their real room, and unused e
 
 
 test('regional full board needs a settled paid stay, actual resort attendance and finite stock across restore',()=>{
- const t=fixture('north'),f=t.s.flies[0];assert.ok(t.air.book(f,'island'));const trip=f.countryAirTrip;t.at(trip.outbound.departure+600);t.air.handleResident(f);t.arrive(f,trip.outbound);
+ const t=fixture('city'),f=t.s.flies[0];assert.ok(t.air.book(f,'island'));const trip=f.countryAirTrip;t.at(trip.outbound.departure+600);t.air.handleResident(f);t.arrive(f,trip.outbound);
  const resort=t.s.businesses['island-resort'];Object.assign(f,{hunger:90,currentLocationId:'island-resort',x:ISLAND.resort.x,z:ISLAND.resort.z,traveling:false,onPlane:false});resort.inventory=0;const before=supply(t.s);
  t.air.handleResident(f);assert.equal(f.hunger,90,'an empty prepaid pantry cannot create food');
  resort.inventory=1;Object.assign(f,{currentLocationId:'island-beach',x:ISLAND.beach.x,z:ISLAND.beach.z});t.air.handleResident(f);assert.equal(resort.inventory,1);assert.equal(f.hunger,90,'beach relaxation is not a meal');

@@ -10,9 +10,9 @@ export function tourismFares(priceLevel=1){
   beachActivity:12*level,helicopter:185*level,currency:'H$'};
 }
 export function nextFlight(now,from='city',minimumLead=AVIATION.checkInSeconds){
- const first=from==='city'?8:9,last=from==='city'?20:21;
+ const offset=from==='city'?0:.5;
  let day=Math.floor(now/86400);
- for(let d=day;d<=day+2;d++)for(let h=first;h<=last;h+=2){
+ for(let d=day;d<=day+2;d++)for(let h=offset;h<24;h++){
   const departure=d*86400+h*3600;
   if(departure>=now+minimumLead)return {id:`${from}-${departure}`,from,to:from==='city'?'island':'city',departure,arrival:departure+AVIATION.flightSeconds};
  }
@@ -22,6 +22,7 @@ export function airportById(id){return COUNTRY_AIRPORTS.find(p=>p.id===(COUNTRY_
 /** Every pair has a durable ten-seat timetable; legacy city/island IDs stay valid. */
 export function nextRegionalFlight(now,from,to,minimumLead=AVIATION.checkInSeconds){
  from=airportById(from)?.id;to=airportById(to)?.id;if(!from||!to||from===to)return null;
+ if(from==='north'&&to==='island'||from==='island'&&to==='north')return null;
  if(from==='city'&&to==='island'||from==='island'&&to==='city')return nextFlight(now,from,minimumLead);
  const first=from==='north'?(to==='city'?8.75:9.75):from==='city'?9.75:8.75;
  for(let day=Math.floor(now/86400);day<=Math.floor(now/86400)+2;day++)for(let hour=first;hour<=21;hour+=2){const departure=day*86400+hour*3600;if(departure>=now+minimumLead)return{id:`${from}-${to}-${departure}`,from,to,departure,arrival:departure+AVIATION.flightSeconds};}
@@ -40,8 +41,9 @@ export function pathPose(points,progress){
  return {x:mix(a[0],b[0],smooth),y:mix(a[1],b[1],smooth),z:mix(a[2],b[2],smooth),heading:Math.atan2(b[0]-a[0],b[2]-a[2]),progress};
 }
 export function flightPose(now,flight){
- if(flight.regional||flight.from==='north'||flight.to==='north'){
+ if(flight.regional||flight.from==='north'||flight.to==='north'||flight.from==='city'||flight.from==='island'){
   const points=regionalFlightPath(flight);if(!points)return null;
+  if(now>=flight.arrival){const port=airportById(flight.to||(flight.from==='city'?'island':'city')),stand=port.stands.at(-1);return{...stand,y:3,heading:0,phase:'parked'};}
   return {...pathPose(points,(now-flight.departure)/Math.max(1,flight.arrival-flight.departure)),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
  }
  const city=[AIRPORT.terminal.x,3,-420],island=[ISLAND.terminal.x,3,ISLAND.gate.z];
@@ -51,13 +53,9 @@ export function flightPose(now,flight){
  return {...pathPose(points,(now-flight.departure)/AVIATION.flightSeconds),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
 }
 export function scheduledAircraft(now){
- const hour=Math.floor(((now%86400)+86400)%86400/3600),day=Math.floor(now/86400);
- if(hour<8||hour>21)return {...flightPose(0,{from:'city',departure:1,arrival:1201}),phase:'parked',from:'city'};
- const departure=day*86400+hour*3600,from=hour%2===0?'city':'island';
- const flight={id:`${from}-${departure}`,from,departure,arrival:departure+AVIATION.flightSeconds};
- if(now<flight.arrival)return {...flightPose(now,flight),...flight};
- const p=from==='city'?ISLAND.gate:{x:AIRPORT.terminal.x,z:-420};
- return {...p,y:3,heading:from==='city'?Math.PI/2:-Math.PI/2,phase:'parked',from};
+ const hour=Math.floor(now/3600),from=now-hour*3600<1800?'city':'island',departure=hour*3600+(from==='island'?1800:0);
+ const flight={id:`${from}-${departure}`,from,to:from==='city'?'island':'city',departure,arrival:departure+AVIATION.flightSeconds,regional:true};
+ return {...flightPose(now,flight),...flight};
 }
 export function helicopterPose(now,start,end){
  const p=AIRPORT.helipad;

@@ -5,7 +5,7 @@ export const HAWAII_ISLAND={x:100,z:790,rx:260,rz:2*205*135/260};
 export const COUNTRIES=[
  {id:COUNTRY_IDS.hansdrex,name:'Hansdrex',initialResidents:750},
  {id:COUNTRY_IDS.north,name:'North City',initialResidents:250},
- {id:COUNTRY_IDS.hawaii,name:'Hawaii',initialResidents:0,seasonal:true},
+ {id:COUNTRY_IDS.hawaii,name:'Hawaii',initialResidents:50,seasonal:false},
 ];
 export function countryAt(p){
  if(!Number.isFinite(p?.x)||!Number.isFinite(p?.z))return null;
@@ -86,6 +86,8 @@ export const HAWAII_APARTMENTS=[
  {id:'HAWAII-APT-COVE',name:'Cove View Apartments',x:160,z:896,w:24,d:18,h:17,capacity:14},
  {id:'HAWAII-APT-HARBOR',name:'Harbor View Apartments',x:200,z:908,w:25,d:18,h:20,capacity:18},
 ].map(b=>({...b,kind:'resort-apartment',countryId:COUNTRY_IDS.hawaii,seasonal:true,primaryResidence:false}));
+// Permanent households have their own buildings; visitor hotel inventory is separate.
+HAWAII_APARTMENTS.push(...[[220,820],[250,820],[50,830],[80,830],[220,840]].map(([x,z],i)=>({id:`HAWAII-HOME-${i+1}`,name:`Hawaii Resident Court ${i+1}`,x,z,w:16,d:16,h:24,capacity:10,rent:8,purchaseValue:4200,kind:'resort-apartment',countryId:COUNTRY_IDS.hawaii,seasonal:false,primaryResidence:true})));
 export const HAWAII_ROADS=[
  {id:'HAWAII-SOUTH-AVENUE',x:65,z:877.5,w:7,d:165},
  ...[810,910].map(z=>({id:`HAWAII-COTTAGE-STREET-${z}`,x:10,z,w:180,d:6})),

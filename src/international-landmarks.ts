@@ -1,5 +1,6 @@
 import {NORTH_F1_CHARTER_STANDS} from '../worker/north-f1-map.mjs';
 import * as THREE from 'three';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {NORTH_FIRE_STATION} from '../worker/north-fire-service.mjs';
 import {NORTH_TRAINING_STAND} from '../worker/national-services.mjs';
 import {createNorthGolfCourse} from './north-golf-course.ts';
@@ -24,6 +25,7 @@ export class InternationalLandmarks{
  private rice=new THREE.MeshStandardMaterial({color:0x959843,roughness:1});
  private earth=new THREE.MeshStandardMaterial({color:0x695e45,roughness:1});
  private readonly sign:Sign;
+ private readonly islandWalls=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.72,metalness:.12});
  constructor(parent:THREE.Group,sign:Sign){
   this.sign=sign;
   this.root.name='International national infrastructure';parent.add(this.root);
@@ -62,7 +64,17 @@ export class InternationalLandmarks{
   }
   if(b.kind==='customs')this.label(g,b.name.toUpperCase(),0,3.7,0,9,.75);
   if(!cottage&&b.kind!=='customs'&&b.kind!=='farm-service')this.label(g,b.name.toUpperCase(),0,height+2,0,Math.max(17,b.w));
-  batchStaticMeshes(g);return g;
+  batchStaticMeshes(g);
+  if(b.countryId==='hawaii'){
+   const sources=g.children.filter((o):o is THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>=>o instanceof THREE.Mesh&&o.material instanceof THREE.MeshStandardMaterial&&!o.material.transparent),parts:THREE.BufferGeometry[]=[];
+   for(const mesh of sources){
+    mesh.updateMatrix();const geometry=mesh.geometry.index?mesh.geometry.toNonIndexed():mesh.geometry.clone();geometry.applyMatrix4(mesh.matrix);
+    const colors=new Float32Array(geometry.getAttribute('position').count*3);for(let i=0;i<colors.length;i+=3)mesh.material.color.toArray(colors,i);
+    geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));parts.push(geometry);
+   }
+   if(parts.length){const geometry=mergeGeometries(parts);if(geometry){for(const mesh of sources){g.remove(mesh);mesh.geometry.dispose();}g.add(new THREE.Mesh(geometry,this.islandWalls));}for(const part of parts)part.dispose();}
+  }
+  return g;
  }
  private fireStation(b:CountryBuilding){
   const g=new THREE.Group();g.name=b.name;g.position.set(b.x,0,b.z);

@@ -1944,7 +1944,7 @@ function animate(now = performance.now()) {
     if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}
   }
   const legacyFlight=snapshot?.aviation?.legacyFlights?.find(f=>gameNow>=f.departure-300&&gameNow<=f.arrival+900);
-  aviationVisual.plane.visible=Boolean(legacyFlight);
+  aviationVisual.plane.visible=Boolean(legacyFlight&&!snapshot?.regionalAviation?.flights?.some(f=>f.id===legacyFlight.id));
   if(legacyFlight){const pose=flightPose(gameNow,legacyFlight);aviationVisual.plane.position.set(pose.x,pose.y,pose.z);aviationVisual.plane.rotation.y=pose.heading;for(const prop of aviationVisual.propellers)prop.rotation.z+=dt*(pose.phase==='flying'?40:8);}
   const heliLead=(snapshot?.flies||[]).find(f=>f.heliPassenger);
   if(heliLead&&heliLead.heliTourStartedAt&&heliLead.heliTourUntil&&gameNow>=heliLead.heliTourStartedAt){

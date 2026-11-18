@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
+import {RESIDENT_TARGET,HAWAII_RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {packConnectome} from '../tools/pack-connectome.mjs';
 import {parsePackedGraph,createNeuralState,stepNeuralGraph,runNeuralBatch,neuralSnapshotBytes,encodeSensoryInput} from '../cloudflare/src/neural/engine.mjs';
 import {freshState,getNeuralAgents,applyNeuralOutputs,getNeuralStatus,getRawState} from '../worker/civilization-engine.mjs';
@@ -71,17 +71,17 @@ test('observed visual sides drive the optic input instead of an unseen navigatio
  assert.equal(a.ext[1],0);assert.equal(a.ext[4],0);
 });
 test('full-brain counters require real outputs for all living residents and reject older checkpoints',()=>{
- const s=freshState(),agents=getNeuralAgents();assert.equal(agents.length,RESIDENT_TARGET);assert.equal(getNeuralStatus().allBrainsReady,false);
+ const s=freshState(),agents=getNeuralAgents();assert.equal(agents.length,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET);assert.equal(getNeuralStatus().allBrainsReady,false);
  const outputs=agents.map(a=>({...a,full_connectome:true,neurons:139255,edges:15091983,neural_steps_total:128,active_neurons:12,region_activity:[.01],engine:'full-flywire-event-lif-v1'}));
  applyNeuralOutputs(outputs.slice(0,10),{cycleId:'one',intervalMs:720000,stepsPerCycle:128});
  assert.equal(getNeuralStatus().registeredBrains,10);assert.equal(getNeuralStatus().allBrainsReady,false);
  applyNeuralOutputs(outputs,{cycleId:'one',intervalMs:720000,stepsPerCycle:128,complete:true});
- assert.equal(getNeuralStatus().registeredBrains,RESIDENT_TARGET);assert.equal(getNeuralStatus().allBrainsReady,true);assert.equal(getNeuralStatus().minNeuralSteps,128);
+ assert.equal(getNeuralStatus().registeredBrains,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET);assert.equal(getNeuralStatus().allBrainsReady,true);assert.equal(getNeuralStatus().minNeuralSteps,128);
  applyNeuralOutputs([{...outputs[0],neural_steps_total:1}],{cycleId:'late'});
  assert.equal(s.flies[0].brain.fullConnectome.neuralStepsTotal,128);
  s.flies[0].brain.fullConnectome.lastSyncAt=0;
- assert.equal(getNeuralStatus().registeredBrains,RESIDENT_TARGET-1);assert.equal(getNeuralStatus().allBrainsReady,false);
- assert.equal(getRawState().flies.length,RESIDENT_TARGET);
+ assert.equal(getNeuralStatus().registeredBrains,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET-1);assert.equal(getNeuralStatus().allBrainsReady,false);
+ assert.equal(getRawState().flies.length,RESIDENT_TARGET+HAWAII_RESIDENT_TARGET);
 });
 
 test('replaying a committed batch preserves its actual computation time and measured step count',()=>{

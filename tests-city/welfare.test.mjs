@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
+import {RESIDENT_TARGET,HAWAII_RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {blocked,pedestrianRoute,LOCATIONS} from '../worker/city-map.mjs';
 import {freshState,applyWelfareRecovery,payBirthGrant,needsAndActivities,mortalityReport,liquidMoneySupply,completePregnancy,maintainPopulation,restoreState} from '../worker/civilization-engine.mjs';
 test('extinction recovery adds exactly 500 with homes and independent brains, preserving dead history, once',()=>{
@@ -69,7 +69,8 @@ test('restoring 13 survivors adds 487 residents once and preserves survivors and
 });
 test('population support replenishes below its 90% threshold at most daily and never revives the dead',()=>{
  const s=freshState(),removed=RESIDENT_TARGET-Math.floor(RESIDENT_TARGET*.9)+1,archived=s.flies.slice(0,removed);
- for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=removed;
+ for(const f of s.flies.filter(f=>f.residencyCountryId==='hawaii').slice(0,HAWAII_RESIDENT_TARGET))f.alive=false;
+ for(const f of archived){f.alive=false;f.causeOfDeath='natural causes';}s.deaths=removed+HAWAII_RESIDENT_TARGET;
  assert.equal(maintainPopulation(),removed);assert.equal(s.flies.filter(f=>f.alive).length,RESIDENT_TARGET);
  assert.ok(archived.every(f=>!f.alive));
  for(const f of s.flies.filter(f=>f.alive).slice(0,removed))f.alive=false;
