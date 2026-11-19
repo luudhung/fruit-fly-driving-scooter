@@ -1,6 +1,8 @@
 import {readyToDrive} from './life-skills.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {PARKING_SPACES,parkingPoint,LOCATIONS,onIsland} from './city-map.mjs';
+import {roadActors,occupyParking,parkingInCountry,reserveRoadParking} from './vehicle-parking.mjs';
+import {countryAt,COUNTRY_IDS} from './country-map.mjs';
 const clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,Number.isFinite(n)?n:a));
 const ownsCar=f=>readyToDrive(f)&&String(f.vehicle||'').includes('car');
 export function ensureDrivingMemory(f){
@@ -19,14 +21,57 @@ export function learnDrivingOutcome(f,reward,outcome){
 export function createRoadLife({world,random,remember,emit,neuralDrive,startJourney,isWorkCommitted=()=>false}){
 
  const data=()=>{const s=world();return s.roadLife||(s.roadLife={version:1,incidents:[],nextChaosAt:s.simulationAgeSeconds+600,chaosUntil:0,totalIncidents:0,totalFines:0,totalRepairs:0,vehiclePurchases:0});};
- function occupied(skip){const taken=new Set();for(const f of world().flies){if(!f.alive||f.id===skip)continue;if(f.parkedCar?.spaceId&&(!f.traveling||f.transitMode!=='car'))taken.add(f.parkedCar.spaceId);if(f.destinationParking?.spaceId)taken.add(f.destinationParking.spaceId);}return taken;}
- function park(f,p=f){const point=parkingPoint(p,occupied(f.id));if(point)f.parkedCar=point;return point;}
- function destination(f,p){const point=parkingPoint(p,occupied(f.id));f.destinationParking=point;return point;}
+ function park(f,p=f){const point=reserveRoadParking(world(),f,p);if(point)f.parkedCar=point;return point;}
+ function destination(f,p){const point=reserveRoadParking(world(),f,p);f.destinationParking=point;return point;}
  function normalizeParking(){
-  const spaceIds=new Set(PARKING_SPACES.map(p=>p.id));
-  const taken=new Set();for(const f of world().flies){if(!f.alive||!f.vehicle||f.traveling&&f.transitMode==='car')continue;
-   const p=f.parkedCar;if(!p?.spaceId||!spaceIds.has(p.spaceId)||taken.has(p.spaceId))f.parkedCar=parkingPoint(p||f,taken);
-   if(f.parkedCar)taken.add(f.parkedCar.spaceId);
+  const spaceIds=new Set(PARKING_SPACES.map(p=>p.id)),actors=roadActors(world());
+  const taken=new Set();
+  // A car already travelling owns its booked arrival bay until it parks there.
+  for(const f of actors)if(f.alive&&f.traveling)occupyParking(taken,f.destinationParking);
+  for(const f of actors){if(!f.alive||!f.vehicle&&!f.rentalCar||f.traveling&&f.transitMode==='car')continue;
+   const p=f.parkedCar;if(!p?.spaceId||!spaceIds.has(p.spaceId)||taken.has(p.spaceId))f.parkedCar=parkingInCountry(p||f,taken);
+   // The sequential allocator also excludes bays whose actual bodies overlap.
+   if(f.parkedCar)occupyParking(taken,f.parkedCar);
+  }
+ }
+ function recordCollision(driver,other,impact){
+  driver=driver?.collisionOwner||driver;other=other?.collisionOwner||other;
+  const s=world(),now=s.simulationAgeSeconds;
+  if(!driver||!other||driver.alive===false||other.alive===false||Number(impact?.closingSpeed||0)<3||now<Number(driver.vehicleCollisionUntil||0)||now<Number(other.vehicleCollisionUntil||0))return false;
+  const severity=Math.min(45,Math.max(3,Number(impact.closingSpeed)*1.6)),ids=[driver.id,other.id].sort(),r=data();
+  for(const f of [driver,other]){
+   f.vehicleCondition=Math.max(0,Number(f.vehicleCondition??100)-severity);
+   f.vehicleCollisionUntil=now+1800;f.trafficHoldUntil=Math.max(Number(f.trafficHoldUntil||0),now+1800);
+   if(f.vehicle||f.rentalCar)f.vehicleRecovery={phase:'awaiting-tow',dueAt:now+1800,collisionAt:now,x:f.x,z:f.z};
+   f.stress=clamp(Number(f.stress||0)+severity*.4,0,100);
+   if(f.brain){ensureDrivingMemory(f).damageEvents++;learnDrivingOutcome(f,-1.5,'vehicle collision');}
+   remember(f,'vehicle_collision',{otherId:f===driver?other.id:driver.id,severity,condition:f.vehicleCondition});
+  }
+  r.totalIncidents++;r.incidents.push({id:`ROAD-${r.totalIncidents}`,kind:'vehicle-collision',driverIds:ids,x:driver.x,z:driver.z,damage:severity,repairAt:now+7200});r.incidents=r.incidents.slice(-24);
+  emit('traffic_incident',`${ids.join(' and ')} collided; both vehicles require repair.`,{driverIds:ids,x:driver.x,z:driver.z,damage:severity});return true;
+ }
+ function recoverVehicles(){
+  const s=world(),now=s.simulationAgeSeconds;
+  for(const f of roadActors(s)){
+   if(!f.alive||!f.vehicleRecovery)continue;const job=f.vehicleRecovery;
+   if(job.phase==='awaiting-tow'&&now>=job.dueAt){
+    const bay=reserveRoadParking(s,f,job);if(!bay){job.dueAt=now+120;continue;}
+    const country=countryAt(job),budget=country===COUNTRY_IDS.hansdrex?s.treasury:s.businesses?.[`treasury:${country}`];
+    const operator=s.businesses['vehicle-recovery']||={cash:0,inventory:0,sector:'roadside-assistance',receivables:0};
+    const paid=Math.min(12,Math.max(0,Number(budget?.cash||0)));if(paid){budget.cash-=paid;operator.cash+=paid;s.totalTransactions++;}
+    // Road clearance remains a public emergency service. An unpaid balance is
+    // an explicit operating debt, never invented cash or a permanent roadblock.
+    operator.receivables+=12-paid;f.vehicleTowDebt=Number(f.vehicleTowDebt||0)+12-paid;
+    f.parkedCar=bay;if(f.leg)f.leg.needsRecoveryRoute=true;f.carPosition=null;f.traveling=false;f.routeWaypoints=[];f.routeIndex=0;f.transitMode='walk';f.vx=f.vz=0;f.indoors=false;f.currentLocationId=null;f.actionUntil=0;f.trafficHoldUntil=0;
+    Object.assign(job,{phase:'repair',towedAt:now,repairAt:now+1800,parkingSpaceId:bay.spaceId});
+    remember(f,'vehicle_recovered',{parkingSpaceId:bay.spaceId,condition:f.vehicleCondition});
+   }
+   if(job.phase==='repair'&&now>=job.repairAt){
+    const fee=Math.ceil((100-Number(f.vehicleCondition??100))*2),reserve=f.kind==='visitor'?200:20,available=Math.max(0,Number(f.money||0)+Number(f.savings||0)-reserve),dealer=s.businesses['vehicle-showroom'];
+    if(available<fee||!dealer)continue;
+    const cash=Math.min(Number(f.money||0),fee);f.money=Number(f.money||0)-cash;f.savings=Number(f.savings||0)-(fee-cash);dealer.cash+=fee;s.totalTransactions++;f.expensesLifetime=Number(f.expensesLifetime||0)+fee;
+    f.vehicleCondition=100;f.vehicleRecovery=null;data().totalRepairs++;remember(f,'vehicle_repaired',{price:fee});
+   }
   }
  }
  function buy(f,vehicle='compact car',financed=true){
@@ -51,6 +96,7 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   f.roadDuty=false;f.destinationParking=null;
  }
  function stepDriver(f){
+  if(f.vehicleRecovery?.phase==='awaiting-tow'||Number(f.vehicleCondition??100)<=10)return true;
   const s=world(),now=s.simulationAgeSeconds,d=ensureDrivingMemory(f),chaos=now<data().chaosUntil?1:0;
   if(d.lastDecisionTrip!==f.travelStartedAt){d.lastDecisionTrip=f.travelStartedAt;chooseDrivingStyle(f,{motor:neuralDrive(f,'motorDrive'),avoid:neuralDrive(f,'avoidDrive')},chaos,random(f));d.lastObservedAt=now;f.drivingTripActive=true;}
   if(now-Number(d.lastObservedAt||0)>=900){
@@ -73,6 +119,7 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   return false;
  }
  function tick(){
+  recoverVehicles();
   const s=world(),r=data(),now=s.simulationAgeSeconds;if(!s.flies.some(f=>f.alive))return;normalizeParking();
   for(const f of s.flies)if(f.alive)finance(f);
   const dealer=s.businesses['vehicle-showroom'];if(dealer.inventory<15&&dealer.cash>12000&&now-Number(r.lastRestockAt||-86400)>=10800){dealer.cash-=9600;s.businesses['vehicle-supplier'].cash+=9600;dealer.inventory+=30;r.lastRestockAt=now;}
@@ -99,5 +146,5 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   r.targetDrivingCars=target;r.drivingCars=driving;r.parkedCars=living.filter(f=>ownsCar(f)&&(!f.traveling||f.transitMode!=='car')).length;r.carOwners=living.filter(ownsCar).length;r.recklessDrivers=living.filter(f=>f.traveling&&f.transitMode==='car'&&f.brain?.driving?.style==='reckless').length;
  }
  function summary(){const r=data();return{targetDrivingCars:r.targetDrivingCars||Math.ceil(world().flies.filter(f=>f.alive).length*.1),drivingCars:r.drivingCars||0,parkedCars:r.parkedCars||0,carOwners:r.carOwners||0,recklessDrivers:r.recklessDrivers||0,chaosActive:world().simulationAgeSeconds<r.chaosUntil,incidents:r.incidents,totalIncidents:r.totalIncidents,totalFines:r.totalFines,totalRepairs:r.totalRepairs,financing:{downPayment:10,dailyPayment:5,annualRate:0}};}
- return{tick,stepDriver,arrived,buy,finance,park,destination,normalizeParking,summary};
+ return{tick,stepDriver,arrived,buy,finance,park,destination,normalizeParking,recordCollision,recoverVehicles,summary};
 }

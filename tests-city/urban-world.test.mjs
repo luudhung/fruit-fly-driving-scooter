@@ -163,10 +163,11 @@ test('damaged customs and North barracks receive matching country budgets even w
  const projects=t.s.urbanWorld.projects.filter(p=>[barracks.id,northBooth.id].includes(p.buildingId));
  assert.equal(projects.length,2);
  assert.ok(projects.every(p=>p.funding.accountId==='treasury:north-city'));
- assert.equal(t.s.treasury.cash,hans);
+ const hansRepair=t.s.urbanWorld.projects.find(p=>p.buildingId===hansBooth.id);
+ assert.ok(hansRepair,'a full Hans work pool still accepts its own customs repair');assert.equal(hansRepair.stage,'queued');assert.equal(hansRepair.funding.accountId,'treasury');
+ assert.equal(t.s.treasury.cash,hans-hansRepair.budget);
  assert.ok(north.cash<budget);
  assert.ok(t.s.businesses['north-civic-materials'].inventory>=projects[0].materialsRequired);
- assert.ok(!t.s.urbanWorld.projects.some(p=>p.buildingId===hansBooth.id));
 });
 
 

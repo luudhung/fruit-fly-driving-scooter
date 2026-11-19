@@ -1,3 +1,4 @@
+import {provisionDutyMeal} from './duty-meals.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,PARKING_SPACES,ROADS,UNDERPASSES,roadTravelY} from './city-map.mjs';
@@ -68,7 +69,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
  function atGarage(f,e){const home=loc(e.homeLocationId);return f&&!f.traveling&&home&&dist(f,home)<32;}
  function staff(engine,clock){
   const role=engine.kind==='fire'?'firefighter':'paramedic',home=loc(engine.homeLocationId),depot=depotFor(engine),ids=depot?depot.staffIds(engine.kind):data().roster;
-  return ids.map(alive).filter(f=>f&&(countryAt(f)===countryFor(engine)||depot&&f.citizenshipCountryId===countryFor(engine)&&countryAt(f)!==COUNTRY_IDS.hawaii)&&(depot?depot.acceptsStaff(f,engine.kind):!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role)&&!busy({...f,...(depot?{nationalServiceDuty:null,nationalServiceResting:false,publicServiceRole:null}: {})},now())&&f.health>40&&f.energy>12&&f.hunger<88)
+  return ids.map(alive).filter(f=>f&&(countryAt(f)===countryFor(engine)||depot&&f.citizenshipCountryId===countryFor(engine)&&countryAt(f)!==COUNTRY_IDS.hawaii)&&(depot?depot.acceptsStaff(f,engine.kind):!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&f.jobId===role)&&!busy({...f,...(depot?{nationalServiceDuty:null,nationalServiceResting:false,publicServiceRole:null}: {})},now())&&f.health>40&&f.energy>12&&(f.hunger<88||engine.kind==='fire'&&fires().some(f=>f.detected&&!f.containedAt)))
    .sort((a,b)=>Number(atGarage(b,engine))-Number(atGarage(a,engine))||dist(a,home)-dist(b,home)||Number(onShift(b,clock.hour))-Number(onShift(a,clock.hour)));
  }
  function driveAccess(from,target,e){
@@ -111,7 +112,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
    const e=fleet().find(e=>e.id===(f.fireEngineDuty?.vehicleId||f.ambulanceDuty?.vehicleId)),origin=countryAt(f),own=e&&countryFor(e),commuting=e&&e.phase==='loading'&&id===e.homeLocationId&&f.citizenshipCountryId===own&&origin!==own;
    // National crews report on the ground. Selecting a new metro transfer here
    // can strand the only two available responders while a fire grows.
-   if(depotFor(e||{})&&e.phase==='loading'&&id===e.homeLocationId&&!mode)mode='walk';
+   if(e?.phase==='loading'&&id===e.homeLocationId&&!mode)mode='walk';
    // A stranded legacy vehicle can be collected on foot via immigration.
    // This exception does not authorize a new foreign rescue assignment.
    if(recoveryPickup(e,id))mode='walk';
@@ -137,12 +138,12 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   const target=loc(`CIVIC-FIRE-${fire.id}`)||BUILDINGS.find(b=>b.id===fire.buildingId);if(!target)return null;
   fire.nextDispatchAt=now()+600;
   for(const e of engines){
-   const candidates=staff(e,clock).slice(0,EMERGENCY_RULES.crewPerEngine);if(!candidates.length)return null;
+   const candidates=staff(e,clock).slice(0,EMERGENCY_RULES.crewPerEngine);if(!candidates.length){fire.dispatchWait='awaiting a fit domestic crew at the station';continue;}
    const ready=candidates.filter(f=>atGarage(f,e)),crew=ready.length>=2?ready:candidates;
-   const access=driveAccess(stationExit(e),target,e);if(!access)continue;
+   const access=driveAccess(stationExit(e),target,e);if(!access){fire.dispatchWait='awaiting a safe domestic vehicle approach';continue;}
    const {curb,route}=access;
    Object.assign(e,{incidentId:fire.id,patientId:null,destination:{x:curb.x,z:curb.z},pickup:{x:curb.x,z:curb.z},outboundRoute:route,paidForCall:false,callId:`FIRE-CALL-${fire.id}`});pickupLocation(e,curb);
-   fire.engineId=e.id;fire.teamIds=crew.map(f=>f.id);startLoading(e,crew);data().dispatches++;emit('fire_engine_dispatch',`${e.id} was assigned to ${fire.buildingId}; its crew is gathering at the garage.`,{engineId:e.id,fireId:fire.id,crewIds:e.crewIds});return e;
+   fire.dispatchWait=null;fire.engineId=e.id;fire.teamIds=crew.map(f=>f.id);startLoading(e,crew);data().dispatches++;emit('fire_engine_dispatch',`${e.id} was assigned to ${fire.buildingId}; its crew is gathering at the garage.`,{engineId:e.id,fireId:fire.id,crewIds:e.crewIds});return e;
   }
   return null;
  }
@@ -293,12 +294,31 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   for(const e of fleet())tickVehicle(e,dt,clock,index);
  }
  function fallbackWalk(f,dt){if(!f.traveling)return;const p=f.routeWaypoints?.[f.routeIndex||0];if(!p){f.traveling=false;return;}const length=dist(f,p),step=Math.min(length,dt/120*2.5);if(length>.01){f.x+=(p.x-f.x)/length*step;f.z+=(p.z-f.z)/length*step;}if(length<=step+.05){f.routeIndex=(f.routeIndex||0)+1;if(f.routeIndex>=f.routeWaypoints.length){f.traveling=false;f.currentLocationId=f.targetLocationId;}}}
- function care(f,clock){needsAndActivities(f,clock);payAndFinance(f,clock);}
+ function care(f,clock){const e=f.fireEngineDuty&&fleet().find(e=>e.id===f.fireEngineDuty.vehicleId);if(e&&!f.traveling&&!f.onFireEngine&&!f.onAmbulance&&(atGarage(f,e)||e.phase==='on-scene'&&dist(f,loc(`CIVIC-FIRE-${e.incidentId}`)||e)<12))provisionDutyMeal(raw(),f,countryFor(e));needsAndActivities(f,clock);payAndFinance(f,clock);}
+ // Report to the station before a call, rather than discovering at dispatch
+ // time that the whole roster is scattered around the country on metro trips.
+ function standby(f,clock){
+  if(!data().roster.includes(f.id)||!['firefighter','paramedic'].includes(f.jobId)||busy(f,now())||f.health<=40||f.energy<=12||countryAt(f)!==COUNTRY_IDS.hansdrex)return false;
+  const role=f.jobId==='firefighter'?'fire':'ambulance',urgent=role==='fire'&&fires().some(f=>f.detected&&!f.containedAt&&!f.engineId);
+  if(!urgent&&!onShift(f,clock.hour))return false;
+  const id=f.emergencyStationId||(role==='fire'?'firestation':'hospital-central'),home=loc(id);if(!home)return false;
+  // Never pull a passenger off a moving train. The next ground tick reports in.
+  if(f.traveling&&f.targetLocationId!==id){f.traveling=false;f.routeWaypoints=[];f.vx=f.vz=0;}
+  if(!f.traveling&&dist(f,home)<32){
+   f.currentLocationId=id;f.indoors=true;f.action=`working as ${f.jobId}`;f.pendingAction=null;f.sleeping=false;
+   provisionDutyMeal(raw(),f,COUNTRY_IDS.hansdrex);care(f,clock);return true;
+  }
+  if(!f.traveling&&now()>=Number(f.emergencyReportRetryAt||0)){
+   f.emergencyReportRetryAt=now()+600;requestJourney(f,id,'reporting for emergency standby','walk');
+  }
+  if(f.traveling&&f.targetLocationId===id){if(moveFly)moveFly(f);else fallbackWalk(f,120);care(f,clock);return true;}
+  return false;
+ }
  function handleResident(f,clock){
   if(!enabled()||!f.alive)return false;
   if(f.ambulanceDuty){const e=fleet().find(e=>e.id===f.ambulanceDuty.vehicleId);if(!e){f.ambulanceDuty=null;f.onAmbulance=false;return false;}if(!f.onAmbulance&&f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}care(f,clock);if(f.onAmbulance){f.action='being transported by ambulance';f.sleeping=false;}return true;}
-  if(!f.fireEngineDuty)return false;const e=fleet().find(e=>e.id===f.fireEngineDuty.vehicleId);if(!e){f.fireEngineDuty=null;f.onFireEngine=f.onAmbulance=false;return false;}
-  if(e.phase==='on-scene'&&e.kind==='fire'){if(!depotFor(e))return false;if(f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}else if(f.urbanTask?.targetId&&dist(f,loc(f.urbanTask.targetId))>12)requestJourney(f,f.urbanTask.targetId,'deploying hoses at the fire','walk');care(f,clock);f.action=f.traveling?'deploying hoses at the fire':'operating the national fire engine hose';return true;}
+  if(!f.fireEngineDuty)return standby(f,clock);const e=fleet().find(e=>e.id===f.fireEngineDuty.vehicleId);if(!e){f.fireEngineDuty=null;f.onFireEngine=f.onAmbulance=false;return false;}
+  if(e.phase==='on-scene'&&e.kind==='fire'){if(f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}else if(f.urbanTask?.targetId&&dist(f,loc(f.urbanTask.targetId))>12)requestJourney(f,f.urbanTask.targetId,'deploying hoses at the fire','walk');care(f,clock);f.action=f.traveling?'deploying hoses at the fire':'operating the fire engine hose';return true;}
   if(!f.onFireEngine&&!f.onAmbulance&&f.traveling){if(moveFly)moveFly(f);else fallbackWalk(f,120);}care(f,clock);f.action=f.onFireEngine||f.onAmbulance?'riding an emergency vehicle':e.phase==='loading'?'reporting to the emergency garage':'returning to the emergency vehicle';return true;
  }
  function managesCountry(country){return enabled()&&data().engines.some(e=>countryFor(e)===country&&e.owned!==false);}

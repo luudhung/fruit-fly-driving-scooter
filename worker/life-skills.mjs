@@ -4,7 +4,7 @@ export const LIFE_SKILLS = ['home', 'nutrition', 'health', 'transit', 'driving',
 const LESSON_SECONDS = 1200;
 
 export function readyToDrive(resident) {
-  return resident.ageYears >= 18 && (!resident.lifeSkillsOnboarding || resident.lifeSkills?.minutes?.driving >= LESSON_SECONDS / 60);
+  return resident.ageYears >= 18 && !resident.vehicleRecovery && Number(resident.vehicleCondition??100)>10 && (!resident.lifeSkillsOnboarding || resident.lifeSkills?.minutes?.driving >= LESSON_SECONDS / 60);
 }
 
 export function lifeSkillsLesson(resident, { now, elapsed, schoolId, supervised, earlyCare = false }) {

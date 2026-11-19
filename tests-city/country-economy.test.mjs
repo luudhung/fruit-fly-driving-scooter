@@ -76,9 +76,28 @@ test('a cargo order queued for two days gets its own real boarding window, retai
 test('more than thirty-two real work ticks cultivate finite stock in bounded cohorts and no seed matures before its full growth time',()=>{
  const t=fixture(),f=t.f;assert.equal(t.service.economy.applyJob(f),true);const pin=LOCATIONS.find(p=>p.id===f.internationalWork.locationId);Object.assign(f,{x:pin.x,z:pin.z,currentLocationId:pin.id,hunger:0});let d=t.s.internationalEconomy;d.stock.seeds=24;d.nextDecisionAt=Infinity;const before=total(t.s);
  for(let i=0;i<180;i++){t.s.simulationAgeSeconds+=120;t.service.economy.tick(120,{hour:8});t.service.economy.handleResident(f,{hour:8});}
- assert.ok(Math.abs(d.planted-24)<1e-8);assert.ok(d.stock.seeds<1e-8);assert.ok(d.crops.length<=2);assert.equal(d.harvested,0);assert.ok(Math.abs(d.crops.reduce((n,l)=>n+l.remaining,0)-96)<1e-8);for(const lot of d.crops)assert.ok(lot.readyAt>=lot.lastPlantedAt+86400);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+ assert.ok(Math.abs(d.planted-24)<1e-8);assert.ok(d.stock.seeds<1e-8);assert.ok(d.crops.length<=2);assert.equal(d.harvested,0);assert.ok(Math.abs(d.crops.reduce((n,l)=>n+l.remaining,0)-240)<1e-8);for(const lot of d.crops)assert.ok(lot.readyAt>=lot.lastPlantedAt+86400);assert.ok(Math.abs(total(t.s)-before)<1e-6);
  // Legacy checkpoints had no cohort key. Resume them without new seed,
  // accelerated maturity, duplicate output or an extra wage payment.
  for(const lot of d.crops)delete lot.plantingWindow;const maturity=d.crops.map(l=>l.readyAt);t.restore();d=t.s.internationalEconomy;t.service.economy.tick(0,{hour:8});assert.deepEqual(d.crops.map(l=>l.readyAt),maturity);assert.ok(Math.abs(d.planted-24)<1e-8);
- t.s.simulationAgeSeconds=Math.min(...maturity)-1;t.service.economy.tick(120,{hour:8});assert.equal(d.harvested,0);t.s.simulationAgeSeconds+=1800;t.service.economy.tick(1800,{hour:8});assert.ok(d.harvested>0);assert.ok(d.stock.vegetables>0);assert.ok(d.harvested<=96);assert.ok(d.crops.length<=32);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+ t.s.simulationAgeSeconds=Math.min(...maturity)-1;t.service.economy.tick(120,{hour:8});assert.equal(d.harvested,0);t.s.simulationAgeSeconds+=1800;t.service.economy.tick(1800,{hour:8});assert.ok(d.harvested>0);assert.ok(d.stock.vegetables>0);assert.ok(d.harvested<=240);assert.ok(d.crops.length<=32);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
+
+test('a real city food crisis funds finite seed freight from the North warehouse and releases sub-twenty crop stock without minting food or cash',()=>{
+ const t=fixture(),d=t.s.internationalEconomy;assert.equal(t.service.economy.applyJob(t.f),true);
+ for(let i=0;i<10;i++)t.s.flies.push({...t.f,id:`HUNGRY-${i}`,internationalWork:null,jobId:null,x:110,z:-730,currentLocationId:'north-market',hunger:100});
+ t.f.hunger=100;t.s.businesses['farm:north-city'].cash=0;t.s.businesses.market.inventory=0;t.s.businesses['north-market'].inventory=0;
+ d.stock={rice:8,vegetables:9,seeds:0};t.s.regionalFreight={stocks:{'INDUSTRY-north-4':{grain:276}}};
+ const north=t.s.businesses['treasury:north-city'],northBefore=north.cash,hans=t.s.treasury.cash,totalBefore=total(t.s);t.s.simulationAgeSeconds=1800;d.nextDecisionAt=0;t.service.economy.tick(1800,{hour:8});
+ assert.equal(d.publicAdvanceOutstanding,4000);assert.ok(north.cash<northBefore);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(total(t.s)-totalBefore)<1e-6);
+ const seeds=d.orders.find(o=>o.product==='seed grain'&&!o.paid);assert.ok(seeds);assert.equal(seeds.sellerId,'regional-warehouse-INDUSTRY-north-4');assert.equal(seeds.sourceKey,'grain');assert.equal(t.s.regionalFreight.stocks['INDUSTRY-north-4'].grain,96);assert.equal(d.stock.seeds,0,'an ordered truck has not yet delivered seeds');assert.equal(d.orders.filter(o=>o.product==='grain rations'&&!o.paid).length,2);assert.equal(d.orders.filter(o=>o.product==='grain rations').reduce((n,o)=>n+o.quantity,0),120);
+ assert.ok(d.orders.some(o=>o.sellerId==='farm:north-city'&&o.quantity<20&&!o.paid));assert.equal(t.s.businesses['north-market'].inventory,0,'reserved food is not teleported to the market');
+});
+
+test('ten harvested North crop units retain one finite seed and sell only the other nine',()=>{
+ const t=fixture(),d=t.s.internationalEconomy;assert.equal(t.service.economy.applyJob(t.f),true);const pin=LOCATIONS.find(l=>l.id===t.f.internationalWork.locationId);Object.assign(t.f,{x:pin.x,z:pin.z,currentLocationId:pin.id,hunger:0});
+ d.nextDecisionAt=Infinity;d.stock={rice:0,vegetables:0,seeds:0};d.crops=[{crop:'rice',seeds:1,remaining:10,plantedAt:-86400,readyAt:0}];d.lastProductionAt=0;t.s.simulationAgeSeconds=1800;t.service.economy.tick(1800,{hour:8});
+ assert.equal(d.harvested,4);assert.equal(d.stock.rice,3.6);assert.equal(d.stock.seeds,.4);assert.equal(d.retainedSeed,.4);assert.equal(d.crops[0].remaining,6);
+ t.s.simulationAgeSeconds=3600;t.service.economy.tick(1800,{hour:8});t.s.simulationAgeSeconds=5400;t.service.economy.tick(1800,{hour:8});
+ assert.equal(d.harvested,10);assert.equal(d.stock.rice,9);assert.equal(d.retainedSeed,1);assert.ok(Math.abs(d.stock.seeds+d.planted-1)<1e-8,'the retained seed is either still reserved or actually replanted');
 });

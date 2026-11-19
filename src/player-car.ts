@@ -1,5 +1,6 @@
 import {northF1MovementBlocked,northF1PointRestricted} from '../worker/north-f1-closure.mjs';
 import * as THREE from 'three';
+import {createVehicleIndex,type TrafficActor} from '../worker/traffic.mjs';
 import {ROADS,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,BUILDINGS,WORLD_HALF,contains,blocked,roadTravelY,effectiveBuildingHeight,urbanGeometryRevision} from '../worker/city-map.mjs';
 import {PLAYER_EYE} from './player-controller.ts';
 import {streetCollidersNear} from '../worker/street-furniture.mjs';
@@ -87,7 +88,10 @@ function approach(value:number,target:number,step:number){return value<target?Ma
 /** Local observer vehicle: independent of the city's resident and traffic simulation. */
 export class PlayerCar{
  x:number=PLAYER_CAR_PARKING.x;z:number=PLAYER_CAR_PARKING.z;heading:number=PLAYER_CAR_PARKING.heading;ground:number=PLAYER_CAR_PARKING.ground;
- speed=0;steering=0;pitch=0;active=false;trackClosed=false;
+ speed=0;steering=0;pitch=0;active=false;trackClosed=false;condition=100;
+ private traffic:ReturnType<typeof createVehicleIndex>|null=null;
+ private impactCooldown=0;
+ setTraffic(actors:TrafficActor[]){this.traffic=createVehicleIndex(actors);}
  private readonly world:CarWorld;
  constructor(world:CarWorld=cityWorld){this.world=world;}
  // A fresh page constructs the car by the bridge; re-entry keeps its parked pose.
@@ -95,6 +99,7 @@ export class PlayerCar{
  stop(){this.speed=this.steering=0;this.active=false;}
  update(dt:number,input:CarInput){
   if(!this.active||!Number.isFinite(dt)||dt<=0)return;
+  this.impactCooldown=Math.max(0,this.impactCooldown-dt);
   const duration=Math.min(.1,dt),steps=Math.ceil(duration/.008);
   for(let i=0;i<steps;i++)this.advance(duration/steps,input);
   // Suspension is visual: sample it once per rendered frame, while collision and
@@ -107,6 +112,11 @@ export class PlayerCar{
  }
  private canDrive(x:number,z:number,heading:number,ground:number){
   if(this.trackClosed&&northF1MovementBlocked({x:this.x,z:this.z,y:this.ground},{x,z,y:ground},Math.hypot(CAR_HALF_WIDTH,CAR_HALF_LENGTH)))return false;
+  const from={id:'PLAYER-CAR',x:this.x,y:this.ground+.9,z:this.z,targetX:x,targetZ:z,vehicleLength:CAR_HALF_LENGTH*2,vehicleWidth:CAR_HALF_WIDTH*2};
+  if(this.traffic&&this.traffic(from,{x,z})<Math.hypot(x-this.x,z-this.z)-.001){
+   if(Math.abs(this.speed)>3&&this.impactCooldown<=0){this.condition=Math.max(0,this.condition-Math.abs(this.speed)*1.6);this.impactCooldown=2;}
+   return false;
+  }
   return this.world.clear(x,z,heading,ground);
  }
  private advance(dt:number,input:CarInput){

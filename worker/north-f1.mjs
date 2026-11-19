@@ -30,7 +30,7 @@ const occupied=(f,at)=>f.fireEngineDuty||f.ambulanceDuty||f.publicServiceRole||f
 const healthy=f=>f.alive&&Number(f.health??80)>45&&!f.illness;
 const onSite=(f,site)=>!f.traveling&&!f.onPlane&&!f.onTrain&&f.currentLocationId===site.id&&distance(f,site)<35;
 
-export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities,payAndFinance,
+export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities,payAndFinance,
  isUnavailable=()=>false,aviationAdmission,interceptMovement,bookEventHotel,releaseEventHotel,visitEventAttraction,lawfulPresence=()=>true,travelCost=()=>({affordable:true,closed:false,entryFee:0})}){
  const raw=()=>world(),now=()=>Number(raw().simulationAgeSeconds||0);
  function account(id){
@@ -50,7 +50,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
   }
  }
  const charterService=createF1Charters({world,signature,admit:aviationAdmission,intercept:interceptMovement,account,
-  weatherClosed,movementBlocked:(from,to,margin)=>isNorthF1TrackClosed(raw())&&northF1MovementBlocked(from,to,margin),
+  onVehicleCollision,weatherClosed,movementBlocked:(from,to,margin)=>isNorthF1TrackClosed(raw())&&northF1MovementBlocked(from,to,margin),
   bookHotel:bookEventHotel,releaseHotel:releaseEventHotel,visitAttraction:visitEventAttraction,attend});
  function eligibleDriver(f){return Boolean(f&&healthy(f)&&[HANS,NORTH].includes(f.citizenshipCountryId)&&f.ageYears>=21&&f.ageYears<=68&&readyToDrive(f)
   &&!f.publicServiceRole&&!f.publicServiceDuty&&!f.nationalServiceDuty&&!f.facilityEmployment&&!f.industrialFreightDuty);}
@@ -465,6 +465,7 @@ export function createNorthF1({world,northAccount,emit=()=>{},remember=()=>{},st
     money:f.money||0,savings:f.savings||0,debt:0,affection:0,children:[],parents:[],
     onPlane:Boolean(f.onPlane),indoors:Boolean(f.indoors),visitorPhase:f.phase,citizenshipCountryId:'outside',originCountryId:'outside',
     homeX:f.x,homeZ:f.z,entryAirportId:f.entryAirportId||null,
+    vehicleHeading:f.vehicleHeading,rentalCar:Boolean(f.rentalCar),parkedCar:f.parkedCar||null,vehicleCondition:f.vehicleCondition??100,
     ...f1VisitorTravel(e,f,now()),
    }));
  }

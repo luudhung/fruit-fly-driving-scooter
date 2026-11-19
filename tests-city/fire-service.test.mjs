@@ -76,3 +76,29 @@ test('an active fire abandoned by its first crew is reassigned to another fire e
  assert.ok(fire.engineId&&fire.engineId!==first.id);
  assert.ok(fire.teamIds.length);
 });
+
+test('Hansdrex on-scene firefighters retain the engine duty even while their ordinary job is work-committed',()=>{
+ const t=setup(),fire=t.fire(),engine=t.service.dispatchFire(fire,t.clock());
+ for(let i=0;i<800&&engine.phase!=='on-scene';i++)t.step();
+ assert.equal(engine.phase,'on-scene');
+ for(const id of engine.crewIds){const f=t.s.flies.find(f=>f.id===id);assert.equal(t.service.handleResident(f,t.clock()),true,'the national job scheduler must not reclaim an active hose crew');assert.equal(f.urbanTask?.id,fire.id);assert.equal(f.fireEngineDuty?.phase,'on-scene');}
+});
+
+test('a hungry but physically fit fire crew still reports and dispatches for a life-threatening fire without invented food',()=>{
+ const t=setup();t.s.simulationAgeSeconds=0;
+ const staff=t.s.flies.filter(f=>f.jobId==='firefighter');
+ for(const f of staff)Object.assign(f,{hunger:100,x:794,z:-184,currentLocationId:'riverside-market',traveling:false,preferredWorkStart:0});
+ const fire=t.fire(),engine=t.service.dispatchFire(fire,t.clock());assert.ok(engine,'an active fire takes priority over a missing meal when the crew is still physically fit');
+ const worker=staff.find(f=>engine.crewIds.includes(f.id));assert.equal(t.service.handleResident(worker,t.clock()),true);assert.equal(worker.targetLocationId,'firestation');
+ assert.equal(worker.routeWaypoints.some(p=>p.mode==='metro'),false);
+ for(let i=0;i<100&&worker.traveling;i++)t.service.handleResident(worker,t.clock());
+ assert.ok(Math.hypot(worker.x-830,worker.z+200)<32);assert.equal(worker.hunger,100,'reporting does not manufacture a meal');
+});
+
+test('station canteen feeds a real reporting employee from finite paid stock and then dispatches the engine',()=>{
+ const t=setup(),f=t.s.flies.find(f=>f.jobId==='firefighter');
+ for(const person of t.s.flies.filter(p=>p.jobId==='firefighter'))person.hunger=100;
+ Object.assign(f,{preferredWorkStart:0});t.s.businesses.market={cash:0,inventory:1};
+ const before=money(t.s);assert.equal(t.service.handleResident(f,t.clock()),true);assert.equal(f.hunger,40);assert.equal(t.s.businesses.market.inventory,0);assert.equal(t.s.businesses.market.cash,4);assert.equal(money(t.s),before);
+ t.s.simulationAgeSeconds=600;const e=t.service.dispatchFire(t.fire(),t.clock());assert.ok(e);t.step();assert.equal(e.phase,'pullout');
+});

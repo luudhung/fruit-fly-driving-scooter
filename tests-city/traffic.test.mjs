@@ -23,7 +23,8 @@ test('a real car cannot leap a red signal and resumes on green',()=>{
 test('headway stops followers while leaving the opposite direction independent',()=>{
  const a={id:'a',alive:true,traveling:true,transitMode:'car',x:0,z:0,targetX:30,targetZ:0},b={...a,id:'b',x:8};
  assert.equal(createVehicleIndex([a,b])(a,{x:20,z:0}),3);
- assert.equal(createVehicleIndex([a,{...b,targetX:-30}])(a,{x:20,z:0}),20);
+ assert.equal(createVehicleIndex([a,{...b,z:-3,targetX:-30}])(a,{x:20,z:0}),20);
+ assert.ok(createVehicleIndex([a,{...b,targetX:-30}])(a,{x:20,z:0})<4,'oncoming car in the actual same lane cannot be driven through');
 });
 test('observer projection keeps census, positions and selected brain while omitting other heavy details',()=>{
  const s=freshState(),selected=s.flies[0].id,full=getState(),observer=getState({observer:true,selectedId:selected});
@@ -37,11 +38,12 @@ test('obsolete electric accounts do not increase active city power demand',async
  assert.ok(s.utilities.householdAccounts['retired-1'],'preserve historical accounts');
 });
 
-test('headway ignores perpendicular traffic and vehicles waiting to turn across another lane',()=>{
+test('crossing vehicle bodies remain solid while a perpendicular vehicle in another lane is clear',()=>{
  const east={id:'east',alive:true,traveling:true,transitMode:'car',x:0,z:0,targetX:30,targetZ:0};
  const north={...east,id:'north',x:4,z:1,targetX:4,targetZ:30};
  const atTurn={...north,id:'turn',targetX:4,targetZ:1};
- assert.equal(createVehicleIndex([east,north,atTurn])(east,{x:12,z:0}),12);
+ assert.ok(createVehicleIndex([east,north,atTurn])(east,{x:12,z:0})<2,'sweep stops before crossing body contact');
+ assert.equal(createVehicleIndex([east,{...north,z:4,targetZ:30}])(east,{x:12,z:0}),12);
  assert.equal(createVehicleIndex([east,{...north,targetX:30,targetZ:1}])(east,{x:12,z:0}),0,'same-direction leader still protects its queue');
 });
 
@@ -93,7 +95,8 @@ test('shallow merging paths choose one leader without weakening an ordinary lane
  const truck={id:'truck',alive:true,traveling:true,transitMode:'car',vehicleLength:6.4,x:0,z:1000,targetX:30,targetZ:1000},leader={...truck,id:'leader',x:8};
  assert.ok(Math.abs(createVehicleIndex([truck,leader])(truck,{x:20,z:1000})-.6)<1e-9);
  const car={...truck,id:'car',vehicleLength:4};assert.ok(Math.abs(createVehicleIndex([car,leader])(car,{x:20,z:1000})-1.8)<1e-9);
- assert.equal(createVehicleIndex([truck,{...leader,targetX:-30}])(truck,{x:20,z:1000}),20);
+ assert.equal(createVehicleIndex([truck,{...leader,z:997,targetX:-30}])(truck,{x:20,z:1000}),20);
+ assert.ok(createVehicleIndex([truck,{...leader,targetX:-30}])(truck,{x:20,z:1000})<2);
  });
 
 test('signals belong to the actual crossing road centers, preserving genuinely close avenues',async()=>{
@@ -106,4 +109,14 @@ test('signals belong to the actual crossing road centers, preserving genuinely c
   assert.ok(INTERSECTIONS.some(p=>p.x===-20&&p.z===z));assert.ok(!INTERSECTIONS.some(p=>p.x===-24&&p.z===z));
  }
  for(const x of [-102,-92])assert.ok(INTERSECTIONS.some(p=>p.x===x&&p.z===29));
+});
+
+
+test('parked cars are physical obstacles, and a swept high-speed hit records a real contact only',()=>{
+ const driver={id:'driver',alive:true,traveling:true,transitMode:'car',x:0,y:1.1,z:1000,targetX:30,targetZ:1000,vx:11,vz:0};
+ const owner={id:'owner',alive:true,vehicle:'compact car',x:100,z:1100,traveling:false,parkedCar:{x:8,z:1000,heading:Math.PI/2}};
+ const hits=[],index=createVehicleIndex([driver,owner],(...hit)=>hits.push(hit));
+ assert.ok(index(driver,{x:30,z:1000})<4);assert.equal(hits.length,1);assert.equal(hits[0][1],owner);assert.equal(hits[0][2].closingSpeed,11);
+ hits.length=0;assert.equal(index(driver,{x:2,z:1000}),2);assert.equal(hits.length,0,'a nearby parked car is not a collision until actually reached');
+ const upper={...owner,parkedCar:null,traveling:true,transitMode:'car',x:8,y:8,z:1000,targetX:30,targetZ:1000};assert.equal(createVehicleIndex([driver,upper])(driver,{x:30,z:1000}),30);
 });

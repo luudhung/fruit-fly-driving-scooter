@@ -1,3 +1,5 @@
+import {HANSDREX_FRUIT_FARM} from './fruit-farm-map.mjs';
+import {accidentalFireCandidates} from './fire-risk.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
 import {NORTH_F1_RESERVED,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS} from './north-f1-map.mjs';
@@ -8,6 +10,7 @@ import {createCivicFacilityOperations} from './civic-facilities.mjs';
 import {INDUSTRIAL_RESERVED} from './industry-map.mjs';
 import {GOVERNMENT_RESERVED} from './government-map.mjs';
 import {createFireService} from './fire-service.mjs';
+import {provisionDutyMeal} from './duty-meals.mjs';
 import {createNorthFireDepot} from './north-fire-service.mjs';
 import {restoreInitialFireDamage} from './urban-restoration.mjs';
 import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
@@ -25,7 +28,7 @@ const NORTH=COUNTRY_IDS.north;
 const materialSupplier=country=>country===NORTH?'north-civic-materials':country===COUNTRY_IDS.hawaii?'hawaii-civic-materials':'civic-materials';
 const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:country===COUNTRY_IDS.hawaii?'island-airport':'construction';
 const publicTreasury=country=>country===COUNTRY_IDS.hansdrex?'treasury':`treasury:${country}`;
-const available=(f,now)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&f.hunger<80&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
+const available=(f,now,mealIntake=false)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&(mealIntake||f.hunger<80)&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted=()=>false}){
@@ -37,7 +40,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  const roll=()=>{const sample=raw().flies.find(f=>f.alive&&f.brain);return sample?random(sample):.5;};
  const report=(type,text,payload={})=>emit(type,text,payload);
  const ongoing=p=>!['complete','cancelled'].includes(p.stage);
- const activeProject=p=>ongoing(p)&&!p.recoveryPaused;
+ const activeProject=p=>ongoing(p)&&p.stage!=='queued'&&!p.recoveryPaused;
  const ownership=b=>b?.countryId||b?.warRecovery?.countryId||countryAt(b);
  const projectCountry=p=>p.countryId||ownership(u().buildings[p.buildingId]||building(p.buildingId));
  const projectLimit=country=>country===COUNTRY_IDS.hansdrex?(recoveryPriority(country)?MAX_RECOVERY_PROJECTS:MAX_PROJECTS):(recoveryPriority(country)?MAX_NORTH_RECOVERY_PROJECTS:MAX_NORTH_PROJECTS);
@@ -116,7 +119,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const activeSites=new Set([...v.fires.map(f=>`CIVIC-FIRE-${f.id}`),...v.projects.filter(p=>p.stage!=='complete').map(p=>`CIVIC-SITE-${p.id}`),...v.projects.filter(p=>ongoing(p)&&p.materialCache?.quantity>0).map(p=>`CIVIC-CARGO-${p.id}`)]);
   for(let i=LOCATIONS.length-1;i>=0;i--)if((LOCATIONS[i].id.startsWith('CIVIC-FIRE-')||LOCATIONS[i].id.startsWith('CIVIC-SITE-')||LOCATIONS[i].id.startsWith('CIVIC-CARGO-'))&&!activeSites.has(LOCATIONS[i].id))LOCATIONS.splice(i,1);
   for(const fire of v.fires){const b=building(fire.buildingId)||v.buildings[fire.buildingId];if(b)taskSite(`CIVIC-FIRE-${fire.id}`,b);}
-  for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b){if(p.kind!=='new')rememberBlueprint(b);taskSite(`CIVIC-SITE-${p.id}`,b);if(p.materialCache?.quantity>0)addLocation(`CIVIC-CARGO-${p.id}`,p.materialCache,'Reserved construction material pickup');}}
+  for(const p of v.projects){const b=v.buildings[p.buildingId]||building(p.buildingId);if(b){if(p.kind!=='new'){rememberBlueprint(b);if(ongoing(p)&&!Number.isFinite(p.acceptedAt))Object.assign(p,recoveryOrder(b),{acceptedAt:Number(p.startedAt??now()),workStartedAt:Number(p.startedAt??now())});}taskSite(`CIVIC-SITE-${p.id}`,b);if(p.materialCache?.quantity>0)addLocation(`CIVIC-CARGO-${p.id}`,p.materialCache,'Reserved construction material pickup');}}
   // Completed location pins are reconstructed from durable buildings on a cold Worker start.
   for(const b of Object.values(v.buildings))if(b.id?.startsWith('CIVIC-')&&b.stage==='operational')addLocation(b.id,b.frontage||b,b.name||'Resident-built premises');
  }
@@ -147,9 +150,10 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  }
  function assignTask(f,task,b){
   const id=task.type==='fire'?`CIVIC-FIRE-${task.id}`:`CIVIC-SITE-${task.id}`;taskSite(id,b);
-  f.urbanTask={...task,targetId:id,assignedAt:now()};f.roadDuty=false;f.mobilityShopping=false;f.sleeping=false;f.actionUntil=0;
-  startJourney(f,{id,action:task.type==='fire'?'responding to fire':'joining a construction crew'});
-  if(!f.traveling&&!present(f,id)){f.urbanTask=null;return false;}return true;
+  const hungryBuilder=task.type==='build'&&f.hunger>=80,destination=hungryBuilder?materialDepot(ownership(b)):id;
+  f.urbanTask={...task,targetId:id,assignedAt:now(),...(hungryBuilder?{phase:'canteen',mealDeadlineAt:now()+DAY}:{})};f.roadDuty=false;f.mobilityShopping=false;f.sleeping=false;f.actionUntil=0;
+  startJourney(f,{id:destination,action:hungryBuilder?'reporting to the construction canteen':task.type==='fire'?'responding to fire':'joining a construction crew'});
+  if(!f.traveling&&!present(f,destination)){f.urbanTask=null;return false;}return true;
  }
  function releaseTask(f,keepJourney=false){
   if(!f?.urbanTask)return;
@@ -179,7 +183,9 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const country=ownership(b),localOnly=type==='build'||country===COUNTRY_IDS.hawaii;
   for(let i=ref.length-1;i>=0;i--){
    const f=byId.get(ref[i]),task=f?.urbanTask;
-   if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86){
+   if(type==='build'&&task?.id===fireOrProject.id&&present(f,task.targetId))provisionDutyMeal(raw(),f,country);
+   const mealIntake=type==='build'&&task?.phase==='canteen'&&now()<Number(task.mealDeadlineAt||0);
+   if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86&&!mealIntake){
     if(task?.id===fireOrProject.id){releaseTask(f,hasCountryCommitment(f,now())||isWorkCommitted(f));}
     ref.splice(i,1);
    }
@@ -193,7 +199,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   fireOrProject.crewCheckAt=now()+600;
   const distance=f=>Math.hypot(f.x-b.x,f.z-b.z),skill=f=>Number(f.professionSkills?.[type==='fire'?'fireSafety':'construction']||0)+Number(f.traits?.empathy||0);
   const employment=f=>f.jobId==='construction'?2:!f.jobId&&!f.businessId&&!f.businessEmployeeOf?1:0;
-  const candidates=raw().flies.filter(f=>available(f,now())&&(!localOnly||countryAt(f)===country)&&!isWorkCommitted(f)&&Number(f.urbanCrewRetryAt||0)<=now()).sort((a,c)=>employment(c)-employment(a)||(distance(a)-skill(a)*24)-(distance(c)-skill(c)*24));
+  const candidates=raw().flies.filter(f=>available(f,now(),type==='build')&&(!localOnly||countryAt(f)===country)&&!isWorkCommitted(f)&&Number(f.urbanCrewRetryAt||0)<=now()).sort((a,c)=>employment(c)-employment(a)||(distance(a)-skill(a)*24)-(distance(c)-skill(c)*24));
   for(const f of candidates.slice(0,12)){if(assignTask(f,{type,id:fireOrProject.id},b)){ref.push(f.id);if(ref.length>=max)break;}}
  }
  function payCrew(ids,budget,seconds,maxPayment=Infinity){
@@ -223,6 +229,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(fire.intensity<=.05||b.health<=0){
    fire.containedAt=now();u().extinguishedFires++;setStage(b,b.health<18?'collapsed':'damaged');for(const id of fire.teamIds){const crew=byId.get(id);if(!crew?.fireEngineDuty)releaseTask(crew);}
    report('fire_extinguished',`The fire at ${b.id} is out. Inspection and repair are still required.`,{buildingId:b.id,waterUsed:fire.waterUsed});
+   b.recoveryReadyAt=now();b.recoveryDeadlineAt=now()+DAY;
    b.lastFireId=fire.id;u().history.push({type:'fire',buildingId:b.id,t:now(),damage:100-b.health});u().history=u().history.slice(-24);
   }
  }
@@ -270,6 +277,20 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    }
   }
  }
+ function recoveryOrder(b){
+  const requestedAt=Number.isFinite(b.recoveryReadyAt)?b.recoveryReadyAt:Number(b.lastDamageAt||b.lastStageAt||now());
+  b.recoveryReadyAt=requestedAt;b.recoveryDeadlineAt??=requestedAt+DAY;
+  return {requestedAt,deadlineAt:b.recoveryDeadlineAt,contractorId:`national-reconstruction:${ownership(b)}`};
+ }
+ function activateRecoveryQueue(){
+  const waiting=u().projects.filter(p=>p.stage==='queued'&&p.kind!=='new')
+   .sort((a,b)=>Number(a.deadlineAt||a.startedAt)-Number(b.deadlineAt||b.startedAt)||a.startedAt-b.startedAt||a.id.localeCompare(b.id));
+  for(const p of waiting){
+   if(!hasSlot(projectCountry(p))||u().fires.some(f=>f.buildingId===p.buildingId&&!f.containedAt))continue;
+   p.stage=p.queuedStage||'delivery';delete p.queuedStage;p.workStartedAt=now();p.crewCheckAt=0;p.pauseReason=null;
+   const b=stateFor(p.buildingId);if(b?.recovery?.projectId===p.id)b.recovery.status='funded';
+  }
+ }
  function submitProject(buildingId,{ownerId=null,kind='repair',height=null,accessRoads=[],fundingAccountId=null}={}){
   ensure();
   const b=stateFor(buildingId);if(!b||u().fires.some(f=>f.buildingId===buildingId&&!f.containedAt))return null;
@@ -277,7 +298,11 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(kind!=='new')rememberBlueprint(b);
   if(kind==='new'&&recoveryPriority(country))return null;
   if(kind!=='new')prioritizeRecovery();
-  if(!hasSlot(country)||u().projects.some(p=>p.buildingId===buildingId&&ongoing(p)))return null;
+  if((kind==='new'&&!hasSlot(country))||u().projects.some(p=>p.buildingId===buildingId&&ongoing(p)))return null;
+  // Acceptance and escrow are independent of the bounded active worksite pool.
+  // A disaster backlog must have a paid responsible contractor within one day,
+  // rather than remaining invisible behind eight indefinitely occupied slots.
+  const queued=kind!=='new'&&!hasSlot(country),order=kind!=='new'?recoveryOrder(b):null;
   const warRecovery=kind!=='new'&&b.warRecovery?.active?b.warRecovery:null;
   if(kind!=='new'){fundingAccountId=publicTreasury(country);ownerId=null;}
   if(kind==='repair'&&b.stage==='collapsed')kind='rebuild';
@@ -296,9 +321,10 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   const payerId=owner?.id||contributions?.[0]?.residentId||null;
   const project={id:`BUILD-${u().nextProjectId++}`,buildingId,countryId:country,ownerId:payerId,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:kind==='new'?(height||b.h):(b.originalHeight||b.h),roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0};
+  if(order){Object.assign(project,order,{acceptedAt:now()});if(queued){project.queuedStage=project.stage;project.stage='queued';project.pauseReason='national crew scheduling';}else project.workStartedAt=now();}
   if(fundingAccountId)project.funding={type:fundingAccountId==='power-grid'?'utility':'public',accountId:fundingAccountId};
-  if(kind!=='new')b.recovery={status:'funded',projectId:project.id,cost,countryId:country};
-  if(warRecovery){project.warRecovery={countryId:warRecovery.countryId,projectileIds:[...warRecovery.projectileIds]};b.recovery={status:'funded',projectId:project.id,cost,countryId:warRecovery.countryId};}
+  if(kind!=='new')b.recovery={status:queued?'queued':'funded',projectId:project.id,cost,countryId:country,...order,acceptedAt:now()};
+  if(warRecovery){project.warRecovery={countryId:warRecovery.countryId,projectileIds:[...warRecovery.projectileIds]};b.recovery={status:queued?'queued':'funded',projectId:project.id,cost,countryId:warRecovery.countryId,...order,acceptedAt:now()};}
   if(contributions)project.funding={type:'resident',contributions};
   project.materialsRequired+=project.roadMaterialsRequired;
   for(const [index,road]of accessRoads.entries()){const record={...road,id:`ROAD-${project.id}-${index+1}`,projectId:project.id,buildingId,ownerId:owner?.id||null,stage:'planned',progress:0};u().roads.push(record);project.roadIds.push(record.id);}
@@ -306,7 +332,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   report('construction_contract',`${payerId||'City recovery fund'} commissioned ${kind} at ${buildingId}.`,{buildingId,projectId:project.id,budget:cost});return project;
  }
  function developmentContext(national=false){
-  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,NORTH_SPORTS_PARK,NORTH_MILITARY,SPACEPORT,...NORTH_F1_RESERVED].filter(Boolean);
+  const protectedLand=[cityGeometry.AIRPORT_PARK,cityGeometry.AIRPORT?.runway,cityGeometry.AIRPORT?.apron,cityGeometry.AIRPORT?.terminal,NORTH_AIRPORT.runway,NORTH_AIRPORT.apron,NORTH_FARM,HANSDREX_FRUIT_FARM,NORTH_SPORTS_PARK,NORTH_MILITARY,SPACEPORT,...NORTH_F1_RESERVED].filter(Boolean);
   return {bounds:{minX:national?-cityGeometry.WORLD_HALF+20:480,maxX:cityGeometry.WORLD_HALF-20,minZ:-cityGeometry.WORLD_HALF+20,maxZ:450},roads:ROADS,buildings:BUILDINGS,water:WATER,parks:[PARK,...SPORTS_VENUES,...GOVERNMENT_RESERVED,...INDUSTRIAL_RESERVED,...protectedLand],reserved:u().roads.filter(r=>r.stage!=='operational'),underpasses:cityGeometry.UNDERPASSES||[]};
  }
  function develop(lot,ownerId){
@@ -511,6 +537,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   restoreRequestedDamage();
   u().fires=u().fires.filter(f=>!f.containedAt||now()-f.containedAt<7200);
   prioritizeRecovery();
+  activateRecoveryQueue();
   for(const p of u().projects){
    if(p.recoveryPaused)continue;
    if(p.stage==='inspection'){if(now()>=p.inspectionAt)finishProject(p);}
@@ -522,15 +549,15 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const occupied=new Set(Object.values(raw().housing?.households||{}).map(h=>h.unitId));
   const priority=b=>b.kind==='customs'?0:b.id==='north-army'?1:['house','apartment'].includes(b.kind)||occupied.has(b.id)?3:2;
   const repairs=Object.values(u().buildings).filter(b=>['damaged','collapsed','cleared'].includes(b.stage)&&!active.has(b.id)&&Number(b.recovery?.nextFundingCheckAt||0)<=now());
-  repairs.sort((a,b)=>priority(a)-priority(b)||Number(b.stage==='collapsed')-Number(a.stage==='collapsed'));
-  for(const b of repairs)if(hasSlot(ownership(b))&&!u().fires.some(f=>f.buildingId===b.id&&!f.containedAt)){
+  repairs.sort((a,b)=>recoveryOrder(a).deadlineAt-recoveryOrder(b).deadlineAt||priority(a)-priority(b)||Number(b.stage==='collapsed')-Number(a.stage==='collapsed'));
+  for(const b of repairs)if(!u().fires.some(f=>f.buildingId===b.id&&!f.containedAt)){
    const project=submitProject(b.id,{kind:b.stage==='cleared'?'rebuild':'repair'});
    if(project)project.crewCheckAt=0;
   }
 
   if(now()>=u().nextFireAt){
    u().nextFireAt=now()+DAY*(1.6+roll()*2.8);
-   const pool=BUILDINGS.filter(b=>['block','house','destination','civic'].includes(b.kind)&&b.x<900&&!u().projects.some(p=>p.buildingId===b.id&&p.stage!=='complete'));
+   const pool=accidentalFireCandidates(BUILDINGS,u());
    const candidate=pool[Math.floor(roll()*pool.length)];if(candidate)ignite(candidate.id,raw().utilities?.powerPlant?.gridOnline===false?'unsafe improvised wiring':'kitchen or electrical fault');
   }
   if(now()>=u().development.nextReviewAt)planNationalDevelopment();
@@ -579,9 +606,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   if(!f.urbanTask)return false;
   const task=f.urbanTask,job=task.type==='fire'?u().fires.find(v=>v.id===task.id&&!v.containedAt):u().projects.find(v=>v.id===task.id&&!['complete','cancelled'].includes(v.stage));
-  if(!job||job.recoveryPaused||!f.alive||f.health<20||f.energy<5||f.hunger>96||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession){releaseTask(f);return false;}
-  const depot=job.materialCache?.quantity>0?`CIVIC-CARGO-${job.id}`:job.materialDepotId||(job.materialsOrdered?'construction':materialDepot(projectCountry(job)));
-  const destination=task.phase==='collecting'?depot:task.targetId;
+  if(task.type==='build'&&job&&present(f,task.targetId))provisionDutyMeal(raw(),f,projectCountry(job));
+  const mealIntake=task.type==='build'&&task.phase==='canteen'&&now()<Number(task.mealDeadlineAt||0);
+  if(!job||job.recoveryPaused||!f.alive||f.health<20||f.energy<5||f.hunger>96&&!mealIntake||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession){releaseTask(f);return false;}
+  const depot=job.materialCache?.quantity>0?`CIVIC-CARGO-${job.id}`:job.materialDepotId||materialDepot(projectCountry(job));
+  const canteen=materialDepot(projectCountry(job));
+  const destination=task.phase==='canteen'?canteen:task.phase==='collecting'?depot:task.targetId;
   if(!present(f,destination)){
    const progress=task.travelProgress;
    if(!progress||progress.destination!==destination||Math.hypot(f.x-progress.x,f.z-progress.z)>.5){task.travelProgress={x:f.x,z:f.z,at:now(),destination};}
@@ -594,7 +624,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    if(Number(task.routeFailures||0)>=3){f.urbanCrewRetryAt=now()+3600;releaseTask(f);return false;}
    task.routeFailures=Number(task.routeFailures||0)+1;task.nextRouteAt=now()+600;
    const site=LOCATIONS.find(l=>l.id===destination);
-   startJourney(f,{id:destination,action:task.phase==='collecting'?'collecting construction materials':task.phase==='delivering'?'delivering construction materials':'returning to the civic site',mode:site&&Math.hypot(f.x-site.x,f.z-site.z)<70?'walk':undefined});
+   startJourney(f,{id:destination,action:task.phase==='canteen'?'reporting to the construction canteen':task.phase==='collecting'?'collecting construction materials':task.phase==='delivering'?'delivering construction materials':'returning to the civic site',mode:site&&Math.hypot(f.x-site.x,f.z-site.z)<70?'walk':undefined});
+  }
+  if(task.type==='build'&&task.phase==='canteen'&&present(f,canteen)){
+   provisionDutyMeal(raw(),f,projectCountry(job));
+   if(f.hunger<80){task.phase='onsite';task.routeFailures=0;task.nextRouteAt=0;startJourney(f,{id:task.targetId,action:'joining a construction crew'});}
+   else f.action='waiting for funded construction canteen stock';
   }
   if(task.type==='build'&&task.phase==='collecting'&&!f.traveling&&f.currentLocationId===depot){
    task.phase='delivering';task.routeFailures=0;task.nextRouteAt=0;task.materials=job.materialCache?.quantity>0?job.materialCache.quantity:job.materialsOrdered-job.materialsDelivered;job.materialCache=null;startJourney(f,{id:task.targetId,action:'delivering construction materials'});
@@ -626,7 +661,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   u().warDamageReceipts||={};if(u().warDamageReceipts[projectileId])return false;
   u().warDamageReceipts[projectileId]={buildingId,countryId,at:now(),damage};const keys=Object.keys(u().warDamageReceipts);for(const key of keys.slice(0,-256))delete u().warDamageReceipts[key];
   for(const p of u().projects.filter(p=>p.buildingId===buildingId&&ongoing(p))){p.stage='cancelled';p.cancelledAt=now();p.cancelReason='new war damage';refundProject(p);for(const id of p.workerIds){const f=byId.get(id);if(f?.urbanTask?.id!==p.id)continue;if(f.onTrain||f.onPlane)f.urbanTask=null;else releaseTask(f);}}
-  rememberBlueprint(b);b.health=clamp(b.health-Math.max(0,Number(damage)||0));b.lastDamageAt=now();b.warRecovery={active:true,countryId,fundingAccountId,conflictId,at:now(),projectileIds:[...(b.warRecovery?.projectileIds||[]),projectileId].slice(-24)};
+  rememberBlueprint(b);b.health=clamp(b.health-Math.max(0,Number(damage)||0));b.lastDamageAt=now();b.recoveryReadyAt=now();b.recoveryDeadlineAt=now()+DAY;b.warRecovery={active:true,countryId,fundingAccountId,conflictId,at:now(),projectileIds:[...(b.warRecovery?.projectileIds||[]),projectileId].slice(-24)};
   evacuate(b,'war impact');setStage(b,b.health<18?'collapsed':'damaged');
   if(fire&&b.health>=18){const incident=ignite(buildingId,'war projectile impact');if(incident){incident.countryId=countryId;incident.fundingAccountId=fundingAccountId;incident.projectileId=projectileId;}}
   apply();report('war_building_damage',`A projectile damaged ${buildingId}; ${countryId} is responsible for its recovery budget.`,{buildingId,projectileId,countryId,conflictId});return true;

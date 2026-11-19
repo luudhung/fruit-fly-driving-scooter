@@ -61,9 +61,12 @@ export class CivilizationWorld extends DurableObject {
     this.baseKnownIds=new Set();this.baseAliveIds=new Set();
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
+      const bootAt=Date.now(),bootStage=(stage,extra={})=>console.log(JSON.stringify({event:'city_boot',stage,elapsedMs:Date.now()-bootAt,...extra}));
+      bootStage('reading durable snapshot');
       const storedKnown=new Set(),storedAlive=new Set();
       const mapResident=f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;};
       const saved=await loadSnapshot(this.ctx.storage,{mapResident});
+      bootStage('snapshot decoded',{living:saved?.state?.flies?.length||0,compressedBytes:saved?.stats?.compressedBytes||0});
       this.archiveDormant=true;
       if(saved&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
       let base;
@@ -77,7 +80,9 @@ export class CivilizationWorld extends DurableObject {
       this.baseAliveIds=storedAlive.size?storedAlive:new Set(base.flies.filter(f=>f.alive).map(f=>f.id));
       // Reconstruct against the persisted schema BEFORE the engine migrates maps.
       // A new map release must preserve every already-acknowledged browser save.
+      bootStage('reading save journal');
       const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
+      bootStage('journal decoded',{journalSequence:journal?.meta?.sequence||0});
       this.localHost=await this.ctx.storage.get('localHostLease')||null;
       this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
       const compatibleOwner=this.localHost?.protocol===3&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
@@ -95,6 +100,7 @@ export class CivilizationWorld extends DurableObject {
         await this.ctx.storage.put('localHostLease',this.localHost);
       }
       await this.ensureAlarm();
+      bootStage('ready',{living:getRawState().flies.filter(f=>f.alive).length});
     });
     if(env.NEURAL_ENABLED==='1'&&env.NEURAL_COORDINATOR){
       ctx.waitUntil(this.ready.then(()=>env.NEURAL_COORDINATOR.getByName(env.CIV_WORLD_ID||DEFAULT_WORLD_ID).ensureRunning()).catch(error=>console.error(JSON.stringify({event:'neural_start_failed',error:String(error)}))));

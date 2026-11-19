@@ -1,6 +1,7 @@
 import {LOCATIONS,parkingPoint} from './city-map.mjs';
 import {INDUSTRIAL_LOADING_BAYS,INDUSTRIAL_PLANTS} from './industry-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
+import {reserveRoadParking,occupyParking,trafficActors} from './vehicle-parking.mjs';
 import {countryAt,NORTH_MATERIALS_YARD} from './country-map.mjs';
 export const REGIONAL_TRUCK_LIMIT=24;
 export const REGIONAL_HUBS=['industrial-raw-depot','INDUSTRY-north-4','INDUSTRY-europe-4'];
@@ -95,7 +96,8 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   return d;
  }
  function route(t,destination,from=t.locationId){
-  const end=INDUSTRIAL_LOADING_BAYS[destination]||parkingPoint(location(destination));if(!end)return false;
+  const dock=INDUSTRIAL_LOADING_BAYS[destination]||location(destination),end=reserveRoadParking(raw(),t,dock);if(!end)return false;
+  t.destinationParking=end;
   const points=roadPath(t,end,from,destination);if(!points.length)return false;
   Object.assign(t,{routeWaypoints:points,routeIndex:0,traveling:true,motionSpeed:0,lastProgressAt:now(),routeDestination:destination});return true;
  }
@@ -163,7 +165,7 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
    if(brokered(job)){const o=sourceOrder(job);if(o)Object.assign(o,{phase:'collecting',truckId:t.id,carrierId:operatorId});}
    departures++;
   }
-  const index=createVehicleIndex([...raw().flies,...raw().industrialEconomy.trucks,...d.trucks]);
+  const index=createVehicleIndex(trafficActors(raw()));
   const occupied=new Set(d.trucks.map(t=>t.returnParking?.id).filter(Boolean));
   let sites;
   for(const t of d.trucks){

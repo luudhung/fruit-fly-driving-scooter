@@ -35,6 +35,7 @@ import {isHospitalitySector,hospitalityPremises,hospitalityDemand,openHospitalit
 import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
+import {trafficActors} from './vehicle-parking.mjs';
 import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, AIRPORT_PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
@@ -537,7 +538,7 @@ const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember
 const urbanWorld=createUrbanWorld(cityServices);
 const spaceProgram=createSpaceProgram({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f)});
 const countries=createInternationalLife({...cityServices,neuralDrive,housingHomeLocation,redistribute:false,onConflictStarted:conflict=>nationalDefense?.onConflictStarted(conflict),onPeace:conflict=>nationalDefense?.onPeace(conflict)});
-const northF1=createNorthF1({...cityServices,isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),northAccount:()=>countries.countryAccount('north-city'),lawfulPresence:(f,id)=>countries.lawfulPresence(f,id),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),travelCost:(f,id)=>countries.travelCost(f,id),
+const northF1=createNorthF1({...cityServices,onVehicleCollision:(f,other,impact)=>roadLife.recordCollision(f,other,impact),isUnavailable:(id,f)=>urbanWorld.isUnavailable(id,f),northAccount:()=>countries.countryAccount('north-city'),lawfulPresence:(f,id)=>countries.lawfulPresence(f,id),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),travelCost:(f,id)=>countries.travelCost(f,id),
  interceptMovement:(f,from,to,options)=>countries.interceptMovement(f,from,to,options),
  bookEventHotel:(f,nights)=>cityVisitors.reserveEventRoom(f,nights),releaseEventHotel:f=>cityVisitors.releaseEventRoom(f),
  visitEventAttraction:(f,id,clock)=>cityVisitors.visitEventAttraction?.(f,id,clock)});
@@ -3251,6 +3252,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
   const dist = Math.hypot(dx, dz,fly.transitMode==='walk'?dy:0);
 
   if (dist <= 0.85) {
+    if(vehicleHeadway&&['car','scooter'].includes(fly.transitMode)&&vehicleHeadway(fly,{x:fly.targetX,z:fly.targetZ})<Math.hypot(dx,dz)-.001){fly.vx=fly.vz=0;fly.trafficStatus='queuing behind traffic';return;}
     const barrier=stopForSignal(fly,{x:fly.targetX,z:fly.targetZ});
     if(barrier&&!fly.signalEncounter?.permit&&barrier.distance<dist-.001){fly.vx=fly.vz=0;fly.trafficStatus="waiting at red light";return;}
     const next={x:fly.targetX,z:fly.targetZ,y:routeTarget?.y??fly.y},stationAccess=fly.transitMode==='walk'&&(routeTarget?.stage?.startsWith('station-')||routeTarget?.stage==='interchange-walk');
@@ -3292,7 +3294,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
         emit("metro_boarding",`${fly.id} boarded ${fly.metroLineId} after waiting on the platform.`,{flyId:fly.id,lineId:fly.metroLineId,fare});
         return;
       }
-      if(currentWp?.stage==="parking"){fly.parkedCar=fly.destinationParking||parkingPoint(fly);fly.carPosition=null;fly.destinationParking=null;}
+      if(currentWp?.stage==="parking"){fly.parkedCar=fly.destinationParking||roadLife.park(fly);fly.carPosition=null;fly.destinationParking=null;}
       fly.routeIndex += 1;
       const next = fly.routeWaypoints[fly.routeIndex];
       fly.targetX = next.x;
@@ -3367,6 +3369,11 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
     return;
   }
 
+  if(['car','scooter'].includes(fly.transitMode)){
+    const previous=fly.routeWaypoints?.[Math.max(0,fly.routeIndex-1)];
+    const manoeuvre=previous?.mode!=='car'||routeTarget?.stage==='parking';
+    fly.vehicleHeading=manoeuvre?Number((routeTarget?.stage==='parking'?fly.vehicleHeading:fly.parkedCar?.heading)??Math.atan2(dx,dz)):Math.atan2(dx,dz);
+  }
   if(fly.transitMode==="car"&&roadLife.stepDriver(fly)){fly.vx=fly.vz=0;fly.trafficStatus="traffic inspection after an incident";return;}
   const vehicleBoost =
     fly.transitMode === "metro" ? 8.8 :
@@ -3375,7 +3382,7 @@ function moveFly(fly,waypointHops=0,movementSeconds=activeGameStepSeconds/GAME_S
 
   const fc = fly.brain?.fullConnectome;
   const neuralMotor = fc?.connected ? clamp(Number(fc.motorDrive || 0), 0, 1) : 0.5;
-  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * vehicleBoost * motorwaySpeedMultiplier(fly,fly.transitMode) * (fly.transitMode==="car"&&fly.brain?.driving?.style==="reckless"?1.28:1);
+  const baseSpeed = (1.8 + fly.energy / 150 + neuralMotor * 0.65) * (fly.transitMode==='car'?.55+.45*Number(fly.vehicleCondition??100)/100:1) * vehicleBoost * motorwaySpeedMultiplier(fly,fly.transitMode) * (fly.transitMode==="car"&&fly.brain?.driving?.style==="reckless"?1.28:1);
   const danger = weatherDanger();
   const weatherFactor =
     fly.transitMode === "metro" ? 1 :
@@ -4579,6 +4586,7 @@ function compactFly(f) {
     traveling:Boolean(f.traveling),indoors:Boolean(f.indoors),onTrain:Boolean(f.onTrain),
     parkedCar:f.parkedCar||null,
     movementTrace:f.movementTrace||[],
+    vehicleCondition:f.vehicleCondition??100,vehicleHeading:f.vehicleHeading,
     trafficSignalPermit:Boolean(f.signalEncounter?.permit),
     currentLocationId: f.currentLocationId,
     targetLocationId: f.targetLocationId,
@@ -4729,7 +4737,7 @@ function motionPlan(f,compact=false){
 function observerFly(f,selectedId,compactObserver=false){
  if(f.id===selectedId)return {...compactFly(f),ownsHome:Boolean(ownsCountryHome(state,f,f.residencyCountryId)),relationships:f.kind==='visitor'?null:residentRelationships.profile(f),awareness:f.selfModel?residentSelfModel.snapshot(f):null,vision:f.vision||null,motion:motionPlan(f),movementTrace:(f.movementTrace||[]).slice(-8)};
  const record={};
- for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId','citizenshipCountryId','residencyCountryId','publicServiceRole','publicServiceCountryId']){
+ for(const key of ['onFireEngine','onAmbulance','homeDistrict','kind','taxiPassenger','onPrivateHelicopter','privateHelicopterId','id','name','sex','ageYears','generation','alive','x','y','z','vx','vz','action','traveling','indoors','onTrain','onPlane','sleeping','vehicle','vehicleCondition','vehicleHeading','transitMode','transitStage','currentLocationId','targetLocationId','metroLineId','metroTrainId','metroTrainDirection','heliPassenger','heliTourStartedAt','heliTourUntil','wheelRideUntil','wheelSeat','money','savings','health','hunger','energy','stress','happiness','excitement','loneliness','illness','mentalHealthCrisis','smoking','exercising','flirtingWith','householdId','housingUnitId','facilityEmployment','militaryRank','militaryCommanderId','militaryShipId','citizenshipCountryId','residencyCountryId','publicServiceRole','publicServiceCountryId']){
   const value=f[key];
   if(compactObserver&&value===null)continue;
   record[key]=typeof value==='number'?Math.round(value*100)/100:value;
@@ -4918,7 +4926,7 @@ async function tick(options = {}) {
       roadLife.normalizeParking();
       for(const [name,service]of [['countries',countries],['nationalServices',nationalServices],['urban',urbanWorld],['sports',sportsLuxury],['northF1',northF1],['visitors',cityVisitors],['civic',civicConflict],['relationships',residentRelationships],['publicServices',publicServices],['industry',industrialEconomy],['spaceProgram',spaceProgram]]){try{service.tick(gameSeconds,clock);}catch(error){recordSimulationFault(name,error);}}
       try{updateResidentPerception(clock,options.perceptionBudget);}catch(error){recordSimulationFault('perception',error);}
-      vehicleHeadway=createVehicleIndex([...neuralActors(),...(state.industrialEconomy?.trucks||[]),...(state.regionalFreight?.trucks||[])]);
+      vehicleHeadway=createVehicleIndex(trafficActors(state),(f,other,impact)=>roadLife.recordCollision(f,other,impact));
       for(const fly of state.flies){try{tickFly(fly,clock);}catch(error){recordSimulationFault('resident',error,fly.id);}}
       vehicleHeadway=null;
       roadLife.tick();

@@ -3,6 +3,7 @@ import {northF1PointRestricted} from './north-f1-closure.mjs';
 import {buildHansdrexTourismMap} from './hansdrex-tourism-map.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT_BUILDINGS,SPACEPORT_LOCATIONS,SPACEPORT_ROADS} from './spaceport-map.mjs';
+import {FRUIT_FARM_BUILDINGS,FRUIT_FARM_LOCATIONS,FRUIT_FARM_ROADS} from './fruit-farm-map.mjs';
 import {NORTH_F1_BUILDINGS,NORTH_F1_LOCATIONS,NORTH_F1_ACCESS_ROADS} from './north-f1-map.mjs';
 import {northMilitaryPerimeterBlocked} from './country-map.mjs';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_ROADS,INDUSTRIAL_RESERVED,INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
@@ -465,9 +466,10 @@ ROADS.push(...INDUSTRIAL_ROADS.map(r=>({...r})));
 // footprints stay exact while obsolete asphalt becomes a real canal.
 ROADS.splice(0,ROADS.length,...districtRiverRoads(ROADS,districtTopology));
 // New countries append after existing lot generation; old titles never shift.
-BUILDINGS.push(...NORTH_BUILDINGS.map(b=>({...b})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({...b})),...SPACEPORT_BUILDINGS.map(b=>({...b})),...BORDER_CUSTOMS_BUILDINGS.map(b=>({...b})));
+BUILDINGS.push(...NORTH_BUILDINGS.map(b=>({...b})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({...b})),...SPACEPORT_BUILDINGS.map(b=>({...b})),...BORDER_CUSTOMS_BUILDINGS.map(b=>({...b})),...FRUIT_FARM_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...NORTH_LOCATIONS.map(l=>({...l})),...[...HAWAII_COTTAGES,...HAWAII_APARTMENTS].map(b=>({id:b.id,name:b.name,type:b.primaryResidence?'home':'seasonal-lodging',x:b.x,z:b.z})),...SPACEPORT_LOCATIONS.map(l=>({...l})));
-ROADS.push(...NORTH_ROADS.map(r=>({...r})),...HAWAII_ROADS.map(r=>({...r})),...SPACEPORT_ROADS.map(r=>({...r})));
+ROADS.push(...NORTH_ROADS.map(r=>({...r})),...HAWAII_ROADS.map(r=>({...r})),...SPACEPORT_ROADS.map(r=>({...r})),...FRUIT_FARM_ROADS.map(r=>({...r})));
+LOCATIONS.push(...FRUIT_FARM_LOCATIONS.map(l=>({...l})));
 BUILDINGS.push(...NORTH_F1_BUILDINGS.map(b=>({...b})));
 LOCATIONS.push(...NORTH_F1_LOCATIONS.map(l=>({...l})));
 ROADS.push(...NORTH_F1_ACCESS_ROADS.map(r=>({...r})));

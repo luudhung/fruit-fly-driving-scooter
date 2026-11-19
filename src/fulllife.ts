@@ -1,3 +1,4 @@
+import {buildFruitFarm} from './fruit-farm.ts';
 import {LocalCitySession} from './local-city-session.ts';
 import {ResidentAwarenessUI,ResidentEyeSession,residentEyeVerticalFov,type ResidentVision,type ResidentAwareness} from './resident-awareness-ui.ts';
 import {createCityLabelSprite,setCityLabelText} from './city-label-texture.ts';
@@ -137,6 +138,7 @@ type FlyState = CountryPerson & {
   children: string[];
   parents: string[];
   vehicle?: string | null;
+  vehicleCondition?:number;
   transitMode?: string;
   onPlane?:boolean;
   airTrip?:{phase:string;cost:number;outbound?:Flight;inbound?:Flight};
@@ -230,7 +232,7 @@ type CivilizationSnapshot = {
   spaceProgram?:SpaceProgramView|null;
   northF1?:(NorthF1View & {foreignVisitors?:FlyState[]})|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
-  international?:CountrySnapshot['international'] & {economy?:{trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
+  international?:CountrySnapshot['international'] & {economy?:{fruitFarm?:{workers:number;capacity:number;inventory:number};farm?:{workers:number;stock?:{rice?:number;vegetables?:number;seeds?:number}};trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
   nationalDefense?:Parameters<NationalDefenseRenderer['sync']>[0];
   nationalServices?:Parameters<NationalDefenseRenderer['sync']>[1];
   publicServices?:PublicServicesSnapshot;
@@ -636,7 +638,7 @@ function renderInspector(fly: FlyState | null) {
   flyPartnerEl.textContent = fly.partnerId || (fly.flirtingWith ? `flirting: ${fly.flirtingWith}` : "single");
   flyChildrenEl.textContent = String(fly.children?.length || 0);
   flyMoneyEl.textContent = `${num(fly.money, 1)} / ${num(fly.savings, 1)} H$`;
-  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0),1)} H$ + power ${num(fly.utilityDebt||0,1)} · ${fly.powerOn===false?"POWER CUT":"powered"} · ${fly.vehicle||fly.transitMode||"walk"}${fly.vehicleLoan?` · trả góp ${num(fly.vehicleLoan.balance,1)} H$ còn lại (${fly.vehicleLoan.dailyPayment}/ngày, 0%)`:""}${fly.vehicle?.includes("car")&&fly.drivingStyle?` · ${fly.drivingStyle==="reckless"?"lái liều":"lái cẩn thận"} · ${fly.drivingExperiences||0} kinh nghiệm · ${fly.drivingFines||0} lần phạt`:""}${fly.metroTransfers?` · ${fly.metroTransfers} lần đổi tuyến`:""}`;
+  flyDebtEl.textContent = `${num(fly.debt + (fly.bankLoan || 0),1)} H$ + power ${num(fly.utilityDebt||0,1)} · ${fly.powerOn===false?"POWER CUT":"powered"} · ${fly.vehicle||fly.transitMode||"walk"}${fly.vehicle&&Number(fly.vehicleCondition??100)<100?` · xe ${num(fly.vehicleCondition??100,0)}%`:""}${fly.vehicleLoan?` · trả góp ${num(fly.vehicleLoan.balance,1)} H$ còn lại (${fly.vehicleLoan.dailyPayment}/ngày, 0%)`:""}${fly.vehicle?.includes("car")&&fly.drivingStyle?` · ${fly.drivingStyle==="reckless"?"lái liều":"lái cẩn thận"} · ${fly.drivingExperiences||0} kinh nghiệm · ${fly.drivingFines||0} lần phạt`:""}${fly.metroTransfers?` · ${fly.metroTransfers} lần đổi tuyến`:""}`;
   flySleepEl.textContent = `${fly.sleeping ? "sleeping 💤" : "awake"} · caffeine ${num(fly.caffeine || 0)} · sleep debt ${num(fly.sleepDebt || 0)}`;
   flyNeedsEl.textContent = `hunger ${num(fly.hunger)} · thirst ${num(fly.thirst || 0)}`;
   flyRelationshipEl.textContent = fly.partnerId
@@ -728,7 +730,10 @@ function renderSnapshot(s: CivilizationSnapshot) {
       const trackClosed=f1?.trackClosure&&s.simulationAgeSeconds>=f1.trackClosure.startsAt&&s.simulationAgeSeconds<f1.trackClosure.endsAt
         ?'Đường đua đang đóng với xe và người đi bộ':'';
       const raceFinances=f1?`Doanh thu vé Grand Prix ${num(f1.revenue)} H$ · ${num(f1.charterArrivals)} khách charter đã tới / ${num(f1.charterDepartures)} đã về`:'';
-      board.textContent=[residents,finances,jobs,exchanges,race,trackClosed,raceFinances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
+      const farming=s.international?.economy;
+      const agriculture=id==='hansdrex'&&farming?.fruitFarm?`Trang trại trái cây · ${num(farming.fruitFarm.workers)}/${num(farming.fruitFarm.capacity)} nhân viên · ${num(farming.fruitFarm.inventory)} quả trong kho · giữ 1/10 để trồng lại`
+        :id==='north-city'&&farming?.farm?`Nông trại · ${num(farming.farm.workers)} nhân viên · ${num((farming.farm.stock?.rice??0)+(farming.farm.stock?.vegetables??0))} suất gạo/rau · ${num(farming.farm.stock?.seeds??0)} giống`:'';
+      board.textContent=[residents,finances,jobs,exchanges,agriculture,race,trackClosed,raceFinances,data?`${num(data.students)} người học · ${num(data.graduates)} tốt nghiệp`:'',data?`${num(data.fires)} đám cháy · ${num(data.projects)} công trình`:'',sportsVisits].filter(Boolean).join('\n');
     }
   }
   const space=document.getElementById('spaceworks-activity');
@@ -1308,6 +1313,8 @@ const empireRoot=buildHansdrexEmpire(cityRoot,makeCanvasSprite);
 buildHansdrexTower(cityRoot,makeCanvasSprite);
 const aviationVisual=buildAirportAndIsland(cityRoot,makeCanvasSprite);
 const internationalVisuals=new InternationalLandmarks(cityRoot,makeCanvasSprite);
+const fruitFarmVisuals=buildFruitFarm(cityRoot,makeCanvasSprite);
+for(const [id,group] of fruitFarmVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const spaceportVisuals=new SpaceportRenderer(cityRoot,makeCanvasSprite);
 for(const [id,group] of spaceportVisuals.buildings)urbanVisuals.registerBuilding(id,group);
 const northF1Visuals=new NorthF1Renderer(cityRoot,makeCanvasSprite);
@@ -1849,6 +1856,7 @@ function updateFreeCamera(dt: number,now:number) {
     const forward=Number(pressed.has("KeyW")||pressed.has("ArrowUp"))-Number(pressed.has("KeyS")||pressed.has("ArrowDown"));
     const steer=Number(pressed.has("KeyD")||pressed.has("ArrowRight"))-Number(pressed.has("KeyA")||pressed.has("ArrowLeft"));
     const heading=playerCar.heading;
+    playerCar.setTraffic(personalCars.trafficActors);
     playerCar.update(dt,{throttle:forward,steer,brake:pressed.has("Space")||pressed.has("KeyQ")});
     cameraYaw+=playerCar.heading-heading;playerCarVisual.sync(playerCar);
     const seat=playerCar.driverPosition();freePosition.set(seat.x,seat.y,seat.z);

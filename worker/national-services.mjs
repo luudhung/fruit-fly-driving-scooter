@@ -1,5 +1,6 @@
 import {COUNTRY_IDS,NORTH_AIRPORT,NORTH_GUARD_POSTS,countryAt} from './country-map.mjs';
 import {LOCATIONS,BUILDINGS,entrance,clearSegment} from './city-map.mjs';
+import {provisionDutyMeal} from './duty-meals.mjs';
 const NORTH=COUNTRY_IDS.north,DAY=86400,roles=['army','police','medical','fire','education'];
 // A paid trainer uses its own dry apron bay, outside all passenger stands.
 export const NORTH_TRAINING_STAND=Object.freeze({x:-933,z:-880});
@@ -112,7 +113,7 @@ export function createNationalServices(hooks){
    if(!present(pilot,id)){if(!pilot.nationalServiceDuty){pilot.nationalServiceDuty={kind:'pilot-transfer',targetId:gateId};dispatch(pilot,gateId,'reporting to North airport for training',true);}continue;}
    const departure=now()+120,arrival=departure+2400;if(!runwayAvailable({airportId:'north',aircraftId:plane.id,departure,arrival}))continue;plane.fuel-=15;plane.pilotId=pilot.id;plane.flight={id:`NORTH-FLIGHT-${Math.floor(now())}-${plane.trips}`,from:'north',to:'north',departure,arrival,pilotId:pilot.id};plane.boardingPilotId=null;pilot.nationalAviationTransferId=null;release(pilot);pilot.nationalTrainingFlightId=plane.flight.id;pilot.onPlane=true;note('north_training_departure',{planeId:plane.id,pilotId:pilot.id});}}
  function tick(seconds=0,clock){retire();recruit();guards();procure();foodTick();flightTick(clock);}
- function handleResident(f,clock){if(f.publicServiceCountryId!==NORTH||!roles.includes(f.nationalServiceRole)||!live(f))return false;if(f.nationalTrainingFlightId){needsAndActivities(f,clock);return true;}if(f.onTrain||f.onPlane||outside(f))return false;if(f.nationalSupplyTask)return supplyDuty(f,clock);if(aviationDuty(f,clock))return true;if(restDuty(f,clock))return true;
+ function handleResident(f,clock){if(f.publicServiceCountryId!==NORTH||!roles.includes(f.nationalServiceRole)||!live(f))return false;if(f.nationalTrainingFlightId){needsAndActivities(f,clock);return true;}if(f.onTrain||f.onPlane||outside(f))return false;if(present(f,stations[f.nationalServiceRole]))provisionDutyMeal(world(),f,NORTH);if(f.nationalSupplyTask)return supplyDuty(f,clock);if(aviationDuty(f,clock))return true;if(restDuty(f,clock))return true;
   const duty=f.nationalServiceDuty;if(!onShift(f,clock)&&!guardLead(f,clock)){if(duty)release(f);return false;}
   if(f.traveling&&(!duty||f.targetLocationId!==duty.targetId))return false;
   if(!duty){f.nationalServiceDuty=chooseDuty(f);f.nationalServiceSampleAt=now();dispatch(f,f.nationalServiceDuty.targetId,`North ${f.nationalServiceDuty.kind} duty`);}
