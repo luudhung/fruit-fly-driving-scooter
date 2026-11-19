@@ -120,3 +120,16 @@ test('parked cars are physical obstacles, and a swept high-speed hit records a r
  hits.length=0;assert.equal(index(driver,{x:2,z:1000}),2);assert.equal(hits.length,0,'a nearby parked car is not a collision until actually reached');
  const upper={...owner,parkedCar:null,traveling:true,transitMode:'car',x:8,y:8,z:1000,targetX:30,targetZ:1000};assert.equal(createVehicleIndex([driver,upper])(driver,{x:30,z:1000}),30);
 });
+
+test('a motorway entry is not closed by a stationary queue on the opposite carriageway',()=>{
+ const truck={id:'entering',alive:true,traveling:true,transitMode:'car',vehicleLength:6.4,heading:Math.PI,x:-428.5,z:-1082.7,targetX:-428.5,targetZ:-1094};
+ const opposite={id:'opposite',alive:true,traveling:true,transitMode:'car',x:-390,z:-1105.8,targetX:-450,targetZ:-1105.8,vx:0,vz:0};
+ assert.ok(createVehicleIndex([truck,opposite])(truck,{x:-428.5,z:-1092.7})>9.9);
+ const oncoming={...opposite,x:-450,z:-1091,targetX:-400,targetZ:-1091,vx:24};
+ assert.ok(createVehicleIndex([truck,oncoming])(truck,{x:-428.5,z:-1092.7})<1,'a moving car in the lane being crossed keeps its merge priority');
+});
+test('a long truck keeps its actual heading until its turn, rather than rotating its collision body towards a later route segment',()=>{
+ const lead={id:'lead',alive:true,traveling:true,transitMode:'car',vehicleLength:6.4,heading:Math.PI,x:-432.655,z:-1097.5,targetX:-432.655,targetZ:-1105.8,routeIndex:0,routeWaypoints:[{x:-432.655,z:-1105.8},{x:-1000,z:-1105.8}]};
+ const parallel={...lead,id:'parallel',x:-436.81,z:-1099.1,targetX:-436.81,routeWaypoints:[{x:-436.81,z:-1105.8},{x:-1000,z:-1105.8}]};
+ assert.ok(createVehicleIndex([lead,parallel])(lead,{x:lead.x,z:lead.z-4})>3.9,'separate parallel lanes keep their real body width');
+});

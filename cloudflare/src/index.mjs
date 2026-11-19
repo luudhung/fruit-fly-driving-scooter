@@ -1,7 +1,7 @@
 import {MAP_VERSION} from '../../worker/city-map.mjs';
 import {projectLocalDocument,applyLocalDelta,localDocumentState} from '../../worker/local-host-delta.mjs';
 import {loadLocalHostJournal,clearLocalHostJournal,saveLocalHostBase,appendLocalHostDelta,localHostExportStream} from './local-host-journal.mjs';
-import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream} from '../../worker/local-host-state.mjs';
+import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,localHostCheckpointStream} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
 import {loadSnapshotHeader, loadSnapshot, saveSnapshot, saveSnapshotMapped, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
@@ -488,6 +488,11 @@ export class CivilizationWorld extends DurableObject {
       }
 
       if (url.pathname === "/api/civilization/export") {
+        if(url.searchParams.get('view')==='live'){
+          const source=this.localDocument?localDocumentState(this.localDocument):getRawState();
+          const current=localHostSnapshot(source);
+          return new Response(localHostCheckpointStream(current,{exportedAt:new Date().toISOString(),worldId:this.env.CIV_WORLD_ID||DEFAULT_WORLD_ID}),{headers:corsHeaders({'content-type':'application/json; charset=utf-8'})});
+        }
         if(this.localDocument||this.archiveDormant){
           // Re-read the durable accepted document so an asynchronous export is
           // isolated from later handoff/engine ticks and never drops archives.

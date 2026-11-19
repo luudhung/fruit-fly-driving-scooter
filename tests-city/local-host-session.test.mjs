@@ -17,7 +17,7 @@ function fixture(){
  source=source.replace(/^export \{FlyWire[^\n]*\n/m,'').replace(/^import[\s\S]*?from\s+["'][^"']+["'];\n/gm,'');
  source=source.slice(0,source.indexOf('\nexport default')).replace('export class CivilizationWorld','class CivilizationWorld');
  let savedBase=structuredClone(state),baseSavedAt=Date.now();
- const deps={...Delta,...Journal,MAP_VERSION:36,LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint,DurableObject:class{},
+ const deps={...Delta,...Journal,MAP_VERSION:36,LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,localHostCheckpointStream,readLocalHostCheckpoint,DurableObject:class{},
  loadSnapshotHeader:async()=>({state:structuredClone({...savedBase,flies:[]}),lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}}),
  loadSnapshot:async(_storage,{mapResident}={})=>{loads.push(mapResident);const snapshot=structuredClone(savedBase);if(mapResident)snapshot.flies=snapshot.flies.map(mapResident).filter(Boolean);return {state:snapshot,lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}};},
  saveSnapshot:async()=>{saves++;return{};},exportSnapshot:()=>Journal.localHostExportStream(savedBase,Delta.projectLocalDocument(savedBase),'WORLD-A'),
@@ -376,4 +376,11 @@ test('queued commands survive a durable release and a cold restart before deferr
  assert.deepEqual(t.metadata.get('local-save:meta').pendingCommands,[command]);
  const cold=t.restart(36);await cold.ready;await cold.materializeLocalDocument();
  assert.deepEqual(t.commands,[command]);assertArchiveRetained(t);
+});
+
+
+test('a live export freezes only current identities without claiming ownership, loading archives or writing a checkpoint',async()=>{
+ const t=fixture();await t.world.ready;const before=t.saves,reads=t.loads.length,ticks=t.ticks;
+ const response=await t.world.fetch(new Request('https://city/api/civilization/export?view=live'));
+ const body=await response.json();assert.equal(body.state.flies.length,1);assert.equal(body.state.flies[0].id,'A');assert.equal(t.saves,before);assert.equal(t.loads.length,reads);assert.equal(t.ticks,ticks);assert.equal(t.world.localHost,null);assertArchiveRetained(t);
 });

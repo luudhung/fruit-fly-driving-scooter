@@ -47,13 +47,7 @@ export function signalBarrier(start,end,seconds){
 }
 function heading(other){
  if(Number.isFinite(other.vehicleHeading))return{x:Math.sin(other.vehicleHeading),z:Math.cos(other.vehicleHeading)};
- if(Number(other.vehicleLength)>4.5&&other.routeWaypoints?.length){
-  const route=other.routeWaypoints,index=other.routeIndex||0,p=route[index],next=route[index+1],prev=route[index-1];
-  if(p&&Math.hypot(p.x-other.x,p.z-other.z)<Number(other.vehicleLength)+1){
-   const a=index<3&&next&&Math.hypot(next.x-p.x,next.z-p.z)>8?p:index>=route.length-2&&prev?prev:null;
-   const b=a===p?next:p;if(a&&b){const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(len>.1)return{x:dx/len,z:dz/len};}
-  }
- }
+ if(Number(other.vehicleLength)>4.5&&Number.isFinite(other.heading))return{x:Math.sin(other.heading),z:Math.cos(other.heading)};
  let dx=Number(other.targetX)-other.x,dz=Number(other.targetZ)-other.z;
  if(!Number.isFinite(dx)||!Number.isFinite(dz)||Math.hypot(dx,dz)<.05){
   const points=other.routeWaypoints?.slice(other.routeIndex||0)||[];const next=points.find(p=>Math.hypot(p.x-other.x,p.z-other.z)>.1);
@@ -124,9 +118,19 @@ export function createVehicleIndex(drivers,onCollision){
   // moving, and a vehicle already inside the merge box can clear it.
   const entering=motorwaySegmentAt(end);
   if(entering&&!motorwaySegmentAt(f)){
-   const horizontal=entering.w>entering.d,waiting=nearby(end.x-42,end.x+42,end.z-42,end.z+42).some(other=>{
-    if(other.id===f.id||!motorwaySegmentAt(other)||!other.heading)return false;
-    return horizontal?Math.abs(other.heading.x)>.85:Math.abs(other.heading.z)>.85;
+   const horizontal=entering.w>entering.d;
+   const waiting=nearby(end.x-42,end.x+42,end.z-42,end.z+42).some(other=>{
+    if(other.id===f.id||!motorwaySegmentAt(other,horizontal?'x':'z')||!other.heading||Math.abs(other.y-fy)>2)return false;
+    const along=horizontal?other.heading.x:other.heading.z;
+    if(Math.abs(along)<.85)return false;
+    // Only lanes actually crossed by this merge have priority. The opposite
+    // carriageway (and a stopped queue on it) cannot close every slip road.
+    const cross=horizontal?other.z:other.x,lo=Math.min(horizontal?f.z:f.x,horizontal?end.z:end.x),hi=Math.max(horizontal?f.z:f.x,horizontal?end.z:end.x);
+    if(cross<lo-other.width/2-1||cross>hi+other.width/2+1)return false;
+    const speed=Math.hypot(Number(other.actor.vx||0),Number(other.actor.vz||0));
+    if(speed<.1)return false; // physical bodies still clip through bodyContact
+    const distance=((horizontal?end.x:end.z)-(horizontal?other.x:other.z))*Math.sign(along);
+    return distance>=-other.length&&distance<=Math.max(8,speed*2.5);
    });
    if(waiting){
     let lo=0,hi=allowed;for(let i=0;i<12;i++){const mid=(lo+hi)/2;if(motorwaySegmentAt({x:f.x+ux*mid,z:f.z+uz*mid}))hi=mid;else lo=mid;}
