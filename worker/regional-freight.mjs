@@ -1,3 +1,4 @@
+import {recoverStalledFreight} from './freight-recovery.mjs';
 import {LOCATIONS,parkingPoint} from './city-map.mjs';
 import {INDUSTRIAL_LOADING_BAYS,INDUSTRIAL_PLANTS} from './industry-map.mjs';
 import {createVehicleIndex} from './traffic.mjs';
@@ -169,6 +170,7 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   const occupied=new Set(d.trucks.map(t=>t.returnParking?.id).filter(Boolean));
   let sites;
   for(const t of d.trucks){
+   if(recoverStalledFreight(raw(),t,seconds,index,t=>route(t,t.routeDestination)))continue;
    const job=d.jobs.find(j=>j.id===t.jobId);
    if(!job||job.paid){
     if(t.jobId)Object.assign(t,{jobId:null,phase:'parked',traveling:false,motionSpeed:0,routeWaypoints:[]});
@@ -212,6 +214,6 @@ export function createRegionalFreight({world,account,transfer,roadPath,moveTruck
   }
   d.jobs=[...d.jobs.filter(j=>!j.paid),...d.jobs.filter(j=>j.paid).slice(-32)];
  }
- function snapshot(){const d=data();return{fleet:d.trucks.length,driving:d.trucks.filter(t=>t.traveling).length,repositioning:d.trucks.filter(t=>t.repositioning).length,delivered:d.delivered,exports:d.exports,feesPaid:d.feesPaid,stocks:Object.fromEntries(REGIONAL_HUBS.map(id=>[id,{...stock(id)}])),trucks:d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,motionSpeed:t.traveling?t.motionSpeed:0,driverId:null,orderId:t.jobId||null,routeWaypoints:t.traveling?t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12):[],at:now()}))};}
+ function snapshot(){const d=data();return{fleet:d.trucks.length,driving:d.trucks.filter(t=>t.traveling).length,repositioning:d.trucks.filter(t=>t.repositioning).length,delivered:d.delivered,exports:d.exports,feesPaid:d.feesPaid,stocks:Object.fromEntries(REGIONAL_HUBS.map(id=>[id,{...stock(id)}])),trucks:d.trucks.map(t=>({id:t.id,x:t.x,y:t.y,z:t.z,heading:t.heading,phase:t.phase,motionSpeed:t.traveling?t.motionSpeed:0,driverId:null,orderId:t.jobId||null,routeWaypoints:t.freightRecovery?[{x:t.freightRecovery.x,y:t.y,z:t.freightRecovery.z,mode:'car'}]:t.traveling?t.routeWaypoints.slice(t.routeIndex,t.routeIndex+12):[],at:now()}))};}
  return{init,tick,snapshot,inputSource};
 }
