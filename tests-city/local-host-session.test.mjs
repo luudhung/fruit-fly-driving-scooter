@@ -18,6 +18,7 @@ function fixture(){
  source=source.slice(0,source.indexOf('\nexport default')).replace('export class CivilizationWorld','class CivilizationWorld');
  let savedBase=structuredClone(state),baseSavedAt=Date.now();
  const deps={...Delta,...Journal,MAP_VERSION:36,LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream,readLocalHostCheckpoint,DurableObject:class{},
+ loadSnapshotHeader:async()=>({state:structuredClone({...savedBase,flies:[]}),lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}}),
  loadSnapshot:async(_storage,{mapResident}={})=>{loads.push(mapResident);const snapshot=structuredClone(savedBase);if(mapResident)snapshot.flies=snapshot.flies.map(mapResident).filter(Boolean);return {state:snapshot,lastWallClockMs:Date.now(),savedAtMs:baseSavedAt,stats:{}};},
  saveSnapshot:async()=>{saves++;return{};},exportSnapshot:()=>Journal.localHostExportStream(savedBase,Delta.projectLocalDocument(savedBase),'WORLD-A'),
  saveSnapshotMapped:async(_storage,document)=>{mappedSaves++;if(mappedGate)await mappedGate;if(failMapped){failMapped=false;throw Error('mapped publication failed');}const merged=await new Response(Journal.localHostExportStream(savedBase,document,'WORLD-A')).json();savedBase=merged.state;baseSavedAt=Date.now();return{chunks:1};},

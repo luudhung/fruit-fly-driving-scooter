@@ -55,3 +55,18 @@ test('a final release checkpoint compacts with its actual sequence and clears ow
  for(let sequence=1;sequence<=13;sequence++){const next=change(doc,sequence);await appendLocalHostDelta(db,next,{epoch:4,sequence,baseSequence:sequence-1,patch:diffLocalDocument(doc,next)},sequence===13?null:{...lease,sequence},null);doc=next;}
  assert.equal(await db.get('localHostLease'),undefined);const cold=await loadLocalHostJournal(db,s);assert.equal(cold.meta.sequence,13);assert.equal(cold.document.actors.A.money,76);
 });
+
+test('header-only cold resume retains current money, deaths and births while archival compaction preserves every historical brain',async()=>{
+ const {loadSnapshotHeader,saveSnapshot,saveSnapshotMapped,loadSnapshot}=await import('../cloudflare/src/civilization-snapshot.mjs');
+ const db=storage(),singleGet=db.get;db.get=async keys=>Array.isArray(keys)?new Map(await Promise.all(keys.map(async k=>[k,await singleGet(k)]))):singleGet(keys);
+ const original=base();await saveSnapshot(db,original,1234);
+ const lease=owner(),document=aliveDoc(original);document.world.simulationAgeSeconds=700;
+ document.actors.A.alive=false;document.actors.A.money=72;document.actors.CHILD={id:'CHILD',alive:true,x:1,z:2,health:99,money:15,brain:{id:'NEW-BRAIN',memory:{episodes:['birth']}}};
+ await saveLocalHostBase(db,document,lease,{lastWallClockMs:5678});
+ const header=await loadSnapshotHeader(db);assert.equal(header.state.flies.length,0);
+ const resumed=await loadLocalHostJournal(db,header.state,header.savedAtMs);
+ assert.equal(resumed.state.simulationAgeSeconds,700);assert.equal(resumed.state.flies.find(f=>f.id==='A').money,72);assert.equal(resumed.state.flies.find(f=>f.id==='A').alive,false);assert.equal(resumed.state.flies.find(f=>f.id==='CHILD').brain.id,'NEW-BRAIN');
+ assert.equal(resumed.state.flies.some(f=>f.id==='OLD'),false,'history is not hydrated into the current engine');
+ await saveSnapshotMapped(db,resumed.document,resumed.lastWallClockMs);
+ const complete=await loadSnapshot(db);assert.equal(complete.state.flies.length,3);assert.deepEqual(complete.state.flies.find(f=>f.id==='OLD'),original.flies.find(f=>f.id==='OLD'));assert.equal(complete.state.flies.find(f=>f.id==='A').money,72);assert.equal(complete.state.flies.find(f=>f.id==='CHILD').brain.id,'NEW-BRAIN');assert.equal(complete.lastWallClockMs,5678);
+});
