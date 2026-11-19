@@ -4,7 +4,7 @@ import {loadLocalHostJournal,clearLocalHostJournal,saveLocalHostBase,appendLocal
 import {LOCAL_HOST_TTL_MS,localHostSnapshot,mergeLocalHostCheckpoint,localHostClaimStream} from '../../worker/local-host-state.mjs';
 export {FlyWireBrainShard,FlyWireNeuralCoordinator} from "./neural/objects.mjs";
 import { DurableObject } from "cloudflare:workers";
-import {loadSnapshot, saveSnapshot, saveSnapshotMapped, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
+import {loadSnapshotHeader, loadSnapshot, saveSnapshot, saveSnapshotMapped, exportSnapshot, exportSnapshotMapped} from "./civilization-snapshot.mjs";
 import {handleConflictControl} from '../../worker/conflict-control.mjs';
 import {
   freshState,
@@ -65,10 +65,11 @@ export class CivilizationWorld extends DurableObject {
       bootStage('reading durable snapshot');
       const storedKnown=new Set(),storedAlive=new Set();
       const mapResident=f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;};
-      const saved=await loadSnapshot(this.ctx.storage,{mapResident});
+      const hasJournal=Boolean(await this.ctx.storage.get('local-save:meta'));
+      let saved=hasJournal?await loadSnapshotHeader(this.ctx.storage):await loadSnapshot(this.ctx.storage,{mapResident});
       bootStage('snapshot decoded',{living:saved?.state?.flies?.length||0,compressedBytes:saved?.stats?.compressedBytes||0});
       this.archiveDormant=true;
-      if(saved&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
+      if(saved&&!hasJournal&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
       let base;
       if(saved){
         base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
@@ -82,6 +83,11 @@ export class CivilizationWorld extends DurableObject {
       // A new map release must preserve every already-acknowledged browser save.
       bootStage('reading save journal');
       const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
+      if(hasJournal&&(!journal||journal.stale)){
+        saved=await loadSnapshot(this.ctx.storage,{mapResident});if(!saved||!snapshotLooksUsable(saved.state))throw Error('Invalid fallback civilization snapshot');
+        base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
+        this.baseKnownIds=storedKnown;this.baseAliveIds=storedAlive;
+      }
       bootStage('journal decoded',{journalSequence:journal?.meta?.sequence||0});
       this.localHost=await this.ctx.storage.get('localHostLease')||null;
       this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
@@ -89,7 +95,9 @@ export class CivilizationWorld extends DurableObject {
       if(journal&&!journal.stale){
         this.localJournalMeta=journal.meta;this.lastWallClockMs=journal.lastWallClockMs;
         if(compatibleOwner&&this.localHost.expiresAt>Date.now()){
-          restoreState(base);this.localDocument=journal.document;this.localObserver=journal.observer;
+          // Service initialization mutates the engine copy; the accepted delta base
+          // must remain byte-for-byte compatible with its browser owner.
+          restoreState(structuredClone(journal.state));this.localDocument=journal.document;this.localObserver=journal.observer;
         }else restoreState(journal.state);
       }else{
         restoreState(base);

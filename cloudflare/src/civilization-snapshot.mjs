@@ -76,6 +76,21 @@ async function readFramedJson(stream, mapResident = null) {
   return state;
 }
 
+/** An accepted living journal is complete on its own. Read only the framed
+ * base header to validate its generation; historical private brains stay in
+ * storage until an explicit export/compaction streams them. */
+export async function loadSnapshotHeader(storage){
+  const saved=await readStoredSnapshot(storage);if(!saved)return null;
+  if(saved.meta.version!==2)return loadSnapshot(storage,{mapResident:f=>f.alive?f:null});
+  let buffer='',state;
+  for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
+    buffer+=text;const end=buffer.indexOf('\n');if(end===-1)continue;
+    state=JSON.parse(buffer.slice(0,end)+'}');state.flies=[];break;
+  }
+  if(!state)throw Error('Missing civilization snapshot header');
+  return {state,lastWallClockMs:Number(saved.meta.lastWallClockMs||Date.now()),savedAtMs:Number(saved.meta.savedAtMs||0),stats:{chunks:saved.meta.chunks,compressedBytes:saved.meta.compressedBytes}};
+}
+
 export async function loadSnapshot(storage, {mapResident=null}={}) {
   const saved = await readStoredSnapshot(storage);
   if (!saved) return null;

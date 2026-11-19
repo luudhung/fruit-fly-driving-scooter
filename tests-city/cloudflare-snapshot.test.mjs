@@ -135,3 +135,14 @@ test('mapped compaction upgrades legacy JSON and can create an empty or first cu
  const first=new SnapshotStorage();await saveSnapshotMapped(first,{world:{simulationAgeSeconds:0},actors:{}},3);
  assert.deepEqual((await loadSnapshot(first)).state,{simulationAgeSeconds:0,flies:[]});
 });
+
+test('cold journal boot can read just the base header without parsing historical brain records',async()=>{
+ const {loadSnapshotHeader}=await import('../cloudflare/src/civilization-snapshot.mjs');
+ const storage=new SnapshotStorage(),header={worldId:'WORLD-A',mapVersion:36,simulationAgeSeconds:100,timeScale:120};
+ // A malformed archive record deliberately proves the header reader never
+ // parses resident history. The ordinary archive loader still rejects it.
+ await storage.put('snapshot:meta',{version:2,chunks:1,lastWallClockMs:1234,savedAtMs:2345});
+ await storage.put('snapshot:chunk:0',gzipSync(JSON.stringify(header).slice(0,-1)+'\n,"flies":[\nINVALID ARCHIVE RECORD\n]}\n'));
+ const saved=await loadSnapshotHeader(storage);assert.deepEqual(saved.state,{...header,flies:[]});assert.equal(saved.lastWallClockMs,1234);assert.equal(saved.savedAtMs,2345);
+ await assert.rejects(loadSnapshot(storage));
+});
