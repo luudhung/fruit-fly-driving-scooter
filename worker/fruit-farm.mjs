@@ -5,6 +5,7 @@ import {hasCountryCommitment} from './country-commitments.mjs';
 import {provisionDutyMeal} from './duty-meals.mjs';
 const DAY=86400,FIELD='HANSDREX-FRUIT-FIELD',JOB='hansdrex-fruit-grower';
 const live=f=>f?.alive&&!f.departed;
+const essentialJobs=new Set(['doctor','hospital-central','hospital-east','clinic','riverside-clinic','school','riverside-school','police','military','transit','power','power-evening','power-night','grid-dispatch','firefighter','paramedic','pilot','pilot-evening','heli-pilot-day','heli-pilot-evening','heli-ground','heli-ground-evening']);
 const busy=f=>f.publicServiceRole||f.facilityEmployment||f.businessId||f.businessEmployeeOf||f.internationalWork||f.industrialFreightDuty||f.fireEngineDuty||f.ambulanceDuty||f.urbanTask||f.civicDuty||f.socialTask||f.cityService||f.onTrain||f.onPlane||f.privateFlight||f.taxiJobId||f.taxiPassenger||f.arrested;
 /** A public orchard employs existing people in three shifts. Each mature plant
  * yields exactly ten fruit: nine enter paid trade and one stays as seed. */
@@ -13,7 +14,7 @@ export function createFruitFarm({world,countryAccount,transfer,startJourney,move
  const data=()=>raw().fruitFarm||={version:1,employees:[],beds:[],seeds:0,harvested:0,saleFruit:0,retainedSeed:0,replanted:0,wagesPaid:0,nextRecruitAt:0,nextOrderAt:0,lastProductionAt:now()};
  const account=()=>{raw().businesses||={};return raw().businesses[FARM.accountId]||={cash:0,inventory:0,price:2.5,sector:'fruit-farming',countryId:'hansdrex',locationId:FARM.id};};
  function shift(f,clock){const h=Number(clock?.hour??now()%DAY/3600)+Number(clock?.minute||0)/60;return ((h-Number(f.preferredWorkStart||0)+24)%24)<8;}
- function available(f){return live(f)&&f.ageYears>=18&&f.ageYears<68&&countryAt(f)==='hansdrex'&&!busy(f)&&!hasCountryCommitment(f,now())&&!isWorkCommitted(f)&&f.health>40&&f.energy>15&&(!f.jobId||['farm','construction','delivery','warehouse'].includes(f.jobId));}
+ function available(f){return live(f)&&f.ageYears>=18&&f.ageYears<68&&countryAt(f)==='hansdrex'&&!busy(f)&&!hasCountryCommitment(f,now())&&!isWorkCommitted(f)&&f.health>40&&f.energy>15&&!essentialJobs.has(f.jobId)&&(!f.jobId||['farm','construction','delivery','warehouse'].includes(f.jobId)||Number(f.wage||0)<6);}
  function assign(f){const d=data();if(!available(f)||d.employees.length>=FARM.capacity||account().cash<8*6)return false;const slot=d.employees.length,previous=f.jobId;
   d.employees.push(f.id);Object.assign(f,{fruitFarmDuty:{farmId:FARM.id,joinedAt:now(),previousJob:previous},jobId:JOB,jobTitle:'fruit grower',wage:6,preferredWorkStart:(slot%3)*8,preferredWorkHours:8,fruitFarmSampleAt:now(),fruitFarmAttending:false});
   remember(f,'fruit_farm_job',{farmId:FARM.id,shiftStart:f.preferredWorkStart,wage:6});emit('fruit_farm_hire',`${f.id} joined the Hansdrex fruit cooperative.`,{flyId:f.id,farmId:FARM.id});return true;

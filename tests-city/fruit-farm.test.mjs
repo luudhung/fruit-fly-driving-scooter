@@ -27,3 +27,10 @@ test('fruit wholesales reorder before zero and name physical North and Hans buye
  const t=fixture();t.s.businesses[F.accountId].inventory=100;t.s.fruitFarm.nextOrderAt=0;t.step();
  assert.ok(t.requests.some(o=>o.product==='fruit'&&o.buyerId==='market'));assert.ok(t.requests.some(o=>o.product==='fruit'&&o.buyerId==='north-market'));assert.equal(t.s.businesses.market.inventory,0);assert.equal(t.s.businesses['north-market'].inventory,0);assert.ok(t.requests.every(o=>o.sourceLocationId===F.id&&o.quantity<=60));
 });
+
+test('the paid orchard can recruit lower-paid ordinary workers while retaining essential and better-paid jobs',()=>{
+ const t=fixture();for(const f of t.s.flies)Object.assign(f,{jobId:'office',wage:10});
+ Object.assign(t.s.flies[0],{jobId:'grocery',wage:3.1});Object.assign(t.s.flies[1],{jobId:'doctor',wage:2});Object.assign(t.s.flies[2],{jobId:'school',wage:2});
+ t.step();assert.equal(t.s.flies[0].jobId,'hansdrex-fruit-grower');assert.equal(t.s.flies[0].wage,6);assert.equal(t.s.flies[0].fruitFarmDuty.previousJob,'grocery');
+ assert.equal(t.s.flies[1].jobId,'doctor');assert.equal(t.s.flies[2].jobId,'school');assert.equal(t.s.flies[3].jobId,'office');assert.equal(t.farm.snapshot().workers,1);
+});
