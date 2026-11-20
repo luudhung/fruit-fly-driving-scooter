@@ -51,7 +51,7 @@ export function localHostCheckpointStream(state,metadata){
  const lines=[head.slice(0,-2)+'\n',',"flies":[\n',...flies.map((f,i)=>(i?',':'')+JSON.stringify(f)+'\n'),']}}\n'];
  return jsonLinesStream(lines);
 }
-export async function readLocalHostCheckpoint(stream){
+export async function readLocalHostCheckpoint(stream,onProgress=()=>{}){
  let envelope,opened=false,closed=false,buffer='';
  for await(const chunk of stream.pipeThrough(new TextDecoderStream())){
   buffer+=chunk;
@@ -59,10 +59,10 @@ export async function readLocalHostCheckpoint(stream){
   while((end=buffer.indexOf('\n'))!==-1){
    const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
    if(closed)throw Error('trailing checkpoint data');
-   if(!envelope){envelope=JSON.parse(line+'}}');envelope.state.flies=[];}
+   if(!envelope){envelope=JSON.parse(line+'}}');envelope.state.flies=[];onProgress('header',{headerBytes:line.length});}
    else if(!opened){if(line!==',"flies":[')throw Error('invalid resident frame');opened=true;}
    else if(line===']}}')closed=true;
-   else envelope.state.flies.push(JSON.parse(envelope.state.flies.length?line.slice(1):line));
+   else {envelope.state.flies.push(JSON.parse(envelope.state.flies.length?line.slice(1):line));if(envelope.state.flies.length%100===0)onProgress('actors',{actors:envelope.state.flies.length});}
   }
  }
  if(!closed||buffer)throw Error('incomplete local checkpoint');

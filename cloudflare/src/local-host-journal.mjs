@@ -31,7 +31,7 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
  const parts=[];
  for(const key of meta.overlayKeys){const b=await storage.get(key);if(!b)throw Error('missing local save overlay');parts.push(b);}
  onStage('overlay read',{compressedBytes:parts.reduce((n,p)=>n+p.byteLength,0)});
- const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')));
+ const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage);
  onStage('overlay parsed',{actors:overlay.state.flies.length});
  let document=projectLocalDocument(overlay.state),observer=overlay.observer||null,sequence=meta.overlaySequence;
  for(const entry of meta.entries){

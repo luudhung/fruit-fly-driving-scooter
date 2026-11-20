@@ -66,7 +66,7 @@ export class CivilizationWorld extends DurableObject {
       const storedKnown=new Set(),storedAlive=new Set();
       const mapResident=f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;};
       const hasJournal=Boolean(await this.ctx.storage.get('local-save:meta'));
-      let saved=hasJournal?await loadSnapshotHeader(this.ctx.storage):await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});
+      let saved=hasJournal?await loadSnapshotHeader(this.ctx.storage,{identityOnly:true}):await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});
       bootStage('snapshot decoded',{living:saved?.state?.flies?.length||0,compressedBytes:saved?.stats?.compressedBytes||0});
       this.archiveDormant=true;
       if(saved&&!hasJournal&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
