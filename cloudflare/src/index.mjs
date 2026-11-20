@@ -252,14 +252,17 @@ export class CivilizationWorld extends DurableObject {
   async alarm() {
     return this.withLock(async () => {
       await this.ready;
-      this.nextAlarmAtMs=Date.now()+this.alarmIntervalMs();
-      await this.ctx.storage.setAlarm(this.nextAlarmAtMs);
       try {
         if(await this.compactHistoryIfDue())return;
         await this.advanceTo(Date.now(), "alarm");
         await this.persistIfDue(false);
       } catch (error) {
         console.error(JSON.stringify({event: "city_alarm_failed", error: String(error)}));
+      } finally {
+        // A slow bulk step must not leave its next alarm already overdue. Give
+        // observers/checkpoints room between batches instead of a hot retry loop.
+        this.nextAlarmAtMs=Date.now()+this.alarmIntervalMs();
+        await this.ctx.storage.setAlarm(this.nextAlarmAtMs);
       }
     });
   }

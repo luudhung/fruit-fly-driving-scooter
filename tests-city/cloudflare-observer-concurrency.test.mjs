@@ -61,3 +61,15 @@ test('preflight never waits for an active simulation writer',async()=>{
  const t=fixture();await t.world.ready;let unlock;const block=new Promise(resolve=>{unlock=resolve;});const write=t.world.withLock(()=>block);
  try{const response=await t.world.fetch(new Request('https://test/api/civilization/state',{method:'OPTIONS'}));assert.equal(response.status,204);}finally{unlock();await write;}
 });
+
+test('the next background alarm is scheduled after its work, including archive-only and failed batches',async()=>{
+ for(const mode of ['normal','archive','failed']){
+  const t=fixture({recentCheckpoint:true});await t.world.ready;const order=[];
+  t.world.ctx.storage.setAlarm=async()=>{order.push('scheduled');};
+  t.world.compactHistoryIfDue=async()=>{order.push('archive');return mode==='archive';};
+  t.world.advanceTo=async()=>{order.push('simulation');if(mode==='failed')throw Error('isolated recoverable batch error');};
+  t.world.persistIfDue=async()=>{order.push('saved');};
+  await t.world.alarm();
+  assert.deepEqual(order,mode==='archive'?['archive','scheduled']:mode==='failed'?['archive','simulation','scheduled']:['archive','simulation','saved','scheduled']);
+ }
+});
