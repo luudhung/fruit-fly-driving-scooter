@@ -82,7 +82,7 @@ export class CivilizationWorld extends DurableObject {
       // Reconstruct against the persisted schema BEFORE the engine migrates maps.
       // A new map release must preserve every already-acknowledged browser save.
       bootStage('reading save journal');
-      const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
+      const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0,(stage,extra)=>bootStage('journal '+stage,extra));
       if(hasJournal&&(!journal||journal.stale)){
         saved=await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});if(!saved||!snapshotLooksUsable(saved.state))throw Error('Invalid fallback civilization snapshot');
         base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
