@@ -4722,6 +4722,7 @@ function compactFly(f) {
 }
 
 function motionPlan(f,compact=false){
+ if(f.airportMotion&&!f.onPlane&&!f.onTrain&&state.simulationAgeSeconds<f.airportMotion.points.at(-1)?.at)return f.airportMotion;
  if(!f.traveling||f.onTrain||f.onPlane||f.heliPassenger||f.onPrivateHelicopter||f.taxiPassenger)return null;
  const current=f.routeWaypoints?.[f.routeIndex];
  const points=[{x:current?.x??f.targetX,y:current?.y??f.y,z:current?.z??f.targetZ}];

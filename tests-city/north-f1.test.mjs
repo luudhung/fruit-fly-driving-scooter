@@ -260,3 +260,12 @@ test('all seven North City grandstands face a clear track and each painted pit b
  }
  assert.ok(pedestrianRoute(NORTH_F1_CIRCUIT.spectator,NORTH_F1_CIRCUIT.paddock).length>=2);
 });
+
+test('F1 visitors publish the timed interior walk instead of freezing every immigration segment',async()=>{
+ const {visitorArrivalPath}=await import('../worker/visitor-aviation.mjs');
+ const {system,event,step}=fixture(),flight=event.charters.find(f=>f.airportId==='city'),guest=flight.guests[0];
+ event.charters=[flight];step(flight.parkedAt);
+ const path=visitorArrivalPath(flight,0),scan=path.find(p=>p.stage==='scanning');step(scan.at+1);
+ const passenger=system.snapshot().foreignVisitors.find(f=>f.id===guest.id);
+ assert.ok(passenger);assert.equal(passenger.indoors,true,JSON.stringify({phase:passenger.visitorPhase,onPlane:passenger.onPlane,action:passenger.action}));assert.equal(passenger.onPlane,false);assert.equal(passenger.motion.timed,true);assert.ok(!passenger.motion.blocked);assert.ok(passenger.motion.points.every(p=>Number.isFinite(p.at)));assert.equal(guest.immigrationClearedAt,undefined);
+});

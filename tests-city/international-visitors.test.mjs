@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createInternationalLife} from '../worker/international-life.mjs';
 import {createCityVisitors} from '../worker/city-visitors.mjs';
-import {MIN_VISITOR_PASSENGERS,visitorAircraftPose,visitorArrivalPath} from '../worker/visitor-aviation.mjs';
+import {MIN_VISITOR_PASSENGERS,visitorAircraftPose,visitorArrivalPath,visitorArrivalCompleteAt} from '../worker/visitor-aviation.mjs';
 import {COUNTRY_IDS,countryAt,NORTH_AIRPORT} from '../worker/country-map.mjs';
 
 function fixture(){let s={simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{},treasury:{cash:10000},centralBank:{priceLevel:1},weather:{condition:'clear',precipitation:0,wind:0},totalTransactions:0};let countries,visitors;const build=()=>{countries=createInternationalLife({world:()=>s,redistribute:false});countries.init();visitors=createCityVisitors({world:()=>s,aviationAdmission:countries.aviationAdmission,interceptMovement:countries.interceptMovement,createVisitor:(_n,i)=>({ageYears:30,brain:{id:`EXTERNAL-${i}`},traits:{thrift:1}})});visitors.init();s.cityVisitors.nextArrivalAt=1e15;};build();return{get s(){return s;},get countries(){return countries;},get visitors(){return visitors;},step(dt=120){s.simulationAgeSeconds+=dt;visitors.tick(dt,{hour:s.simulationAgeSeconds%86400/3600});},restore(){s=structuredClone(s);build();}};}
@@ -9,7 +9,7 @@ function fixture(){let s={simulationAgeSeconds:0,timeScale:120,flies:[],business
 test('North receives ten actual reserved passengers from a distant aircraft, not city spawning; immigration charges once',()=>{
  const t=fixture();assert.ok(t.visitors.queueAircraft(MIN_VISITOR_PASSENGERS,'north'));const flight=t.s.cityVisitors.airportTraffic.flights[0],ids=flight.arrivalPassengerIds.slice();assert.equal(ids.length,10);assert.ok(t.s.cityVisitors.visitors.every(v=>v.onPlane&&v.citizenshipCountryId==='outside'));assert.ok(visitorAircraftPose(flight.inboundAt,flight).y>200);
  t.s.simulationAgeSeconds=flight.parkedAt;t.step();assert.equal(t.countries.snapshot().visaRevenue,0);assert.equal(t.visitors.snapshot().totalArrivals,0);
- t.s.simulationAgeSeconds=visitorArrivalPath(flight,9,120).at(-1).at;t.step();assert.equal(t.visitors.snapshot().totalArrivals,10);assert.equal(t.countries.snapshot().visaRevenue,500);assert.ok(t.s.cityVisitors.visitors.every(v=>v.x===NORTH_AIRPORT.gate.x&&v.z===NORTH_AIRPORT.gate.z&&v.travelGoals.includes('hansdrex')&&v.travelGoals.includes('north-city')));
+ t.s.simulationAgeSeconds=visitorArrivalCompleteAt(flight,10,120);t.step();assert.equal(t.visitors.snapshot().totalArrivals,10);assert.equal(t.countries.snapshot().visaRevenue,500);assert.ok(t.s.cityVisitors.visitors.every(v=>v.x===NORTH_AIRPORT.gate.x&&v.z===NORTH_AIRPORT.gate.z&&v.travelGoals.includes('hansdrex')&&v.travelGoals.includes('north-city')));
  const cash=t.countries.snapshot().visaRevenue,identity=t.s.cityVisitors.visitors.map(v=>[v.id,v.brain.id,v.arrivalFlightId]);t.restore();t.step();assert.equal(t.countries.snapshot().visaRevenue,cash);assert.deepEqual(t.s.cityVisitors.visitors.map(v=>[v.id,v.brain.id,v.arrivalFlightId]),identity);assert.deepEqual(t.s.cityVisitors.visitors.filter(v=>v.arrivalFlightId===flight.id).map(v=>v.id),ids);
  assert.equal(t.s.cityVisitors.airportTraffic.flights.some(f=>f.id===flight.id),false,'completed empty aircraft metadata is released after all ten guests clear immigration');
 });

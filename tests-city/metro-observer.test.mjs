@@ -37,3 +37,16 @@ test('compact observer skips unused traces, keeps the announced route and preser
  assert.deepEqual(c.motion.points,[{x:23.45,y:1.1,z:1.5}]);
  assert.ok(JSON.stringify(compact).length<JSON.stringify(full).length);
 });
+
+test('compact airport observations keep absolute walking and scan times even for an indoor passenger with no street journey',async()=>{
+ const {visitorStands,visitorArrivalPath,visitorArrivalMotion}=await import('../worker/visitor-aviation.mjs');
+ const s=freshState(),f=s.flies.find(f=>f.alive),stand=visitorStands('north')[0],flight={airportId:'north',standId:stand.id,arrivalStand:stand,parkedAt:1020};
+ const path=visitorArrivalPath(flight,0),scan=path.find(p=>p.stage==='scanning');s.simulationAgeSeconds=scan.at+120;
+ const motion=visitorArrivalMotion(s.simulationAgeSeconds,flight,0);
+ Object.assign(f,{x:scan.x,y:scan.y,z:scan.z,airportMotion:motion,traveling:false,indoors:true,onPlane:false,onTrain:false,heliPassenger:false,onPrivateHelicopter:false,taxiPassenger:false});
+ const full=getState({observer:true}),compact=getState({observer:true,compactObserver:true});
+ for(const snapshot of [full,compact]){
+  const body=snapshot.flies.find(r=>r.id===f.id);assert.equal(body.indoors,true);assert.equal(body.motion.timed,true);assert.equal(body.motion.mode,'walk');assert.deepEqual(body.motion.points,motion.points);assert.ok(body.motion.points.every(p=>Number.isFinite(p.at)));
+ }
+ s.simulationAgeSeconds=path.at(-1).at+1;assert.equal(getState({observer:true}).flies.find(r=>r.id===f.id).motion,null,'an expired itinerary cannot animate a later indoor activity');
+});

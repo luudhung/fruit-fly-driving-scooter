@@ -10,7 +10,7 @@ import {createF1Charters} from '../worker/north-f1-charters.mjs';
 import {NORTH_F1_CIRCUIT} from '../worker/north-f1-map.mjs';
 import {createCityVisitors} from '../worker/city-visitors.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
-import {MIN_VISITOR_PASSENGERS,visitorArrivalPath,visitorAircraftPose,visitorStands} from '../worker/visitor-aviation.mjs';
+import {MIN_VISITOR_PASSENGERS,visitorArrivalPath,visitorArrivalCompleteAt,visitorAircraftPose,visitorStands} from '../worker/visitor-aviation.mjs';
 import {showResidentBody} from '../src/actor-transport.ts';
 
 function internationalAirport(){
@@ -50,11 +50,11 @@ test('ten separately identified foreign passengers pay 50 H$ once only after wal
  assert.equal(t.admissions.length,0);
  t.tick(first.find(point=>point.phase==='immigration').at+1);
  assert.equal(people[0].indoors,true);assert.equal(t.admissions.length,0,'the waiting period at immigration is real');
- t.tick(first.at(-1).at-1);assert.equal(t.admissions.length,0);
+ t.tick(first.at(-1).at-1);assert.ok(!t.admissions.some(a=>a.id===people[0].id),'this passenger cannot pay before completing their own scan and walk');
  const identities=people.map(v=>[v.id,v.brain.id]);
  t.restore();flight=t.state.cityVisitors.airportTraffic.flights[0];
- t.tick(last.at(-1).at+1);
- assert.equal(t.admissions.length,10);assert.ok(t.admissions.every(entry=>!entry.onPlane&&entry.x===AIRPORT.gate.x&&entry.z===AIRPORT.gate.z));
+ t.tick(visitorArrivalCompleteAt(flight,10)+1);
+ assert.equal(t.admissions.length,10);assert.ok(t.admissions.every(entry=>entry.at>=visitorArrivalPath(flight,flight.arrivalPassengerIds.indexOf(entry.id)).at(-1).at));assert.ok(t.admissions.every(entry=>!entry.onPlane&&entry.x===AIRPORT.gate.x&&entry.z===AIRPORT.gate.z));
  assert.equal(t.countries.countryAccount('hansdrex').cash,treasury+500);
  assert.equal(t.state.internationalLife.visaRevenue,500);assert.equal(t.state.internationalLife.entries,10);
  assert.equal(t.state.businesses['hansdrex-airline'].cash,2000);
@@ -79,7 +79,7 @@ test('both Hansdrex and North expose all ten real disembarking passengers to the
    seen.add(passenger.id);
   }
   assert.equal(seen.size,10);assert.equal(t.admissions.length,0);
-  t.tick(visitorArrivalPath(flight,9).at(-1).at+1);assert.equal(t.admissions.length,10);
+  t.tick(visitorArrivalCompleteAt(flight,10)+1);assert.equal(t.admissions.length,10);
   assert.ok(t.admissions.every(a=>a.request.airportId===airport));
  }
 });
@@ -140,7 +140,7 @@ test('ten returning passengers board real seats and pay 200 H$ each way without 
  const t=internationalAirport(),treasury=t.countries.countryAccount('hansdrex').cash;
  assert.equal(t.visitors.queueAircraft(10,'city'),true);
  const inbound=t.state.cityVisitors.airportTraffic.flights[0],ids=[...inbound.arrivalPassengerIds];
- t.tick(visitorArrivalPath(inbound,9,120).at(-1).at+1);
+ t.tick(visitorArrivalCompleteAt(inbound,10,120)+1);
  assert.equal(t.state.businesses['hansdrex-airline'].cash,2000);assert.equal(t.countries.countryAccount('hansdrex').cash,treasury+500);
  for(const person of t.state.cityVisitors.visitors){person.departAt=t.state.simulationAgeSeconds;person.travelGoalsCompleted=[...person.travelGoals];}
  let returning;

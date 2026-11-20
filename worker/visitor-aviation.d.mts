@@ -1,6 +1,6 @@
 export type VisitorAircraft = {
  id:string; standId:string; sector:string; direction:number; inboundAt:number; parkedAt:number;airportId?:string;arrivalStand?:{id:string;x:number;z:number};
- outboundAt:number|null; exitAt:number|null; boardAt?:number|null; arrivingGuests?:number; passengerIds?:string[]; hold?:{x:number;y:number;z:number;at:number};
+ outboundAt:number|null; exitAt:number|null; boardAt?:number|null; boardingStartedAt?:number; arrivingGuests?:number; passengerIds?:string[]; hold?:{x:number;y:number;z:number;at:number};
  kind?:'passenger'|'ferry'|'positioning'; runwayId?:string; aircraftGone?:boolean; standReleasedAt?:number; expectedStandReleaseAt?:number; arrivalPassengerIds?:string[]; arrivalCompleteAt?:number; landedAt?:number; disembarkAt?:number;
 };
 export type VisitorAircraftPose = {x:number;y:number;z:number;heading:number;phase:string};
@@ -9,6 +9,7 @@ export const VISITOR_TAXIWAY_Z:number;
 export function visitorStands(airportId?:string):Array<{id:string;x:number;z:number}>;
 export function visitorAirport(flight:VisitorAircraft):import('./country-map.mjs').CountryAirport;
 export function visitorRunwaySlot(earliest:number,duration:number,flights:VisitorAircraft[],airportId?:string,runwayId?:string):number;
+export const INBOUND_SECONDS:number;
 export const MIN_VISITOR_PASSENGERS:number;
 export const VISITOR_ARRIVAL_STAGGER:number;
 export type VisitorArrivalPoint = {at:number;x:number;y:number;z:number;phase:string;kioskId?:string;queueIndex?:number;stage?:string};
@@ -27,3 +28,8 @@ export function resolveVisitorTaxiStand(flight:VisitorAircraft,flights:VisitorAi
 
 export function visitorArrivalCompleteAt(flight:VisitorAircraft,count?:number,timeScale?:number):number;
 export function visitorStairsClearAt(flight:VisitorAircraft,count?:number,timeScale?:number):number;
+
+export type AirportArrivalMotion={at:number;speed:number;mode:'walk';timed:true;points:Array<{x:number;y:number;z:number;at:number}>};
+export function visitorArrivalMotion(now:number,flight:VisitorAircraft,index?:number,timeScale?:number):AirportArrivalMotion|null;
+
+export function visitorBoardingMotion(now:number,flight:VisitorAircraft,index?:number,timeScale?:number):AirportArrivalMotion|null;

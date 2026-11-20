@@ -63,17 +63,27 @@ export function visitorArrivalPath(flight,index=0,timeScale=120) {
   add(gate.queue.x,1.1,gate.queue.z,'immigration',0,{...detail,stage:'queue'});
   // Stairs stagger alone is shorter than a scan. Later people in a lane wait
   // for the preceding scan, rather than occupying the same kiosk together.
-  const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),walk=g=>distance(g.entry,g.queue)+distance(g.queue,g)+distance(g,g.exit)+distance(g.exit,airport.gate);
-  const cohort=Math.max(MIN_VISITOR_PASSENGERS,index+1),longest=Math.max(...Array.from({length:cohort},(_,i)=>walk(passengerImmigrationGate(airport.id,i))));
-  const wait=gate.queueIndex*Math.max(0,gate.serviceSeconds-gate.gateCount*VISITOR_ARRIVAL_STAGGER)+(longest-walk(gate))/speed;
-  if(wait)add(gate.queue.x,1.1,gate.queue.z,'immigration',wait,{...detail,stage:'queue'});
+  const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
+  const first=gate.queueIndex?passengerImmigrationGate(airport.id,index%gate.gateCount):gate;
+  const entryAt=path.at(-2).at,queueAt=path.at(-1).at;
+  const firstScan=entryAt-gate.queueIndex*gate.gateCount*VISITOR_ARRIVAL_STAGGER+(distance(first.entry,first.queue)+distance(first.queue,first))/speed;
+  const wait=Math.max(0,firstScan+gate.queueIndex*gate.serviceSeconds-queueAt-distance(gate.queue,gate)/speed);
+  if(wait>1e-6)add(gate.queue.x,1.1,gate.queue.z,'immigration',wait,{...detail,stage:'queue'});
   add(gate.x,1.1,gate.z,'immigration',0,{...detail,stage:'scanning'});
   add(gate.x,1.1,gate.z,'immigration',gate.serviceSeconds,{...detail,stage:'cleared'});
   add(gate.exit.x,1.1,gate.exit.z,'immigration',0,{...detail,stage:'exit'});
+  // Rejoin the clear centre aisle before crossing the narrow landside door.
+  const t=airport.terminal;
+  add(t.x+(gate.axis==='x'?t.w/2-3:0),1.1,t.z+(gate.axis==='z'?t.d/2-3:0),'immigration',0,{stage:'concourse'});
   add(airport.gate.x,1.1,airport.gate.z,'complete');return path;
  };
  add(stand.x-1.4,3.4,stand.z+4,'disembarking');
  add(stand.x-6,1.1,stand.z+4,'disembarking');
+ if(flight.airportId==='island'){
+  const t=visitorAirport(flight).terminal,front=t.z-t.d/2-2;
+  add(stand.x-6,1.1,front,'apron');add(t.x,1.1,front,'apron');
+  return immigration();
+ }
  if(flight.airportId&&flight.airportId!=='city'){
   const airport=visitorAirport(flight);
   add(airport.terminal.x-airport.terminal.w/2-2,1.1,stand.z+4,'apron');
@@ -90,6 +100,22 @@ export function visitorArrivalCompleteAt(flight,count=MIN_VISITOR_PASSENGERS,tim
 }
 export function visitorStairsClearAt(flight,count=MIN_VISITOR_PASSENGERS,timeScale=120){
  return Math.max(Number(flight.parkedAt)||0,...Array.from({length:Math.max(0,Math.floor(count))},(_,index)=>visitorArrivalPath(flight,index,timeScale)[1]?.at||0));
+}
+
+/** A finite, timed walking itinerary lets viewers animate between snapshots,
+ * including exact queue/scan pauses, without advancing admission or payments. */
+export function visitorArrivalMotion(now,flight,index=0,timeScale=120){
+ const path=visitorArrivalPath(flight,index,timeScale);
+ if(!path.length||now<path[0].at||now>=path.at(-1).at)return null;
+ return {at:now,speed:1.8,mode:'walk',timed:true,points:path.map(({x,y,z,at})=>({x,y,z,at}))};
+}
+
+export function visitorBoardingMotion(now,flight,index=0,timeScale=120){
+ if(!Number.isFinite(flight.boardingStartedAt))return null;
+ const path=visitorArrivalPath(flight,index,timeScale).toReversed();if(!path.length)return null;
+ const end=path[0].at,points=path.map(({x,y,z,at})=>({x,y,z,at:flight.boardingStartedAt+end-at}));
+ if(now>=points.at(-1).at)return null;
+ return {at:now,speed:1.8,mode:'walk',timed:true,points};
 }
 
 export function visitorArrivalPose(now,flight,index=0,timeScale=120) {

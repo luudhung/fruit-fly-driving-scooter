@@ -1566,7 +1566,7 @@ function syncFlyMeshes(flies: FlyState[]) {
     }
     visual.target.set(fly.x, fly.y, fly.z);
     if(fly.currentLocationId==="rooftop"&&!fly.traveling){visual.target.set(SKY_LOUNGE.x-4+seeded(Number(fly.id.replace(/\D/g,"")))*8,SKY_LOUNGE.y,SKY_LOUNGE.z+3.5);}
-    visual.stationary=Boolean(fly.sleeping||!fly.traveling);
+    visual.stationary=Boolean(fly.sleeping||!fly.traveling&&!fly.motion?.timed);
     visual.hasMotion=Boolean(fly.motion&&!visual.stationary);
     if(fly.motion)visual.motion.accept(fly,fly.motion);
     const trace=(fly.movementTrace||[]).filter(p=>p.t>visual!.lastTraceTime);
@@ -1916,7 +1916,8 @@ function animate(now = performance.now()) {
   for (const [id,visual] of flyVisuals) {
     if(visual.hasMotion){visual.motion.advance(dt,gameNow,snapshot?.timeScale||120);visual.target.set(visual.motion.x,visual.motion.y,visual.motion.z);visual.route=[];}
     const next=visual.route[0]||visual.target;
-    visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
+    if(visual.hasMotion&&visual.motion.timed)visual.current.copy(next);
+    else visual.current.lerp(next,Math.min(1,dt*(visual.route.length>3?10:6)));
     if(visual.route.length&&visual.current.distanceTo(next)<.35)visual.route.shift();
     const vessel=latestFlyStates.get(id)?.militaryShipId&&militaryCrewShips.get(id);
     if(vessel){const aboard=militaryCrewPose(gameNow,vessel,id);visual.current.set(aboard.x,aboard.y,aboard.z);visual.target.copy(visual.current);}

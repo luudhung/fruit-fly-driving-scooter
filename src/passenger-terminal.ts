@@ -32,9 +32,10 @@ export function createPassengerTerminal(airport:Airport,makeSign:Sign,{name,mode
  }
  // Counters, seating and vertical fins add detail without closing the centre aisle.
  for(const side of [-1,1]){
-  box(Math.min(9,width*.2),1.05,1.3,side*width*.27,.77,0,stone);
-  box(Math.min(9,width*.2)+.1,.09,1.4,side*width*.27,1.34,0,metal);
-  for(const end of [-1,1])box(5,.5,1,side*width*.3,.58,end*depth*.22,glass);
+  const edge=side*(width/2-3);
+  box(3,1.05,1.3,edge,.77,0,stone);
+  box(3.1,.09,1.4,edge,1.34,0,metal);
+  for(const end of [-1,1])box(5,.5,1,edge,.58,end*depth*.22,glass);
  }
  for(let x=-width/2+3;x<width/2-2;x+=6)if(Math.abs(x)>4)for(const end of [-1,1])box(.14,height-.8,.42,x,(height-.8)/2,end*(depth/2-.42),metal);
  sign(name.toUpperCase(),0,height+1.8,0,Math.min(55,width),1.6);

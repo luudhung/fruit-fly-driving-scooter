@@ -6,7 +6,7 @@ export function airportImmigrationLayout(airportId='city'){
  const id=COUNTRY_AIRPORT_ALIASES[airportId]||airportId,airport=COUNTRY_AIRPORTS.find(p=>p.id===id);
  if(!airport)return null;
  const t=airport.terminal,axis=id==='north'?'x':'z',count=id==='city'?8:id==='north'?4:2,spacing=id==='city'?6:id==='north'?12:10;
- const entry=id==='city'?{x:t.x,z:t.z-t.d/2+1}:id==='north'?{x:t.x-t.w/2+2,z:t.z}:{x:t.x-t.w/2+2,z:t.z};
+ const entry=axis==='z'?{x:t.x,z:t.z-t.d/2+1}:{x:t.x-t.w/2+2,z:t.z};
  const gates=Array.from({length:count},(_,index)=>{
   const across=(index-(count-1)/2)*spacing,x=t.x+(axis==='z'?across:0),z=t.z+(axis==='x'?across:0),lead=id==='island'?4:5;
   return {id:`${id.toUpperCase()}-EGATE-${index+1}`,airportId:id,index,x,z,axis,width:1.8,depth:2.4,

@@ -3,7 +3,7 @@ import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraft,isScheduledIslandFlight} from './aviation.mjs';
-import {visitorArrivalPose,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
+import {visitorArrivalPose,visitorArrivalMotion,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const SPORTS_STOP_SECONDS=3600;
 const STUDY_NIGHTS=2,STUDY_TUITION=15,STUDY_COOLDOWN=18*DAY;
@@ -128,8 +128,9 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    const returning=t.phase==='inbound'||t.phase==='return-arrival',flight=returning?t.inbound:t.outbound;
    if(now()<flight.arrival){const pose=flightPose(now(),flight);Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,onPlane:true,indoors:false,traveling:false,transitMode:'airplane',action:`flying ${flight.from} to ${flight.to}`});return true;}
    const airport=airportById(flight.to),arrival=arrivalFlight(flight),pose=visitorArrivalPose(now(),arrival,returning?t.inboundIndex||0:t.outboundIndex||0,raw().timeScale||120);t.phase=returning?'return-arrival':'arrival';
-   Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,onPlane:pose.onPlane,indoors:pose.indoors,traveling:false,transitMode:pose.onPlane?'airplane':'walk',action:'walking from the aircraft through immigration'});
+   Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,onPlane:pose.onPlane,indoors:pose.indoors,traveling:false,airportMotion:visitorArrivalMotion(now(),arrival,returning?t.inboundIndex||0:t.outboundIndex||0,raw().timeScale||120),transitMode:pose.onPlane?'airplane':'walk',action:'walking from the aircraft through immigration'});
    if(pose.phase!=='complete')return true;
+   f.airportMotion=null;
    const admitted=aviationAdmission?.(f,{airportId:airport.id,flightId:flight.id,toCountryId:airport.countryId});if(admitted&&!admitted.allowed){f.x=airport.terminal.x;f.z=airport.terminal.z;f.indoors=true;f.action='waiting for lawful airport admission';return true;}
    Object.assign(f,{x:airport.gate.x,y:1.1,z:airport.gate.z,onPlane:false,indoors:false,currentLocationId:airport.locationId,targetLocationId:airport.locationId,routeWaypoints:[],routeIndex:0});
    if(returning){releaseRoom(f,t);f.countryAirTrip=null;f.lastCountryFlightAt=now();data().completedTrips++;if(t.studySchoolId){

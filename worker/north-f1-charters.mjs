@@ -5,7 +5,7 @@ import {BORDER_CHECKPOINTS,COUNTRY_IDS,countryAt} from './country-map.mjs';
 import {airportById} from './aviation.mjs';
 import {chargeHansdrexFare,HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_AIRPORT_FOOTBRIDGE} from './north-f1-map.mjs';
-import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalCompleteAt,visitorStairsClearAt,visitorArrivalPose,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand,VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand} from './visitor-aviation.mjs';
+import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalCompleteAt,visitorStairsClearAt,visitorArrivalPose,visitorArrivalMotion,visitorBoardingMotion,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand,VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand} from './visitor-aviation.mjs';
 
 const DAY=86400,HOUR=3600;
 const HANS=COUNTRY_IDS.hansdrex,NORTH=COUNTRY_IDS.north;
@@ -342,7 +342,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
       action:pose.phase==='inbound'?'flying to the Grand Prix':pose.phase==='disembarking'?'walking down the aircraft stairs':pose.phase==='immigration'?'clearing airport immigration':'walking across the airport apron'});
      const arrivalPath=visitorArrivalPath(flight,index,scale());
      f.terminalAt=arrivalPath.at(-1).at;
-     f.motion=!pose.onPlane&&pose.phase!=='complete'?{at:now(),speed:1.8,mode:'walk',blocked:pose.phase==='immigration',points:arrivalPath.filter(p=>p.at>now()).slice(0,8).map(p=>({x:p.x,y:p.y,z:p.z}))}:null;
+     f.motion=visitorArrivalMotion(now(),flight,index,scale());
      if(pose.phase!=='complete')continue;
     }
     visit(e,f,flight);
@@ -372,9 +372,9 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     if(!['airport-ready','boarding','return-flight'].includes(f.phase))continue;
     const pose=boardingPose(plane,index);if(!pose)continue;
     if(pose.onPlane&&!f.legacyAirlineContract&&!chargeHansdrexFare(world(),f,'outbound',{reference:plane.id})){
-     f.phase='stranded';f.onPlane=false;f.action='waiting at the terminal: return ticket funds unavailable';continue;
+     f.phase='stranded';f.onPlane=false;f.motion=null;f.action='waiting at the terminal: return ticket funds unavailable';continue;
     }
-    Object.assign(f,pose,{indoors:pose.onPlane,traveling:false,action:pose.onPlane?'flying home with Hansdrex Airline':'walking through the terminal to board Hansdrex Airline'});
+    Object.assign(f,pose,{indoors:pose.onPlane,traveling:false,motion:pose.onPlane?null:visitorBoardingMotion(now(),plane,index,scale()),action:pose.onPlane?'flying home with Hansdrex Airline':'walking through the terminal to board Hansdrex Airline'});
     f.phase=pose.onPlane?'return-flight':'boarding';
     if(pose.onPlane&&!plane.passengerIds.includes(f.id)){
      plane.passengerIds.push(f.id);

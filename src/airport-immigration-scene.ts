@@ -22,7 +22,7 @@ export function createAirportImmigrationScene(make?:(text:string,w:number,h:numb
     box(side*.8,1.28,-.62,.26,.36,.36,screen);
     box(side*.8,1.49,-.62,.24,.06,.34,indicator);
    }
-   box(0,.85,.35,1.34,.06,.12,indicator);box(0,.03,0,1.9,.06,2.4,frame);
+   box(0,2.1,.35,1.34,.06,.12,indicator);box(0,.03,0,1.9,.06,2.4,frame);
    root.add(station);count++;
   }
   if(make){const sign=make('AUTOMATED IMMIGRATION · VISA H$ 50',Math.min(layout.terminal.w-2,35),1.1);sign.position.set(layout.terminal.x,floor+3.6,layout.terminal.z);root.add(sign);}

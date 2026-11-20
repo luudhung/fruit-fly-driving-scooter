@@ -75,10 +75,8 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  for(const floor of createAirportGroundLayout()){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(floor.w,floor.d),groundMaterials[floor.material]);mesh.rotation.x=-Math.PI/2;mesh.position.set(floor.x,floor.topY,floor.z);g.add(mesh);}
  for(const [index,strip]of AIRPORT.runways.entries())runway(strip,index===0?'09L  HANSDREX CITY AIRPORT  27R':'09R  HANSDREX CITY AIRPORT  27L');
  for(const t of [AIRPORT.terminal,ISLAND.terminal]){
-  if(t===AIRPORT.terminal){g.add(createPassengerTerminal(AIRPORT,make,{name:'Hansdrex International · HCA',modern:true,height:10}));continue;}
-  box(g,t.w,6,t.d,t.x,3,t.z,glass);box(g,t.w+4,.8,t.d+5,t.x,6.4,t.z,stone);
-  for(let i=-2;i<=2;i++)box(g,.5,6,.6,t.x+i*t.w/5,3,t.z+t.d/2+.4,metal);
-  box(g,t.w+8,.5,8,t.x,4.7,t.z+t.d/2+3,metal);
+  const city=t===AIRPORT.terminal;
+  g.add(createPassengerTerminal(city?AIRPORT:ISLAND,make,{name:city?'Hansdrex International · HCA':'Hawaii Island Airport',modern:city,height:city?10:6}));
  }
  sign(g,make,'HCA · HANSDREX CITY AIRPORT',-180,16,-390,66,2.3);
  sign(g,make,'HANSDREX AIRLINE · DEPARTURES & ARRIVALS',-180,10,-376,54,1.5);
