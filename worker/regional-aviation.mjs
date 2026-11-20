@@ -1,7 +1,8 @@
+import {createIslandAirCargo} from './island-air-cargo.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
-import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraft} from './aviation.mjs';
+import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraft,isScheduledIslandFlight} from './aviation.mjs';
 import {visitorArrivalPose,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const SPORTS_STOP_SECONDS=3600;
@@ -39,8 +40,9 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   const route=regionalFlightPath(flight)||[],countries=[...new Set(route.map(p=>countryAt({x:p[0],z:p[2]})))];
   return !requestAirClearance||requestAirClearance({flightId:flight.id,operatorCountryId,fromAirportId:flight.from,toAirportId:flight.to,countries,kind:'commercial'}).allowed;
  }
+ const cargo=createIslandAirCargo({world,emit,mayDepart:flight=>weatherDanger()<=.3&&clearLeg(flight,COUNTRY_IDS.hansdrex)});
  function hotels(){raw().cityVisitors||={visitors:[],hotels:{}};raw().cityVisitors.hotels||={};return raw().cityVisitors.hotels;}
- function init(){data();for(const id of ['regional-air','regional-flight-escrow'])account(id);return data();}
+ function init(){data();cargo.init();for(const id of ['regional-air','regional-flight-escrow'])account(id);return data();}
  function availableSeat(flight,except){return occupancy(flight)-(except?.countryAirTrip&&[except.countryAirTrip.outbound.id,except.countryAirTrip.inbound.id].includes(flight.id)?1:0)<AVIATION.seats;}
  function book(f,toId,{staySeconds=DAY,hotelId,studySchoolId,race=false,visitAirportId=null}={}){
   init();const from=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f)),to=airportById(toId);
@@ -193,9 +195,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    if(!trip||!f.alive)continue;
    for(const leg of [trip.outbound,trip.inbound]){
     if(!leg||at<leg.departure-300||at>leg.arrival+900)continue;
-    const onHourlySchedule=leg.id===`${leg.from}-${leg.departure}`&&(
-     leg.from==='city'&&leg.departure%3600===0||leg.from==='island'&&leg.departure%3600===1800);
-    if(onHourlySchedule&&at>=leg.departure+1800)continue;
+    if(isScheduledIslandFlight(leg)&&leg.id!==shuttle.id)continue;
     let record=manifests.get(leg.id);
     if(!record){
      record=manifest(leg,airportById(leg.from).countryId,flightPose(at,leg));
@@ -206,9 +206,9 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   }
   const airports=COUNTRY_AIRPORTS.map(port=>({id:port.id,countryId:port.countryId,
    nextFlights:COUNTRY_AIRPORTS.map(to=>nextRegionalFlight(at,port.id,to.id,0)).filter(Boolean)}));
-  return {...data(),seats:AVIATION.seats,flights:[...manifests.values()].slice(0,12),airports};
+  return {...data(),cargo:cargo.snapshot(),seats:AVIATION.seats,flights:[...manifests.values()].slice(0,12),airports};
  }
- function tick(){init();for(const f of people())if(f.countryAirTrip&&!f.alive||f.kind==='visitor'&&(f.countryAirTrip||f.countryFlightPlan))handleResident(f,{hour:now()%DAY/3600});for(const record of snapshot().flights)if(!record.scheduled&&now()>=record.departure&&now()<record.arrival&&!data().flightsOperated.includes(record.id)){data().flightsOperated.push(record.id);data().flightsOperated=data().flightsOperated.slice(-96);const airline=account('regional-air'),fuel=account('vehicle-showroom'),cost=Math.min(24,airline.cash);airline.cash-=cost;fuel.cash+=cost;}}
+ function tick(){init();cargo.tick();for(const f of people())if(f.countryAirTrip&&!f.alive||f.kind==='visitor'&&(f.countryAirTrip||f.countryFlightPlan))handleResident(f,{hour:now()%DAY/3600});for(const record of snapshot().flights)if(!record.scheduled&&now()>=record.departure&&now()<record.arrival&&!data().flightsOperated.includes(record.id)){data().flightsOperated.push(record.id);data().flightsOperated=data().flightsOperated.slice(-96);const airline=account('regional-air'),fuel=account('vehicle-showroom'),cost=Math.min(24,airline.cash);airline.cash-=cost;fuel.cash+=cost;}}
  function runwayAvailable({airportId,departure,arrival}){const external=(raw().cityVisitors?.airportTraffic?.flights||[]).filter(f=>(f.airportId||'city')===airportId);return visitorRunwaySlot(departure,arrival-departure,external,airportId)===departure;}
  function addChoices(f,clock,add){
   if(f.alive&&f.citizenshipCountryId===COUNTRY_IDS.north&&countryAt(f)===COUNTRY_IDS.north&&!f.traveling&&!f.onPlane&&!f.onTrain&&!f.countryAirTrip&&f.energy>55&&f.hunger<45&&clock.hour>=9&&clock.hour<=17&&weatherDanger()<.25){

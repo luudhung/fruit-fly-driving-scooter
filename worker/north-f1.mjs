@@ -6,7 +6,7 @@ import {COUNTRY_IDS,NORTH_AIRPORT,countryAt} from './country-map.mjs';
 import {readyToDrive} from './life-skills.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_PIT_BOXES} from './north-f1-map.mjs';
 import {F1_TARGET_SPEED,planF1Motion,f1MotionWindow,sampleF1Motion} from './north-f1-motion.mjs';
-import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
+import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalCompleteAt,visitorRunwaySlot} from './visitor-aviation.mjs';
 
 const HOUR=3600,DAY=24*HOUR;
 const NORTH=COUNTRY_IDS.north,HANS=COUNTRY_IDS.hansdrex;
@@ -256,7 +256,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    const flight={id,airportId:'north',standId:stand.id,arrivalStand:stand,sector:index?'east':'north',direction:index?-1:1,
     inboundAt,parkedAt:inboundAt+INBOUND_SECONDS,arrivingGuests:size,kind:'passenger',boardAt:null,outboundAt:null,exitAt:null,
     guests:[],landed:false};
-   const scale=Number(raw().timeScale||120),lastArrival=visitorArrivalPath(flight,size-1,scale).at(-1)?.at;
+   const scale=Number(raw().timeScale||120),lastArrival=visitorArrivalCompleteAt(flight,size,scale);
    if(!lastArrival||lastArrival+route.duration>=e.startsAt-600)continue;
    // These visitors bring outside money and never consume city hotel/brain quotas.
    for(let n=0;n<size;n++){
@@ -276,7 +276,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
     if(weatherClosed()){
      flight.inboundAt=visitorRunwaySlot(now()+900,INBOUND_SECONDS,trafficDuringRace(e,flight),'north');
      flight.parkedAt=flight.inboundAt+INBOUND_SECONDS;
-     flight.arrivalCompleteAt=visitorArrivalPath(flight,flight.guests.length-1,scale).at(-1)?.at;
+     flight.arrivalCompleteAt=visitorArrivalCompleteAt(flight,flight.guests.length,scale);
      if(flight.arrivalCompleteAt+e.shuttleRoute.duration>=e.endsAt){flight.departed=true;for(const f of flight.guests)f.phase='cancelled';}
      continue;
     }

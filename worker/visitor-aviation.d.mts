@@ -11,7 +11,7 @@ export function visitorAirport(flight:VisitorAircraft):import('./country-map.mjs
 export function visitorRunwaySlot(earliest:number,duration:number,flights:VisitorAircraft[],airportId?:string,runwayId?:string):number;
 export const MIN_VISITOR_PASSENGERS:number;
 export const VISITOR_ARRIVAL_STAGGER:number;
-export type VisitorArrivalPoint = {at:number;x:number;y:number;z:number;phase:string};
+export type VisitorArrivalPoint = {at:number;x:number;y:number;z:number;phase:string;kioskId?:string;queueIndex?:number;stage?:string};
 export function visitorArrivalPath(flight:VisitorAircraft,index?:number,timeScale?:number):VisitorArrivalPoint[];
 export function visitorArrivalPose(now:number,flight:VisitorAircraft,index?:number,timeScale?:number):null|{x:number;y:number;z:number;phase:string;indoors:boolean;onPlane:boolean;next?:VisitorArrivalPoint};
 export function visitorAircraftPose(now:number,flight:VisitorAircraft):VisitorAircraftPose|null;
@@ -24,3 +24,6 @@ export function visitorRunwayReservation(earliest:number,duration:number,flights
 export function visitorStandReservation(earliest:number,flights:VisitorAircraft[],airportId?:string,groundStay?:number):null|{at:number;runwayId:string;stand:{id:string;x:number;z:number}};
 
 export function resolveVisitorTaxiStand(flight:VisitorAircraft,flights:VisitorAircraft[],now:number):boolean;
+
+export function visitorArrivalCompleteAt(flight:VisitorAircraft,count?:number,timeScale?:number):number;
+export function visitorStairsClearAt(flight:VisitorAircraft,count?:number,timeScale?:number):number;

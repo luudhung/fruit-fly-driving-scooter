@@ -1,3 +1,4 @@
+import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
 import {AIRPORT,ISLAND,ROADS} from '../worker/city-map.mjs';
 import {subtractRects,unionRects,type Rect} from './surface-rectangles.ts';
 
@@ -41,7 +42,19 @@ export function createAirportGroundLayout(publicRoads:readonly Rect[]=ROADS):rea
  for(const x of [-2,2])add(rect(AIRPORT.helipad.x+x,AIRPORT.helipad.z,.65,6),'white',.30);
  add(rect(AIRPORT.helipad.x,AIRPORT.helipad.z,4,.65),'white',.30);
  for(const strip of AIRPORT.runways)runway(strip,0);runway(ISLAND.runway,.85);
- add(rect(65,762,11,42),'asphalt',1.10);add(rect(130,858,170,4),'concrete',1.05);add(rect(65,824,4,68),'concrete',1.05);
+ const island=COUNTRY_AIRPORTS.find(port=>port.id==='island')!,taxi=island.taxiwayZ!;
+ add(island.apron,'concrete',1.05);
+ add(rect(island.runway.x,taxi,192,10),'asphalt',1.10);
+ add(rect(island.runway.x,taxi,192,.25),'yellow',1.15);
+ for(const x of [49,241]){add(rect(x,(742+taxi)/2,10,taxi-742),'asphalt',1.10);add(rect(x,(751+taxi)/2,.25,taxi-751),'yellow',1.15);}
+ for(const stand of island.stands){
+  add(rect(stand.x,(taxi+stand.z)/2,10,stand.z-taxi),'asphalt',1.10);
+  add(rect(stand.x,stand.z,25,22),'asphalt',1.10);
+  add(rect(stand.x,(taxi+stand.z)/2,.25,stand.z-taxi),'yellow',1.15);
+  for(const side of [-1,1])add(rect(stand.x+side*12,stand.z,.2,22),'yellow',1.15);
+  add(rect(stand.x,stand.z+10.8,24,.2),'yellow',1.15);
+ }
+ add(rect(84,794,68,2),'concrete',1.05);add(rect(130,858,170,4),'concrete',1.05);add(rect(65,824,4,68),'concrete',1.05);
  const surfaces:AirportGroundSurface[]=[];
  for(const group of groups.values())for(const piece of unionRects(group.rects))surfaces.push(Object.freeze({...piece,topY:group.topY,material:group.material}));
  return Object.freeze(surfaces);

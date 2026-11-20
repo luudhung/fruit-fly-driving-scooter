@@ -1,3 +1,4 @@
+import {passengerImmigrationGate} from './airport-immigration.mjs';
 import {NORTH_F1_CHARTER_STANDS} from './north-f1-map.mjs';
 import {AIRPORT} from './city-map.mjs';
 import {AVIATION,nextRegionalFlight,airportById} from './aviation.mjs';
@@ -50,10 +51,26 @@ export function visitorArrivalPath(flight,index=0,timeScale=120) {
  if(!stand)return [];
  const speed=1.8/Math.max(1,timeScale),path=[];
  let at=Number(flight.disembarkAt??flight.parkedAt)+120+index*VISITOR_ARRIVAL_STAGGER;
- const add=(x,y,z,phase,wait=0)=>{
+ const add=(x,y,z,phase,wait=0,details={})=>{
   const previous=path.at(-1);
   if(previous)at+=Math.hypot(x-previous.x,y-previous.y,z-previous.z)/speed+wait;
-  path.push({at,x,y,z,phase});
+  path.push({at,x,y,z,phase,...details});
+ };
+ const immigration=()=>{
+  const gate=passengerImmigrationGate(flight.airportId||'city',index),airport=visitorAirport(flight);
+  add(gate.entry.x,1.1,gate.entry.z,'immigration');
+  const detail={kioskId:gate.id,queueIndex:gate.queueIndex};
+  add(gate.queue.x,1.1,gate.queue.z,'immigration',0,{...detail,stage:'queue'});
+  // Stairs stagger alone is shorter than a scan. Later people in a lane wait
+  // for the preceding scan, rather than occupying the same kiosk together.
+  const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z),walk=g=>distance(g.entry,g.queue)+distance(g.queue,g)+distance(g,g.exit)+distance(g.exit,airport.gate);
+  const cohort=Math.max(MIN_VISITOR_PASSENGERS,index+1),longest=Math.max(...Array.from({length:cohort},(_,i)=>walk(passengerImmigrationGate(airport.id,i))));
+  const wait=gate.queueIndex*Math.max(0,gate.serviceSeconds-gate.gateCount*VISITOR_ARRIVAL_STAGGER)+(longest-walk(gate))/speed;
+  if(wait)add(gate.queue.x,1.1,gate.queue.z,'immigration',wait,{...detail,stage:'queue'});
+  add(gate.x,1.1,gate.z,'immigration',0,{...detail,stage:'scanning'});
+  add(gate.x,1.1,gate.z,'immigration',gate.serviceSeconds,{...detail,stage:'cleared'});
+  add(gate.exit.x,1.1,gate.exit.z,'immigration',0,{...detail,stage:'exit'});
+  add(airport.gate.x,1.1,airport.gate.z,'complete');return path;
  };
  add(stand.x-1.4,3.4,stand.z+4,'disembarking');
  add(stand.x-6,1.1,stand.z+4,'disembarking');
@@ -61,16 +78,18 @@ export function visitorArrivalPath(flight,index=0,timeScale=120) {
   const airport=visitorAirport(flight);
   add(airport.terminal.x-airport.terminal.w/2-2,1.1,stand.z+4,'apron');
   add(airport.terminal.x-airport.terminal.w/2-2,1.1,airport.terminal.z,'apron');
-  add(airport.terminal.x,1.1,airport.terminal.z,'immigration');
-  add(airport.terminal.x,1.1,airport.terminal.z,'immigration',420);
-  add(airport.gate.x,1.1,airport.gate.z,'complete');return path;
+  return immigration();
  }
  add(stand.x-6,1.1,-414,'apron');
  add(AIRPORT.terminal.x,1.1,-403,'apron');
- add(AIRPORT.terminal.x,1.1,AIRPORT.terminal.z,'immigration');
- add(AIRPORT.terminal.x,1.1,AIRPORT.terminal.z,'immigration',420);
- add(AIRPORT.gate.x,1.1,AIRPORT.gate.z,'complete');
- return path;
+ return immigration();
+}
+
+export function visitorArrivalCompleteAt(flight,count=MIN_VISITOR_PASSENGERS,timeScale=120){
+ return Math.max(Number(flight.parkedAt)||0,...Array.from({length:Math.max(0,Math.floor(count))},(_,index)=>visitorArrivalPath(flight,index,timeScale).at(-1)?.at||0));
+}
+export function visitorStairsClearAt(flight,count=MIN_VISITOR_PASSENGERS,timeScale=120){
+ return Math.max(Number(flight.parkedAt)||0,...Array.from({length:Math.max(0,Math.floor(count))},(_,index)=>visitorArrivalPath(flight,index,timeScale)[1]?.at||0));
 }
 
 export function visitorArrivalPose(now,flight,index=0,timeScale=120) {
@@ -183,7 +202,7 @@ function flightPath(stand, flight, outbound) {
  const {sector,direction}=flight;
  const [farX,farY,farZ]=FAR[sector]||FAR.north;
  if(flight.airportId&&flight.airportId!=='city'){
-  const airport=visitorAirport(flight),r=airport.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=cross+(vertical?26:46),point=(time,a,c,y=3)=>vertical?[time,c,y,a]:[time,a,y,c],entry=along-direction*half,exit=along+direction*half,standAlong=vertical?stand.z:stand.x;
+  const airport=visitorAirport(flight),r=airport.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=vertical?cross+26:(airport.taxiwayZ??cross+46),point=(time,a,c,y=3)=>vertical?[time,c,y,a]:[time,a,y,c],entry=along-direction*half,exit=along+direction*half,standAlong=vertical?stand.z:stand.x;
   if(outbound)return[[0,stand.x,3,stand.z],point(140,standAlong,taxi),point(330,entry,taxi),point(460,entry,cross),point(625,exit,cross,4),point(815,exit+direction*190,cross,115),[OUTBOUND_SECONDS,farX,farY,farZ]];
   const start=flight.hold?holdPose(flight.inboundAt,flight):{x:farX,y:farY,z:farZ};
   return[[0,start.x,start.y,start.z],point(330,entry-direction*190,cross,63),point(VISITOR_TOUCHDOWN_SECONDS,entry,cross),point(690,exit,cross),point(820,exit,taxi),point(950,standAlong,taxi),[INBOUND_SECONDS,stand.x,3,stand.z]];

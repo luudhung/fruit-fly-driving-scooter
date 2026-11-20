@@ -93,9 +93,9 @@ test('a paid holiday physically flies over sea, visits the resort and beach, sur
  s.simulationAgeSeconds=back.arrival;simulateIslandHoliday(f,gameClock());assert.equal(f.airTrip,null);assert.equal(f.currentLocationId,'airport');assert.ok(f.money>=0&&f.savings>=0);
  assert.ok(Math.abs(liquidMoneySupply()-before)<1e-6);
 });
-test('flight schedule respects 30-minute check-in and aircraft stays above sea until island landing',()=>{
- assert.equal(nextFlight(7.5*3600).departure,8*3600);assert.equal(nextFlight(7.5*3600+1).departure,9*3600);
- assert.equal(nextFlight(21*3600,'city').departure,22*3600);
+test('four-hour flight schedule respects 30-minute check-in and aircraft stays above sea until island landing',()=>{
+ assert.equal(nextFlight(7.5*3600).departure,8*3600);assert.equal(nextFlight(7.5*3600+1).departure,12*3600);
+ assert.equal(nextFlight(21*3600,'city').departure,24*3600);
  const flight=nextFlight(7*3600);
  for(let t=0;t<AVIATION.flightSeconds;t+=10){const p=flightPose(flight.departure+t,flight);if(atSea(p))assert.ok(p.y>20);}
 });

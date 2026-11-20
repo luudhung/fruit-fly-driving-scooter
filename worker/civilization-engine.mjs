@@ -76,11 +76,11 @@ const CENTRAL_RECRUITMENT='interviewing for a Main City job';
 const LOCAL_JOB_FLOORS={'riverside-office':4,'riverside-hotel':12,'riverside-market':3,'riverside-cafe':2,'marina-bay-day':3,'marina-bay-evening':3,'marina-bay-night':3};
 const CENTRAL_DAY_JOBS=new Set(['office','lab','central-finance','central-technology']);
 const JOBS = [
-  {id:'island-hotel-day',locationId:'island-resort',title:'Hawaii hotel concierge',publicOnly:true,employerId:'island-resort',wage:5.4,shiftStart:7,shiftEnd:15},
-  {id:'island-hotel-evening',locationId:'island-resort',title:'Hawaii hotel staff',publicOnly:true,employerId:'island-resort',wage:5.5,shiftStart:15,shiftEnd:23},
-  {id:'island-retail',locationId:'island-market',title:'Hawaii market vendor',publicOnly:true,employerId:'island-market',wage:4.7,shiftStart:8,shiftEnd:16},
-  {id:'island-food',locationId:'island-restaurant',title:'Hawaii restaurant staff',publicOnly:true,employerId:'island-restaurant',wage:4.9,shiftStart:11,shiftEnd:19},
-  {id:'island-airport-staff',locationId:'island-airport',title:'Hawaii airport worker',publicOnly:true,employerId:'regional-air',wage:5.2,shiftStart:6,shiftEnd:14},
+  {id:'island-hotel-day',locationId:'island-resort',title:'Hawaii hotel concierge',publicOnly:true,employerId:'island-resort',wage:9.8,shiftStart:7,shiftEnd:15},
+  {id:'island-hotel-evening',locationId:'island-resort',title:'Hawaii hotel staff',publicOnly:true,employerId:'island-resort',wage:10,shiftStart:15,shiftEnd:23},
+  {id:'island-retail',locationId:'island-market',title:'Hawaii market vendor',publicOnly:true,employerId:'island-market',wage:8.8,shiftStart:8,shiftEnd:16},
+  {id:'island-food',locationId:'island-restaurant',title:'Hawaii restaurant staff',publicOnly:true,employerId:'island-restaurant',wage:9.2,shiftStart:11,shiftEnd:19},
+  {id:'island-airport-staff',locationId:'island-airport',title:'Hawaii airport worker',publicOnly:true,employerId:'regional-air',wage:9.6,shiftStart:6,shiftEnd:14},
   {id:'central-finance',locationId:'office',title:'financial operations analyst',wage:7.1,shiftStart:8,shiftEnd:16,publicOnly:true},
   {id:'central-technology',locationId:'lab',title:'technology services specialist',wage:7.4,shiftStart:9,shiftEnd:17,publicOnly:true},
   {id:'spaceworks-engineer',locationId:'spaceworks-assembly',title:'Spaceworks assembly engineer',wage:8.2,shiftStart:8,shiftEnd:16,publicOnly:true,employerId:'spaceworks'},
@@ -168,8 +168,8 @@ const BUSINESSES = {
   rooftop: { inventory: 999, cash: 2500, price: 9.0, sector: "nightlife" },
   "island-air": { inventory:999, cash:18000, price:45, sector:"aviation" },
   "island-resort": { inventory:999, cash:12000, price:44, sector:"tourism" },
-  'island-market':{inventory:120,cash:3000,price:2.4,sector:'food'},
-  'island-restaurant':{inventory:120,cash:3000,price:3.5,sector:'food'},
+  'island-market':{inventory:120,cash:3000,price:6,sector:'food'},
+  'island-restaurant':{inventory:120,cash:3000,price:10,sector:'food'},
   "travel-escrow": { inventory:0, cash:0, price:0, sector:"escrow" },
   "heli-tour": { inventory: 999, cash: 12000, price: 185, sector: "luxury-tourism" },
   "vehicle-showroom": { inventory: 80, cash: 60000, price: 650, sector: "automotive" },

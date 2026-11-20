@@ -45,7 +45,7 @@ test('a North traveller checks in for Hawaii only after reaching Hansdrex airpor
  air.handleResident(f);
  assert.equal(f.countryAirTrip.outbound.from,'city');assert.equal(f.countryAirTrip.outbound.to,'island');
  assert.equal(f.countryAirTrip.inbound.to,'city');assert.equal(f.countryFlightPlan,null);
- for(let hour=0;hour<24;hour++){
+ for(let hour=0;hour<24;hour+=4){
   t.at(hour*3600+300);
   const [flight]=air.snapshot().flights;
   assert.equal(flight.departure,hour*3600);assert.equal(flight.from,'city');assert.equal(flight.to,'island');

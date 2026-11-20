@@ -22,7 +22,7 @@ const airport=(id,countryId,terminal,gate,runway,apron,stands)=>({id,countryId,l
 export const COUNTRY_AIRPORTS=[
  {id:'city',countryId:COUNTRY_IDS.hansdrex,locationId:'airport',...HANSDREX_AIRPORT},
  airport('north',COUNTRY_IDS.north,{x:-908,z:-820,w:36,d:64},{x:-886,z:-820},{x:-1000,z:-820,w:22,d:340},{x:-950,z:-820,w:44,d:150},[-780,-820,-860].map((z,i)=>({id:`NORTH-STAND-${i+1}`,x:-950,z}))),
- airport('island',COUNTRY_IDS.hawaii,{x:65,z:785,w:30,d:16},{x:65,z:795},{x:145,z:742,w:240,d:16},{x:145,z:765,w:180,d:30},[120,170].map((x,i)=>({id:`HAWAII-STAND-${i+1}`,x,z:765}))),
+ {...airport('island',COUNTRY_IDS.hawaii,{x:65,z:785,w:30,d:16},{x:65,z:795},{x:145,z:742,w:240,d:16},{x:145,z:779,w:110,d:36},[120,170].map((x,i)=>({id:`HAWAII-STAND-${i+1}`,x,z:782}))),taxiwayZ:762},
 ];
 export const COUNTRY_AIRPORT_ALIASES={airport:'city','north-airport':'north','island-airport':'island',hawaii:'island'};
 export const NORTH_AIRPORT=COUNTRY_AIRPORTS[1];

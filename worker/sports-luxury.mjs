@@ -1,5 +1,6 @@
 import {hasCountryCommitment} from './country-commitments.mjs';
 import {COUNTRY_IDS,countryAt} from './country-map.mjs';
+import {SPORTS_ACTIVITY_VENUES,sportsPlayerPose} from './sports-venues.mjs';
 import {AIRPORT,BUILDINGS,LOCATIONS,SPORTS_VENUES,entrance,pedestrianRoute,clearSegment,onIsland} from './city-map.mjs';
 
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
@@ -47,7 +48,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  const get=()=>world().sportsLuxury||init();
  const alive=id=>world().flies.find(f=>f.id===id&&f.alive);
  const account=()=>world().businesses['sports-aviation'];
- const busy=f=>hasCountryCommitment(f,world().simulationAgeSeconds)||isWorkCommitted(f)||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.urbanFloodEscape||f.emergencyTask||f.arrested||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.onTrain||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
+ const busy=f=>hasCountryCommitment(f,world().simulationAgeSeconds)||isWorkCommitted(f)||f.fruitFarmDuty||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.urbanFloodEscape||f.emergencyTask||f.arrested||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.civicDuty||f.airTrip||f.heliPassenger||f.onPlane||f.arrestedUntil>world().simulationAgeSeconds||f.urbanDuty||f.urbanTask||f.cityService||f.constructionJob||f.rescueJob||f.taxiJob||f.taxiJobId||f.taxiPassenger;
  function transfer(f,cost,to=account()){
   if(!Number.isFinite(cost)||cost<0||money(f)+1e-7<cost)return false;
   const cash=Math.min(Math.max(0,Number(f.money)||0),cost);f.money-=cash;f.savings=Math.max(0,Number(f.savings)||0)-(cost-cash);to.cash=Number(to.cash||0)+cost;
@@ -57,6 +58,10 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   const s=world();s.businesses||={};s.businesses['sports-aviation']||={cash:0,inventory:0,sector:'sport-private-aviation'};
   const d=s.sportsLuxury||={version:1,helicopters:[],nextFlight:1,privateFlights:0,privateRevenue:0,maintenanceRevenue:0,sportsRevenue:0,matchesCompleted:0,tennisSessions:0,goals:0,match:null,lastDay:-1,nextMatchAt:Math.floor(s.simulationAgeSeconds/86400)*86400+16*3600,nextOwnershipCheck:0,history:[]};
   d.history||=[];d.helicopters||=[];
+  d.pickups||={nextAt:{},nextId:1,invitations:0,completed:0,blocked:{}};
+  for(const venue of SPORTS_ACTIVITY_VENUES)if(!locate(venue.id)){
+   LOCATIONS.push({id:venue.id,name:venue.name,type:'social',x:venue.x,z:venue.z});
+  }
   if(!d.foundingGrant){
    const top=s.flies.filter(f=>f.alive&&f.ageYears>=18).sort((a,b)=>helicopterNetWorth(b)-helicopterNetWorth(a)||a.id.localeCompare(b.id)).slice(0,10),occupied=new Set(d.helicopters.map(h=>h.padId));
    for(const f of top){
@@ -168,7 +173,61 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   f.sportsSession=null;if(!busy(f)){f.action=`sports session interrupted: ${reason}`;f.actionUntil=world().simulationAgeSeconds;}
   remember?.(f,'sports_interrupted',{activity:session.kind,reason});
  }
- function interruptedSports(f){return !f.alive||busy(f)||f.traveling||f.currentLocationId!==(f.sportsSession?.kind==='tennis'?'tennis':'stadium')||f.health<30||f.energy<15||f.hunger>90;}
+ function sessionVenue(session){return session?.venueId||(session?.kind==='tennis'?'tennis':'stadium');}
+ function venueSafe(venue){
+  const u=world().urbanWorld,status=u?.buildings?.[venue.id];
+  return (!status||status.stage==='operational')&&!(u?.fires||[]).some(f=>f.buildingId===venue.id&&!f.containedAt)&&!(u?.floods||[]).some(f=>f.depth>.35&&Math.abs(venue.x-f.x)<(Number(venue.w||40)+f.w)/2&&Math.abs(venue.z-f.z)<(Number(venue.d||50)+f.d)/2);
+ }
+ function sportReady(f){return f.alive&&f.ageYears>=12&&f.health>=55&&f.energy>=40&&Number(f.hunger||0)<80&&!busy(f)&&!f.sleeping&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.onPlane;}
+ function interruptedSports(f){
+  const venue=SPORTS_ACTIVITY_VENUES.find(v=>v.id===sessionVenue(f.sportsSession));
+  return !f.alive||busy(f)||f.onTrain||f.traveling||f.currentLocationId!==sessionVenue(f.sportsSession)||f.health<30||f.energy<15||f.hunger>90||!venue||!venueSafe(venue)||dangerous();
+ }
+ function cancelInvitation(f,reason){
+  if(!f.sportsInvitation)return;
+  remember?.(f,'sports_invitation_cancelled',{venueId:f.sportsInvitation.venueId,reason});
+  f.sportsInvitation=null;
+ }
+ function organizePickups(now){
+  if(!startJourney||hour(now)<7||hour(now)>=20||dangerous())return;
+  const d=get(),p=d.pickups;
+  for(const venue of SPORTS_ACTIVITY_VENUES){
+   if(now<Number(p.nextAt[venue.id]||0)||!venueSafe(venue))continue;
+   const reserved=world().flies.filter(f=>f.alive&&(f.sportsSession&&sessionVenue(f.sportsSession)===venue.id||f.sportsInvitation?.venueId===venue.id));
+   if(reserved.length>=venue.pickupPlayers){p.nextAt[venue.id]=now+900;continue;}
+   const candidates=world().flies.filter(f=>sportReady(f)&&!f.onTrain&&!f.traveling&&!f.sportsSession&&!f.sportsInvitation&&countryAt(f)===venue.countryId&&money(f)>=venue.fee*clamp(world().centralBank?.priceLevel||1,.5,10)&&now-Number(f.lastSportAt??-86400)>=21600&&Math.hypot(f.x-venue.x,f.z-venue.z)<1400)
+    .sort((a,b)=>pickupInterest(b,venue)-pickupInterest(a,venue)||a.id.localeCompare(b.id));
+   p.blocked[venue.id]={at:now,eligible:candidates.length,reserved:reserved.length,reason:candidates.length<2?'waiting for healthy, fed, off-duty local players':null};
+   p.nextAt[venue.id]=now+(candidates.length>=2?5400:900);
+   if(candidates.length<2)continue;
+   const groupId=`PICKUP-${venue.id}-${p.nextId++}`,selected=candidates.slice(0,Math.max(0,venue.pickupPlayers-reserved.length));
+   for(const f of selected){
+    const invitation={id:groupId,venueId:venue.id,kind:venue.kind,role:'player',requestedAt:now,expiresAt:now+Math.min(43200,Math.max(10800,Math.ceil(Math.hypot(f.x-venue.x,f.z-venue.z)/2.4*Math.max(1,Number(world().timeScale||120)))+3600))};
+    f.sportsInvitation=invitation;
+    const result=startJourney(f,{id:venue.id,action:`joining ${venue.name} pickup session`});
+    if(result===false||f.targetLocationId!==venue.id&&f.currentLocationId!==venue.id){cancelInvitation(f,'lawful route unavailable');continue;}
+    p.invitations++;
+    remember?.(f,'sports_invitation',{venueId:venue.id,groupId});
+   }
+  }
+ }
+ function pickupInterest(f,venue){
+  const skill=Number(f.sportsProfile?.[venue.kind==='golf'?'golf':venue.kind==='tennis'?'tennis':'team']||0);
+  return Number(f.traits?.sociability??.5)*30+Number(f.loneliness||0)*.3+Number(f.stress||0)*.2+skill*20-Math.hypot(f.x-venue.x,f.z-venue.z)/4;
+ }
+ function handleInvitation(f,clock){
+  const inv=f.sportsInvitation;if(!inv)return false;
+  const now=world().simulationAgeSeconds,venue=SPORTS_ACTIVITY_VENUES.find(v=>v.id===inv.venueId);
+  if(!sportReady(f)||now>=inv.expiresAt||!venue||!venueSafe(venue)||dangerous()||hour(now)>=21){cancelInvitation(f,'resident, weather or venue unavailable');return false;}
+  if(f.traveling){
+   if(f.targetLocationId!==venue.id){cancelInvitation(f,'journey diverted');return false;}
+   moveFly?.(f);care(f,clock);
+   if(f.traveling)return true;
+  }
+  if(f.currentLocationId!==venue.id){cancelInvitation(f,'did not reach venue');return false;}
+  if(beginSports(f,venue.kind,'player',venue.id))return true;
+  cancelInvitation(f,'admission unavailable');return false;
+ }
  function tick(gameSeconds,clock){
   const d=get(),s=world(),now=s.simulationAgeSeconds;bindFamilyHomes(d);relocateLegacyParking(d);maintenance(d,Math.floor(now/86400));inherit(d,now);
   for(const h of d.helicopters)settleUnattendedFlight(h,now);
@@ -179,11 +238,16 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
    if(now>=m.startsAt&&now<m.endsAt&&now>=m.lastGoalAt){m.lastGoalAt=now+1200;const players=m.players.map(id=>alive(id)).filter(f=>f?.sportsSession?.id===m.id&&f.currentLocationId==='stadium'&&!f.traveling);if(players.length>=2){const side=m.score[0]<=m.score[1]?0:1;m.score[side]++;d.goals++;}}
    if(now>=m.endsAt&&!m.settled){m.settled=true;const participants=[...m.players,...m.spectators].map(id=>alive(id)).filter(Boolean);for(const f of participants){if(f.sportsSession?.id===m.id)finishSports(f,now,m);}d.matchesCompleted++;d.history.push({id:m.id,score:m.score,players:m.players.length,spectators:m.spectators.length,endedAt:now});d.history=d.history.slice(-12);emit?.('sports_result',`Riverside match ended ${m.score[0]}–${m.score[1]}; ${m.spectators.length} spectators attended.`,{matchId:m.id,score:m.score});d.match=null;}
   }
+  organizePickups(now);
  }
  function addChoices(f,clock,add){
-  const now=world().simulationAgeSeconds;if(f.ageYears<12||f.health<55||f.energy<35||busy(f)||f.privateFlight)return;
+  const now=world().simulationAgeSeconds;if(f.ageYears<12||f.health<55||f.energy<35||busy(f)||f.privateFlight||f.onTrain||f.sportsInvitation||f.sportsSession)return;
   const d=get(),social=Number(f.traits?.sociability??.5),stress=Number(f.stress||0);
-  if(clock.hour>=7&&clock.hour<21&&now-Number(f.lastTennisAt??-86400)>14400)add('tennis','playing tennis',38+stress*.5+social*48+Number(f.traits?.resilience||.5)*18+(f.homeX>480?18:0)-Math.min(24,Math.hypot(f.x-830,f.z-120)/45));
+  if(clock.hour>=7&&clock.hour<21&&now-Number(f.lastSportAt??f.lastTennisAt??-86400)>14400){
+   for(const venue of SPORTS_ACTIVITY_VENUES.filter(v=>v.countryId===countryAt(f)&&v.kind!=='stadium'&&venueSafe(v))){
+    add(venue.id,`playing ${venue.kind}`,38+stress*.5+social*48+Number(f.traits?.resilience||.5)*18-Math.min(24,Math.hypot(f.x-venue.x,f.z-venue.z)/45));
+   }
+  }
   if(d.match&&now<d.match.endsAt){
    if(f.ageYears>=16&&f.energy>60&&d.match.players.length<SPORTS_RULES.stadiumPlayers)add('stadium','playing a stadium match',23+social*22+Number(f.excitement||0)*.25);
    if(d.match.spectators.length<SPORTS_RULES.spectators)add('stadium','watching a stadium match',22+social*30+stress*.35);
@@ -195,26 +259,25 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  function care(f,clock){needsAndActivities?.(f,clock);payAndFinance?.(f,clock);}
  function finishSports(f,now,match){
   const session=f.sportsSession;if(!session)return;
-  f.sportsProfile||={tennis:0,team:0,fitness:0,attended:0};const active=session.role==='player';if(active){f.sportsProfile.fitness=clamp(f.sportsProfile.fitness+.015,0,1);f.sportsProfile[session.kind==='tennis'?'tennis':'team']=clamp(f.sportsProfile[session.kind==='tennis'?'tennis':'team']+.01,0,1);f.health=clamp(f.health+1.2);f.energy=clamp(f.energy-3);}f.happiness=clamp(f.happiness+(active?8:5));f.stress=clamp(f.stress-9);f.loneliness=clamp(f.loneliness-8);f.sportsProfile.attended++;f.lastSportAt=now;f.action='finished a sports session';f.actionUntil=now+1800;f.sportsSession=null;
+  f.sportsProfile||={tennis:0,team:0,fitness:0,attended:0};const active=session.role==='player';if(active){f.sportsProfile.fitness=clamp(Number(f.sportsProfile.fitness||0)+.015,0,1);const skill=session.kind==='golf'?'golf':session.kind==='tennis'?'tennis':'team';f.sportsProfile[skill]=clamp(Number(f.sportsProfile[skill]||0)+.01,0,1);f.health=clamp(f.health+1.2);f.energy=clamp(f.energy-3);}f.happiness=clamp(f.happiness+(active?8:5));f.stress=clamp(f.stress-9);f.loneliness=clamp(f.loneliness-8);f.sportsProfile.attended=Number(f.sportsProfile.attended||0)+1;f.lastSportAt=now;f.action='finished a sports session';f.actionUntil=now+1800;f.sportsSession=null;if(session.pickup)get().pickups.completed++;
   remember?.(f,'sports_session',{kind:session.kind,role:session.role,matchId:match?.id,score:match?.score});
  }
- function beginSports(f,kind,role){
-  const now=world().simulationAgeSeconds,d=get();if(f.sportsSession||f.privateFlight||f.traveling||f.currentLocationId!==(kind==='tennis'?'tennis':'stadium')||busy(f))return false;
-  const m=kind==='stadium'?d.match:null;if(kind==='stadium'&&(!m||now>=m.endsAt))return false;
-  if(kind==='tennis'&&world().flies.filter(o=>o.alive&&o.sportsSession?.kind==='tennis').length>=SPORTS_RULES.tennisPlayers)return false;
-  if(m&&(role==='player'?m.players:m.spectators).length>=(role==='player'?SPORTS_RULES.stadiumPlayers:SPORTS_RULES.spectators))return false;
-  const cost=(kind==='tennis'?SPORTS_RULES.tennisFee:role==='player'?0:SPORTS_RULES.stadiumFee)*clamp(world().centralBank?.priceLevel||1,.5,10);if(cost>0&&!transfer(f,cost))return false;
-  if(m)(role==='player'?m.players:m.spectators).push(f.id);d.sportsRevenue+=cost;if(kind==='tennis'){d.tennisSessions++;f.lastTennisAt=now;}
-  f.sportsSession={id:m?.id||`TENNIS-${f.id}-${now}`,kind,role,startsAt:now,until:m?.endsAt||now+SPORTS_RULES.playerSeconds};f.action=kind==='tennis'?'playing tennis':role==='player'?'playing a stadium match':'watching a stadium match';f.sleeping=false;f.traveling=false;f.indoors=false;
-  const venue=SPORTS_VENUES.find(v=>v.id===(kind==='tennis'?'tennis':'stadium'));
-  const slot=kind==='tennis'?world().flies.filter(o=>o.alive&&o.sportsSession?.kind==='tennis').length-1:(role==='player'?m.players:m.spectators).length-1;
-  f.x=venue.x+(kind==='tennis'?(slot<2?-10:10):role==='player'?(slot%3-1)*7:slot%2?18:-18);
-  f.z=venue.z+(kind==='tennis'?(slot%2?8:-8):role==='player'?(Math.floor(slot/3)-1.5)*10:Math.floor(slot/2)*2-20);f.y=1.1;f.targetX=f.x;f.targetZ=f.z;
+ function beginSports(f,kind,role,venueId=kind==='golf'?'north-golf':kind==='football'?'north-football':kind){
+  const now=world().simulationAgeSeconds,d=get(),venue=SPORTS_ACTIVITY_VENUES.find(v=>v.id===venueId);
+  if(!venue||venue.kind!==kind||!venueSafe(venue)||dangerous()||f.sportsSession||f.privateFlight||f.traveling||f.onTrain||f.currentLocationId!==venue.id||busy(f)||f.health<30||f.energy<15||Number(f.hunger||0)>90)return false;
+  const invitation=f.sportsInvitation,players=world().flies.filter(o=>o.alive&&o.sportsSession&&sessionVenue(o.sportsSession)===venue.id&&o.sportsSession.role===role);
+  const m=kind==='stadium'?d.match:null;if(kind==='stadium'&&(!m||now>=m.endsAt)&&invitation?.venueId!==venue.id)return false;
+  if(players.length>=(role==='player'?venue.capacity:SPORTS_RULES.spectators))return false;
+  const cost=(role==='spectator'?SPORTS_RULES.stadiumFee:venue.fee)*clamp(world().centralBank?.priceLevel||1,.5,10);if(cost>0&&!transfer(f,cost))return false;
+  if(m)(role==='player'?m.players:m.spectators).push(f.id);d.sportsRevenue+=cost;if(kind==='tennis'){d.tennisSessions++;f.lastTennisAt=now;}if(kind==='golf')d.golfSessions=Number(d.golfSessions||0)+1;
+  const usedSlots=new Set(players.map(p=>p.sportsSession.slot));let slot=0;while(usedSlots.has(slot))slot++;
+  f.sportsSession={id:m?.id||invitation?.id||`SPORT-${f.id}-${now}`,kind,venueId:venue.id,role,slot,pickup:Boolean(invitation),startsAt:now,until:m?.endsAt||now+SPORTS_RULES.playerSeconds};f.sportsInvitation=null;f.action=kind==='stadium'?(role==='player'?'playing a stadium match':'watching a stadium match'):`playing ${kind}`;f.sleeping=false;f.traveling=false;f.indoors=false;
+  const position=sportsPlayerPose(venue,slot,now,now,role);Object.assign(f,position);f.y=1.1;f.targetX=f.x;f.targetZ=f.z;f.vx=f.vz=0;
   return true;
  }
  function beginPrivate(f,destinationPadId){
   const d=get(),now=world().simulationAgeSeconds,h=d.helicopters.find(h=>h.ownerId===f.id);
-  if(!h||h.destroyed||h.flight||f.privateFlight||f.traveling||busy(f)||dangerous()||h.condition<.35||h.maintenanceDebt>30||f.health<55||f.energy<30)return false;
+  if(!h||h.destroyed||h.flight||f.privateFlight||f.sportsSession||f.sportsInvitation||f.onTrain||f.traveling||busy(f)||dangerous()||h.condition<.35||h.maintenanceDebt>30||f.health<55||f.energy<30)return false;
   const from=padById.get(h.padId);if(!from||!padAvailable(from.id,h.id)||f.currentLocationId!==from.locationId)return false;
   const dests=pads.filter(p=>p.rooftop&&p.id!==from.id&&p.locationId!==from.locationId&&padAvailable(p.id,h.id));
   const to=destinationPadId?dests.find(p=>p.id===destinationPadId):(dests.find(p=>p.id===h.homePadId)||dests[Math.floor(rng(f)*dests.length)%dests.length]);if(!to)return false;
@@ -275,10 +338,18 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
  }
  function handleResident(f,clock){
   if(!f.alive)return false;if(f.privateFlight)return handlePrivate(f,clock);
-  if(f.sportsSession){if(interruptedSports(f)){cancelSports(f,'resident or venue unavailable');return false;}care(f,clock);if(world().simulationAgeSeconds>=f.sportsSession.until)finishSports(f,world().simulationAgeSeconds);return true;}
+  if(f.sportsInvitation&&handleInvitation(f,clock))return true;
+  if(f.sportsSession){
+   if(interruptedSports(f)){cancelSports(f,'resident or venue unavailable');return false;}
+   const venue=SPORTS_ACTIVITY_VENUES.find(v=>v.id===sessionVenue(f.sportsSession)),pose=sportsPlayerPose(venue,Number(f.sportsSession.slot||0),world().simulationAgeSeconds,f.sportsSession.startsAt,f.sportsSession.role);
+   f.vx=pose.x-f.x;f.vz=pose.z-f.z;Object.assign(f,pose);f.targetX=f.x;f.targetZ=f.z;f.indoors=false;
+   care(f,clock);if(world().simulationAgeSeconds>=f.sportsSession.until)finishSports(f,world().simulationAgeSeconds);return true;
+  }
   if(f.traveling||busy(f))return false;
   if(f.currentLocationId==='tennis'&&f.action==='playing tennis'){if(beginSports(f,'tennis','player'))return true;f.action='tennis courts full · waiting';f.actionUntil=world().simulationAgeSeconds+1200;return false;}
   if(f.currentLocationId==='stadium'&&['playing a stadium match','watching a stadium match'].includes(f.action)){if(beginSports(f,'stadium',f.action.startsWith('playing')?'player':'spectator'))return true;f.action='stadium registration closed';f.actionUntil=world().simulationAgeSeconds+1200;return false;}
+  const venue=SPORTS_ACTIVITY_VENUES.find(v=>v.id===f.currentLocationId&&v.id.startsWith('north-'));
+  if(venue&&f.action===`playing ${venue.kind}`){if(beginSports(f,venue.kind,'player',venue.id))return true;f.action='sports admission unavailable';f.actionUntil=world().simulationAgeSeconds+1200;return false;}
   if(f.action==='taking a private helicopter'){if(beginPrivate(f))return true;f.action='private aviation unavailable';f.actionUntil=world().simulationAgeSeconds+3600;}
   return false;
  }
@@ -286,7 +357,7 @@ export function createSportsLuxury({world,random,emit,remember,startJourney,move
   const d=get(),now=world().simulationAgeSeconds;
   const visiblePads=new Set(['PAD-riverside-hotel','PAD-riverside-office','PAD-riverside-clinic','PAD-island-resort','PAD-AIRPORT-1','PAD-AIRPORT-2',...d.helicopters.flatMap(h=>[h.padId,h.homePadId,h.flight?.from.id,h.flight?.to.id])]);
   const shownPads=pads.filter(p=>visiblePads.has(p.id)).map(p=>({...p,householdIds:[...new Set(d.helicopters.filter(h=>h.homePadId===p.id).map(h=>h.familyHouseholdId).filter(Boolean))]}));
-  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,goals:d.goals,pads:shownPads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,homePadId:h.homePadId,familyHouseholdId:h.familyHouseholdId,familyIds:h.familyIds||[],destroyed:Boolean(h.destroyed),destroyedAt:h.destroyedAt??null,condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
+  return {privateFlights:d.privateFlights,privateRevenue:d.privateRevenue,maintenanceRevenue:d.maintenanceRevenue,sportsRevenue:d.sportsRevenue,matchesCompleted:d.matchesCompleted,tennisSessions:d.tennisSessions,golfSessions:Number(d.golfSessions||0),goals:d.goals,pickups:d.pickups,venues:SPORTS_ACTIVITY_VENUES.map(v=>({id:v.id,kind:v.kind,capacity:v.capacity,playing:world().flies.filter(f=>f.alive&&f.sportsSession&&sessionVenue(f.sportsSession)===v.id).length,traveling:world().flies.filter(f=>f.alive&&f.sportsInvitation?.venueId===v.id).length})),pads:shownPads,match:d.match,history:d.history.slice(-4),helicopters:d.helicopters.map(h=>({id:h.id,ownerId:h.ownerId,padId:h.padId,homePadId:h.homePadId,familyHouseholdId:h.familyHouseholdId,familyIds:h.familyIds||[],destroyed:Boolean(h.destroyed),destroyedAt:h.destroyedAt??null,condition:h.condition,maintenanceDebt:h.maintenanceDebt,trips:h.trips,flight:h.flight?{id:h.flight.id,from:h.flight.from,to:h.flight.to,departure:h.flight.departure,arrival:h.flight.arrival}:null})),participants:world().flies.filter(f=>f.alive&&f.sportsSession).map(f=>({id:f.id,...f.sportsSession})),algorithmOnly:true};
  }
  return {init,tick,handleResident,addChoices,snapshot,beginPrivate,beginSports,padAvailable};
 }

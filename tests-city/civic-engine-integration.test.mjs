@@ -20,13 +20,14 @@ function arriveCrew(s,p){for(const id of p.workerIds){const f=s.flies.find(f=>f.
 test('real engine builds a paid nonresidential factory with delivered materials and opened access roads without creating housing across cold restore',()=>{
  let s=fixture();const crew=s.flies.filter(available).slice(0,8);assert.equal(crew.length,8);
  for(const f of crew){healthy(f);Object.assign(f,{jobId:'construction',jobTitle:'builder',x:1000,z:40,currentLocationId:'construction',money:30000,savings:10000});}
- const owner=crew[0],housing=s.housing.apartmentBlocks.length,identities=s.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]);
+ const owner=crew[0],housing=s.housing.apartmentBlocks.length,identities=s.flies.map(f=>[f.id,f.brain.id]);
  const facilities=urbanWorld.completedFacilities().map(b=>b.id);
  const initial=liquidMoneySupply(),wallet=owner.money+owner.savings,p=urbanWorld.developFacility('factory',{ownerId:owner.id,lot:{x:1000,z:0},industrySector:'garments'});assert.ok(p);assert.ok(p.roadIds.length);assert.equal(owner.money+owner.savings,wallet-p.budget);assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-6);assert.deepEqual(urbanWorld.completedFacilities().map(b=>b.id),facilities);
  step(s);assert.equal(p.progress,0);assert.equal(p.materialsOrdered,0,'travelling workers cannot order or build');assert.ok(p.workerIds.length);
  arriveCrew(s,p);step(s);assert.ok(p.materialsOrdered>0);assert.equal(p.materialsDelivered,0);const invoice=s.businesses['civic-materials'].cash,projectId=p.id,buildingId=p.buildingId;
  s=restoreState(structuredClone(s));const saved=s.urbanWorld.projects.find(p=>p.id===projectId);assert.ok(saved);assert.equal(saved.materialsOrdered,p.materialsOrdered);
- for(let i=0;i<100&&saved.stage!=='complete';i++){
+ // The funded factory now needs multi-day structural work, rather than the old sub-day build.
+ for(let i=0;i<2400&&saved.stage!=='complete';i++){
   for(const id of saved.workerIds){const f=s.flies.find(f=>f.id===id),task=f.urbanTask;if(!task)continue;
    siteActor(f,task.phase==='collecting'?'construction':task.targetId);urbanWorld.handleResident(f,gameClock());
   }
@@ -34,7 +35,8 @@ test('real engine builds a paid nonresidential factory with delivered materials 
  }
  assert.equal(saved.stage,'complete');assert.equal(s.urbanWorld.buildings[buildingId].stage,'operational');assert.equal(s.housing.apartmentBlocks.length,housing);assert.ok(saved.materialsUsed<=saved.materialsDelivered+1e-6);assert.ok(s.businesses['civic-materials'].cash>=invoice);
  for(const id of saved.roadIds)assert.ok(ROADS.some(r=>r.id===id),'only physically finished roads enter authoritative routing');
- assert.deepEqual(s.flies.map(f=>[f.id,f.brain.id,f.housingUnitId]),identities);assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-5,'real engine finance conserves project and wage cash');
+ // Residents can legally move homes during the longer construction period; identities and housing capacity must survive.
+ assert.deepEqual(s.flies.map(f=>[f.id,f.brain.id]),identities);assert.ok(Math.abs(liquidMoneySupply()-initial)<1e-5,'real engine finance conserves project and wage cash');
  const refund=saved.refunded,location=LOCATIONS.findIndex(l=>l.id===buildingId);LOCATIONS.splice(location,1);s=restoreState(structuredClone(s));assert.ok(LOCATIONS.some(l=>l.id===buildingId));assert.equal(s.housing.apartmentBlocks.length,housing);assert.equal(s.urbanWorld.projects.find(p=>p.id===projectId).refunded,refund);
 });
 

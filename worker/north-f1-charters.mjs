@@ -5,7 +5,7 @@ import {BORDER_CHECKPOINTS,COUNTRY_IDS,countryAt} from './country-map.mjs';
 import {airportById} from './aviation.mjs';
 import {chargeHansdrexFare,HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_AIRPORT_FOOTBRIDGE} from './north-f1-map.mjs';
-import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalPose,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand,VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand} from './visitor-aviation.mjs';
+import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalCompleteAt,visitorStairsClearAt,visitorArrivalPose,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand,VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand} from './visitor-aviation.mjs';
 
 const DAY=86400,HOUR=3600;
 const HANS=COUNTRY_IDS.hansdrex,NORTH=COUNTRY_IDS.north;
@@ -169,7 +169,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    const candidate={...flight,standId:reservation.stand.id,arrivalStand:reservation.stand,runwayId:reservation.runwayId,
     inboundAt:reservation.at,parkedAt:reservation.at+INBOUND_SECONDS};
    const path=visitorArrivalPath(candidate,Math.max(0,(flight.guests?.length||10)-1),scale());
-   const ground=candidate.kind==='positioning'?path.at(-1).at-path[0].at+780:Math.max(1200,(path[1]?.at||candidate.parkedAt+900)-candidate.parkedAt+120);
+   const ground=candidate.kind==='positioning'?visitorArrivalCompleteAt(candidate,flight.guests?.length||10,scale())-path[0].at+780:Math.max(1200,visitorStairsClearAt(candidate,flight.guests?.length||10,scale())-candidate.parkedAt+120);
    outbound(e,candidate,candidate.parkedAt+ground);
    const actualStay=candidate.standReleasedAt-candidate.parkedAt;
    if(actualStay>stay){stay=actualStay;continue;}
@@ -350,7 +350,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    // Empty arriving equipment leaves promptly; its passengers keep their own
    // durable ground itineraries instead of reserving the stand for their holiday.
    if(flight.landed&&flight.outboundAt==null){
-    const stairsClear=visitorArrivalPath(flight,flight.guests.length-1,scale())[1]?.at||flight.parkedAt+900;
+    const stairsClear=visitorStairsClearAt(flight,flight.guests.length,scale())||flight.parkedAt+900;
     outbound(e,flight,Math.max(flight.parkedAt+1200,stairsClear+120));
    }
    const ready=flight.guests.every(f=>['airport-ready','denied','departed','cancelled'].includes(f.phase));

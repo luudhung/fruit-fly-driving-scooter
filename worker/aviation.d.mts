@@ -1,9 +1,10 @@
-export const AVIATION:{seats:number;checkInSeconds:number;flightSeconds:number;heliSeats:number;heliSeconds:number};
+export const AVIATION:{seats:number;checkInSeconds:number;flightSeconds:number;islandIntervalSeconds:number;islandReturnOffsetSeconds:number;heliSeats:number;heliSeconds:number};
 export {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 export type Flight={id:string;from:string;to?:string;departure:number;arrival:number;regional?:boolean};
 export type AircraftPose={x:number;y:number;z:number;heading:number;phase:string;from?:string;progress?:number};
 export function tourismFares(level?:number):{oneWay:number;airportFee:number;roundTrip:number;resortNight:number;beachActivity:number;helicopter:number;currency:string};
 export function nextFlight(now:number,from?:string,minimumLead?:number):Flight;
+export function isScheduledIslandFlight(flight:Flight):boolean;
 export function airportById(id:string):import('./country-map.mjs').CountryAirport|null;
 export function nextRegionalFlight(now:number,from:string,to:string,minimumLead?:number):Flight|null;
 export function regionalFlightPath(flight:Flight):number[][]|null;

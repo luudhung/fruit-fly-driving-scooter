@@ -1,3 +1,5 @@
+import {createAirportImmigrationScene} from './airport-immigration-scene.ts';
+import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
 import {createPassengerTerminal} from './passenger-terminal.ts';
@@ -68,6 +70,7 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
   }
   sign(g,make,code,r.x,3,r.z-15,48,1.6);
  }
+ g.add(createAirportImmigrationScene(make));
  const groundMaterials={concrete,asphalt,white,yellow};
  for(const floor of createAirportGroundLayout()){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(floor.w,floor.d),groundMaterials[floor.material]);mesh.rotation.x=-Math.PI/2;mesh.position.set(floor.x,floor.topY,floor.z);g.add(mesh);}
  for(const [index,strip]of AIRPORT.runways.entries())runway(strip,index===0?'09L  HANSDREX CITY AIRPORT  27R':'09R  HANSDREX CITY AIRPORT  27L');
@@ -91,6 +94,7 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  const sand=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,80),new THREE.MeshStandardMaterial({color:0xe4d3a0,roughness:1}));sand.scale.set(ISLAND.rx,.48,ISLAND.rz);sand.position.set(ISLAND.x,.31,ISLAND.z);g.add(sand);
  const grass=new THREE.Mesh(new THREE.CylinderGeometry(1,1,.12,64),new THREE.MeshStandardMaterial({color:0x6fa779,roughness:1}));grass.scale.set(ISLAND.rx-18,1,ISLAND.rz-17);grass.position.set(ISLAND.x,.61,ISLAND.z);g.add(grass);
  runway(ISLAND.runway,'09  HWI · HAWAII CITY  27');
+ for(const [i,stand]of COUNTRY_AIRPORTS.find(port=>port.id==='island')!.stands.entries())sign(g,make,`HWI ${i+1} · ${i===0?'INTERNATIONAL':'HANSDREX / DAILY FOOD'}`,stand.x,1.6,stand.z+9,24,.75);
  // Low-rise resort with shaded verandas, villas, pool and a beach pier.
  const r=ISLAND.resort;box(g,r.w,9,r.d,r.x,5,r.z,stone);box(g,r.w+4,.7,r.d+4,r.x,10,r.z,gold);
  sign(g,make,'HAWAII LOCAL MARKET',r.x-14,3.8,r.z-r.d/2-.2,16,.8);
