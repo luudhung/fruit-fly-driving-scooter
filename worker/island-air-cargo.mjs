@@ -1,5 +1,6 @@
 import {AVIATION,scheduledAircraft,flightPose,nextFlight} from './aviation.mjs';
 import {COUNTRY_IDS,countryAt} from './country-map.mjs';
+import {HANSDREX_FRUIT_FARM} from './fruit-farm-map.mjs';
 
 const DAY=86400,UNLOAD_SECONDS=300,CAPACITY=200;
 export const HAWAII_SERVICE_WAGES=Object.freeze({'island-hotel-day':9.8,'island-hotel-evening':10,'island-retail':8.8,'island-food':9.2,'island-airport-staff':9.6});
@@ -14,9 +15,9 @@ export function createIslandAirCargo({world,mayDepart=()=>true,emit=()=>{}}){
  function sources(){
   const s=world();
   // Keep mainland emergency meals and ordinary vendor stock available locally.
-  return [['farm',50],['market',60],['grocery',40],['bakery',30]].flatMap(([id,floor])=>{
+  return [['farm',50],['market',60],['grocery',40],['bakery',30],[HANSDREX_FRUIT_FARM.accountId,24]].flatMap(([id,floor])=>{
    const seller=s.businesses?.[id];return seller?[{id,seller,holder:seller,key:'inventory',floor,unitPrice:Math.max(1,positive(seller.price))}]:[];
-  }).concat(s.treasury?[{id:'hansdrex-food-warehouse',seller:s.treasury,holder:s,key:'foodReserve',floor:1000,unitPrice:2}]:[]);
+  }).concat(s.industrialEconomy?.rawStock?[{id:'industrial-raw-depot',seller:account('industrial-raw-depot'),holder:s.industrialEconomy.rawStock,key:'grain',floor:60,unitPrice:2}]:[]).concat(s.treasury?[{id:'hansdrex-food-warehouse',seller:s.treasury,holder:s,key:'foodReserve',floor:1000,unitPrice:2}]:[]);
  }
  function dispatch(flight,at){
   const d=data(),day=Math.floor(flight.departure/DAY);

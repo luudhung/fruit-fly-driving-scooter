@@ -74,3 +74,13 @@ test('island procurement protects two daily meals per resident at the market and
  const t=fixture();t.s.flies=Array.from({length:50},(_,i)=>({id:'HWI-'+i,alive:true,residencyCountryId:'hawaii',x:170,z:850,jobId:i===0?'island-retail':null,wage:4.7}));t.s.foodReserve=1800;t.at(8*3600);
  const shipment=t.cargo.snapshot().shipments[0];assert.equal(shipment.manifest.find(p=>p.buyerId==='island-market').quantity,100);assert.ok(shipment.quantity<=200);assert.equal(t.s.businesses['island-market'].price,6);assert.equal(t.s.businesses['island-restaurant'].price,10);assert.equal(t.s.flies[0].wage,8.8);
 });
+
+
+test('daily island provisioning can buy domestic warehouse grain when retail shelves are empty, preserving mainland crew rations',()=>{
+ const t=fixture();t.s.foodReserve=0;t.s.industrialEconomy={rawStock:{grain:260,fabric:34,aggregate:88}};t.s.businesses['industrial-raw-depot']={cash:20};
+ const before=cash(t.s);t.at(8*3600);const shipment=t.cargo.snapshot().shipments[0];assert.equal(shipment.quantity,100);
+ assert.ok(shipment.manifest.every(p=>p.sellerId==='industrial-raw-depot'));assert.equal(t.s.industrialEconomy.rawStock.grain,160);assert.equal(t.s.industrialEconomy.rawStock.fabric,34);assert.equal(cash(t.s),before);
+ assert.equal(t.s.businesses['island-market'].inventory,0);t.at(shipment.unloadAt);assert.equal(t.s.businesses['island-market'].inventory,60);
+ const limited=fixture();limited.s.foodReserve=0;limited.s.industrialEconomy={rawStock:{grain:76}};limited.at(8*3600);
+ assert.equal(limited.cargo.snapshot().shipments[0].quantity,16);assert.equal(limited.s.industrialEconomy.rawStock.grain,60);
+});
