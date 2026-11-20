@@ -51,13 +51,15 @@ test('physical motorway lanes cross the river and harbor on legal decks, while i
 test('motorway merges yield to established lanes without traffic signals or false adjacent-lane queues',()=>{
  assert.ok(INTERSECTIONS.every(p=>!MOTORWAY_ROADS.some(r=>r.motorway&&contains(r,p))));
  assert.equal(signalBarrier({x:-500,z:MOTORWAY.north+12.2},{x:-390,z:MOTORWAY.north+12.2},50),null);
- const established={id:'MAIN',alive:true,traveling:true,transitMode:'car',x:-410,z:MOTORWAY.north+12.2,targetX:-300,targetZ:MOTORWAY.north+12.2};
+ const established={id:'MAIN',alive:true,traveling:true,transitMode:'car',x:-450,vx:20,vz:0,z:MOTORWAY.north+12.2,targetX:-300,targetZ:MOTORWAY.north+12.2};
  const join={id:'JOIN',alive:true,traveling:true,transitMode:'car',x:-430,z:-1070,targetX:-430,targetZ:-1090};
  const index=createVehicleIndex([established,join]);
  assert.ok(index(join,{x:-430,z:-1090})<13,'the entering car waits outside the carriageway');
- assert.equal(index(established,{x:-390,z:established.z}),20,'the established lane keeps moving');
- const neighbor={...established,id:'OTHER-LANE',x:-400,z:established.z-3.2};
- assert.equal(createVehicleIndex([established,neighbor])(established,{x:-390,z:established.z}),20);
+ const departing={...established,id:'LEAVING',x:-410};
+ assert.equal(createVehicleIndex([departing])(join,{x:-430,z:-1090}),20,'a motorway car already moving away from the merge cannot close the entry');
+ assert.equal(index(established,{x:-430,z:established.z}),20,'the established lane keeps moving');
+ const neighbor={...established,id:'OTHER-LANE',x:-440,z:established.z-3.2};
+ assert.equal(createVehicleIndex([established,neighbor])(established,{x:-430,z:established.z}),20);
  assert.equal(motorwayMedianBlocked({x:-600,z:MOTORWAY.north}),true);
  assert.equal(motorwayMedianBlocked({x:-430,z:MOTORWAY.north}),false,'the interchange has a median opening');
 });

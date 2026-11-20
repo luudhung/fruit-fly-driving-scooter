@@ -74,7 +74,7 @@ function bodyContact(f,other,ux,uz,length){
  if(overlapping){
   // Old snapshots can already overlap. Let one car leave instead of preserving
   // the corrupt stack forever; this is migration, not a newly recorded crash.
-  if(dx*ux+dz*uz<-.01||String(f.id).localeCompare(String(other.id))<0&&(Math.hypot(dx,dz)<.25||q.x*ux+q.z*uz>.7&&dx*q.x+dz*q.z<-.01))return null;
+  if(other.parked&&dx*ux+dz*uz<=.001||dx*ux+dz*uz<-.01||String(f.id).localeCompare(String(other.id))<0&&(Math.hypot(dx,dz)<.25||q.x*ux+q.z*uz>.7&&dx*q.x+dz*q.z<-.01))return null;
   return {distance:0,legacy:true};
  }
  return {distance:Math.max(0,enter-.015),legacy:false};

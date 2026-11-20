@@ -66,7 +66,7 @@ export class CivilizationWorld extends DurableObject {
       const storedKnown=new Set(),storedAlive=new Set();
       const mapResident=f=>{storedKnown.add(f.id);if(f.alive){storedAlive.add(f.id);return f;}return null;};
       const hasJournal=Boolean(await this.ctx.storage.get('local-save:meta'));
-      let saved=hasJournal?await loadSnapshotHeader(this.ctx.storage):await loadSnapshot(this.ctx.storage,{mapResident});
+      let saved=hasJournal?await loadSnapshotHeader(this.ctx.storage):await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});
       bootStage('snapshot decoded',{living:saved?.state?.flies?.length||0,compressedBytes:saved?.stats?.compressedBytes||0});
       this.archiveDormant=true;
       if(saved&&!hasJournal&&!snapshotLooksUsable(saved.state))throw Error('Invalid saved civilization state');
@@ -84,7 +84,7 @@ export class CivilizationWorld extends DurableObject {
       bootStage('reading save journal');
       const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0);
       if(hasJournal&&(!journal||journal.stale)){
-        saved=await loadSnapshot(this.ctx.storage,{mapResident});if(!saved||!snapshotLooksUsable(saved.state))throw Error('Invalid fallback civilization snapshot');
+        saved=await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});if(!saved||!snapshotLooksUsable(saved.state))throw Error('Invalid fallback civilization snapshot');
         base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
         this.baseKnownIds=storedKnown;this.baseAliveIds=storedAlive;
       }
@@ -238,7 +238,10 @@ export class CivilizationWorld extends DurableObject {
     // This is a separate alarm work unit: stream the old archive, replace only
     // current identities, then evict completed deaths without dropping history.
     this.storageStats=await saveSnapshotMapped(this.ctx.storage,document,this.lastWallClockMs);
-    await clearLocalHostJournal(this.ctx.storage);this.localJournalMeta=null;
+    // Retain a small living base across archive compaction and the next cold
+    // start; deleting it forced every later boot through all historical brains.
+    const liveDocument=projectLocalDocument({...state,flies:state.flies.filter(f=>f.alive)});
+    this.localJournalMeta=await saveLocalHostBase(this.ctx.storage,liveDocument,null,{lastWallClockMs:this.lastWallClockMs,epoch:this.localEpoch,sequence:this.localJournalMeta?.sequence||0});
     for(const id of Object.keys(document.actors))this.baseKnownIds.add(id);
     const living=state.flies.filter(f=>f.alive);
     this.baseAliveIds=new Set(living.map(f=>f.id));

@@ -48,7 +48,7 @@ async function readStoredSnapshot(storage) {
   return {meta, json: streamFrom(parts.values()).pipeThrough(new DecompressionStream("gzip"))};
 }
 
-async function readFramedJson(stream, mapResident = null) {
+async function readFramedJson(stream, mapResident = null, livingOnly = false) {
   let state, opened = false, closed = false, buffer = "";
   for await (const text of stream.pipeThrough(new TextDecoderStream())) {
     buffer += text;
@@ -66,7 +66,14 @@ async function readFramedJson(stream, mapResident = null) {
       } else if (line === ']}') {
         closed = true;
       } else {
-        const resident=JSON.parse(line.startsWith(',')?line.slice(1):line);
+        const record=line.startsWith(',')?line.slice(1):line;
+        // Saved residents put identity/liveness before their large private brain.
+        // Only skip an unambiguously top-level false flag; unusual legacy key
+        // orders fall back to the ordinary parser. Archive bytes stay untouched.
+        const flag=livingOnly?record.indexOf('"alive":false'):-1;
+        if(flag>=0&&flag<4096&&/^[{](?:"(?:[^"\\]|\\.)*":(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null),)*$/.test(record.slice(0,flag))&&/^[,}]/.test(record.slice(flag+13)))continue;
+        const resident=JSON.parse(record);
+        if(livingOnly&&!resident.alive)continue;
         const mapped=mapResident?mapResident(resident):resident;
         if(mapped!=null)state.flies.push(mapped);
       }
@@ -91,12 +98,12 @@ export async function loadSnapshotHeader(storage){
   return {state,lastWallClockMs:Number(saved.meta.lastWallClockMs||Date.now()),savedAtMs:Number(saved.meta.savedAtMs||0),stats:{chunks:saved.meta.chunks,compressedBytes:saved.meta.compressedBytes}};
 }
 
-export async function loadSnapshot(storage, {mapResident=null}={}) {
+export async function loadSnapshot(storage, {mapResident=null,livingOnly=false}={}) {
   const saved = await readStoredSnapshot(storage);
   if (!saved) return null;
   const {meta, json} = saved;
-  const state = meta.version === 2 ? await readFramedJson(json,mapResident) : await new Response(json).json();
-  if(meta.version!==2&&mapResident)state.flies=state.flies.map(mapResident).filter(f=>f!=null);
+  const state = meta.version === 2 ? await readFramedJson(json,mapResident,livingOnly) : await new Response(json).json();
+  if(meta.version!==2){if(livingOnly)state.flies=state.flies.filter(f=>f.alive);if(mapResident)state.flies=state.flies.map(mapResident).filter(f=>f!=null);}
   return {
     state,
     lastWallClockMs: Number(meta.lastWallClockMs || Date.now()),

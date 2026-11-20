@@ -58,3 +58,10 @@ test('a car owner can fund a drive from savings when pocket cash is empty',()=>{
  const plan=chooseTravelMode(f,entrance(BUILDINGS.find(b=>b.id==='school')));assert.equal(plan.mode,'car');assert.ok(plan.route.some(p=>p.mode==='car'));
  const supply=liquidMoneySupply();f.drivingTripActive=true;roadLife.arrived(f);assert.equal(f.savings,99.7);assert.ok(Math.abs(liquidMoneySupply()-supply)<1e-7);
 });
+
+test('parking normalization reserves existing freight bodies and loading bays before assigning residents',()=>{
+ const s=freshState(),f=s.flies.find(f=>f.alive&&f.vehicle?.includes('car')),bay=parkingPoint({x:-570,z:-950});
+ Object.assign(f,{traveling:false,transitMode:'walk',parkedCar:{...bay}});
+ s.regionalFreight||={trucks:[]};s.regionalFreight.trucks=[{id:'DELIVERY',alive:true,x:bay.x,z:bay.z,heading:bay.heading,vehicleLength:6.4,returnParking:bay,phase:'loading'}];
+ roadLife.normalizeParking();assert.notEqual(f.parkedCar.spaceId,bay.spaceId);assert.ok(Math.hypot(f.parkedCar.x-bay.x,f.parkedCar.z-bay.z)>5);
+});

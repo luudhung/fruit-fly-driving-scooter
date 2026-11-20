@@ -83,7 +83,7 @@ test('thirty-two recent deaths compact in their own alarm work unit and prune on
  unblock();await alarm;
  assert.equal(t.ticks,beforeTicks,'archive gzip and simulation ticking occupy different alarm events');
  assert.equal(t.loads.length,reads,'compaction streams the durable base without hydrating its archive into the engine');
- assert.equal(t.metadata.has('local-save:meta'),false);assert.equal(t.world.localJournalMeta,null);
+ assert.ok(t.metadata.has('local-save:meta'));assert.ok(t.world.localJournalMeta,'keep a living journal so the next cold start avoids the full archive');
  assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assert.equal(t.state.flies[0].x,52);assertArchiveRetained(t);
  for(let i=0;i<32;i++){
   const dead=t.savedBase.flies.find(f=>f.id==='RECENT-DEAD-'+i);
@@ -92,7 +92,7 @@ test('thirty-two recent deaths compact in their own alarm work unit and prune on
  assert.deepEqual([...t.world.baseAliveIds],['A']);
  const cold=t.restart(36);await cold.ready;
  assert.deepEqual(t.state.flies.map(f=>f.id),['A']);assert.equal(t.state.flies[0].x,52);assertArchiveRetained(t);
- assert.equal(t.savedBase.flies.filter(f=>!f.alive).length,33);assert.equal(t.saves,0);
+ assert.equal(t.savedBase.flies.filter(f=>!f.alive).length,33);assert.equal(t.saves,0);assert.equal(t.loads.length,reads,'restart reads the living journal and base header only');assert.equal(await cold.compactHistoryIfDue(),false,'already archived deaths are not compacted again after restart');
 });
 
 test('failed archive publication retains the journal and all recent brain records for a safe retry',async()=>{

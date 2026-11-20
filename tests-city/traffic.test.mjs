@@ -133,3 +133,10 @@ test('a long truck keeps its actual heading until its turn, rather than rotating
  const parallel={...lead,id:'parallel',x:-436.81,z:-1099.1,targetX:-436.81,routeWaypoints:[{x:-436.81,z:-1105.8},{x:-1000,z:-1105.8}]};
  assert.ok(createVehicleIndex([lead,parallel])(lead,{x:lead.x,z:lead.z-4})>3.9,'separate parallel lanes keep their real body width');
 });
+
+test('a legacy truck overlapping an unattended parked car may move out, while new arrivals still stop before its body',()=>{
+ const parked={id:'A-OWNER',alive:true,x:590,z:40,vehicle:'compact car',traveling:false,parkedCar:{x:-570,z:-946.55,heading:Math.PI/2}};
+ const truck={id:'Z-TRUCK',alive:true,x:-570,z:-946.55,y:1.1,traveling:true,transitMode:'car',vehicleLength:6.4,heading:Math.PI,targetX:-570,targetZ:-948.5};
+ assert.ok(createVehicleIndex([parked])(truck,{x:-570,z:-948.5})>1.9,'an absent parked owner cannot hold the only departure priority');
+ const incoming={...truck,x:-570,z:-935,targetZ:-955};assert.ok(createVehicleIndex([parked])(incoming,{x:-570,z:-955})<10,'a new truck cannot drive through a parked body');
+});

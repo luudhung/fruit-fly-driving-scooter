@@ -146,3 +146,11 @@ test('cold journal boot can read just the base header without parsing historical
  const saved=await loadSnapshotHeader(storage);assert.deepEqual(saved.state,{...header,flies:[]});assert.equal(saved.lastWallClockMs,1234);assert.equal(saved.savedAtMs,2345);
  await assert.rejects(loadSnapshot(storage));
 });
+
+test('living-only cold boot skips large archived brains without changing the durable archive or confusing nested liveness',async()=>{
+ const storage=new SnapshotStorage(),dead={id:'D',name:'old',alive:false,brain:{memory:'old memories '.repeat(10000)}},nested={id:'LIVE',traits:{alive:false},alive:true,brain:{id:'B'}};
+ const state={worldId:'W',simulationAgeSeconds:123,flies:[dead,nested]};await saveSnapshot(storage,state,1);
+ const mapped=[];const current=await loadSnapshot(storage,{livingOnly:true,mapResident:f=>{mapped.push(f.id);return f;}});
+ assert.deepEqual(mapped,['LIVE']);assert.deepEqual(current.state.flies,[nested]);assert.deepEqual((await loadSnapshot(storage)).state,state);
+ const journalHeader=await import('../cloudflare/src/civilization-snapshot.mjs');assert.equal((await journalHeader.loadSnapshotHeader(storage)).state.flies.length,0);
+});
