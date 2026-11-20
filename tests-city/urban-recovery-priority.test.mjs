@@ -162,3 +162,32 @@ test('an empty canteen keeps its workers waiting without clearing hunger or prog
  t.s.businesses.market.inventory=12;t.step();
  assert.equal(worker.hunger,40);assert.ok(saved.workerIds.includes(workerId));assert.notEqual(worker.urbanTask.phase,'canteen');
 });
+
+test('a fire deadline starts at ignition and a fresh disaster gets an arriving crew despite an old full work pool',()=>{
+ const t=fixture(),old=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500&&b.id!==t.home.id).slice(0,8);
+ for(const b of old)t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0,recoveryReadyAt:t.s.simulationAgeSeconds};
+ t.step();assert.equal(t.s.urbanWorld.projects.filter(p=>p.stage!=='queued').length,8);
+ t.s.simulationAgeSeconds+=2*86400;
+ const fire=t.urban.ignite(t.home.id);assert.ok(fire);
+ const deadline=fire.startedAt+86400;
+ assert.equal(t.s.urbanWorld.buildings[t.home.id].recoveryDeadlineAt,deadline);
+ t.s.simulationAgeSeconds+=6*3600;fire.intensity=0;
+ t.step();const p=t.s.urbanWorld.projects.find(p=>p.buildingId===t.home.id);
+ assert.ok(p);assert.equal(p.requestedAt,fire.startedAt);assert.equal(p.deadlineAt,deadline);
+ assert.equal(p.crewArrivedAt,undefined,'accepting a contract is not counted as crew arrival');
+ t.step();assert.notEqual(p.stage,'queued');assert.ok(p.workerIds.length>0);
+ assert.ok(p.crewAssignedAt<=deadline);assert.ok(p.crewArrivedAt<=deadline);
+ assert.ok(p.workerIds.some(id=>t.s.flies.find(f=>f.id===id)?.currentLocationId===`CIVIC-SITE-${p.id}`));
+ assert.equal(t.s.urbanWorld.projects.filter(p=>!['queued','complete','cancelled'].includes(p.stage)).length,8);
+ t.restore();const restored=t.s.urbanWorld.projects.find(q=>q.id===p.id);
+ assert.equal(restored.deadlineAt,deadline);assert.equal(restored.crewArrivedAt,p.crewArrivedAt);
+});
+
+test('reconstruction releases orchard employees even between shifts so recovery does not shut down its own food supply',()=>{
+ const t=fixture(),grower=t.s.flies[0],b=t.home;
+ t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0,recoveryReadyAt:t.s.simulationAgeSeconds};
+ const p=t.urban.submitProject(b.id);grower.fruitFarmDuty={farmId:'HANSDREX-FRUIT-FARM'};grower.jobId='hansdrex-fruit-grower';
+ grower.urbanTask={type:'build',id:p.id,targetId:`CIVIC-SITE-${p.id}`,assignedAt:t.s.simulationAgeSeconds};p.workerIds=[grower.id];
+ t.step();assert.equal(grower.urbanTask,null);assert.ok(!p.workerIds.includes(grower.id));assert.ok(p.workerIds.length>0);
+ t.step();assert.equal(grower.urbanTask,null);assert.equal(grower.jobId,'hansdrex-fruit-grower');assert.ok(grower.fruitFarmDuty);
+});

@@ -8,7 +8,7 @@ import {countryAt,COUNTRY_IDS,COUNTRY_AIRPORTS} from './country-map.mjs';
 import {airportById} from './aviation.mjs';
 import {HANSDREX_AIRLINE,hansdrexAirlineAccount,hansdrexAirlineSummary,chargeHansdrexFare,hansdrexReturnFare} from './hansdrex-airline.mjs';
 import {syncHospitalityHotels,hospitalityAccount,recordHospitalitySale,diningVenues,purchaseHospitalityMeal} from './hospitality-enterprises.mjs';
-import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_TOUCHDOWN_SECONDS, MIN_VISITOR_PASSENGERS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,legacyVisitorStand} from './visitor-aviation.mjs';
+import {AIRPORT_SECTORS, INBOUND_SECONDS, OUTBOUND_SECONDS, VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand, MIN_VISITOR_PASSENGERS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,legacyVisitorStand} from './visitor-aviation.mjs';
 
 const MAX_VISITORS=40,MAX_TAXIS=6,HOUR=3600,DAY=86400;
 const cap=(v,a=0,b=100)=>Math.max(a,Math.min(b,Number.isFinite(v)?v:a));
@@ -571,11 +571,14 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    if(!f.unloaded&&!f.arrivalPassengerIds&&f.arrivingGuests>0&&!reserveManifest(f)){
     rescheduleArrival(f,time+900);continue;
    }
-   if(closed&&!f.unloaded&&time>=f.inboundAt&&previous<f.inboundAt+VISITOR_TOUCHDOWN_SECONDS){
+   if(closed&&!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+VISITOR_TOUCHDOWN_SECONDS){
     const pose=visitorAircraftPose(Math.max(f.inboundAt,previous),f);
     if(pose)f.hold={x:pose.x,y:pose.y,z:pose.z,at:time};
-    rescheduleArrival(f,time+900);
+    rescheduleArrival(f,time+900);continue;
    }
+   if(time>=f.inboundAt+VISITOR_TOUCHDOWN_SECONDS)f.touchdownAt??=f.inboundAt+VISITOR_TOUCHDOWN_SECONDS;
+   if(resolveVisitorTaxiStand(f,airportFlights(f.airportId||'city',f),time))scheduleTurnaround(f,airportFlights(f.airportId||'city',f));
+   if(f.taxiHold)continue;
    if(closed&&f.outboundAt!=null&&time>=f.outboundAt&&previous<f.outboundAt){
     f.outboundAt=runwaySlot(time+900,OUTBOUND_SECONDS,f.airportId||'city',f);
     f.exitAt=f.outboundAt+OUTBOUND_SECONDS;

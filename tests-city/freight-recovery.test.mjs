@@ -27,3 +27,16 @@ test('only one recovery vehicle clears a congested junction at a time',()=>{
  assert.equal(recoverStalledFreight(s,first,120,(_actor,end)=>Math.hypot(end.x-first.x,end.z-first.z)),true);assert.ok(first.freightRecovery);
  assert.equal(recoverStalledFreight(s,second,120,()=>100),false);assert.equal(second.freightRecovery,undefined);assert.equal(s.businesses['vehicle-recovery'].cash,12);
 });
+
+test('a disabled truck can reverse clear of a junction before seeking a curb, without moving through another body',()=>{
+ const t={id:'CROSSING',alive:true,x:-431.5,z:-1087.8,y:1.1,heading:Math.PI/2,vehicleLength:6.4,traveling:true,transitMode:'car',phase:'collecting',freightProgress:{x:-431.5,z:-1087.8,at:1}};
+ const s={simulationAgeSeconds:7*3600,timeScale:120,flies:[],businesses:{'treasury:north-city':{cash:100}},treasury:{cash:100},regionalFreight:{trucks:[t]}};
+ const check=(_f,p)=>Math.abs(p.z-t.z)<.01&&p.x<t.x?Math.hypot(p.x-t.x,p.z-t.z):0;
+ assert.equal(recoverStalledFreight(s,t,120,check),true);assert.ok(t.freightRecovery.backing);assert.equal(t.z,-1087.8);assert.ok(t.x<-431.5&&t.x>=-433.5);assert.equal(s.businesses['vehicle-recovery'].cash,12);
+});
+
+test('an obstructed tow releases its junction reservation rather than blocking every following recovery forever',()=>{
+ const t={id:'TOW',alive:true,x:-431.5,z:-1087.8,heading:0,traveling:true,freightProgress:{x:-431.5,z:-1087.8,at:1},freightRecovery:{x:-440,z:-1087.8,startedAt:1,lastProgressAt:1}};
+ const s={simulationAgeSeconds:3600,timeScale:120,flies:[],businesses:{},treasury:{cash:100},regionalFreight:{trucks:[t]}};
+ assert.equal(recoverStalledFreight(s,t,120,()=>0),false);assert.equal(t.freightRecovery,null);assert.ok(t.nextFreightRecoveryAt>s.simulationAgeSeconds);assert.equal(s.treasury.cash,100);
+});

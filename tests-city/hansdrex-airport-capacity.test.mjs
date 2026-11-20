@@ -329,3 +329,42 @@ for(const seed of [20,22,27])test(`bulk foreign arrivals rotate finite stands an
  assert.equal(t.state.businesses['hansdrex-airline'].cash,demand*200);
  assert.ok(sawStairs,'foreign people are visible walking down aircraft stairs');assert.ok(sawImmigration,'foreign people are visible at immigration');
 });
+
+test('a charter finishes taxiing after touchdown when a storm starts, instead of returning to an airborne hold',()=>{
+ const state={simulationAgeSeconds:700,timeScale:120,businesses:{},northF1:{},cityVisitors:{airportTraffic:{flights:[]}}};let closed=false;
+ const stand=visitorStands('city')[0],flight={id:'TAXIING',airportId:'city',standId:stand.id,arrivalStand:stand,runwayId:AIRPORT.runways[0].id,sector:'west',direction:1,inboundAt:0,parkedAt:1020,outboundAt:null,exitAt:null,guests:[]};
+ const event={format:2,tenPassengerVersion:1,airportItineraryVersion:1,charters:[flight]};state.northF1.event=event;
+ const service=createF1Charters({world:()=>state,weatherClosed:()=>closed});service.tick(event);
+ assert.equal(flight.touchdownAt,520);closed=true;state.simulationAgeSeconds=1020;service.tick(event);
+ assert.equal(flight.landed,true);assert.equal(flight.inboundAt,0);assert.equal(flight.hold,undefined);assert.equal(visitorAircraftPose(1020,flight).phase,'parked');
+});
+
+test('a late stand release redirects a landed airliner to an empty bay, and a full apron causes a ground hold',()=>{
+ const stands=visitorStands('city'),incoming=()=>({id:'LATE',airportId:'city',standId:stands[0].id,arrivalStand:stands[0],runwayId:AIRPORT.runways[0].id,sector:'west',direction:1,inboundAt:0,parkedAt:1020,outboundAt:5000,exitAt:6080});
+ const occupied=stands.map((stand,i)=>({id:'PARKED-'+i,airportId:'city',arrivalStand:stand,standId:stand.id,inboundAt:-1020,parkedAt:0,landed:true,outboundAt:null,exitAt:null}));
+ const free=incoming();assert.equal(airportTraffic.resolveVisitorTaxiStand(free,occupied.slice(0,1),700),true);
+ assert.notEqual(free.standId,stands[0].id);assert.equal(free.inboundAt,0);assert.equal(free.hold,undefined);
+ assert.equal(visitorAircraftPose(701,free).y,3);assert.equal(visitorAircraftPose(free.parkedAt,free).phase,'parked');
+ const full=incoming();assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,700),true);assert.equal(visitorAircraftPose(700,full).phase,'taxi-hold');assert.equal(visitorAircraftPose(700,full).y,3);
+ occupied[1].aircraftGone=true;
+ assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,900),true);assert.equal(full.standId,stands[1].id);assert.equal(full.taxiHold,undefined);assert.equal(full.hold,undefined);
+});
+
+test('a restored legacy visitor car keeps moving when a new parking itinerary cannot yet be reserved',()=>{
+ const at=100000,guest={id:'LEGACY-CAR',alive:true,phase:'visiting',x:-390,z:-1105.8,y:1.1,money:500,vx:-11,vz:0,traveling:true,transitMode:'car',currentLocationId:'old-unavailable-location',leg:{key:'OLD-PATH',destination:'old-unavailable-destination',index:0,at:at-120},nights:0};
+ const flight={id:'OLD-FLIGHT',airportId:'city',inboundAt:0,parkedAt:1020,landed:true,aircraftGone:true,guests:[guest]};
+ const event={format:2,tenPassengerVersion:1,airportItineraryVersion:1,charters:[flight],tourPaths:{'OLD-PATH':[{x:-418,z:-1105.8,y:1.1,mode:'car'}]}};
+ const state={simulationAgeSeconds:at,timeScale:120,flies:[],businesses:{},northF1:{event},cityVisitors:{airportTraffic:{flights:[]}}};
+ const service=createF1Charters({world:()=>state,weatherClosed:()=>false});service.tick(event);
+ assert.ok(guest.x<-390);assert.equal(guest.leg.at,at);assert.ok(guest.leg.parkingRetryAt>at);assert.equal(guest.rentalCar,true);
+});
+
+test('a stopped rental car reports zero velocity so it cannot claim perpetual motorway merge priority',()=>{
+ const at=100000,guest={id:'STOPPED',alive:true,phase:'visiting',x:-390,z:-1105.8,y:1.1,money:500,traveling:true,transitMode:'car',vehicleHeading:-Math.PI/2,currentLocationId:'old',rentalCar:true,leg:{key:'DRIVE',destination:'next',index:0,at:at-120,parkingVersion:1},nights:0};
+ const leader={id:'LEADER',alive:true,x:-395,z:-1105.8,y:1.1,traveling:true,transitMode:'car',vehicleHeading:-Math.PI/2,targetX:-450,targetZ:-1105.8};
+ const flight={id:'FLIGHT',airportId:'city',inboundAt:0,parkedAt:1020,landed:true,aircraftGone:true,guests:[guest]};
+ const event={format:2,tenPassengerVersion:1,airportItineraryVersion:1,charters:[flight],tourPaths:{DRIVE:[{x:-418,z:-1105.8,y:1.1,mode:'car'}]}};
+ const state={simulationAgeSeconds:at,timeScale:120,flies:[leader],businesses:{},northF1:{event},cityVisitors:{airportTraffic:{flights:[]}}};
+ createF1Charters({world:()=>state,weatherClosed:()=>false}).tick(event);
+ assert.equal(guest.x,-390);assert.equal(guest.vx,0);assert.equal(guest.vz,0);assert.equal(guest.leg.blocked,true);
+});

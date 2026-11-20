@@ -28,7 +28,7 @@ const NORTH=COUNTRY_IDS.north;
 const materialSupplier=country=>country===NORTH?'north-civic-materials':country===COUNTRY_IDS.hawaii?'hawaii-civic-materials':'civic-materials';
 const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:country===COUNTRY_IDS.hawaii?'island-airport':'construction';
 const publicTreasury=country=>country===COUNTRY_IDS.hansdrex?'treasury':`treasury:${country}`;
-const available=(f,now,mealIntake=false)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&(mealIntake||f.hunger<80)&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
+const available=(f,now,mealIntake=false)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.fruitFarmDuty&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&(mealIntake||f.hunger<80)&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted=()=>false}){
@@ -146,6 +146,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const b=stateFor(buildingId);if(!b||['collapsed','cleared','construction'].includes(b.stage)||['landmark','mansion','airport'].includes(b.kind))return null;
   rememberBlueprint(b);
   const fire={id:`FIRE-${u().nextIncidentId++}`,buildingId,reason,startedAt:now(),lastAt:now(),intensity:18,detected:false,teamIds:[],waterUsed:0,spreadAttemptAt:now()+3600};u().fires.push(fire);
+  b.recoveryReadyAt=fire.startedAt;b.recoveryDeadlineAt=fire.startedAt+DAY;
   report('fire_started',`A fire started at ${buildingId}: ${reason}.`,{buildingId,incidentId:fire.id});evacuate(b,'fire');setStage(b,'unsafe');return fire;
  }
  function assignTask(f,task,b){
@@ -185,13 +186,19 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    const f=byId.get(ref[i]),task=f?.urbanTask;
    if(type==='build'&&task?.id===fireOrProject.id&&present(f,task.targetId))provisionDutyMeal(raw(),f,country);
    const mealIntake=type==='build'&&task?.phase==='canteen'&&now()<Number(task.mealDeadlineAt||0);
-   if(task?.id!==fireOrProject.id||!f?.alive||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86&&!mealIntake){
+   if(task?.id!==fireOrProject.id||!f?.alive||type==='build'&&f.fruitFarmDuty||hasCountryCommitment(f,now())||isWorkCommitted(f)||f.civicDuty||f.cityService||f.taxiJobId||f.taxiPassenger||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.health<25||f.energy<18||f.hunger>86&&!mealIntake){
     if(task?.id===fireOrProject.id){releaseTask(f,hasCountryCommitment(f,now())||isWorkCommitted(f));}
     ref.splice(i,1);
    }
   }
   if(now()<Number(fireOrProject.crewCheckAt||0)||ref.length>=max)return;
   if(type==='build'){
+   if(!ref.length&&fireOrProject.kind!=='new'&&!Number.isFinite(fireOrProject.crewArrivedAt)&&now()-fireOrProject.requestedAt<DAY){
+    // A fresh site needs a real response team even when all builders are
+    // already committed to the old backlog. Keep other sites staffed.
+    const donors=u().projects.filter(p=>activeProject(p)&&p.id!==fireOrProject.id&&p.requestedAt<fireOrProject.requestedAt&&projectCountry(p)===country&&p.workerIds?.length>3).sort((a,b)=>b.workerIds.length-a.workerIds.length);
+    for(const donor of donors.slice(0,1))for(const id of donor.workerIds.splice(-Math.min(3,donor.workerIds.length-3))){const f=byId.get(id);if(f?.urbanTask?.id===donor.id)releaseTask(f);}
+   }
    const assigned=raw().flies.filter(f=>f.alive&&f.urbanTask?.type==='build').length;
    max=Math.min(max,ref.length+Math.max(0,CONSTRUCTION_WORKFORCE_TARGET-assigned));
    if(ref.length>=max)return;
@@ -200,7 +207,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const distance=f=>Math.hypot(f.x-b.x,f.z-b.z),skill=f=>Number(f.professionSkills?.[type==='fire'?'fireSafety':'construction']||0)+Number(f.traits?.empathy||0);
   const employment=f=>f.jobId==='construction'?2:!f.jobId&&!f.businessId&&!f.businessEmployeeOf?1:0;
   const candidates=raw().flies.filter(f=>available(f,now(),type==='build')&&(!localOnly||countryAt(f)===country)&&!isWorkCommitted(f)&&Number(f.urbanCrewRetryAt||0)<=now()).sort((a,c)=>employment(c)-employment(a)||(distance(a)-skill(a)*24)-(distance(c)-skill(c)*24));
-  for(const f of candidates.slice(0,12)){if(assignTask(f,{type,id:fireOrProject.id},b)){ref.push(f.id);if(ref.length>=max)break;}}
+  for(const f of candidates.slice(0,12)){if(assignTask(f,{type,id:fireOrProject.id},b)){ref.push(f.id);if(type==='build')fireOrProject.crewAssignedAt??=now();if(ref.length>=max)break;}}
  }
  function payCrew(ids,budget,seconds,maxPayment=Infinity){
   const escrow=account('civic-escrow');let paid=0;
@@ -229,7 +236,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(fire.intensity<=.05||b.health<=0){
    fire.containedAt=now();u().extinguishedFires++;setStage(b,b.health<18?'collapsed':'damaged');for(const id of fire.teamIds){const crew=byId.get(id);if(!crew?.fireEngineDuty)releaseTask(crew);}
    report('fire_extinguished',`The fire at ${b.id} is out. Inspection and repair are still required.`,{buildingId:b.id,waterUsed:fire.waterUsed});
-   b.recoveryReadyAt=now();b.recoveryDeadlineAt=now()+DAY;
+   b.recoveryReadyAt=Number(fire.startedAt);b.recoveryDeadlineAt=b.recoveryReadyAt+DAY;
    b.lastFireId=fire.id;u().history.push({type:'fire',buildingId:b.id,t:now(),damage:100-b.health});u().history=u().history.slice(-24);
   }
  }
@@ -278,11 +285,25 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
  }
  function recoveryOrder(b){
-  const requestedAt=Number.isFinite(b.recoveryReadyAt)?b.recoveryReadyAt:Number(b.lastDamageAt||b.lastStageAt||now());
-  b.recoveryReadyAt=requestedAt;b.recoveryDeadlineAt??=requestedAt+DAY;
+  const fire=u().fires.find(f=>f.buildingId===b.id&&Number.isFinite(f.startedAt));
+  const requestedAt=fire?fire.startedAt:Number.isFinite(b.recoveryReadyAt)?b.recoveryReadyAt:Number(b.lastDamageAt||b.lastStageAt||now());
+  b.recoveryReadyAt=requestedAt;b.recoveryDeadlineAt=requestedAt+DAY;
   return {requestedAt,deadlineAt:b.recoveryDeadlineAt,contractorId:`national-reconstruction:${ownership(b)}`};
  }
  function activateRecoveryQueue(){
+  // Keep the bounded worksite pool, but reserve a response for a new disaster
+  // instead of leaving it behind an older, already overdue reconstruction backlog.
+  const urgent=u().projects.filter(p=>p.stage==='queued'&&p.kind!=='new'&&!Number.isFinite(p.crewArrivedAt)&&now()-p.requestedAt<DAY)
+   .sort((a,b)=>a.deadlineAt-b.deadlineAt);
+  for(const p of urgent){
+   if(hasSlot(projectCountry(p))||u().fires.some(f=>f.buildingId===p.buildingId&&!f.containedAt))continue;
+   const older=u().projects.filter(q=>activeProject(q)&&q.kind!=='new'&&q.stage!=='inspection'&&projectCountry(q)===projectCountry(p)&&q.requestedAt<p.requestedAt&&now()-q.requestedAt>=DAY)
+    .sort((a,b)=>Number(a.crewArrivedAt!=null)-Number(b.crewArrivedAt!=null)||a.requestedAt-b.requestedAt)[0];
+   if(!older)continue;
+   for(const id of older.workerIds||[]){const f=byId.get(id);if(f?.urbanTask?.id===older.id)releaseTask(f);}
+   older.workerIds=[];older.courierId=null;older.queuedStage=older.stage;older.stage='queued';older.pauseReason='urgent disaster crew dispatch';
+   p.stage=p.queuedStage||'delivery';delete p.queuedStage;p.workStartedAt??=now();p.crewCheckAt=0;p.pauseReason=null;
+  }
   const waiting=u().projects.filter(p=>p.stage==='queued'&&p.kind!=='new')
    .sort((a,b)=>Number(a.deadlineAt||a.startedAt)-Number(b.deadlineAt||b.startedAt)||a.startedAt-b.startedAt||a.id.localeCompare(b.id));
   for(const p of waiting){
@@ -418,8 +439,10 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const sites=u().projects.filter(q=>activeProject(q)&&q.stage!=='inspection').length;
   crewFor(p,'build',b,Math.min(MAX_SITE_CREW,Math.max(3,Math.ceil(CONSTRUCTION_WORKFORCE_TARGET/Math.max(1,sites)))));
   const country=projectCountry(p);
-  const onsite=p.workerIds.map(id=>byId.get(id)).filter(f=>f?.urbanTask?.phase!=='collecting'&&present(f,`CIVIC-SITE-${p.id}`));
+  const onsite=p.workerIds.map(id=>byId.get(id)).filter(f=>!['collecting','canteen'].includes(f?.urbanTask?.phase)&&present(f,`CIVIC-SITE-${p.id}`));
   if(!onsite.length){p.pauseReason='waiting for workers to reach the site';return;}
+  p.crewArrivedAt??=now();
+  if(b.recovery?.projectId===p.id){b.recovery.crewAssignedAt=p.crewAssignedAt;b.recovery.crewArrivedAt=p.crewArrivedAt;b.recovery.status='under repair';}
   if(p.stage==='clearance'){
    const hourlyWages=onsite.length*3,wages=Math.min(Math.max(0,p.budget-p.spent),hourlyWages*dt/3600);p.spent+=payCrew(onsite.map(f=>f.id),hourlyWages,dt,wages);
    p.clearance=clamp(Number(p.clearance||0)+onsite.length*dt/18000,0,1);p.pauseReason=null;
@@ -538,7 +561,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   u().fires=u().fires.filter(f=>!f.containedAt||now()-f.containedAt<7200);
   prioritizeRecovery();
   activateRecoveryQueue();
-  for(const p of u().projects){
+  for(const p of [...u().projects].sort((a,b)=>Number(b.kind!=='new'&&!Number.isFinite(b.crewArrivedAt)&&now()-b.requestedAt<DAY)-Number(a.kind!=='new'&&!Number.isFinite(a.crewArrivedAt)&&now()-a.requestedAt<DAY))){
    if(p.recoveryPaused)continue;
    if(p.stage==='inspection'){if(now()>=p.inspectionAt)finishProject(p);}
    else advanceProject(p,dt);

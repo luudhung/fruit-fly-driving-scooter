@@ -22,3 +22,5 @@ export function legacyVisitorStand(flight:VisitorAircraft):null|{id:string;x:num
 export function visitorStandReleaseAt(flight:VisitorAircraft):number;
 export function visitorRunwayReservation(earliest:number,duration:number,flights:VisitorAircraft[],airportId?:string):{at:number;runwayId:string};
 export function visitorStandReservation(earliest:number,flights:VisitorAircraft[],airportId?:string,groundStay?:number):null|{at:number;runwayId:string;stand:{id:string;x:number;z:number}};
+
+export function resolveVisitorTaxiStand(flight:VisitorAircraft,flights:VisitorAircraft[],now:number):boolean;

@@ -147,6 +147,24 @@ export function visitorStandReservation(earliest,flights,airportId='city',ground
  return choices.sort((a,b)=>a.at-b.at||a.stand.id.localeCompare(b.stand.id))[0]||null;
 }
 
+/** Once wheels are down, a late stand release is handled on the taxiway.
+ * Never send a landed aircraft back into the airborne holding pattern. */
+export function resolveVisitorTaxiStand(flight,flights,now){
+ if(flight.aircraftGone||flight.landed||flight.landedAt!=null||!Number.isFinite(flight.inboundAt)||now<flight.inboundAt+690||flight.taxiStandChecked)return false;
+ const occupied=stand=>flights.some(f=>f!==flight&&!f.aircraftGone&&(f.airportId||'city')===(flight.airportId||'city')&&flightStand(f)&&Math.hypot(flightStand(f).x-stand.x,flightStand(f).z-stand.z)<24&&Number(f.parkedAt)<Math.max(now+330,visitorStandReleaseAt(flight))&&visitorStandReleaseAt(f)>Math.max(now,flight.inboundAt+690));
+ const current=flightStand(flight);
+ if(current&&!occupied(current)&&!flight.taxiHold){flight.taxiStandChecked=true;return false;}
+ const free=visitorStands(flight.airportId||'city').filter(p=>!occupied(p)).sort((a,b)=>Math.hypot(a.x-(current?.x||0),a.z-(current?.z||0))-Math.hypot(b.x-(current?.x||0),b.z-(current?.z||0)))[0];
+ const pose=flight.taxiHold?.pose||visitorAircraftPose(Math.min(now,flight.inboundAt+690),flight);
+ if(!pose)return false;
+ if(!free){flight.taxiHold||={at:now,pose};flight.parkedAt=Math.max(flight.parkedAt,now+330);return true;}
+ const start=flight.taxiHold?now:Math.min(now,flight.inboundAt+690),taxi=visitorFlightRunway(flight).taxiwayZ??visitorAirport(flight).taxiwayZ??VISITOR_TAXIWAY_Z;
+ const points=[{...pose,at:start}],add=(x,z)=>{const p=points.at(-1);points.push({x,y:3,z,at:p.at+Math.max(30,Math.hypot(x-p.x,z-p.z)*2)});};
+ for(const step of flightPath(current||free,flight,false).filter(p=>p[0]>690&&p[0]<=820))add(step[1],step[3]);
+ add(free.x,taxi);add(free.x,free.z);
+ flight.standId=free.id;flight.arrivalStand={...free};flight.taxiRoute=points;flight.parkedAt=points.at(-1).at;delete flight.taxiHold;flight.taxiStandChecked=true;return true;
+}
+
 function holdPose(now, flight) {
  const [farX,farY,farZ]=FAR[flight.sector]||FAR.north;
  const hold=flight.hold;
@@ -198,6 +216,11 @@ export function visitorAircraftPose(now, flight) {
  if(!stand)return null;
  const outbound=flight.outboundAt!=null&&now>=flight.outboundAt;
  if(!outbound&&now>=flight.parkedAt)return {...stand,y:3,heading:0,phase:'parked'};
+ if(!outbound&&flight.taxiHold)return {...flight.taxiHold.pose,heading:flight.taxiHold.pose.heading||0,phase:'taxi-hold'};
+ if(!outbound&&flight.taxiRoute){
+  const points=flight.taxiRoute;let i=points.findIndex(p=>p.at>now);if(i<0)i=points.length-1;i=Math.max(1,i);const a=points[i-1],b=points[i],t=Math.max(0,Math.min(1,(now-a.at)/Math.max(1,b.at-a.at)));
+  return {x:a.x+(b.x-a.x)*t,y:3,z:a.z+(b.z-a.z)*t,heading:Math.atan2(b.x-a.x,b.z-a.z),phase:'taxi-in'};
+ }
  const elapsed=now-(outbound?flight.outboundAt:flight.inboundAt);
  const path=flightPath(stand,flight,outbound);
  const index=Math.min(path.length-2, Math.max(0,path.findIndex(p=>p[0]>elapsed)-1));

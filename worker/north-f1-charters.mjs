@@ -5,7 +5,7 @@ import {BORDER_CHECKPOINTS,COUNTRY_IDS,countryAt} from './country-map.mjs';
 import {airportById} from './aviation.mjs';
 import {chargeHansdrexFare,HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_AIRPORT_FOOTBRIDGE} from './north-f1-map.mjs';
-import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalPose,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand} from './visitor-aviation.mjs';
+import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalPose,visitorAircraftPose,visitorRunwayReservation,visitorRunwaySlot,visitorStandReservation,visitorStandReleaseAt,legacyVisitorStand,VISITOR_TOUCHDOWN_SECONDS,resolveVisitorTaxiStand} from './visitor-aviation.mjs';
 
 const DAY=86400,HOUR=3600;
 const HANS=COUNTRY_IDS.hansdrex,NORTH=COUNTRY_IDS.north;
@@ -67,7 +67,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   // Most arriving fans use walkable routes; a bounded minority hire cars.
   // The old shared path silently created a car for every one of 200 guests.
   const hire=!f.vehicleRecovery&&(f.rentalCar||signature(f.id+'rental-car')<.12);
-  const origin=hire?(f.parkedCar||reserveRoadParking(world(),f,a)):null;
+  const origin=hire?(f.parkedCar||(f.traveling&&f.transitMode==='car'?{x:f.x,z:f.z,heading:Number(f.vehicleHeading??Math.atan2(f.vx||0,f.vz||0))}:reserveRoadParking(world(),f,a))):null;
   if(origin)f.parkedCar=origin;
   f.destinationParking=hire?reserveRoadParking(world(),f,b):null;
   const drive=origin&&f.destinationParking?vehicleRoute(a,b,'car',origin,f.destinationParking):[];
@@ -116,10 +116,11 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(!key){f.leg.blocked=true;return;}
    f.leg={key,destination,index:0,at:now(),parkingVersion:1};f.traveling=true;
   }
-  if(!f.leg.parkingVersion&&e.tourPaths[f.leg.key]?.some(p=>p.mode==='car')){
+  if(!f.leg.parkingVersion&&e.tourPaths[f.leg.key]?.some(p=>p.mode==='car')&&now()>=Number(f.leg.parkingRetryAt||0)){
+   if(f.transitMode==='car')f.rentalCar=true;
    const destination=f.leg.destination,key=makeRoute(e,f,destination,{x:f.x,z:f.z,y:f.y??1.1});
    if(key)f.leg={key,destination,index:0,at:f.leg.at,parkingVersion:1};
-   else{f.leg.blocked=true;return;}
+   else f.leg.parkingRetryAt=now()+600; // keep draining the existing legal route while a curb reservation is unavailable
   }
   const leg=f.leg,route=e.tourPaths[leg.key];
   let left=Math.min(1200,Math.max(0,now()-leg.at))/scale();
@@ -145,7 +146,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    f.transitMode=p.mode;
    if(movementBlocked?.(f,next,p.mode==='car'?1:.25)){leg.blocked=true;return;}
    if(countryAt(f)!==countryAt(next)&&intercept?.(f,f,next,{mode:p.mode})?.allowed===false){leg.blocked=true;return;}
-   f.vx=(p.x-f.x)/d*speed;f.vz=(p.z-f.z)/d*speed;
+   f.vx=step>.001?(p.x-f.x)/d*speed:0;f.vz=step>.001?(p.z-f.z)/d*speed:0;
    Object.assign(f,next);left-=step/speed;
    if(step>=d-.01){if(p.stage==='parking'){f.parkedCar=f.destinationParking;f.destinationParking=null;}leg.index++;}
    if(step<.001){leg.blocked=true;return;}
@@ -300,24 +301,15 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  }
  function stepPlane(e,plane){
   if(plane.aircraftGone||!Number.isFinite(plane.parkedAt))return;
-  if(!plane.landed&&now()>=plane.inboundAt+690){
-   const conflict=traffic(e,plane.airportId,plane).find(other=>other.landed&&!other.aircraftGone&&
-    other.arrivalStand&&plane.arrivalStand&&distance(other.arrivalStand,plane.arrivalStand)<24&&visitorStandReleaseAt(other)>plane.parkedAt);
-   if(conflict){
-    const pose=visitorAircraftPose(now(),plane);if(pose)plane.hold={...pose,at:now()};
-    schedule(e,plane,Math.max(now()+900,visitorStandReleaseAt(conflict)+120-INBOUND_SECONDS),plane.kind==='positioning'?8*HOUR:1800);
-    return;
-   }
+  const previous=Number(plane.lastAirfieldAt??Math.min(now(),plane.inboundAt));plane.lastAirfieldAt=now();
+  if(!plane.landed&&!Number.isFinite(plane.touchdownAt)&&now()>=plane.inboundAt&&previous<plane.inboundAt+VISITOR_TOUCHDOWN_SECONDS&&weatherClosed()){
+   const pose=visitorAircraftPose(Math.max(plane.inboundAt,previous),plane);
+   if(pose)plane.hold={...pose,at:now()};
+   schedule(e,plane,now()+900,plane.kind==='positioning'?8*HOUR:1800);return;
   }
-  if(!plane.landed&&now()>=plane.parkedAt){
-   if(weatherClosed()){
-    if(!schedule(e,plane,now()+900,plane.kind==='positioning'?8*HOUR:1800)){
-     plane.inboundAt=null;plane.parkedAt=null;plane.earliestAt=now()+900;
-    }
-    return;
-   }
-   plane.landed=true;
-  }
+  if(!plane.landed&&now()>=plane.inboundAt+VISITOR_TOUCHDOWN_SECONDS)plane.touchdownAt??=plane.inboundAt+VISITOR_TOUCHDOWN_SECONDS;
+  if(resolveVisitorTaxiStand(plane,traffic(e,plane.airportId,plane),now())&&plane.outboundAt!=null)outbound(e,plane,Math.max(plane.outboundAt,plane.parkedAt+1200));
+  if(!plane.landed&&!plane.taxiHold&&now()>=plane.parkedAt)plane.landed=true;
   if(plane.outboundAt!=null&&now()>=plane.outboundAt&&!plane.tookOff){
    if(weatherClosed())outbound(e,plane,now()+900);else plane.tookOff=true;
   }
