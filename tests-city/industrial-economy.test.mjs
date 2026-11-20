@@ -137,3 +137,28 @@ test('the Grand Prix shop orders real finished garments and receives stock only 
  assert.equal(north.cash,budget-1800);
  assert.ok(Math.abs(cash(t.s)-total)<1e-6);
 });
+
+
+test('food-crisis wholesale support transfers domestic money into a paid delayed import, survives restore and remains bounded',()=>{
+ const t=fixture({sovereign:true}),d=t.s.industrialEconomy,depot=t.s.businesses['industrial-raw-depot'];d.rawStock={fabric:0,grain:0,aggregate:0};depot.cash=96;d.nextRestockAt=t.s.simulationAgeSeconds+86400;
+ for(const f of t.s.flies)f.hunger=100;
+ const total=cash(t.s),hans=t.s.treasury.cash,north=t.s.businesses['treasury:north-city'].cash;
+ t.service.tick(0,{hour:9});assert.equal(d.foodSecurityAdvance.outstanding,4000);assert.equal(t.s.treasury.cash,hans-4000);assert.equal(t.s.businesses['treasury:north-city'].cash,north);assert.equal(d.rawStock.grain,0);assert.equal(d.rawRestock.units,400);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
+ const arrival=d.rawRestock.arrival;t.restore();let restored=t.s.industrialEconomy;t.service.tick(0,{hour:9});assert.equal(restored.foodSecurityAdvance.advanced,4000);assert.equal(restored.rawStock.grain,0);
+ t.s.simulationAgeSeconds=arrival;t.service.tick(1800,{hour:12});assert.equal(restored.rawStock.grain,400);assert.ok(Math.abs(cash(t.s)-total)<1e-6);
+ for(let i=0;i<5;i++){t.s.simulationAgeSeconds+=86400;restored.rawStock.grain=0;t.s.businesses['industrial-raw-depot'].cash=0;restored.rawRestock=null;t.service.tick(0,{hour:9});}
+ assert.equal(restored.foodSecurityAdvance.outstanding,12000);assert.equal(restored.foodSecurityAdvance.advanced,12000);
+});
+
+test('ordinary demand and an unfunded country cannot trigger wholesale food advances',()=>{
+ const t=fixture(),d=t.s.industrialEconomy;d.rawStock.grain=0;t.s.businesses['industrial-raw-depot'].cash=0;t.service.tick(0,{hour:9});assert.equal(d.foodSecurityAdvance,undefined);
+ for(const f of t.s.flies)f.hunger=100;t.s.treasury.cash=1000;const stock=d.rawStock.grain;t.service.tick(0,{hour:9});assert.equal(d.foodSecurityAdvance,undefined);assert.equal(d.rawStock.grain,stock);assert.equal(t.s.treasury.cash,1000);
+});
+
+test('a recovered wholesaler repays only its domestic treasury once while retaining operating cash and grain',()=>{
+ const t=fixture({sovereign:true}),d=t.s.industrialEconomy,depot=t.s.businesses['industrial-raw-depot'];
+ d.foodSecurityAdvance={outstanding:500,advanced:500,repaid:0,nextAt:t.s.simulationAgeSeconds+86400};d.rawStock.grain=1400;depot.cash=5500;
+ const total=cash(t.s),hans=t.s.treasury.cash,north=t.s.businesses['treasury:north-city'].cash;
+ t.service.tick(0,{hour:9});assert.equal(d.foodSecurityAdvance.outstanding,0);assert.equal(d.foodSecurityAdvance.repaid,500);assert.equal(depot.cash,5000);assert.equal(d.rawStock.grain,1400);assert.equal(t.s.treasury.cash,hans+500);assert.equal(t.s.businesses['treasury:north-city'].cash,north);assert.equal(cash(t.s),total);
+ t.restore();t.service.tick(0,{hour:9});assert.equal(t.s.treasury.cash,hans+500);assert.equal(cash(t.s),total);
+});

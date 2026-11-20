@@ -225,6 +225,24 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  }
  function restock(){
   const d=data();if(d.rawRestock&&now()>=d.rawRestock.arrival){for(const key of ['fabric','grain','aggregate'])d.rawStock[key]+=d.rawRestock.units;d.rawRestock=null;}
+  // A cash-starved wholesaler otherwise buys ever-smaller batches while the
+  // entire food chain waits. Domestic, repayable working capital funds the
+  // existing paid import and its arrival delay; it never adds pantry stock.
+  const depot=account(sourceId),support=d.foodSecurityAdvance;
+  if(support?.outstanding>0&&Number(depot.cash||0)>5000&&Number(d.rawStock.grain||0)>=1400){
+   const repayment=Math.min(support.outstanding,depot.cash-5000);
+   if(transfer(depot,treasuryFor(sourceId),repayment)){support.outstanding-=repayment;support.repaid=Number(support.repaid||0)+repayment;}
+  }
+  if(!d.rawRestock&&Number(d.rawStock.grain||0)<60&&Number(depot.cash||0)<600&&now()>=Number(support?.nextAt||0)){
+   const residents=raw().flies.filter(f=>f.alive&&!f.departed);
+   if(residents.length>=8&&residents.filter(f=>Number(f.hunger||0)>=85).length>=residents.length*.4){
+    const treasury=treasuryFor(sourceId),amount=Math.min(4000,Math.max(0,12000-Number(support?.outstanding||0)),Math.max(0,Number(treasury?.cash||0)-1000));
+    if(amount>0&&transfer(treasury,depot,amount)){
+     const ledger=d.foodSecurityAdvance||={outstanding:0,advanced:0,repaid:0};ledger.outstanding+=amount;ledger.advanced+=amount;ledger.nextAt=now()+DAY;d.nextRestockAt=Math.min(now(),Number(d.nextRestockAt||now()));
+     note('food_security_advance','Domestic working capital funded the existing grain import during a food shortage.',{accountId:sourceId,amount,outstanding:ledger.outstanding});
+    }
+   }
+  }
   if(!d.rawRestock&&now()>=d.nextRestockAt){const regional=Boolean(raw().regionalFreight?.funded);d.nextRestockAt=now()+(regional?21600:DAY);const units=Math.min(regional?800:400,Math.floor(account(sourceId).cash/6));if(units>0&&Object.values(d.rawStock).some(v=>v<(regional?1400:600))){transfer(account(sourceId),account(supplierId),units*6);d.externalOutflow+=units*6;d.rawRestock={units,arrival:now()+(regional?3600:21600)};}}
  }
  function tick(seconds,clock){syncDynamicPlants();const d=data();if(!loc(sourceId))return;const elapsed=Math.max(0,Math.min(1800,now()-Number(d.lastTickAt??now())));d.lastTickAt=now();const activeCompanies=companies();for(const b of activeCompanies){if(!actor(b.ownerId)?.alive){close(b);continue;}b.employees=b.employees.filter(id=>actor(id)?.alive&&actor(id).businessEmployeeOf===b.id);production(b,clock);decisions(b);}const operating=activeCompanies.filter(b=>b.status==='operating');maintainF1Merchandise(operating);clothingRetail.tick(requestSale,operating);for(const o of d.orders)if(!o.paid&&now()>o.deadline)finishOrder(o,true);dispatch(clock);tickTrucks(elapsed,clock);if(regionalDistribution)regionalFreight.tick(elapsed);restock();d.orders=[...d.orders.filter(o=>!o.paid),...d.orders.filter(o=>o.paid&&now()-Number(o.completedAt||0)<DAY).slice(-32)];refreshPlants();}
