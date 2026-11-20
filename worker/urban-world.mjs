@@ -1,3 +1,4 @@
+import {constructionSchedule,constructionWorkStep} from './construction-schedule.mjs';
 import {HANSDREX_FRUIT_FARM} from './fruit-farm-map.mjs';
 import {accidentalFireCandidates} from './fire-risk.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
@@ -19,7 +20,7 @@ import {validDevelopmentLot,planAccessRoad,MIN_ALLEY} from './urban-roads.mjs';
 import {BUILDINGS,LOCATIONS,ROADS,WATER,PARK,SPORTS_VENUES,RIVER,RIVERSIDE,contains,overlaps,entrance,blocked,applyUrbanGeometry} from './city-map.mjs';
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,Number(n)||0));
 const live=f=>f.alive&&f.ageYears>=18&&f.ageYears<76&&f.health>35;
-const MAX_FIRES=3,MAX_PROJECTS=5,MAX_NORTH_PROJECTS=2,MAX_RECOVERY_PROJECTS=8,MAX_NORTH_RECOVERY_PROJECTS=4,DAY=86400;
+const MAX_FIRES=3,MAX_PROJECTS=5,MAX_NORTH_PROJECTS=2,MAX_RECOVERY_PROJECTS=24,MAX_NORTH_RECOVERY_PROJECTS=10,DAY=86400;
 export const CONSTRUCTION_WORKFORCE_TARGET=100;
 const MAX_SITE_CREW=25;
 const BLUEPRINT_FIELDS=['x','z','w','d','h','kind','color','roofColor','facadeColor','style','roofStyle','seed'];
@@ -196,8 +197,8 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    if(!ref.length&&fireOrProject.kind!=='new'&&!Number.isFinite(fireOrProject.crewArrivedAt)&&now()-fireOrProject.requestedAt<DAY){
     // A fresh site needs a real response team even when all builders are
     // already committed to the old backlog. Keep other sites staffed.
-    const donors=u().projects.filter(p=>activeProject(p)&&p.id!==fireOrProject.id&&p.requestedAt<fireOrProject.requestedAt&&projectCountry(p)===country&&p.workerIds?.length>3).sort((a,b)=>b.workerIds.length-a.workerIds.length);
-    for(const donor of donors.slice(0,1))for(const id of donor.workerIds.splice(-Math.min(3,donor.workerIds.length-3))){const f=byId.get(id);if(f?.urbanTask?.id===donor.id)releaseTask(f);}
+    const donors=u().projects.filter(p=>activeProject(p)&&p.id!==fireOrProject.id&&p.requestedAt<fireOrProject.requestedAt&&projectCountry(p)===country&&p.workerIds?.length>1).sort((a,b)=>b.workerIds.length-a.workerIds.length);
+    for(const donor of donors.slice(0,1))for(const id of donor.workerIds.splice(-Math.min(2,donor.workerIds.length-1))){const f=byId.get(id);if(f?.urbanTask?.id===donor.id)releaseTask(f);}
    }
    const assigned=raw().flies.filter(f=>f.alive&&f.urbanTask?.type==='build').length;
    max=Math.min(max,ref.length+Math.max(0,CONSTRUCTION_WORKFORCE_TARGET-assigned));
@@ -257,7 +258,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   account('civic-escrow').cash+=cost-remaining;raw().totalTransactions=Number(raw().totalTransactions||0)+contributions.length;
   return contributions;
  }
- function recoveryCost(b){return Math.ceil(estimate(b)*(b.stage==='collapsed'?1:Math.max(.25,(100-b.health)/100)));}
+ function recoveryCost(b){return Math.max(constructionSchedule(b,{kind:b.stage==='collapsed'?'rebuild':'repair'}).minimumBudget,Math.ceil(estimate(b)*(b.stage==='collapsed'?1:Math.max(.25,(100-b.health)/100))));}
  function recoveryPriority(country=null){
   const hasFire=id=>u().fires.some(f=>f.buildingId===id&&!f.containedAt);
   if(u().projects.some(p=>ongoing(p)&&p.kind!=='new'&&(!country||territoriesMatch(projectCountry(p),country))&&!hasFire(p.buildingId)))return true;
@@ -327,7 +328,9 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   const warRecovery=kind!=='new'&&b.warRecovery?.active?b.warRecovery:null;
   if(kind!=='new'){fundingAccountId=publicTreasury(country);ownerId=null;}
   if(kind==='repair'&&b.stage==='collapsed')kind='rebuild';
-  const owner=ownerId?byId.get(ownerId):null,roadArea=accessRoads.reduce((sum,r)=>sum+r.w*r.d,0),cost=Math.ceil(estimate(b)*(kind==='new'?2:kind==='rebuild'?1:Math.max(.25,(100-b.health)/100))+Math.ceil(roadArea*1.3));
+  const owner=ownerId?byId.get(ownerId):null,roadArea=accessRoads.reduce((sum,r)=>sum+r.w*r.d,0),roadLength=accessRoads.reduce((sum,r)=>sum+Math.max(r.w,r.d),0);
+  const schedule=constructionSchedule(b,{kind,targetHeight:kind==='new'?(height||b.h):(b.originalHeight||b.h),materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18)))+Math.ceil(roadArea*.18),roadArea,roadLength});
+  const cost=Math.max(schedule.minimumBudget,Math.ceil(estimate(b)*(kind==='new'?2:kind==='rebuild'?1:Math.max(.25,(100-b.health)/100))+Math.ceil(roadArea*1.3)));
   let contributions=null;
   if(fundingAccountId){
    const payer=fundingSource(fundingAccountId),reserve=kind!=='new'?0:fundingAccountId==='power-grid'?650:1000;
@@ -341,7 +344,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    transfer(raw().treasury,account('civic-escrow'),cost);
   }
   const payerId=owner?.id||contributions?.[0]?.residentId||null;
-  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,countryId:country,ownerId:payerId,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:kind==='new'?(height||b.h):(b.originalHeight||b.h),roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0};
+  const project={id:`BUILD-${u().nextProjectId++}`,buildingId,countryId:country,ownerId:payerId,kind,stage:b.stage==='collapsed'?'clearance':'delivery',progress:0,materialsRequired:Math.max(20,Math.ceil(b.w*b.d*(['new','rebuild'].includes(kind)?.45:.18))),materialsOrdered:0,materialsDelivered:0,materialsUsed:0,budget:cost,spent:0,workerIds:[],startedAt:now(),lastAt:now(),targetHeight:kind==='new'?(height||b.h):(b.originalHeight||b.h),roadIds:[],roadProgress:0,roadMaterialsRequired:Math.ceil(roadArea*.18),roadMaterialsUsed:0,constructionSchedule:schedule};
   if(order){Object.assign(project,order,{acceptedAt:now()});if(queued){project.queuedStage=project.stage;project.stage='queued';project.pauseReason='national crew scheduling';}else project.workStartedAt=now();}
   if(fundingAccountId)project.funding={type:fundingAccountId==='power-grid'?'utility':'public',accountId:fundingAccountId};
   if(kind!=='new')b.recovery={status:queued?'queued':'funded',projectId:project.id,cost,countryId:country,...order,acceptedAt:now()};
@@ -431,13 +434,26 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    if(develop(lot,owner.id))return;
   }
  }
+ function projectSchedule(p,b){
+  if(!p.constructionSchedule)p.constructionSchedule=constructionSchedule(b,{kind:p.kind,targetHeight:p.targetHeight,materialsRequired:p.materialsRequired,roadMaterialsRequired:p.roadMaterialsRequired,roadLength:u().roads.filter(r=>p.roadIds?.includes(r.id)).reduce((n,r)=>n+Math.max(r.w,r.d),0),needsClearance:p.stage==='clearance'||p.queuedStage==='clearance'});
+  return p.constructionSchedule;
+ }
+ function rebalanceRecoveryCrews(){
+  const sites=u().projects.filter(p=>activeProject(p)&&p.stage!=='inspection'),share=Math.max(2,Math.floor(CONSTRUCTION_WORKFORCE_TARGET/Math.max(1,sites.length)));
+  for(const p of sites){const b=stateFor(p.buildingId);if(!b)continue;const limit=Math.min(projectSchedule(p,b).targetCrew,share);
+   if(p.workerIds.length<=limit)continue;
+   const keep=[...(p.courierId&&p.workerIds.includes(p.courierId)?[p.courierId]:[]),...p.workerIds.filter(id=>id!==p.courierId)].slice(0,limit),ids=new Set(keep);
+   for(const id of p.workerIds)if(!ids.has(id)){const f=byId.get(id);if(f?.urbanTask?.id===p.id)releaseTask(f);}
+   p.workerIds=keep;p.crewCheckAt=0;
+  }
+ }
  function advanceProject(p,dt){
   if(!activeProject(p))return;
   const b=stateFor(p.buildingId);if(!b)return;
   if(u().fires.some(f=>f.buildingId===b.id&&!f.containedAt)){p.pauseReason='active fire';return;}
   if(p.kind!=='new'&&!fundExistingRecovery(p)){p.pauseReason='awaiting national repair funds';return;}
-  const sites=u().projects.filter(q=>activeProject(q)&&q.stage!=='inspection').length;
-  crewFor(p,'build',b,Math.min(MAX_SITE_CREW,Math.max(3,Math.ceil(CONSTRUCTION_WORKFORCE_TARGET/Math.max(1,sites)))));
+  const sites=u().projects.filter(q=>activeProject(q)&&q.stage!=='inspection').length,schedule=projectSchedule(p,b);
+  crewFor(p,'build',b,Math.min(schedule.targetCrew,MAX_SITE_CREW,Math.max(2,Math.floor(CONSTRUCTION_WORKFORCE_TARGET/Math.max(1,sites)))));
   const country=projectCountry(p);
   const onsite=p.workerIds.map(id=>byId.get(id)).filter(f=>!['collecting','canteen'].includes(f?.urbanTask?.phase)&&present(f,`CIVIC-SITE-${p.id}`));
   if(!onsite.length){p.pauseReason='waiting for workers to reach the site';return;}
@@ -476,14 +492,12 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    return;
   }
   p.stage='construction';p.pauseReason=null;setStage(b,'construction');
-  const increment=onsite.length*dt/(['new','rebuild'].includes(p.kind)?72000:36000);
-  const next=Math.min(1,p.progress+increment),needed=(next-p.progress)*(p.materialsRequired-Number(p.roadMaterialsRequired||0));
+  const work=constructionWorkStep(schedule,{progress:p.progress,onsiteCount:onsite.length,dt,availableWages:Math.min(Math.max(0,p.budget-p.spent),Number(account('civic-escrow').cash||0))});
+  const next=work.progress,needed=work.increment*(p.materialsRequired-Number(p.roadMaterialsRequired||0));
   if(p.materialsUsed+needed>p.materialsDelivered+1e-6){p.pauseReason='out of materials';return;}
-  // Pay for worker time. A lone worker takes longer, but cannot spend a three-person
-  // crew's hourly wage and exhaust an otherwise fully funded small repair.
-  const hourlyWages=onsite.length*3,wages=Math.min(Math.max(0,p.budget-p.spent),hourlyWages*dt/3600);
-  if(wages<=0){p.pauseReason="labor budget exhausted";return;}
-  const paid=payCrew(onsite.map(f=>f.id),hourlyWages,dt,wages);p.spent+=paid;
+  if(work.wages<=0){p.pauseReason='labor budget exhausted';return;}
+  const productive=onsite.slice(0,work.activeWorkers);p.structuralWorkStartedAt??=now();
+  const paid=payCrew(productive.map(f=>f.id),work.activeWorkers*3,work.elapsedSeconds,work.wages);p.spent+=paid;
   p.materialsUsed+=needed;p.progress=next;b.progress=next;b.health=clamp(25+75*next);apply();
   if(next>=1){
    p.stage='inspection';p.inspectionAt=now()+600;
@@ -507,13 +521,22 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  }
  function fundExistingRecovery(p){
   const accountId=publicTreasury(projectCountry(p));
-  if(p.funding?.accountId===accountId)return true;
+  const b=stateFor(p.buildingId);if(!b)return false;
+  const schedule=projectSchedule(p,b),reserve=Math.max(0,schedule.minimumBudget-schedule.materialCost-schedule.laborCost);
+  const clearance=p.stage==='clearance'||p.queuedStage==='clearance'?schedule.clearanceWorkerSeconds*Math.max(0,1-Number(p.clearance||0)):0;
+  const remainingWork=schedule.workerSeconds*Math.max(0,1-Number(p.progress||0))+clearance+schedule.roadWorkerSeconds*Math.max(0,1-Number(p.roadProgress||0));
+  const required=Math.ceil(Number(p.spent||0)+remainingWork*3/3600+Math.max(0,p.materialsRequired-p.materialsOrdered)*2+reserve);
+  if(p.funding?.accountId===accountId){
+   const topUp=Math.max(0,required-p.budget);if(!topUp)return true;
+   const payer=fundingSource(accountId);if(Number(payer?.cash||0)<topUp)return false;
+   transfer(payer,account('civic-escrow'),topUp);p.budget+=topUp;p.scheduleFundedAt=now();return true;
+  }
   const remaining=Math.max(0,p.budget-p.spent),payer=fundingSource(accountId);
   if(!payer||Number(payer.cash||0)<remaining)return false;
   // Existing paid materials remain on site; refund only the unspent private
   // escrow, then replace it with the same country's public recovery budget.
   refundProject(p);transfer(payer,account('civic-escrow'),remaining);
-  p.funding={type:'public',accountId};p.ownerId=null;p.refunded=0;p.publicFundingAt=now();return true;
+  p.funding={type:'public',accountId};p.ownerId=null;p.refunded=0;p.publicFundingAt=now();return fundExistingRecovery(p);
  }
  function finishProject(p){
   const b=stateFor(p.buildingId);if(!b||p.stage==='complete')return;p.stage='complete';p.completedAt=now();b.h=p.targetHeight;if(p.kind!=='new')restoreBlueprint(b);reopenBuilding(b);u().completedProjects++;
@@ -561,6 +584,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   u().fires=u().fires.filter(f=>!f.containedAt||now()-f.containedAt<7200);
   prioritizeRecovery();
   activateRecoveryQueue();
+  rebalanceRecoveryCrews();
   for(const p of [...u().projects].sort((a,b)=>Number(b.kind!=='new'&&!Number.isFinite(b.crewArrivedAt)&&now()-b.requestedAt<DAY)-Number(a.kind!=='new'&&!Number.isFinite(a.crewArrivedAt)&&now()-a.requestedAt<DAY))){
    if(p.recoveryPaused)continue;
    if(p.stage==='inspection'){if(now()>=p.inspectionAt)finishProject(p);}

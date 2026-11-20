@@ -28,7 +28,7 @@ test('a damaged building requires workers, a single paid physical delivery and l
  t.onsite(p);t.step();assert.equal(p.materialsOrdered,p.materialsRequired);assert.equal(p.materialsDelivered,0);const invoice=t.s.businesses['civic-materials'].cash;
  t.restore();const saved=t.s.urbanWorld.projects.find(v=>v.id===p.id);const courier=t.s.flies.find(f=>f.id===saved.courierId);
  t.urban.handleResident(courier,{hour:12});t.urban.handleResident(courier,{hour:12});t.step(1800);t.urban.handleResident(courier,{hour:12});assert.equal(saved.materialsDelivered,saved.materialsRequired);assert.equal(t.s.businesses['civic-materials'].cash,invoice,'no duplicate material invoice after restore');
- t.onsite(saved);for(let i=0;i<80&&saved.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
+ t.onsite(saved);for(let i=0;i<800&&saved.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
  assert.equal(saved.stage,'complete');assert.equal(t.s.urbanWorld.buildings[id].stage,'operational');assert.ok(saved.materialsUsed<=saved.materialsDelivered+.001);assert.ok(t.s.urbanWorld.completedProjects>=1);assert.ok(Math.abs(supply(t.s)-money)<1e-6,'project conserves money');
  const once=t.s.urbanWorld.completedProjects,balances=supply(t.s);t.step();assert.equal(t.s.urbanWorld.completedProjects,once);assert.ok(Math.abs(supply(t.s)-balances)<1e-6);
 });
@@ -55,7 +55,7 @@ test('a lone worker can complete a funded minor repair without consuming a full 
  t.s.urbanWorld.buildings[id]={...t.target,stage:'damaged',health:99,progress:1};applyUrbanGeometry({buildings:Object.values(t.s.urbanWorld.buildings)});
  const initial=supply(t.s),p=t.urban.submitProject(id);assert.ok(p);t.step();t.onsite(p);t.step();
  const worker=t.s.flies[0];t.urban.handleResident(worker,{hour:12});t.urban.handleResident(worker,{hour:12});t.step(1800);t.urban.handleResident(worker,{hour:12});assert.equal(p.materialsDelivered,p.materialsRequired);t.onsite(p);
- for(let i=0;i<100&&p.stage!=='complete';i++){t.urban.handleResident(worker,{hour:12});t.step(600);}
+ for(let i=0;i<1400&&p.stage!=='complete';i++){t.urban.handleResident(worker,{hour:12});t.step(600);}
  assert.equal(p.stage,'complete');assert.ok(p.spent<=p.budget+1e-6);assert.ok(Math.abs(supply(t.s)-initial)<1e-6);
 });
 
@@ -88,7 +88,7 @@ test('a burned home is automatically rebuilt with state funds even when its hous
  const id=p.id;t.restore();p=t.s.urbanWorld.projects.find(v=>v.id===id);
  t.step();t.onsite(p);for(let i=0;i<60&&p.stage==='clearance';i++)t.step(1200);
  assert.equal(p.stage,'delivery');
- for(let i=0;i<150&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(1800);}
+ for(let i=0;i<1400&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(1800);}
  assert.equal(p.stage,'complete');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'operational');assert.equal(t.s.housing.households.hh.unitId,b.id);assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);
  assert.ok(p.refunded>0);assert.equal(t.s.flies.filter(f=>f.housingUnitId===b.id).every(f=>!f.displacedFrom),true);
  assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);assert.equal(t.s.treasury.cash,before-p.budget+p.refunded);assert.ok(Math.abs(supply(t.s)-funds)<1e-6);
@@ -104,7 +104,7 @@ test('a war damaged North building uses only its country treasury and still need
  for(const f of t.s.flies)f.sleeping=true;t.step();assert.equal(p.materialsOrdered,0);assert.equal(p.progress,0);
  for(const f of t.s.flies)f.sleeping=false;t.step();t.onsite(p);t.step();assert.equal(p.materialsDelivered,0);assert.equal(p.progress,0);assert.ok(p.materialsOrdered>0);
  const id=p.id;t.restore();const saved=t.s.urbanWorld.projects.find(p=>p.id===id);
- for(let i=0;i<160&&saved.stage!=='inspection';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
+ for(let i=0;i<2000&&saved.stage!=='inspection';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
  assert.equal(saved.stage,'inspection');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'construction');assert.equal(t.s.urbanWorld.buildings[b.id].warRecovery.active,true);assert.equal(saved.materialsDelivered,saved.materialsRequired);assert.ok(saved.materialsUsed>0);
  t.step(600);assert.equal(saved.stage,'complete');assert.equal(t.s.urbanWorld.buildings[b.id].stage,'operational');assert.equal(t.s.urbanWorld.buildings[b.id].warRecovery.active,false);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(supply(t.s)-funds)<1e-6);assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);
 });
@@ -119,7 +119,7 @@ test('ordinary North disaster repairs wait for their own treasury and never take
  const p=t.urban.submitProject(b.id);assert.ok(p);assert.equal(p.funding.accountId,'treasury:north-city');assert.equal(t.s.treasury.cash,hans);assert.equal(f.money+f.savings,wallet);
 });
 
-test('a hundred real workers join paid reconstruction duties without taking protected staff or exceeding the target',()=>{
+test('real construction crews match the planned house workload without taking protected staff or exceeding the hundred-worker target',()=>{
  const t=setup(),base=t.s.flies[0],houses=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,8);
  assert.equal(houses.length,8);
  t.s.flies=Array.from({length:150},(_,i)=>({...structuredClone(base),id:'CREW-'+i,jobId:i<12?'doctor':undefined}));
@@ -127,10 +127,10 @@ test('a hundred real workers join paid reconstruction duties without taking prot
  for(const b of houses)t.s.urbanWorld.buildings[b.id]={...b,health:0,progress:0,stage:'collapsed'};
  t.step();for(let i=0;i<5;i++)t.step();
  const view=t.urban.snapshot(),assigned=t.s.flies.filter(f=>f.urbanTask?.type==='build');
- assert.equal(view.workforce.target,100);assert.equal(assigned.length,100);assert.equal(new Set(assigned.map(f=>f.id)).size,100);
- assert.equal(view.workforce.assigned,100);assert.ok(assigned.every(f=>f.jobId!=='doctor'));
+ assert.equal(view.workforce.target,100);assert.equal(assigned.length,16);assert.equal(new Set(assigned.map(f=>f.id)).size,16);
+ assert.equal(view.workforce.assigned,16);assert.ok(assigned.every(f=>f.jobId!=='doctor'));
  for(const p of t.s.urbanWorld.projects)t.onsite(p);
- t.step();assert.ok(t.urban.snapshot().workforce.onsite>=80,'workers must physically reach the sites rather than only incrementing a display counter');
+ t.step();assert.ok(t.urban.snapshot().workforce.onsite>=12,'workers must physically reach the sites rather than only incrementing a display counter');
  assert.ok(t.s.flies.slice(0,12).every(f=>!f.urbanTask));assert.ok(t.s.urbanWorld.projects.every(p=>p.funding.accountId==='treasury'));
 });
 
@@ -152,12 +152,12 @@ test('war home repair never charges its household and an unfunded country cannot
 });
 
 test('damaged customs and North barracks receive matching country budgets even when Hans works are full',()=>{
- const t=setup(),north=t.s.businesses['treasury:north-city']={cash:30000};
+ const t=setup(),north=t.s.businesses['treasury:north-city']={cash:1000000};t.s.treasury.cash=10000000;
  t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
  const barracks=BUILDINGS.find(b=>b.id==='north-army'),northBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-W'),hansBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-E');
  for(const b of [barracks,northBooth,hansBooth])t.s.urbanWorld.buildings[b.id]={...b,health:4,stage:'collapsed'};
- const hansPlots=BUILDINGS.filter(b=>b.x>530&&b.z>0&&!['landmark','customs'].includes(b.kind)).slice(0,8);
- assert.equal(hansPlots.length,8);
+ const hansPlots=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,24);
+ assert.equal(hansPlots.length,24);
  for(const b of hansPlots){t.s.urbanWorld.buildings[b.id]={...b,health:10,stage:'collapsed'};assert.ok(t.urban.submitProject(b.id));}
  const hans=t.s.treasury.cash,budget=north.cash;t.step();
  const projects=t.s.urbanWorld.projects.filter(p=>[barracks.id,northBooth.id].includes(p.buildingId));
@@ -221,7 +221,7 @@ test('inspection restores the original geometry and colors rather than a damaged
  record.h=3;record.w=4;record.d=4;p.targetHeight=3;
  for(const id of p.workerIds){const f=t.s.flies.find(f=>f.id===id);t.urban.handleResident(f,{hour:12});t.urban.handleResident(f,{hour:12});}
  t.step(1800);for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.onsite(p);
- for(let i=0;i<100&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
+ for(let i=0;i<1400&&p.stage!=='complete';i++){for(const f of t.s.flies)if(f.urbanTask)t.urban.handleResident(f,{hour:12});t.step(600);}
  assert.equal(p.stage,'complete');assert.deepEqual(Object.fromEntries(Object.keys(expected).map(k=>[k,record[k]])),expected);assert.equal(record.health,100);
 });
 

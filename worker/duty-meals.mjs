@@ -1,4 +1,4 @@
-import {COUNTRY_IDS,countryAt,NORTH_FARM} from './country-map.mjs';
+import {COUNTRY_IDS,countryAt,NORTH_FARM,NORTH_MATERIALS_YARD} from './country-map.mjs';
 import {LOCATIONS} from './city-map.mjs';
 
 const VENDORS=['market','grocery','bakery','restaurant','night-market','riverside-market','north-market','north-restaurant','island-market','island-restaurant'];
@@ -6,6 +6,7 @@ export const DUTY_CANTEENS=Object.freeze([
  {accountId:'emergency-operations',locationId:'firestation',countryId:'hansdrex',target:40},
  {accountId:'north-emergency-operations',locationId:'north-firestation',countryId:'north-city',target:30},
  {accountId:'civic-recovery',locationId:'construction',countryId:'hansdrex',target:60},
+ {accountId:'north-civic-recovery',locationId:NORTH_MATERIALS_YARD.id,countryId:'north-city',target:60},
 ]);
 /** A paid canteen/field-catering meal. Call only after the worker physically
  * reports for duty. A meal consumes finite domestic stock; an empty pantry or

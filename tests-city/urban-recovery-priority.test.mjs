@@ -45,7 +45,7 @@ test('five funded new projects yield their workers and slots to recovery, retain
  }
  assert.ok(t.s.flies.every(f=>!newIds.includes(f.urbanTask?.id)));
  t.restore();
- for(let i=0;i<300&&t.s.urbanWorld.projects.find(p=>p.id===repair.id).stage!=='complete';i++)t.step();
+ for(let i=0;i<1000&&t.s.urbanWorld.projects.find(p=>p.id===repair.id).stage!=='complete';i++)t.step();
  const completed=t.s.urbanWorld.projects.find(p=>p.id===repair.id);
  assert.equal(completed.stage,'complete');assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);assert.equal(t.s.urbanWorld.buildings[b.id].health,100);
  assert.equal(t.events.filter(e=>e.type==='construction_contract'&&e.buildingId===b.id).length,1);
@@ -88,14 +88,14 @@ test('one requested restoration refunds only unused escrow once, keeps new sites
 });
 
 test('all burned homes receive paid national contracts within one game day even when the active site pool is full',()=>{
- const t=fixture(),houses=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,12);
- assert.equal(houses.length,12);const ready=t.s.simulationAgeSeconds;
+ const t=fixture(),houses=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,28);
+ assert.equal(houses.length,28);const ready=t.s.simulationAgeSeconds;
  for(const b of houses)t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0,lastDamageAt:ready,recoveryReadyAt:ready};
  const total=supply(t.s),cash=t.s.treasury.cash;
  t.step(600);
  const repairs=t.s.urbanWorld.projects.filter(p=>houses.some(b=>b.id===p.buildingId));
- assert.equal(repairs.length,12,'every home has an accepted contract instead of being excluded by the site cap');
- assert.equal(repairs.filter(p=>p.stage!=='queued').length,8,'physical work remains bounded to eight Hansdrex sites');
+ assert.equal(repairs.length,28,'every home has an accepted contract instead of being excluded by the site cap');
+ assert.equal(repairs.filter(p=>p.stage!=='queued').length,24,'emergency recovery spreads crews across twenty-four Hansdrex sites');
  assert.equal(repairs.filter(p=>p.stage==='queued').length,4);
  for(const p of repairs){
   assert.equal(p.funding.accountId,'treasury');assert.equal(p.contractorId,'national-reconstruction:hansdrex');
@@ -106,13 +106,13 @@ test('all burned homes receive paid national contracts within one game day even 
  assert.ok(Math.abs(supply(t.s)-total)<1e-6,'all accepted contracts reserve real funds in escrow');
  t.restore();
  assert.equal(t.s.urbanWorld.projects.filter(p=>p.stage==='queued').length,4);
- assert.equal(t.s.urbanWorld.projects.filter(p=>p.kind!=='new').length,12,'cold restore does not duplicate accepted repairs');
+ assert.equal(t.s.urbanWorld.projects.filter(p=>p.kind!=='new').length,28,'cold restore does not duplicate accepted repairs');
  t.step();assert.ok(t.s.flies.some(f=>f.urbanTask?.type==='build'),'healthy real residents receive worksite duties');
  assert.ok(t.s.flies.filter(f=>f.urbanTask?.type==='build').length<=100);
 });
 
 test('the oldest accepted repair leaves the queue when a physical site completes and a later request cannot jump it',()=>{
- const t=fixture(),houses=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,10);
+ const t=fixture(),houses=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,26);
  for(const [i,b]of houses.entries())t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0,lastDamageAt:t.s.simulationAgeSeconds+i};
  t.step();const active=t.s.urbanWorld.projects.filter(p=>p.stage!=='queued'),queued=t.s.urbanWorld.projects.filter(p=>p.stage==='queued');
  assert.equal(queued.length,2);const oldest=queued.sort((a,b)=>a.deadlineAt-b.deadlineAt)[0];
@@ -120,7 +120,7 @@ test('the oldest accepted repair leaves the queue when a physical site completes
  const finished=active[0];Object.assign(finished,{stage:'inspection',inspectionAt:t.s.simulationAgeSeconds,progress:1,materialsOrdered:finished.materialsRequired,materialsDelivered:finished.materialsRequired,materialsUsed:finished.materialsRequired});
  t.step();assert.equal(finished.stage,'complete');
  t.step();assert.notEqual(oldest.stage,'queued');assert.ok(oldest.workStartedAt>=oldest.acceptedAt);assert.equal(t.s.urbanWorld.projects.filter(p=>p.stage==='queued').length,1);
- assert.equal(t.s.urbanWorld.projects.filter(p=>!['queued','complete','cancelled'].includes(p.stage)).length,8);
+ assert.equal(t.s.urbanWorld.projects.filter(p=>!['queued','complete','cancelled'].includes(p.stage)).length,24);
 });
 
 test('queue acceptance never rebuilds an active fire or borrows another countrys repair budget',()=>{
@@ -164,9 +164,9 @@ test('an empty canteen keeps its workers waiting without clearing hunger or prog
 });
 
 test('a fire deadline starts at ignition and a fresh disaster gets an arriving crew despite an old full work pool',()=>{
- const t=fixture(),old=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500&&b.id!==t.home.id).slice(0,8);
+ const t=fixture(),old=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500&&b.id!==t.home.id).slice(0,24);
  for(const b of old)t.s.urbanWorld.buildings[b.id]={...b,stage:'collapsed',health:0,progress:0,recoveryReadyAt:t.s.simulationAgeSeconds};
- t.step();assert.equal(t.s.urbanWorld.projects.filter(p=>p.stage!=='queued').length,8);
+ t.step();assert.equal(t.s.urbanWorld.projects.filter(p=>p.stage!=='queued').length,24);
  t.s.simulationAgeSeconds+=2*86400;
  const fire=t.urban.ignite(t.home.id);assert.ok(fire);
  const deadline=fire.startedAt+86400;
@@ -177,8 +177,8 @@ test('a fire deadline starts at ignition and a fresh disaster gets an arriving c
  assert.equal(p.crewArrivedAt,undefined,'accepting a contract is not counted as crew arrival');
  t.step();assert.notEqual(p.stage,'queued');assert.ok(p.workerIds.length>0);
  assert.ok(p.crewAssignedAt<=deadline);assert.ok(p.crewArrivedAt<=deadline);
- assert.ok(p.workerIds.some(id=>t.s.flies.find(f=>f.id===id)?.currentLocationId===`CIVIC-SITE-${p.id}`));
- assert.equal(t.s.urbanWorld.projects.filter(p=>!['queued','complete','cancelled'].includes(p.stage)).length,8);
+ assert.ok(p.workerIds.some(id=>t.s.flies.find(f=>f.id===id)?.currentLocationId===`CIVIC-SITE-${p.id}`||p.courierId===id&&p.materialsOrdered>0),'an arrived worker either stays on site or has actually collected its funded material invoice');
+ assert.equal(t.s.urbanWorld.projects.filter(p=>!['queued','complete','cancelled'].includes(p.stage)).length,24);
  t.restore();const restored=t.s.urbanWorld.projects.find(q=>q.id===p.id);
  assert.equal(restored.deadlineAt,deadline);assert.equal(restored.crewArrivedAt,p.crewArrivedAt);
 });

@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createInternationalLife} from '../worker/international-life.mjs';
 import {LOCATIONS,pedestrianRoute,parkingPoint} from '../worker/city-map.mjs';
 import {NORTH_FARM} from '../worker/country-map.mjs';
+import {createIndustrialEconomy} from '../worker/industrial-economy.mjs';
 function fixture(options={}){const f={id:'FARMER',alive:true,ageYears:30,x:NORTH_FARM.gate.x,z:NORTH_FARM.gate.z,y:1.1,homeX:0,homeZ:-800,money:100,savings:100,health:100,energy:100,currentLocationId:'north-farm',traits:{ambition:.8}};let s={flies:[f],simulationAgeSeconds:0,timeScale:120,totalTransactions:0,treasury:{cash:100000},businesses:{farm:{cash:3000,inventory:300,price:2},market:{cash:3000,inventory:300,price:3},grocery:{cash:3000,inventory:0},'vehicle-showroom':{cash:3000,inventory:20,price:650}},housing:{households:{},apartmentBlocks:[],houseLots:[]}};const hooks={world:()=>s,redistribute:false,startJourney:(a,c)=>{a.traveling=true;a.targetLocationId=c.id;},moveFly:a=>{const p=LOCATIONS.find(l=>l.id===a.targetLocationId);Object.assign(a,{x:p.x,z:p.z,currentLocationId:p.id,traveling:false});}};Object.assign(hooks,options);let service=createInternationalLife(hooks);service.init();f.citizenshipCountryId='north-city';f.countryPresence={countryId:'north-city',entryId:'TEST'};return{get s(){return s;},get f(){return s.flies[0];},get service(){return service;},restore(){s=structuredClone(s);service=createInternationalLife(hooks);service.init();}};}
 const total=s=>s.treasury.cash+Object.values(s.businesses).reduce((n,b)=>n+Number(b.cash||0),0)+s.flies.reduce((n,f)=>n+Number(f.money||0)+Number(f.savings||0),0);
 test('farm capitalization, truck purchases and reserved cargo conserve money and finite stock across restore',()=>{const t=fixture(),d=t.s.internationalEconomy;assert.equal(total(t.s),112200);assert.equal(d.trucks.length,2);assert.equal(t.s.businesses['vehicle-showroom'].inventory,18);const before=total(t.s),stock=t.s.businesses.farm.inventory;const o=t.service.economy.requestShipment({sellerId:'farm',buyerId:'farm:north-city',sourceLocationId:'farm',destinationId:'north-farm',product:'seed grain',quantity:50,unitPrice:2});assert.ok(o);assert.equal(t.s.businesses.farm.inventory,stock-50);assert.equal(d.stock.seeds,0,'reserved goods have not arrived');assert.ok(Math.abs(total(t.s)-before)<1e-6);const once=structuredClone(t.s);t.restore();assert.equal(t.s.businesses['vehicle-showroom'].inventory,18);assert.ok(Math.abs(total(t.s)-before)<1e-6);assert.deepEqual(t.s.internationalEconomy.orders,once.internationalEconomy.orders);});
@@ -90,7 +91,7 @@ test('a real city food crisis funds finite seed freight from the North warehouse
  d.stock={rice:8,vegetables:9,seeds:0};t.s.regionalFreight={stocks:{'INDUSTRY-north-4':{grain:276}}};
  const north=t.s.businesses['treasury:north-city'],northBefore=north.cash,hans=t.s.treasury.cash,totalBefore=total(t.s);t.s.simulationAgeSeconds=1800;d.nextDecisionAt=0;t.service.economy.tick(1800,{hour:8});
  assert.equal(d.publicAdvanceOutstanding,4000);assert.ok(north.cash<northBefore);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(total(t.s)-totalBefore)<1e-6);
- const seeds=d.orders.find(o=>o.product==='seed grain'&&!o.paid);assert.ok(seeds);assert.equal(seeds.sellerId,'regional-warehouse-INDUSTRY-north-4');assert.equal(seeds.sourceKey,'grain');assert.equal(t.s.regionalFreight.stocks['INDUSTRY-north-4'].grain,96);assert.equal(d.stock.seeds,0,'an ordered truck has not yet delivered seeds');assert.equal(d.orders.filter(o=>o.product==='grain rations'&&!o.paid).length,2);assert.equal(d.orders.filter(o=>o.product==='grain rations').reduce((n,o)=>n+o.quantity,0),120);
+ const seeds=d.orders.find(o=>o.product==='seed grain'&&!o.paid);assert.ok(seeds);assert.equal(seeds.sellerId,'regional-warehouse-INDUSTRY-north-4');assert.equal(seeds.sourceKey,'grain');assert.equal(t.s.regionalFreight.stocks['INDUSTRY-north-4'].grain,66);assert.equal(d.stock.seeds,0,'an ordered truck has not yet delivered seeds');assert.equal(d.orders.filter(o=>o.product==='grain rations'&&!o.paid).length,3);assert.equal(d.orders.filter(o=>o.product==='grain rations').reduce((n,o)=>n+o.quantity,0),150);
  assert.ok(d.orders.some(o=>o.sellerId==='farm:north-city'&&o.quantity<20&&!o.paid));assert.equal(t.s.businesses['north-market'].inventory,0,'reserved food is not teleported to the market');
 });
 
@@ -100,4 +101,79 @@ test('ten harvested North crop units retain one finite seed and sell only the ot
  assert.equal(d.harvested,4);assert.equal(d.stock.rice,3.6);assert.equal(d.stock.seeds,.4);assert.equal(d.retainedSeed,.4);assert.equal(d.crops[0].remaining,6);
  t.s.simulationAgeSeconds=3600;t.service.economy.tick(1800,{hour:8});t.s.simulationAgeSeconds=5400;t.service.economy.tick(1800,{hour:8});
  assert.equal(d.harvested,10);assert.equal(d.stock.rice,9);assert.equal(d.retainedSeed,1);assert.ok(Math.abs(d.stock.seeds+d.planted-1)<1e-8,'the retained seed is either still reserved or actually replanted');
+});
+
+
+test('hungry builders reserve the last cargo slot for paid domestic Hans grain without cancelling existing cargo or feeding across the border',()=>{
+ const t=fixture(),d=t.s.internationalEconomy;
+ t.s.industrialEconomy={rawStock:{grain:380}};d.stock.seeds=40;
+ const construction=LOCATIONS.find(l=>l.id==='construction');Object.assign(t.f,{x:construction.x,z:construction.z,hunger:100,urbanTask:{type:'build',phase:'canteen'}});
+ for(let i=0;i<11;i++)assert.ok(t.service.economy.requestShipment({sellerId:'farm',buyerId:'market',sourceLocationId:'farm',destinationId:'market',product:`already-paid-${i}`,quantity:1,unitPrice:2}));
+ const existing=d.orders.map(o=>structuredClone(o)),before=total(t.s),north=t.s.businesses['treasury:north-city'].cash,hans=t.s.treasury.cash;
+ t.service.economy.tick(0,{hour:8});
+ const ration=d.orders.find(o=>o.product==='grain rations');assert.ok(ration);assert.equal(ration.buyerId,'civic-recovery');assert.equal(ration.sellerId,'industrial-raw-depot');assert.equal(ration.sourceLocationId,'industrial-raw-depot');assert.equal(ration.destinationId,'construction');assert.equal(ration.sourceKey,'grain');assert.equal(ration.quantity,60);
+ assert.equal(t.s.industrialEconomy.rawStock.grain,320);assert.equal(t.s.businesses['civic-recovery'].inventory,0);assert.equal(t.f.hunger,100);assert.equal(t.s.businesses['treasury:north-city'].cash,north);assert.equal(t.s.treasury.cash,hans-ration.total);assert.ok(Math.abs(total(t.s)-before)<1e-6);assert.deepEqual(d.orders.slice(0,11),existing);assert.equal(d.orders.length,12);assert.equal(ration.phase,'queued','Hans food awaits a regional carrier, not a North farm driver');
+ d.nextDecisionAt=0;t.service.economy.tick(0,{hour:8});assert.equal(d.orders.length,12);assert.equal(t.s.industrialEconomy.rawStock.grain,320);assert.equal(t.s.treasury.cash,hans-ration.total);
+ t.service.economy.freightProvider.settle(ration,true);assert.equal(t.s.industrialEconomy.rawStock.grain,380);assert.equal(t.s.businesses['civic-recovery'].inventory,0);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
+
+test('North builder canteen uses only domestic warehouse grain and leaves the seed reserve for a separately paid seed truck',()=>{
+ const t=fixture(),d=t.s.internationalEconomy;Object.assign(t.f,{x:197,z:-963,hunger:100,urbanTask:{type:'build',phase:'canteen'}});t.s.regionalFreight={stocks:{'INDUSTRY-north-4':{grain:68}}};t.s.industrialEconomy={rawStock:{grain:380}};
+ const before=total(t.s),hans=t.s.treasury.cash;t.service.economy.tick(0,{hour:8});
+ const ration=d.orders.find(o=>o.product==='grain rations'),seeds=d.orders.find(o=>o.product==='seed grain');assert.ok(ration);assert.equal(ration.buyerId,'north-civic-recovery');assert.equal(ration.destinationId,'north-materials-yard');assert.equal(ration.sellerId,'regional-warehouse-INDUSTRY-north-4');assert.equal(ration.quantity,48);assert.equal(seeds.quantity,20);assert.equal(t.s.regionalFreight.stocks['INDUSTRY-north-4'].grain,0);assert.equal(d.stock.seeds,0);assert.equal(t.s.businesses['north-civic-recovery'].inventory,0);assert.equal(t.s.industrialEconomy.rawStock.grain,380);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+ t.service.economy.freightProvider.settle(ration);assert.equal(t.s.businesses['north-civic-recovery'].inventory,48);assert.equal(d.stock.seeds,0);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
+
+test('empty or unfunded domestic warehouses cannot conjure emergency grain or borrow foreign reserves',()=>{
+ for(const mode of ['empty','unfunded']){
+  const t=fixture(),d=t.s.internationalEconomy,construction=LOCATIONS.find(l=>l.id==='construction');Object.assign(t.f,{x:construction.x,z:construction.z,hunger:100,urbanTask:{type:'build'}});d.stock.seeds=40;
+  t.s.industrialEconomy={rawStock:{grain:mode==='empty'?0:380}};t.s.regionalFreight={stocks:{'INDUSTRY-north-4':{grain:500}}};if(mode==='unfunded')t.s.treasury.cash=0;
+  const before=total(t.s);t.service.economy.tick(0,{hour:8});assert.equal(d.orders.length,0,mode);assert.equal(t.s.businesses['civic-recovery'].inventory,0);assert.equal(t.s.regionalFreight.stocks['INDUSTRY-north-4'].grain,500);assert.equal(total(t.s),before);assert.equal(t.f.hunger,100);
+ }
+});
+
+
+function fullCrisisFreightFixture(){
+ const t=fixture(),d=t.s.internationalEconomy,construction=LOCATIONS.find(l=>l.id==='construction');
+ Object.assign(t.f,{x:construction.x,z:construction.z,hunger:100,urbanTask:{type:'build',phase:'canteen'}});d.stock.seeds=40;
+ t.s.industrialEconomy={rawStock:{grain:540}};t.s.regionalFreight={stocks:{'INDUSTRY-north-4':{grain:100}}};
+ t.s.businesses['regional-warehouse-INDUSTRY-north-4']={cash:1000,inventory:0};t.s.businesses['civic-recovery'].cash=1000;
+ const foreign=t.service.economy.requestShipment({sellerId:'regional-warehouse-INDUSTRY-north-4',buyerId:'civic-recovery',sourceLocationId:'INDUSTRY-north-4',destinationId:'construction',product:'grain rations',quantity:60,unitPrice:2});assert.ok(foreign);foreign.phase='delivering';
+ for(let i=0;i<11;i++){const order=t.service.economy.requestShipment({sellerId:'farm',buyerId:'market',sourceLocationId:'farm',destinationId:'market',product:`paid-in-transit-${i}`,quantity:1,unitPrice:2});assert.ok(order);order.phase='delivering';}
+ return {t,d,foreign};
+}
+
+test('old foreign rations and twelve paid cargo contracts retain their exact escrow while urgent domestic builder food takes one bounded extra slot',()=>{
+ const {t,d,foreign}=fullCrisisFreightFixture(),existing=structuredClone(d.orders),before=total(t.s),buyerCash=t.s.businesses['civic-recovery'].cash;
+ t.s.simulationAgeSeconds=7*3600;t.service.economy.tick(0,{hour:7});
+ const local=d.orders.find(o=>o.product==='domestic grain rations');assert.ok(local);assert.equal(local.emergency,true);assert.equal(local.sellerId,'industrial-raw-depot');assert.equal(local.quantity,60);assert.equal(local.destinationId,'construction');assert.equal(d.orders.length,13);assert.equal(t.s.industrialEconomy.rawStock.grain,480);assert.equal(t.s.businesses['civic-recovery'].inventory,0);assert.equal(t.s.businesses['civic-recovery'].cash,buyerCash-local.total);assert.deepEqual(d.orders.slice(0,12),existing);assert.equal(foreign.paid,false);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+ d.nextDecisionAt=0;t.s.simulationAgeSeconds+=1800;t.service.economy.tick(0,{hour:7.5});assert.equal(d.orders.length,13);assert.equal(t.s.industrialEconomy.rawStock.grain,480);
+ // Even an explicit urgent API request cannot bypass sixteen slots or make
+ // ordinary shops eligible for the construction-only emergency allowance.
+ for(let i=0;i<3;i++)d.orders.push({...existing[1],id:`OTHER-IN-TRANSIT-${i}`});
+ t.s.flies.push({...t.f,id:'NORTH-HUNGRY-BUILDER',x:197,z:-963,money:0,savings:0});
+ t.s.businesses['treasury:north-city'].cash-=200;t.s.businesses['north-civic-recovery'].cash+=200;
+ assert.equal(t.service.economy.requestShipment({sellerId:'regional-warehouse-INDUSTRY-north-4',buyerId:'north-civic-recovery',sourceLocationId:'INDUSTRY-north-4',destinationId:'north-materials-yard',product:'domestic grain rations',quantity:20,unitPrice:2,emergency:true}),null);
+ assert.equal(t.service.economy.requestShipment({sellerId:'industrial-raw-depot',buyerId:'civic-recovery',sourceLocationId:'industrial-raw-depot',destinationId:'construction',product:'domestic grain rations',quantity:60,unitPrice:2,emergency:true}),null);
+ assert.equal(t.service.economy.requestShipment({sellerId:'farm',buyerId:'grocery',sourceLocationId:'farm',destinationId:'grocery',product:'emergency shop food',quantity:1,unitPrice:2,emergency:true}),null);assert.equal(d.orders.length,16);
+ t.service.economy.freightProvider.settle(local,true);assert.equal(t.s.industrialEconomy.rawStock.grain,540);assert.equal(t.s.businesses['civic-recovery'].inventory,0);assert.equal(foreign.paid,false);assert.ok(Math.abs(total(t.s)-before)<1e-6);
+});
+
+test('a recent foreign canteen consignment keeps its six-hour delivery window before any domestic overflow is purchased',()=>{
+ const {t,d}=fullCrisisFreightFixture(),before=total(t.s);t.s.simulationAgeSeconds=5*3600;t.service.economy.tick(0,{hour:5});assert.equal(d.orders.length,12);assert.equal(t.s.industrialEconomy.rawStock.grain,540);assert.equal(total(t.s),before);
+});
+
+test('a regional licensed truck claims extra domestic builder food and physically delivers before the canteen receives inventory',()=>{
+ const t=fixture(),countryAccount=id=>id==='hansdrex'?t.s.treasury:t.s.businesses[`treasury:${id}`]||={cash:100000,inventory:0};
+ const industry=createIndustrialEconomy({world:()=>t.s,countryAccount,freightProviders:()=>[t.service.economy.freightProvider],interceptMovement:()=>({allowed:true}),regionalDistribution:true});industry.init();
+ const d=t.s.internationalEconomy,construction=LOCATIONS.find(l=>l.id==='construction');Object.assign(t.f,{x:construction.x,z:construction.z,hunger:100,urbanTask:{type:'build'}});d.stock.seeds=40;
+ t.s.industrialEconomy.rawStock.grain=540;t.s.industrialEconomy.nextRestockAt=Infinity;t.s.regionalFreight.nextDispatchAt=Infinity;
+ t.s.businesses['civic-recovery'].cash=1000;t.s.regionalFreight.stocks['INDUSTRY-north-4']={fabric:0,aggregate:0,grain:100};
+ const foreign=t.service.economy.requestShipment({sellerId:'regional-warehouse-INDUSTRY-north-4',buyerId:'civic-recovery',sourceLocationId:'INDUSTRY-north-4',destinationId:'construction',product:'grain rations',quantity:60,unitPrice:2});assert.ok(foreign);foreign.phase='delivering';
+ for(let i=0;i<11;i++){const order=t.service.economy.requestShipment({sellerId:'farm',buyerId:'market',sourceLocationId:'farm',destinationId:'market',product:`other-paid-${i}`,quantity:1,unitPrice:2});assert.ok(order);order.phase='delivering';}
+ t.s.simulationAgeSeconds=7*3600;const before=total(t.s);t.service.economy.tick(0,{hour:7});const local=d.orders.find(o=>o.product==='domestic grain rations');assert.ok(local);assert.equal(t.s.industrialEconomy.rawStock.grain,480);assert.equal(t.s.businesses['civic-recovery'].inventory,0);
+ industry.tick(0,{hour:7});assert.equal(t.s.regionalFreight.trucks.length,24);const job=t.s.regionalFreight.jobs.find(j=>j.sourceOrderId===local.id);assert.ok(job);assert.equal(local.carrierId,'regional-logistics');assert.equal(local.paid,false);assert.equal(t.s.businesses['civic-recovery'].inventory,0);
+ let moved=0;const starts=new Map(t.s.regionalFreight.trucks.map(truck=>[truck.id,{x:truck.x,z:truck.z}]));
+ for(let i=0;i<1800&&!local.paid;i++){t.s.simulationAgeSeconds+=120;industry.tick(120,{hour:7});const truck=t.s.regionalFreight.trucks.find(truck=>truck.id===job.truckId);if(truck)moved=Math.max(moved,Math.hypot(truck.x-starts.get(truck.id).x,truck.z-starts.get(truck.id).z));if(!local.paid)assert.equal(t.s.businesses['civic-recovery'].inventory,0);}
+ assert.equal(local.phase,'complete',JSON.stringify({local,job}));assert.ok(moved>100);assert.equal(t.s.businesses['civic-recovery'].inventory,60);assert.equal(foreign.paid,false);assert.ok(Math.abs(total(t.s)-before)<1e-6);
 });
