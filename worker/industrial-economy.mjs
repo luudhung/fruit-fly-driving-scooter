@@ -138,6 +138,9 @@ export function createIndustrialEconomy({world,neuralDrive=()=>.5,emit=()=>{},re
  }
  function zone(id){if(id===sourceId)return 'west';return plant(id)?.zone||((loc(id)?.x||0)>480?'europe':(loc(id)?.z||0)<-440?'north':null);}
  function roadPath(a,b,sourceLocationId,destId){
+  // A live replan starts at the truck, rather than visiting its old loading
+  // district gateway again after it has already entered the motorway.
+  if(a.traveling)return pedestrianRoute({...a,motorwayLane:a.motorwayLane},b,'car');
   const za=zone(sourceLocationId),zb=zone(destId),anchors=[a];if(za&&zb&&za!==zb)anchors.push(INDUSTRIAL_ZONES[za].gateway,INDUSTRIAL_ZONES[zb].gateway);else if(za&&zb===null)anchors.push(INDUSTRIAL_ZONES[za].gateway);anchors.push(b);const points=[];
   for(let i=1;i<anchors.length;i++){const leg=pedestrianRoute({...anchors[i-1],motorwayLane:a.motorwayLane},anchors[i],'car');if(!leg.length)return [];for(const p of leg)if(!points.length||dist(points.at(-1),p)>.02)points.push({...p,mode:'car'});}return points;
  }
