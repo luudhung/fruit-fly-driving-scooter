@@ -1,3 +1,4 @@
+import {readJsonLines} from '../../worker/json-lines.mjs';
 const META_KEY = "snapshot:meta";
 const CHUNK_SIZE = 1_500_000;
 const MAX_CHUNKS = 128;
@@ -49,13 +50,8 @@ async function readStoredSnapshot(storage) {
 }
 
 async function readFramedJson(stream, mapResident = null, livingOnly = false) {
-  let state, opened = false, closed = false, buffer = "";
-  for await (const text of stream.pipeThrough(new TextDecoderStream())) {
-    buffer += text;
-    let end;
-    while ((end = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, end);
-      buffer = buffer.slice(end + 1);
+  let state, opened = false, closed = false;
+  for await (const line of readJsonLines(stream)) {
       if (closed) throw new Error("Unexpected data after civilization snapshot");
       if (state === undefined) {
         state = JSON.parse(line + '}');
@@ -77,9 +73,8 @@ async function readFramedJson(stream, mapResident = null, livingOnly = false) {
         const mapped=mapResident?mapResident(resident):resident;
         if(mapped!=null)state.flies.push(mapped);
       }
-    }
   }
-  if (!closed || buffer) throw new Error("Incomplete civilization snapshot");
+  if (!closed) throw new Error("Incomplete civilization snapshot");
   return state;
 }
 
@@ -89,10 +84,9 @@ async function readFramedJson(stream, mapResident = null, livingOnly = false) {
 export async function loadSnapshotHeader(storage,{identityOnly=false}={}){
   const saved=await readStoredSnapshot(storage);if(!saved)return null;
   if(saved.meta.version!==2)return loadSnapshot(storage,{mapResident:f=>f.alive?f:null});
-  let buffer='',state;
-  for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
-    buffer+=text;const end=buffer.indexOf('\n');if(end===-1)continue;
-    state=JSON.parse(buffer.slice(0,end)+'}');
+  let state;
+  for await(const line of readJsonLines(saved.json)){
+    state=JSON.parse(line+'}');
     if(identityOnly)state={worldId:state.worldId,mapVersion:state.mapVersion,simulationAgeSeconds:state.simulationAgeSeconds,timeScale:state.timeScale};
     state.flies=[];break;
   }
@@ -149,11 +143,8 @@ async function* storedResidentRecords(saved){
     for(const resident of legacy.flies)yield resident;
     return;
   }
-  let buffer='',lineIndex=0,finished=false;
-  for await(const text of saved.json.pipeThrough(new TextDecoderStream())){
-    buffer+=text;let end;
-    while((end=buffer.indexOf('\n'))!==-1){
-      const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
+  let lineIndex=0,finished=false;
+  for await(const line of readJsonLines(saved.json)){
       if(finished)throw Error('Unexpected archived snapshot data');
       if(lineIndex===0){JSON.parse(line+'}');lineIndex++;continue;}
       if(lineIndex===1){
@@ -162,9 +153,8 @@ async function* storedResidentRecords(saved){
       }
       if(line===']}'){finished=true;continue;}
       yield JSON.parse(line.startsWith(',')?line.slice(1):line);
-    }
   }
-  if(!finished||buffer)throw Error('Incomplete archived snapshot');
+  if(!finished)throw Error('Incomplete archived snapshot');
 }
 
 export async function* archiveRecordStream(storage){
