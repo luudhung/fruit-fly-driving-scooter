@@ -65,3 +65,10 @@ test('parking normalization reserves existing freight bodies and loading bays be
  s.regionalFreight||={trucks:[]};s.regionalFreight.trucks=[{id:'DELIVERY',alive:true,x:bay.x,z:bay.z,heading:bay.heading,vehicleLength:6.4,returnParking:bay,phase:'loading'}];
  roadLife.normalizeParking();assert.notEqual(f.parkedCar.spaceId,bay.spaceId);assert.ok(Math.hypot(f.parkedCar.x-bay.x,f.parkedCar.z-bay.z)>5);
 });
+
+test('a truck passing a legally parked car does not move that parked car to another bay',async()=>{
+ const {createRoadLife}=await import('../worker/road-life.mjs'),bay=parkingPoint({x:-570,z:-950}),car={id:'OWNER',alive:true,vehicle:'compact car',x:590,z:40,traveling:false,parkedCar:{...bay}};
+ const truck={id:'PASSING',alive:true,x:bay.x,z:bay.z-3.5,heading:bay.heading,traveling:true,transitMode:'car',vehicleLength:6.4};
+ const s={flies:[car],regionalFreight:{trucks:[truck]},businesses:{},simulationAgeSeconds:1};
+ createRoadLife({world:()=>s}).normalizeParking();assert.equal(car.parkedCar.spaceId,bay.spaceId);assert.equal(car.parkedCar.x,bay.x);assert.equal(car.parkedCar.z,bay.z);
+});

@@ -29,7 +29,7 @@ export function createRoadLife({world,random,remember,emit,neuralDrive,startJour
   // Freight loading/clearance bays also remain occupied while their drivers
   // are elsewhere; normalizing resident parking must not put a car on a truck.
   const fleets=[...(world().industrialEconomy?.trucks||[]),...(world().regionalFreight?.trucks||[]),...(world().internationalEconomy?.trucks||[])];
-  for(const truck of fleets){occupyParking(taken,{...truck,vehicleLength:truck.vehicleLength||6.4});for(const p of [truck.destinationParking||truck.parking,truck.returnParking])if(p)occupyParking(taken,{...p,vehicleLength:truck.vehicleLength||6.4});}
+  for(const truck of fleets){if(!truck.traveling)occupyParking(taken,{...truck,vehicleLength:truck.vehicleLength||6.4});for(const p of [truck.destinationParking||truck.parking,truck.returnParking])if(p)occupyParking(taken,{...p,vehicleLength:truck.vehicleLength||6.4});}
   // A car already travelling owns its booked arrival bay until it parks there.
   for(const f of actors)if(f.alive&&f.traveling)occupyParking(taken,f.destinationParking);
   for(const f of actors){if(!f.alive||!f.vehicle&&!f.rentalCar||f.traveling&&f.transitMode==='car')continue;
