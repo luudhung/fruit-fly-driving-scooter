@@ -62,7 +62,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   directory(d);
   const replacement=d.teams.some(team=>team.drivers.some(id=>id&&!eligibleDriver(actorsById.get(id))));
   const vacancy=d.teams.some(team=>team.drivers.length<2||team.drivers.some(id=>!id));
-  if(d.event&&d.event.status!=='scheduled'||!replacement&&(now()<d.nextRosterAt||!vacancy&&d.event&&(d.event.format!==2||now()>=d.event.startsAt-48*HOUR)))return;
+  if(d.event?.status==='racing'||!replacement&&(now()<d.nextRosterAt||!vacancy&&d.event?.status==='scheduled'&&(d.event.format!==2||now()>=d.event.startsAt-48*HOUR)))return;
   d.nextRosterAt=now()+12*HOUR;
   const signed=new Set();
   const roster=[...actorsById.values()].filter(eligibleDriver).sort((a,b)=>{
@@ -518,7 +518,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    })};
   const history=d.history.at(-1)||null;
   return {teams:d.teams.map(t=>({...t,drivers:t.drivers.filter(Boolean)})),activeRace,trackClosure:northF1ClosureWindow(e),trackCrowd,lastRace:history,races:d.races,cancelled:d.cancelled,
-   nextAt:e&&now()<e.endsAt?e.startsAt:e?e.startsAt+NORTH_F1_RULES.cadenceDays*DAY:d.nextAt,
+   nextAt:e&&['scheduled','racing'].includes(e.status)&&now()<e.endsAt?e.startsAt:e?e.startsAt+NORTH_F1_RULES.cadenceDays*DAY:d.nextAt,
    revenue:d.revenue,ticketTax:d.ticketTax,prizes:d.prizes,visits:d.visits,hansdrexVisitors:d.hansdrexVisitors,northVisitors:d.northVisitors,
    visitors:d.visitors,charterArrivals:d.charterArrivals,charterDepartures:d.charterDepartures,charterDemand:e?.charterDemand||history?.charterDemand||0,
    northFanTarget:e?.northFanTarget||0,merchSales:Number(d.merchSales||0),hotelBookings:Number(d.hotelBookings||0),hansdrexSightVisits:Number(d.hansdrexSightVisits||0),

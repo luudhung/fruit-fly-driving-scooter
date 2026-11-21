@@ -345,3 +345,9 @@ test('retirement promotes a licensed reserve before a higher rated untrained roo
  step(event.startsAt-1200);assert.ok(state.northF1.teams.flatMap(t=>t.drivers).includes(ready.id));assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(rookie.id));
  step(event.startsAt);assert.equal(event.cars.length,20);
 });
+
+test('a cancelled weekend does not suspend retirement succession while old spectator journeys finish',()=>{
+ const people=[...Array.from({length:20},(_,i)=>driver(i)),{...driver(20),id:'NORTH-BETWEEN-RACES'}];
+ const {state,event,step,system}=fixture(people);event.status='cancelled';assert.equal(system.snapshot().nextAt,event.startsAt+5*DAY);const old=people.find(f=>f.citizenshipCountryId==='north-city'&&state.northF1.teams.flatMap(t=>t.drivers).includes(f.id));old.ageYears=69;
+ step(state.simulationAgeSeconds+1);assert.equal(event.status,'cancelled');assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(old.id));assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,20);assert.ok(old.racingRetiredAt!=null);
+});
