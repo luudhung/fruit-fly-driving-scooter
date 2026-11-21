@@ -3,7 +3,6 @@ import {createF1Charters,f1VisitorTravel} from './north-f1-charters.mjs';
 import {northF1ClosureWindow,isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {COUNTRY_IDS,NORTH_AIRPORT,countryAt} from './country-map.mjs';
-import {readyToDrive} from './life-skills.mjs';
 import {NORTH_F1_CIRCUIT,NORTH_F1_CHARTER_STANDS,NORTH_F1_PIT_BOXES} from './north-f1-map.mjs';
 import {F1_TARGET_SPEED,planF1Motion,f1MotionWindow,sampleF1Motion} from './north-f1-motion.mjs';
 import {INBOUND_SECONDS,OUTBOUND_SECONDS,visitorArrivalPath,visitorArrivalCompleteAt,visitorRunwaySlot} from './visitor-aviation.mjs';
@@ -27,7 +26,8 @@ const homeCountry=f=>f.residencyCountryId||countryAt({x:f.homeX,z:f.homeZ})||f.c
 const occupied=(f,at)=>f.fireEngineDuty||f.ambulanceDuty||f.publicServiceRole||f.publicServiceDuty||f.nationalServiceDuty||f.industrialFreightDuty
  ||f.cityService||f.taxiJobId||f.taxiPassenger||f.civicDuty||f.urbanTask||f.warResponse?.active||Number(f.arrestedUntil||0)>at||f.traveling&&f.countryBorderHold
  ||f.privateFlight||f.privateHelicopterTrip||f.airTrip||f.countryFlightPlan||f.countryAirTrip||f.heliPassenger||f.sportsSession;
-const healthy=f=>f.alive&&Number(f.health??80)>45&&!f.illness;
+const healthy=f=>f.alive&&Number(f.health??80)>45&&(!f.illness||Number(f.health??80)>=70&&['viral fatigue','respiratory illness'].includes(f.illness));
+const licensedForRace=f=>!f.lifeSkillsOnboarding||Number(f.lifeSkills?.minutes?.driving||0)>=20;
 const onSite=(f,site)=>!f.traveling&&!f.onPlane&&!f.onTrain&&f.currentLocationId===site.id&&distance(f,site)<35;
 
 export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{},remember=()=>{},startJourney,moveFly,needsAndActivities,payAndFinance,
@@ -52,15 +52,18 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
  const charterService=createF1Charters({world,signature,admit:aviationAdmission,intercept:interceptMovement,account,
   onVehicleCollision,weatherClosed,movementBlocked:(from,to,margin)=>isNorthF1TrackClosed(raw())&&northF1MovementBlocked(from,to,margin),
   bookHotel:bookEventHotel,releaseHotel:releaseEventHotel,visitAttraction:visitEventAttraction,attend});
- function eligibleDriver(f){return Boolean(f&&healthy(f)&&[HANS,NORTH].includes(f.citizenshipCountryId)&&f.ageYears>=21&&f.ageYears<=68&&readyToDrive(f)
+ function eligibleDriver(f){return Boolean(f&&healthy(f)&&[HANS,NORTH].includes(f.citizenshipCountryId)&&f.ageYears>=21&&f.ageYears<=68&&!occupied(f,now())&&!f.internationalWork&&!f.fruitFarmDuty&&(Number(f.energy??90)>12||f.f1Duty?.role==='driver')
   &&!f.publicServiceRole&&!f.publicServiceDuty&&!f.nationalServiceDuty&&!f.facilityEmployment&&!f.industrialFreightDuty);}
  function rating(f,id=''){
   return Number(f.professionSkills?.racing||0)*.55+Number(f.traits?.resilience??.5)*.18+Number(f.traits?.ambition??.5)*.15
    + (String(f.vehicle||'').includes('car') ? .08 : 0)+signature(f.id+id)*.12;
  }
  function updateRoster(d){
-  if(now()<d.nextRosterAt||d.event&&d.event.status!=='scheduled'||d.event&&(d.event.format!==2||now()>=d.event.startsAt-48*HOUR))return;
-  d.nextRosterAt=now()+12*HOUR;directory(d);
+  directory(d);
+  const replacement=d.teams.some(team=>team.drivers.some(id=>id&&!eligibleDriver(actorsById.get(id))));
+  const vacancy=d.teams.some(team=>team.drivers.length<2||team.drivers.some(id=>!id));
+  if(d.event&&d.event.status!=='scheduled'||!replacement&&(now()<d.nextRosterAt||!vacancy&&d.event&&(d.event.format!==2||now()>=d.event.startsAt-48*HOUR)))return;
+  d.nextRosterAt=now()+12*HOUR;
   const signed=new Set();
   const roster=[...actorsById.values()].filter(eligibleDriver).sort((a,b)=>{
    const score=f=>rating(f)+(countryAt(f)===NORTH?.25:0)-Math.min(.4,distance(f,paddock)/5000)
@@ -71,16 +74,43 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    const previous=team.drivers;
    team.drivers=[0,1].map(slot=>{
     const country=driverCountry(index,slot),prior=actorsById.get(previous[slot]);
-    const driver=[prior,...roster].find(f=>eligibleDriver(f)&&f.citizenshipCountryId===country&&!signed.has(f.id));
+    const trainedReserves=(d.reserveDrivers||[]).map(id=>actorsById.get(id)).filter(f=>f&&licensedForRace(f)).sort((a,b)=>Number(onSite(b,paddock))-Number(onSite(a,paddock)));
+    const driver=[prior,...trainedReserves,...roster].find(f=>eligibleDriver(f)&&f.citizenshipCountryId===country&&!signed.has(f.id));
+    if(prior&&prior.ageYears>68&&prior.id!==driver?.id&&prior.racingRetiredAt==null){
+     prior.racingRetiredAt=now();if(prior.f1Duty?.role==='driver')prior.f1Duty=null;
+     remember(prior,'north_f1_retired',{teamId:team.id,replacementId:driver?.id||null});
+     emit('north_f1_retirement','A retiring driver’s seat was assigned to the next available successor.',{teamId:team.id,retiredId:prior.id,replacementId:driver?.id||null});
+    }
     if(!driver)return null;
     signed.add(driver.id);
     if(prior!==driver)remember(driver,'north_f1_signed',{teamId:team.id});
     return driver.id;
    });
   }
-  const reserves=country=>roster.filter(f=>f.citizenshipCountryId===country&&!signed.has(f.id)).slice(0,country===HANS?22:12).map(f=>f.id);
+  const reserves=country=>roster.filter(f=>f.citizenshipCountryId===country&&!signed.has(f.id)).sort((a,b)=>a.ageYears-b.ageYears||rating(b)-rating(a)).slice(0,country===HANS?15:5).map(f=>f.id);
   d.reserveDrivers=[...reserves(HANS),...reserves(NORTH)];
   driverIds=new Set([...signed,...d.reserveDrivers]);
+ }
+ function fundDriverTravel(f,e){
+  e.driverTravelAdvances||={};if(e.driverTravelAdvances[f.id])return true;
+  const topUp=Math.max(0,(f.citizenshipCountryId===NORTH?30:80)-wallet(f)),club=account(ACCOUNT);
+  if(club.cash<topUp)return false;
+  if(topUp){club.cash-=topUp;f.money=Number(f.money||0)+topUp;raw().totalTransactions=Number(raw().totalTransactions||0)+1;}
+  e.driverTravelAdvances[f.id]={at:now(),paid:topUp};return true;
+ }
+ function trainDriver(f,e){
+  if(licensedForRace(f)||e.status!=='scheduled')return;
+  if(f.sleeping||f.recoveringEnergy||Number(f.energy??90)<=20){if(f.f1Academy){f.f1Academy.onsite=false;f.f1Academy.lastAt=now();}return;}
+  const lesson=f.f1Academy||={raceId:e.id,lastAt:now()};
+  if(lesson.raceId!==e.id){lesson.raceId=e.id;lesson.lastAt=now();lesson.onsite=false;}
+  if(!lesson.onsite){lesson.onsite=true;lesson.lastAt=now();return;}
+  const elapsed=Math.min(300,Math.max(0,now()-lesson.lastAt));lesson.lastAt=now();
+  const club=account(ACCOUNT),seconds=Math.min(elapsed,Math.max(0,club.cash)*3600/12);if(!seconds)return;
+  const profile=f.lifeSkills||={minutes:{},completed:[]};profile.minutes||={};profile.completed||=[];
+  const taught=Math.min(seconds,Math.max(0,20-Number(profile.minutes.driving||0))*60),fee=taught*12/3600;
+  club.cash-=fee;account('north-f1-academy').cash+=fee;raw().totalTransactions=Number(raw().totalTransactions||0)+1;
+  profile.minutes.driving=Number(profile.minutes.driving||0)+taught/60;profile.schoolId=paddock.id;
+  if(profile.minutes.driving>=20){if(!profile.completed.includes('driving'))profile.completed.push('driving');f.racingLicensedAt=now();remember(f,'north_f1_driving_course',{raceId:e.id,schoolId:paddock.id,minutes:20});}
  }
  function offer(f){
   const e=raw().northF1?.event;
@@ -168,7 +198,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   const driver=driverIds.has(f.id)&&eligibleDriver(f);
   const eAvailable=e&&e.status!=='cancelled'&&now()<e.endsAt;
   let duty=f.f1Duty;
-  if(duty&&(occupied(f,now())||!healthy(f))){f.f1Duty=null;f.actionUntil=0;return false;}
+  if(duty&&(occupied(f,now())||!healthy(f))){if(f.f1Academy)f.f1Academy.onsite=false;f.f1Duty=null;f.actionUntil=0;return false;}
   if((duty?.role==='fan'||duty?.role==='driver')&&(!eAvailable||duty.raceId!==e?.id)&&homeCountry(f)===HANS&&countryAt(f)===NORTH){
    duty.role='return';duty.leaveAt=now()+signature(duty.raceId+f.id+'return')*HOUR*2;
   }
@@ -179,9 +209,10 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    f.f1Duty=null;f.actionUntil=0;return false;
   }
   if(duty&&(duty.raceId!==e?.id||!eAvailable)){f.f1Duty=null;f.actionUntil=0;return false;}
-  if(!duty&&eAvailable&&!f.traveling&&!f.onTrain&&!f.onPlane&&!occupied(f,now())&&healthy(f)&&Number(f.f1RetryAt||0)<=now()){
+  if(!duty&&eAvailable&&(!f.traveling||driver)&&(!f.onTrain||driver)&&!f.onPlane&&!occupied(f,now())&&healthy(f)&&Number(f.f1RetryAt||0)<=now()){
    if(driver&&e.status==='scheduled'&&now()>=e.startsAt-(e.format===2?70:28)*HOUR&&now()<e.startsAt&&countryAt(f)!==COUNTRY_IDS.hawaii&&Number(f.energy??50)>12){
-    duty=f.f1Duty={raceId:e.id,role:'driver'};
+    if(!fundDriverTravel(f,e)){f.f1RetryAt=now()+HOUR;return false;}
+    duty=f.f1Duty={raceId:e.id,role:'driver',until:e.endsAt};
    }else if(f.action===WATCH||f.pendingAction===WATCH){
     duty=f.f1Duty={raceId:e.id,role:'fan'};
    }else if(now()<e.startsAt&&now()>=e.startsAt-57*HOUR&&fitForOuting(f)){
@@ -194,20 +225,22 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   if(!duty)return false;
   const site=duty.role==='driver'?paddock:spectator,isDriver=duty.role==='driver';
   if(!eAvailable||isUnavailable(site.id,f)){f.f1Duty=null;return false;}
-  if(f.traveling){moveFly?.(f);care(f,clock);return true;}
+  if(f.traveling){if(isDriver&&f.f1Academy){f.f1Academy.lastAt=now();f.f1Academy.onsite=false;}moveFly?.(f);care(f,clock);return true;}
   if(!onSite(f,site)){
+   if(isDriver&&f.f1Academy){f.f1Academy.lastAt=now();f.f1Academy.onsite=false;}
    if(!tryJourney(f,site.id,isDriver?DRIVE:WATCH)){
     f.f1Duty=null;f.f1RetryAt=now()+HOUR;return false;
    }
    care(f,clock);return true;
   }
   if(isDriver){
+   f.f1Duty.until=e.endsAt;trainDriver(f,e);
    const car=e.cars?.find(c=>c.driverId===f.id);
    if(e.status==='racing'&&!car){f.f1Duty=null;f.actionUntil=0;return false;}
    const resting=now()<e.startsAt-HOUR&&Number(f.energy??50)<64;
    f.indoors=resting;
    f.recoveringEnergy=resting;
-   f.action=resting?'resting indoors':car?'driving in the North City Grand Prix':'preparing the team car in the Grand Prix paddock';
+   f.action=resting?'resting indoors':car?'driving in the North City Grand Prix':!licensedForRace(f)?'training in the paddock driving simulator':'preparing the team car in the Grand Prix paddock';
   }else{
    const waiting=now()<e.startsAt-3*HOUR&&Number(f.energy??50)<58;
    f.recoveringEnergy=waiting;f.indoors=waiting;
@@ -365,7 +398,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
  function startRace(d,e){
   if(e.status!=='scheduled'||now()<e.startsAt)return;
   const drivers=[],substitutions=[],qualifiedTeams=new Map();
-  const available=id=>{const f=actorsById.get(id);return f&&healthy(f)&&!occupied(f,now())&&onSite(f,paddock)?f:null;};
+  const available=id=>{const f=actorsById.get(id);return f&&healthy(f)&&licensedForRace(f)&&!occupied(f,now())&&onSite(f,paddock)?f:null;};
   const reserves=(d.reserveDrivers||[]).map(available).filter(Boolean);
   for(const [index,team] of d.teams.entries()){
    const pair=[];
@@ -386,7 +419,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   if(now()>=e.endsAt||trackClosed||drivers.length<20){
    e.status='cancelled';e.cancelledAt=now();e.cancellationReason=now()>=e.endsAt?'missed-start-window':trackClosed?'unsafe-track-or-weather':'insufficient-ready-drivers';e.readyDrivers=drivers.length;d.cancelled++;
    refundTickets(d,e);
-   emit('north_f1_cancelled','North City called off the Grand Prix because safe racing could not start.',{raceId:e.id});
+   emit('north_f1_cancelled','North City called off the Grand Prix because safe racing could not start.',{raceId:e.id,reason:e.cancellationReason,readyDrivers:drivers.length});
    return;
   }
   for(const team of d.teams)team.drivers=qualifiedTeams.get(team.id);
@@ -473,7 +506,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    }));
  }
  function snapshot(){
-  const d=raw().northF1;if(!d)return null;
+  const d=raw().northF1;if(!d)return null;directory(d);
   const e=d.event,trackCrowd=e&&now()<e.endsAt?{...e.audience}:counts();
   let activeRace=null;
   if(e?.status==='racing'&&now()<e.endsAt)activeRace={id:e.id,startsAt:e.greenAt,endsAt:e.endsAt,totalLaps:NORTH_F1_RULES.laps,audience:trackCrowd,
@@ -490,7 +523,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    visitors:d.visitors,charterArrivals:d.charterArrivals,charterDepartures:d.charterDepartures,charterDemand:e?.charterDemand||history?.charterDemand||0,
    northFanTarget:e?.northFanTarget||0,merchSales:Number(d.merchSales||0),hotelBookings:Number(d.hotelBookings||0),hansdrexSightVisits:Number(d.hansdrexSightVisits||0),
    fanTarget:e?.fanTarget||history?.fanTarget||0,fanInvited:e?Object.keys(e.fanInvites).length:history?.fanInvited||0,
-   foreignVisitors:foreignVisitors(),raceStatus:e?.status||'scheduled',cancellationReason:e?.cancellationReason||null,readyDrivers:e?.readyDrivers??null,charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
+   driverWorkforce:{regular:d.teams.flatMap(t=>t.drivers).filter(Boolean).length,target:20,reserves:(d.reserveDrivers||[]).length,reserveTarget:20,licensed:[...d.teams.flatMap(t=>t.drivers),...(d.reserveDrivers||[])].map(id=>actorsById.get(id)).filter(f=>f&&licensedForRace(f)).length},foreignVisitors:foreignVisitors(),raceStatus:e?.status||'scheduled',cancellationReason:e?.cancellationReason||null,readyDrivers:e?.readyDrivers??null,charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
  }
  function liquidCash(){
   let cash=0;

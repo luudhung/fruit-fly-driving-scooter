@@ -281,3 +281,67 @@ test('the race calendar advances with two older delayed tours, and twenty prepar
  // Airport traffic and audience arrival are deliberately absent from this race.
  next.charters=[];next.charterPlanned=true;step(next.startsAt);assert.equal(next.status,'racing');assert.equal(next.cars.length,20);assert.equal(next.audience.total,0);assert.equal(system.snapshot().activeRace.cars.length,20);
 });
+
+test('real unlicensed citizens train at the funded paddock, then fill twenty cars without a tourist audience',()=>{
+ const trainees=Array.from({length:20},(_,i)=>({...driver(i),money:0,savings:0,energy:90,hunger:20,lifeSkillsOnboarding:true,lifeSkills:{minutes:{},completed:[]}}));
+ const {system,event,state,step,totalCash}=fixture(trainees);event.charters=[];event.charterPlanned=true;state.businesses['north-f1']||={cash:0,inventory:0};state.businesses['north-f1'].cash=10000;const total=totalCash();
+ const train=()=>{for(const f of trainees)assert.equal(system.handleResident(f,{hour:12}),true);};
+ train();assert.ok(trainees.every(f=>f.f1Duty?.role==='driver'&&f.lifeSkills.minutes.driving==null));assert.ok(trainees.every(f=>f.money===(f.citizenshipCountryId==='north-city'?30:80)));assert.equal(totalCash(),total);
+ for(let i=0;i<3;i++){state.simulationAgeSeconds+=300;train();}assert.ok(trainees.every(f=>f.lifeSkills.minutes.driving===15));
+ state.simulationAgeSeconds+=300;train();assert.ok(trainees.every(f=>f.lifeSkills.minutes.driving===20&&f.lifeSkills.completed.includes('driving')));assert.ok(Math.abs(totalCash()-total)<1e-6);
+ const spent=state.businesses['north-f1'].cash;train();assert.equal(state.businesses['north-f1'].cash,spent,'duplicate observations cannot repay travel or duplicate lesson charges');
+ step(event.startsAt);assert.equal(event.status,'racing');assert.equal(event.cars.length,20);assert.equal(event.audience.total,0);assert.equal(new Set(event.cars.map(c=>c.driverId)).size,20);
+});
+
+test('retirement within the locked grid window immediately promotes a prepared same-country reserve and preserves twenty starters',()=>{
+ const people=[...Array.from({length:20},(_,i)=>driver(i)),{...driver(20),id:'READY-HANS-RESERVE',citizenshipCountryId:'hansdrex',ageYears:22}];
+ const {system,event,state,step}=fixture(people);event.charters=[];event.charterPlanned=true;
+ const team=state.northF1.teams.find(t=>t.drivers.some(id=>id===people[0].id)),old=people[0];assert.ok(team);assert.ok(state.northF1.reserveDrivers.length>=1);
+ old.ageYears=69;step(event.startsAt-1200);assert.ok(old.racingRetiredAt!=null);assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(old.id));assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,20);
+ step(event.startsAt);assert.equal(event.status,'racing');assert.equal(event.cars.length,20);assert.equal(event.cars.filter(c=>c.countryId==='hansdrex').length,15);assert.equal(event.cars.filter(c=>c.countryId==='north-city').length,5);assert.ok(!event.cars.some(c=>c.driverId===old.id));
+});
+
+test('offsite time and an unfunded team cannot grant a simulator licence',()=>{
+ const people=Array.from({length:20},(_,i)=>({...driver(i),lifeSkillsOnboarding:true,lifeSkills:{minutes:{},completed:[]},energy:90,money:0,savings:0}));
+ const {system,event,state}=fixture(people),f=people[0];event.charters=[];event.charterPlanned=true;
+ assert.equal(system.handleResident(f,{hour:12}),false);assert.equal(f.f1Duty,undefined);assert.equal(f.lifeSkills.minutes.driving,undefined);
+ state.businesses['north-f1'].cash=100;state.simulationAgeSeconds+=3600;system.handleResident(f,{hour:13});assert.equal(f.lifeSkills.minutes.driving,undefined);
+ f.traveling=true;state.simulationAgeSeconds+=3600;system.handleResident(f,{hour:14});f.traveling=false;state.simulationAgeSeconds+=3600;system.handleResident(f,{hour:15});assert.equal(f.lifeSkills.minutes.driving,undefined,'returning from an offsite interval restarts attendance observation');
+});
+
+test('a selected driver reserves preparation while finishing a boarded metro trip instead of remaining trapped in ordinary errands',()=>{
+ const {system,event,state}=fixture(Array.from({length:20},(_,i)=>driver(i))),f=state.flies[0];event.charters=[];event.charterPlanned=true;
+ Object.assign(f,{traveling:true,onTrain:true,metroLineId:'M1',targetLocationId:'park',routeWaypoints:[{x:30,z:0,mode:'walk'}]});const route=JSON.stringify(f.routeWaypoints),before={x:f.x,z:f.z};
+ assert.equal(system.handleResident(f,{hour:12}),true);assert.equal(f.f1Duty.role,'driver');assert.equal(f.onTrain,true);assert.equal(f.targetLocationId,'park');assert.equal(JSON.stringify(f.routeWaypoints),route);assert.deepEqual({x:f.x,z:f.z},before);
+});
+
+test('a committed driver stays signed when the commute lowers energy, while severe illness still calls a reserve',()=>{
+ const people=[...Array.from({length:20},(_,i)=>driver(i)),{...driver(20),id:'NORTH-READY-RESERVE'}];
+ const {state,event,step,system}=fixture(people);event.charters=[];event.charterPlanned=true;
+ const north=people.find(f=>f.citizenshipCountryId==='north-city'&&state.northF1.teams.flatMap(t=>t.drivers).includes(f.id));system.handleResident(north,{hour:12});Object.assign(north,{energy:8,traveling:true,currentLocationId:'north-school'});
+ step(event.startsAt-30*HOUR);assert.ok(state.northF1.teams.flatMap(t=>t.drivers).includes(north.id),'travel fatigue must not cancel a signed preparation duty');
+ Object.assign(north,{health:30,illness:'respiratory illness'});step(event.startsAt-29*HOUR);
+ assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(north.id));assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,20);
+});
+
+test('vacant seats can recruit a newly eligible citizen inside the grid lock instead of remaining empty until the next event',()=>{
+ const people=Array.from({length:20},(_,i)=>driver(i)),north=people[19];north.energy=0;
+ const {state,event,step}=fixture(people);event.charters=[];event.charterPlanned=true;
+ assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,19);
+ north.energy=90;step(event.startsAt-HOUR);assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,20);
+ step(event.startsAt);assert.equal(event.status,'racing');assert.equal(event.cars.length,20);
+});
+
+test('minor illness with stable health does not erase an otherwise qualified field',()=>{
+ const people=Array.from({length:20},(_,i)=>({...driver(i),health:90,illness:i%2?'respiratory illness':'viral fatigue'}));
+ const {event,step}=fixture(people);event.charters=[];event.charterPlanned=true;
+ step(event.startsAt);assert.equal(event.status,'racing');assert.equal(event.cars.length,20);
+});
+
+test('retirement promotes a licensed reserve before a higher rated untrained rookie',()=>{
+ const people=Array.from({length:20},(_,i)=>driver(i)),ready={...driver(20),id:'LICENSED-NORTH-SPARE'},rookie={...driver(21),id:'ROOKIE-NORTH',lifeSkillsOnboarding:true,lifeSkills:{minutes:{},completed:[]},professionSkills:{racing:100}};
+ const {state,event,step}=fixture(people);event.charters=[];event.charterPlanned=true;
+ state.flies.push(ready,rookie);state.northF1.reserveDrivers=[ready.id,rookie.id];const old=people.find(f=>f.citizenshipCountryId==='north-city'&&state.northF1.teams.flatMap(t=>t.drivers).includes(f.id));old.ageYears=69;
+ step(event.startsAt-1200);assert.ok(state.northF1.teams.flatMap(t=>t.drivers).includes(ready.id));assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(rookie.id));
+ step(event.startsAt);assert.equal(event.cars.length,20);
+});

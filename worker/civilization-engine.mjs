@@ -2053,6 +2053,7 @@ function workCommitment(fly,clock){
   return {job,onShift,essential,commuter,start,soon:(essential||commuter)&&until<=commuteHours,hoursAfterEnd:(nowHour-start-hours+24)%24,shiftEndIn:((start+hours-nowHour+24)%24)*3600};
 }
 function isWorkCommitted(f){
+  if(f.f1Duty?.role==='driver'&&Number(f.f1Duty.until||0)>state.simulationAgeSeconds)return true;
   if(f.industrialFreightDuty||f.facilityEmployment||f.countryAirTrip||f.countryFlightPlan||f.internationalFreightDuty||f.nationalSupplyTask||f.nationalTrainingFlightId||f.warResponse?.active)return true;
   if(countries.isWorkCommitted(f))return true;
   if(f.nationalServiceDuty)return true;

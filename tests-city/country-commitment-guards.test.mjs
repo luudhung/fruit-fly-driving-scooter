@@ -42,3 +42,9 @@ test('social and sports appointments reject active country tasks without double 
 test('guarded country staff still receive real ground ambulance care when injured',()=>{
  const patient=person('PATIENT',{publicServiceRole:'army',nationalServiceDuty:{kind:'guard'},health:30,x:-63,z:43.5,currentLocationId:'cinema'}),t=fixture([...Array.from({length:18},(_,i)=>person(`CREW-${i}`,{x:830,z:-200,currentLocationId:'firestation'})),patient]);t.s.emergencyServicesEnabled=true;const service=createFireService(t.hooks);service.init();const ambulance=service.dispatchAmbulance(patient,{hour:9});assert.ok(ambulance);assert.ok(patient.ambulanceDuty);assert.equal(service.handleResident(patient,{hour:9}),true);assert.equal(t.care,1);assert.equal(t.finance,1);assert.equal(patient.health,30,'dispatch does not invent remote healing');
 });
+
+test('a finite driver preparation contract prevents competing automatic work and expires with the event',async()=>{
+ const {hasCountryCommitment}=await import('../worker/country-commitments.mjs');
+ const f={f1Duty:{role:'driver',until:2000}};
+ assert.equal(hasCountryCommitment(f,1000),true);assert.equal(hasCountryCommitment(f,2001),false);f.f1Duty.role='fan';assert.equal(hasCountryCommitment(f,1000),false);
+});
