@@ -68,9 +68,22 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   }
   for(const v of s.visitors){v.kind='visitor';v.taxiPassenger=Boolean(v.taxiPassenger);v.entryAirportId||='city';v.departureAirportId||=v.entryAirportId;v.originCountryId||='outside';v.citizenshipCountryId||='outside';v.travelGoals||=['hansdrex','north-city'];v.travelGoalsCompleted||=[];v.siteCountryVisits||={};if(international&&!v.returnFarePaid){v.returnFareReserve=hansdrexReturnFare(v);v.visitorReservedBudget=Math.max(Number(v.visitorReservedBudget||0),v.returnFareReserve+100);}}
   if(international&&!s.internationalTourVersion){for(const v of s.visitors)if(v.airportFlightId)v.visitorMedicalException='grandfathered booked departure';s.internationalTourVersion=1;}
+  ignoreOrphanedArrivalSlots(s);
   // Reservations and committed trips resume from stored phases; never recharge in init.
   return s;
  }
+ function ignoreOrphanedArrivalSlots(s){
+  const known=new Set(s.airportTraffic.flights.map(f=>f.id));let released=0;
+  for(const v of s.visitors){
+   if(!v.alive||v.departed||v.immigrationClearedAt!=null||!['inbound-flight','airport-arrival'].includes(v.visitorPhase)||!v.arrivalFlightId||known.has(v.arrivalFlightId))continue;
+   const booked=s.hotels[v.hotelId]?.rooms?.[v.id]?.bookedAt??v.visitorArrivedAt??0;
+   // Keep the old person and their money intact. A missing legacy flight must
+   // not consume the admission slots intended for new ten-person manifests.
+   if(now()-booked>HOUR&&v.admissionSlotExemptAt==null){v.admissionSlotExemptAt=now();released++;}
+  }
+  if(released){s.pendingArrivalDemand=Math.max(MIN_VISITOR_PASSENGERS,Number(s.pendingArrivalDemand||0));s.nextArrivalAt=Math.min(Number(s.nextArrivalAt??Infinity),now()+60);}
+ }
+ const occupiesVisitorSlot=v=>v.alive&&!v.departed&&v.admissionSlotExemptAt==null;
  function reserveRoom(v,hotelId,nights){
   const h=data().hotels[hotelId];if(!h||h.closed||!location(hotelId)||isUnavailable(hotelId,v))return false;
   if(h.rooms[v.id])return true;
@@ -105,7 +118,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   v.eventHotelId=null;
  }
  function spawnVisitor(options={}){
-  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=COMBINED_CAP||s.visitors.filter(v=>v.alive&&!v.departed).length>=MAX_VISITORS)return null;
+  const s=data();if(!createVisitor||residents().length+s.visitors.filter(v=>v.alive&&!v.departed).length>=COMBINED_CAP||s.visitors.filter(occupiesVisitorSlot).length>=MAX_VISITORS)return null;
   const entry=airportById(options.airportId||'city');if(!entry)return null;
   // The ordinary holiday package stays in Hansdrex regardless of entry airport.
   const available=roomHotels(COUNTRY_IDS.hansdrex);
@@ -482,22 +495,22 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   if(money(f)>350&&f.ageYears>=18&&Number(f.traits?.thrift||.5)<.45&&f.currentLocationId&&location(f.currentLocationId)&&clock.hour>=7&&clock.hour<21&&!f.vehicle)add(f.currentLocationId,'calling a city taxi',8+f.stress*.25);
  }
  function airportAdmissionCapacity(){
-  const s=data(),active=s.visitors.filter(v=>v.alive&&!v.departed).length;
+  const s=data(),active=s.visitors.filter(occupiesVisitorSlot).length,allPresent=s.visitors.filter(v=>v.alive&&!v.departed).length;
   const rooms=roomHotels(COUNTRY_IDS.hansdrex)
    .reduce((sum,h)=>sum+Math.max(0,h.capacity-Object.keys(h.rooms).length),0);
-  return Math.max(0,Math.min(MAX_VISITORS-active,COMBINED_CAP-residents().length-active,rooms));
+  return Math.max(0,Math.min(MAX_VISITORS-active,COMBINED_CAP-residents().length-allPresent,rooms));
  }
  function reserveManifest(flight){
-  if(flight.arrivalPassengerIds)return true;
-  const count=MIN_VISITOR_PASSENGERS;
-  if(!createVisitor||airportAdmissionCapacity()<count)return false;
+  const count=MIN_VISITOR_PASSENGERS,existing=flight.arrivalPassengerIds?.length||0;
+  if(existing>=count)return true;
+  if(!createVisitor||airportAdmissionCapacity()<count-existing)return false;
   const start=data().nextVisitorId;
-  const seeds=Array.from({length:count},(_,index)=>createVisitor(`Visitor ${start+index}`,start+index));
+  const seeds=Array.from({length:count-existing},(_,index)=>createVisitor(`Visitor ${start+index}`,start+index));
   if(seeds.some(seed=>!seed?.brain?.id))return false;
-  flight.arrivingGuests=count;flight.kind='passenger';flight.arrivalPassengerIds=[];
+  flight.arrivingGuests=count;flight.kind='passenger';flight.arrivalPassengerIds||=[];
   if(now()>flight.parkedAt)flight.disembarkAt=now();
-  for(let index=0;index<count;index++){
-   const visitor=spawnVisitor({flightId:flight.id,airportId:flight.airportId||'city',inboundFlight:true,arrivalIndex:index,preparedVisitor:seeds[index]});
+  for(let index=existing;index<count;index++){
+   const visitor=spawnVisitor({flightId:flight.id,airportId:flight.airportId||'city',inboundFlight:true,arrivalIndex:index,preparedVisitor:seeds[index-existing]});
    if(!visitor)throw new Error('Reserved airport manifest lost its hotel or admission capacity');
    flight.arrivalPassengerIds.push(visitor.id);
   }
@@ -515,10 +528,10 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    kind:guests>0?'passenger':'ferry',arrivalPassengerIds:guests>0?undefined:[],
    boardAt:null,outboundAt:null,exitAt:null};
   if(!reserveAircraft(flight,now()+180))return false;
-  if(guests>0&&!reserveManifest(flight))return false;
+  traffic.flights.push(flight);
+  if(guests>0&&!reserveManifest(flight)){traffic.flights=traffic.flights.filter(f=>f!==flight);return false;}
   // The aircraft rotates after its ten passengers have left the stairs. Their
   // walk through immigration continues independently of the parked aircraft.
-  traffic.flights.push(flight);
   return true;
  }
  function airportClosed(){
@@ -568,7 +581,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   for(const f of traffic.flights){
    // Upgrade a scheduled legacy 1–3 guest service before it reaches the runway.
    // Existing people and completed arrivals are never regenerated.
-   if(!f.unloaded&&!f.arrivalPassengerIds&&f.arrivingGuests>0&&!reserveManifest(f)){
+   if(!f.unloaded&&(f.arrivalPassengerIds?.length||0)<MIN_VISITOR_PASSENGERS&&f.arrivingGuests>0&&!reserveManifest(f)){
     rescheduleArrival(f,time+900);continue;
    }
    if(closed&&!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+VISITOR_TOUCHDOWN_SECONDS){
@@ -649,9 +662,11 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   if(now()>=s.nextArrivalAt){
    // Ordinary holidays enter Hansdrex. North's inbound foreign demand is the
    // separately booked, same-day Grand Prix cohort, about one quarter of charters.
-   const airport='city',capacity=airportAdmissionCapacity();
-   if(!airportClosed()&&capacity>=MIN_VISITOR_PASSENGERS&&rng()<.35+s.reputation/140&&queueAircraft(MIN_VISITOR_PASSENGERS,airport))s.lastArrivalAirportId=airport;
-   s.nextArrivalAt=now()+Math.round((7200+rng()*12600)*(1.4-s.reputation/140));
+   const airport='city',capacity=airportAdmissionCapacity(),pending=Number(s.pendingArrivalDemand||0)>=MIN_VISITOR_PASSENGERS;
+   if(!airportClosed()&&capacity>=MIN_VISITOR_PASSENGERS&&(pending||rng()<.35+s.reputation/140)&&queueAircraft(MIN_VISITOR_PASSENGERS,airport)){
+    s.lastArrivalAirportId=airport;if(pending)s.pendingArrivalDemand-=MIN_VISITOR_PASSENGERS;
+   }
+   s.nextArrivalAt=now()+(s.pendingArrivalDemand>0?900:Math.round((7200+rng()*12600)*(1.4-s.reputation/140)));
   }
   tickClub(clock);s.lastTickAt=now();
  }

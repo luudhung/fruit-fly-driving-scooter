@@ -269,3 +269,15 @@ test('F1 visitors publish the timed interior walk instead of freezing every immi
  const passenger=system.snapshot().foreignVisitors.find(f=>f.id===guest.id);
  assert.ok(passenger);assert.equal(passenger.indoors,true,JSON.stringify({phase:passenger.visitorPhase,onPlane:passenger.onPlane,action:passenger.action}));assert.equal(passenger.onPlane,false);assert.equal(passenger.motion.timed,true);assert.ok(!passenger.motion.blocked);assert.ok(passenger.motion.points.every(p=>Number.isFinite(p.at)));assert.equal(guest.immigrationClearedAt,undefined);
 });
+
+test('the race calendar advances with two older delayed tours, and twenty prepared drivers can race without any spectators arriving',()=>{
+ const {system,event,state,step}=fixture(Array.from({length:20},(_,i)=>driver(i)));
+ const at=state.simulationAgeSeconds,old=event.id,flight=event.charters[0],guest=flight.guests[0];
+ Object.assign(event,{status:'cancelled',startsAt:at-20*DAY+HOUR,endsAt:at-19*DAY+HOUR});Object.assign(flight,{landed:true,aircraftGone:true,returnLeg:undefined});
+ for(const g of flight.guests)Object.assign(g,{phase:'stranded',onPlane:false});event.charters=[flight];
+ const prior=offset=>({...event,id:old+'-old-'+offset,charters:[{...flight,id:flight.id+'-old-'+offset,guests:[{...guest,id:guest.id+'-old-'+offset}]}]});
+ state.northF1.previousTours=[prior(1),prior(2)];const cash=guest.money;
+ step(at);const next=state.northF1.event;assert.ok(next);assert.notEqual(next.id,old);assert.ok(next.startsAt>at);assert.equal(state.northF1.previousTours.length,3);assert.equal(guest.phase,'stranded');assert.equal(guest.money,cash);
+ // Airport traffic and audience arrival are deliberately absent from this race.
+ next.charters=[];next.charterPlanned=true;step(next.startsAt);assert.equal(next.status,'racing');assert.equal(next.cars.length,20);assert.equal(next.audience.total,0);assert.equal(system.snapshot().activeRace.cars.length,20);
+});

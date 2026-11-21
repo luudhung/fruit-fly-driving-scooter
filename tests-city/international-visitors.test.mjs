@@ -23,3 +23,35 @@ test('a North-arriving outside brain physically visits both countries, pays two 
  let restored=t.s.cityVisitors.visitors.find(p=>p.id===identity[0]);for(let i=0;i<16000&&!restored.departed;i++)t.step();
  assert.equal(restored.departed,true);assert.deepEqual([restored.id,restored.brain.id],identity);assert.ok(restored.travelGoalsCompleted.includes(COUNTRY_IDS.north)&&restored.travelGoalsCompleted.includes(COUNTRY_IDS.hansdrex));assert.ok(restored.siteCountryVisits[COUNTRY_IDS.north].locationId);assert.ok(restored.siteCountryVisits[COUNTRY_IDS.hansdrex].locationId);assert.equal(restored.departureAirportId,'city');assert.equal(t.countries.snapshot().visaRevenue,100);assert.equal(t.visitors.snapshot().totalDepartures,1);assert.ok(maxGroundStep<10,'ordinary ground updates never teleport to the other country');
 });
+
+test('old arrivals with missing flight metadata cannot block a fresh ten-person flight and are left intact',()=>{
+ const t=fixture();for(let i=0;i<3;i++)assert.equal(t.visitors.queueAircraft(10,'city'),true);
+ const ghosts=t.s.cityVisitors.visitors.slice(),identity=ghosts.map(v=>[v.id,v.brain.id,v.money,v.savings,v.visitorPhase]);
+ t.s.cityVisitors.airportTraffic.flights=[];t.s.simulationAgeSeconds+=86400;t.visitors.init();
+ assert.equal(ghosts.filter(v=>v.admissionSlotExemptAt!=null).length,30);assert.deepEqual(ghosts.map(v=>[v.id,v.brain.id,v.money,v.savings,v.visitorPhase]),identity);
+ assert.equal(t.visitors.queueAircraft(10,'city'),true);const fresh=t.s.cityVisitors.airportTraffic.flights[0];assert.equal(fresh.arrivalPassengerIds.length,10);assert.ok(fresh.arrivalPassengerIds.every(id=>!ghosts.some(v=>v.id===id)));
+ t.s.simulationAgeSeconds=visitorArrivalCompleteAt(fresh,10)+1;t.step();assert.equal(t.visitors.snapshot().totalArrivals,10);assert.equal(t.countries.snapshot().visaRevenue,500);
+ assert.deepEqual(ghosts.map(v=>[v.id,v.brain.id,v.money,v.savings,v.visitorPhase]),identity);
+});
+
+test('a temporarily interrupted manifest keeps its flight and resumes to exactly ten people without duplicating those already reserved',()=>{
+ let s={simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{},treasury:{cash:10000},centralBank:{priceLevel:1},weather:{condition:'clear',precipitation:0,wind:0}};
+ let fail=true;
+ const visitors=createCityVisitors({world:()=>s,createVisitor:(_n,i)=>{
+  const v={ageYears:30,brain:{id:'RESERVED-'+i},traits:{thrift:1}};
+  if(fail&&i===4)Object.defineProperty(v,'money',{configurable:true,set(){throw Error('interrupted reservation');}});
+  return v;
+ }});visitors.init();s.cityVisitors.nextArrivalAt=1e15;
+ assert.throws(()=>visitors.queueAircraft(10,'city'),/interrupted reservation/);const flight=s.cityVisitors.airportTraffic.flights[0];assert.ok(flight);assert.equal(flight.arrivalPassengerIds.length,3);
+ const ids=flight.arrivalPassengerIds.slice(),people=s.cityVisitors.visitors.map(v=>[v.id,v.brain.id,v.money]);fail=false;s.simulationAgeSeconds+=120;visitors.tick(120,{hour:12});
+ assert.equal(flight.arrivalPassengerIds.length,10);assert.deepEqual(flight.arrivalPassengerIds.slice(0,3),ids);assert.deepEqual(s.cityVisitors.visitors.slice(0,3).map(v=>[v.id,v.brain.id,v.money]),people);assert.equal(new Set(flight.arrivalPassengerIds).size,10);
+});
+
+
+test('freeing stale arrival slots queues one real replacement flight promptly, even when the ordinary random demand draw would miss',()=>{
+ const t=fixture();for(let i=0;i<3;i++)assert.equal(t.visitors.queueAircraft(10,'city'),true);
+ t.s.cityVisitors.airportTraffic.flights=[];t.s.simulationAgeSeconds+=86400;t.visitors.init();assert.equal(t.s.cityVisitors.pendingArrivalDemand,10);
+ t.s.cityVisitors.nextArrivalAt=t.s.simulationAgeSeconds;t.step();
+ const fresh=t.s.cityVisitors.airportTraffic.flights.find(f=>f.arrivalPassengerIds?.length===10);assert.ok(fresh);assert.equal(fresh.airportId,'city');assert.equal(t.s.cityVisitors.pendingArrivalDemand,0);
+ const flightId=fresh.id;t.restore();assert.ok(t.s.cityVisitors.airportTraffic.flights.some(f=>f.id===flightId));assert.equal(t.s.cityVisitors.pendingArrivalDemand,0,'init cannot repeat replacement demand for the same old people');
+});

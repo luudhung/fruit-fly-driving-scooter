@@ -384,7 +384,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   const trackClosed=weatherClosed()||isUnavailable(paddock.id);
   if(e.format!==2&&!trackClosed&&drivers.length<20&&now()<e.startsAt+HOUR/2)return;
   if(now()>=e.endsAt||trackClosed||drivers.length<20){
-   e.status='cancelled';d.cancelled++;
+   e.status='cancelled';e.cancelledAt=now();e.cancellationReason=now()>=e.endsAt?'missed-start-window':trackClosed?'unsafe-track-or-weather':'insufficient-ready-drivers';e.readyDrivers=drivers.length;d.cancelled++;
    refundTickets(d,e);
    emit('north_f1_cancelled','North City called off the Grand Prix because safe racing could not start.',{raceId:e.id});
    return;
@@ -424,17 +424,20 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
   const d=data();
   updateRoster(d);
   d.previousTours||=[];
-  for(const previous of d.previousTours)charterService.tick(previous);
+  for(const previous of d.previousTours){if(previous.format!==2)processCharters(d,previous);charterService.tick(previous);}
   d.previousTours=d.previousTours.filter(previous=>previous.charters.some(f=>!f.departed));
   if(d.event&&now()>=d.event.endsAt&&['complete','cancelled'].includes(d.event.status)){
    const old=d.event,pending=old.charters.some(f=>!f.departed);
-   if(!pending||old.format===2&&d.previousTours.length<2){
-    if(pending)d.previousTours.push(old);
-    d.nextAt=old.startsAt+NORTH_F1_RULES.cadenceDays*DAY;d.event=null;
+   // Passenger return journeys remain alive independently of the next race.
+   // A single delayed guest must never freeze every future Grand Prix.
+   if(pending){
+    const charters=old.charters.filter(f=>!f.departed),keys=new Set(charters.flatMap(f=>f.guests.map(g=>g.leg?.key)).filter(Boolean));
+    d.previousTours.push({...old,cars:[],charters,tourPaths:Object.fromEntries(Object.entries(old.tourPaths||{}).filter(([key])=>keys.has(key)))});
    }
+   d.nextAt=old.startsAt+NORTH_F1_RULES.cadenceDays*DAY;d.event=null;
   }
   if(!d.event&&now()>=d.nextAt-PREPARATION_HOURS*HOUR){
-   while(now()>=d.nextAt+durationEstimate())d.nextAt+=NORTH_F1_RULES.cadenceDays*DAY;
+   while(now()>=d.nextAt)d.nextAt+=NORTH_F1_RULES.cadenceDays*DAY;
    if(now()>=d.nextAt-PREPARATION_HOURS*HOUR)openRace(d);
   }
   const e=d.event;
@@ -487,7 +490,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    visitors:d.visitors,charterArrivals:d.charterArrivals,charterDepartures:d.charterDepartures,charterDemand:e?.charterDemand||history?.charterDemand||0,
    northFanTarget:e?.northFanTarget||0,merchSales:Number(d.merchSales||0),hotelBookings:Number(d.hotelBookings||0),hansdrexSightVisits:Number(d.hansdrexSightVisits||0),
    fanTarget:e?.fanTarget||history?.fanTarget||0,fanInvited:e?Object.keys(e.fanInvites).length:history?.fanInvited||0,
-   foreignVisitors:foreignVisitors(),raceStatus:e?.status||'scheduled',charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
+   foreignVisitors:foreignVisitors(),raceStatus:e?.status||'scheduled',cancellationReason:e?.cancellationReason||null,readyDrivers:e?.readyDrivers??null,charterShuttles:e?.shuttleRoute&&e.charters.length?{route:e.shuttleRoute,groups:e.charters.filter(f=>f.landed&&!f.departed).map(f=>({id:f.id,count:f.guests.length,arrivalAt:f.guests.at(-1)?.terminalAt,returnAt:e.charterShowUntil}))}:null};
  }
  function liquidCash(){
   let cash=0;
