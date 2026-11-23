@@ -1,3 +1,4 @@
+import {addAviationBeacons} from './aviation-beacons.ts';
 import {NORTH_F1_CHARTER_STANDS} from '../worker/north-f1-map.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
@@ -112,6 +113,7 @@ export class InternationalLandmarks{
   for(const side of [-1,1]){const fin=new THREE.Mesh(new THREE.ConeGeometry(1.25,9,4),this.metal);fin.position.set(side*1.25,188.5,0);g.add(fin);}
   const spire=new THREE.Mesh(new THREE.ConeGeometry(.42,12,8),this.copper);spire.position.y=190;g.add(spire);
   this.box(g,0,.15,0,18,.3,18,this.stone);
+  addAviationBeacons(g,[[0,196.3,0]]);
   this.label(g,'NORTH CITY · AURORA TOWER',0,200,0,32,1.4);batchStaticMeshes(g);return g;
  }
  private airport(){

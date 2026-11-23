@@ -1,3 +1,4 @@
+import {addAviationBeacons} from './aviation-beacons.ts';
 import {AIRPORT} from '../worker/city-map.mjs';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
@@ -89,7 +90,7 @@ export class VisitorAviationRenderer {
   const slots=Array.from({length:Math.max(16,AIRPORT.stands.length+visitorStands('north').length+6)});
   this.aircraft=slots.map(()=>{
    const mesh=new THREE.Mesh(geometry,material);
-   mesh.name='International passenger aircraft';mesh.visible=false;
+   mesh.name='International passenger aircraft';mesh.visible=false;addAviationBeacons(mesh,[[-8.5,-.28,-1.55],[8.5,-.28,-1.55]]);
    root.add(mesh);
    return mesh;
   });

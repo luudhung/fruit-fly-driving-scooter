@@ -1,3 +1,4 @@
+import {addAviationBeacons} from './aviation-beacons.ts';
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -134,6 +135,7 @@ export function buildKhalifa(layout:KhalifaLayout,makeSign:SignMaker){
   const canopy=new THREE.BoxGeometry(2.6,.16,2).rotateY(-angle).translate(x,2.4,z);bases.push(canopy);
  }
  addBatch(group,bases,podium,scale);addBatch(group,panes,glass,scale);addBatch(group,bands,steel,scale);addBatch(group,leds,ribbons,scale);
+ addAviationBeacons(group,[[0,height+.3,0]]);
  const sign=makeSign('BURJ KHALIFA · HANSDREX',26,1.35);sign.position.y=height+4;group.add(sign);
  return group;
 }

@@ -1,3 +1,4 @@
+import {addAviationBeacons} from './aviation-beacons.ts';
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
@@ -173,6 +174,7 @@ export function buildPetronasTowers(
   addBatch(group, panes, glazing, heightScale);
   addBatch(group, steel, stainless, heightScale);
 
+  addAviationBeacons(group,[[-offset,layout.h+.3,0],[offset,layout.h+.3,0]]);
   const sign = makeSign("HANSDREX PETRONAS", 22, 1.15);
   sign.position.y = layout.h + 5;
   group.add(sign);

@@ -1,3 +1,4 @@
+import {visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
 import {createHansdrexTourism} from './hansdrex-tourism.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
@@ -552,9 +553,9 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  function scheduleTurnaround(flight,otherFlights=airportFlights(flight.airportId||'city',flight)){
   const count=Number(flight.arrivingGuests||0),stairs=count?visitorStairsClearAt(flight,count,Number(raw().timeScale||120)):flight.parkedAt;
   const earliest=Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600);
-  flight.outboundAt=visitorRunwaySlot(earliest,OUTBOUND_SECONDS,[...otherFlights,flight],flight.airportId||'city',flight.runwayId);
-  flight.boardAt=flight.outboundAt-420;flight.exitAt=flight.outboundAt+OUTBOUND_SECONDS;
-  flight.expectedStandReleaseAt=flight.outboundAt+140;
+  flight.outboundAt=visitorRunwaySlot(earliest,visitorFlightDuration(flight,true),[...otherFlights,flight],flight.airportId||'city',flight.runwayId,flight.motionVersion===1?visitorRunwayTiming(flight,true):null);
+  flight.boardAt=flight.outboundAt-420;flight.exitAt=flight.outboundAt+visitorFlightDuration(flight,true);
+  flight.expectedStandReleaseAt=flight.outboundAt+visitorStandReleaseSeconds(flight);
  }
  function rescheduleArrival(flight,earliest){
   if(!reserveAircraft(flight,earliest))return false;
@@ -565,8 +566,8 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   const airport=flight.airportId||'city',others=airportFlights(airport,flight);
   let stay=21600;
   for(let tries=0;tries<40;tries++){
-   const reservation=visitorStandReservation(earliest,others,airport,stay);if(!reservation)return false;
-   const candidate={...flight,inboundAt:reservation.at,parkedAt:reservation.at+INBOUND_SECONDS,runwayId:reservation.runwayId,
+   const reservation=visitorStandReservation(earliest,others,airport,stay,{...flight,motionVersion:1});if(!reservation)return false;
+   const candidate={...flight,motionVersion:1,inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration,runwayId:reservation.runwayId,
     standId:reservation.stand.id,arrivalStand:reservation.stand,outboundAt:null,boardAt:null,exitAt:null};
    scheduleTurnaround(candidate,others);
    const actualStay=candidate.expectedStandReleaseAt-candidate.parkedAt;
@@ -584,18 +585,18 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    if(!f.unloaded&&(f.arrivalPassengerIds?.length||0)<MIN_VISITOR_PASSENGERS&&f.arrivingGuests>0&&!reserveManifest(f)){
     rescheduleArrival(f,time+900);continue;
    }
-   if(closed&&!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+VISITOR_TOUCHDOWN_SECONDS){
+   if(closed&&!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+visitorTouchdownSeconds(f)){
     const pose=visitorAircraftPose(Math.max(f.inboundAt,previous),f);
     if(pose)f.hold={x:pose.x,y:pose.y,z:pose.z,at:time};
     rescheduleArrival(f,time+900);continue;
    }
-   if(time>=f.inboundAt+VISITOR_TOUCHDOWN_SECONDS)f.touchdownAt??=f.inboundAt+VISITOR_TOUCHDOWN_SECONDS;
+   if(time>=f.inboundAt+visitorTouchdownSeconds(f))f.touchdownAt??=f.inboundAt+visitorTouchdownSeconds(f);
    if(resolveVisitorTaxiStand(f,airportFlights(f.airportId||'city',f),time))scheduleTurnaround(f,airportFlights(f.airportId||'city',f));
    if(f.taxiHold)continue;
    if(closed&&f.outboundAt!=null&&time>=f.outboundAt&&previous<f.outboundAt){
-    f.outboundAt=runwaySlot(time+900,OUTBOUND_SECONDS,f.airportId||'city',f);
-    f.exitAt=f.outboundAt+OUTBOUND_SECONDS;
-    f.expectedStandReleaseAt=f.outboundAt+140;
+    f.outboundAt=visitorRunwaySlot(time+900,visitorFlightDuration(f,true),airportFlights(f.airportId||'city',f),f.airportId||'city',f.runwayId,f.motionVersion===1?visitorRunwayTiming(f,true):null);
+    f.exitAt=f.outboundAt+visitorFlightDuration(f,true);
+    f.expectedStandReleaseAt=f.outboundAt+visitorStandReleaseSeconds(f);
    }
    if(!f.landedAt&&time>=f.parkedAt){f.landedAt=time;traffic.landed++;}
    let allOffPlane=true;

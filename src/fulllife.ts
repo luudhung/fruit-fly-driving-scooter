@@ -1,3 +1,4 @@
+import {updateAviationBeacons} from './aviation-beacons.ts';
 import {buildFruitFarm} from './fruit-farm.ts';
 import {LocalCitySession} from './local-city-session.ts';
 import {ResidentAwarenessUI,ResidentEyeSession,residentEyeVerticalFov,type ResidentVision,type ResidentAwareness} from './resident-awareness-ui.ts';
@@ -1939,6 +1940,7 @@ function animate(now = performance.now()) {
   governmentVisuals.update(gameNow);
   industrialVisuals.update(dt,gameNow,snapshot?.timeScale||120);
   visitorVisuals.update(dt,gameNow);
+  updateAviationBeacons(now/1000);
   visitorAircraft.update(gameNow);
   regionalAircraft.update(gameNow);
   nationalDefenseVisuals.update(gameNow,snapshot?.timeScale||120);

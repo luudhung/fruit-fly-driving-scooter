@@ -2,7 +2,7 @@ import {createIslandAirCargo} from './island-air-cargo.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
-import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraft,isScheduledIslandFlight} from './aviation.mjs';
+import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraftFlights,isScheduledIslandFlight} from './aviation.mjs';
 import {visitorArrivalPose,visitorArrivalMotion,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const SPORTS_STOP_SECONDS=3600;
@@ -188,15 +188,15 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   return true;
  }
  function snapshot(){
-  const at=now(),shuttle=scheduledAircraft(at),manifests=new Map();
+  const at=now(),manifests=new Map();
   const manifest=(flight,ownerCountryId,pose)=>({...flight,kind:'plane',ownerCountryId,clearance:'scheduled-commercial',passengerIds:[],seats:AVIATION.seats,pose});
-  manifests.set(shuttle.id,{...manifest(shuttle,COUNTRY_IDS.hansdrex,shuttle),scheduled:true});
+  for(const flight of scheduledAircraftFlights(at))manifests.set(flight.id,{...manifest(flight,COUNTRY_IDS.hansdrex,flightPose(at,flight)),scheduled:true});
   for(const f of people()){
    const trip=f.countryAirTrip||f.airTrip;
    if(!trip||!f.alive)continue;
    for(const leg of [trip.outbound,trip.inbound]){
     if(!leg||at<leg.departure-300||at>leg.arrival+900)continue;
-    if(isScheduledIslandFlight(leg)&&leg.id!==shuttle.id)continue;
+    if(isScheduledIslandFlight(leg)&&leg.motionVersion===1&&!manifests.has(leg.id))continue;
     let record=manifests.get(leg.id);
     if(!record){
      record=manifest(leg,airportById(leg.from).countryId,flightPose(at,leg));

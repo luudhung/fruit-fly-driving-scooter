@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {AIRPORT} from '../worker/city-map.mjs';
-import {nextFlight} from '../worker/aviation.mjs';
+import {nextFlight,regionalRunwayWindow} from '../worker/aviation.mjs';
 import {createCityVisitors} from '../worker/city-visitors.mjs';
-import {AIRPORT_SECTORS, INBOUND_SECONDS, MIN_VISITOR_PASSENGERS, VISITOR_STANDS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwaySlot} from '../worker/visitor-aviation.mjs';
+import {visitorRunwayTiming, AIRPORT_SECTORS, INBOUND_SECONDS, MIN_VISITOR_PASSENGERS, VISITOR_STANDS, visitorAircraftPose, visitorArrivalPath, visitorArrivalPose, visitorRunwaySlot} from '../worker/visitor-aviation.mjs';
 
 test('regional aircraft approach from different sectors, use the runway, and occupy separate apron stands',()=>{
  const starts=[];
@@ -23,7 +23,7 @@ test('regional aircraft approach from different sectors, use the runway, and occ
 test('the runway scheduler leaves island flights and other aircraft exclusive clearance',()=>{
  const island=nextFlight(8*3600,'island',0);
  const start=visitorRunwaySlot(island.arrival-420,INBOUND_SECONDS,[]);
- assert.ok(start>=island.arrival+120);
+ const window=regionalRunwayWindow(island,'city');assert.ok(start+INBOUND_SECONDS<=window[0]-60||start>=window[1]+60);
  const first={inboundAt:start,parkedAt:start+INBOUND_SECONDS,outboundAt:null,exitAt:null};
  const next=visitorRunwaySlot(start+90,INBOUND_SECONDS,[first]);
  assert.ok(next>=first.parkedAt+120);
@@ -69,7 +69,7 @@ test('guests clear immigration after parking and return on a plane through check
  const v=state.cityVisitors.visitors[0],id=v.id;
  v.departAt=state.simulationAgeSeconds;tick(state.simulationAgeSeconds+120);
  assert.equal(v.visitorPhase,'airport-wait');assert.equal(v.departed,false);
- for(let step=0;step<120&&!state.cityVisitors.airportTraffic.flights.some(f=>f.passengerIds.includes(id));step++)tick(state.simulationAgeSeconds+120);
+ for(let step=0;step<480&&!state.cityVisitors.airportTraffic.flights.some(f=>f.passengerIds.includes(id));step++)tick(state.simulationAgeSeconds+120);
  flight=state.cityVisitors.airportTraffic.flights.find(f=>f.passengerIds.includes(id));
  assert.ok(flight,'a returning visitor receives a real aircraft seat');
  assert.ok(flight.outboundAt>state.simulationAgeSeconds);
@@ -81,7 +81,7 @@ test('guests clear immigration after parking and return on a plane through check
  state.weather.condition='clear';
  state=JSON.parse(JSON.stringify(state));system=build();system.init();
  const restored=state.cityVisitors.visitors.find(v=>v.id===id);
- tick(flight.outboundAt+700);assert.equal(restored.onPlane,true);assert.ok(restored.y>10);
+ tick(flight.outboundAt+visitorRunwayTiming(flight,true).clear+1200);assert.equal(restored.onPlane,true);assert.ok(restored.y>10);
  tick(flight.exitAt);assert.equal(restored.departed,true);assert.equal(system.snapshot().totalDepartures,1);
  tick(flight.exitAt+120);assert.equal(system.snapshot().totalDepartures,1);
 });

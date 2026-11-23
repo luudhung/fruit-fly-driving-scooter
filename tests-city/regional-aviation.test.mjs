@@ -1,7 +1,7 @@
 import {ISLAND} from '../worker/city-map.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
-import {nextRegionalFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
+import {nextRegionalFlight,flightPose,AVIATION,regionalFlightTiming} from '../worker/aviation.mjs';
 import {createRegionalAviationSystem,regionalJourneyBudget} from '../worker/regional-aviation.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
 import {visitorArrivalPath} from '../worker/visitor-aviation.mjs';
@@ -19,7 +19,7 @@ test('the four direct airport pairs have ten-seat schedules and actual runway/ta
   if(from.id==='north'&&to.id==='island'||from.id==='island'&&to.id==='north'){assert.equal(nextRegionalFlight(0,from.id,to.id),null);continue;}
   const t=fixture(from.id),f=t.s.flies[0],total=supply(t.s);assert.ok(t.air.book(f,to.id));assert.equal(supply(t.s),total);const trip=f.countryAirTrip,flight=trip.outbound;
   assert.ok(flight.departure>=t.s.simulationAgeSeconds+AVIATION.checkInSeconds);assert.equal(flight.to,to.id);
-  t.at(flight.departure+600);t.air.handleResident(f);assert.equal(f.onPlane,true);assert.ok(f.y>20);assert.deepEqual({x:f.x,y:f.y,z:f.z},{x:flightPose(t.s.simulationAgeSeconds,flight).x,y:flightPose(t.s.simulationAgeSeconds,flight).y,z:flightPose(t.s.simulationAgeSeconds,flight).z});
+  t.at(flight.departure+regionalFlightTiming(flight)[6][0]);t.air.handleResident(f);assert.equal(f.onPlane,true);assert.ok(f.y>20);assert.deepEqual({x:f.x,y:f.y,z:f.z},{x:flightPose(t.s.simulationAgeSeconds,flight).x,y:flightPose(t.s.simulationAgeSeconds,flight).y,z:flightPose(t.s.simulationAgeSeconds,flight).z});
   t.at(flight.arrival+180);t.air.handleResident(f);assert.equal(f.onPlane,false);assert.equal(f.airportMotion?.timed,true);assert.ok(f.y>=1.1&&f.y<=3.4);assert.equal(t.countries.snapshot().visaRevenue,0,'no airport fee is charged during overflight or on the aircraft');
   t.arrive(f,flight);assert.equal(f.currentLocationId,to.locationId);assert.equal(f.airportMotion,null);assert.equal(t.countries.snapshot().visaRevenue,50);assert.equal(trip.phase,'visiting');assert.equal(t.s.cityVisitors.hotels[trip.hotelId].rooms[f.id].checkedIn,false,'a reserved room is not a remote check-in');
   t.restore();const restored=t.s.flies[0],back=restored.countryAirTrip.inbound;Object.assign(restored,{currentLocationId:to.locationId,x:to.gate.x,z:to.gate.z,traveling:false});t.at(back.departure-1200);t.air.handleResident(restored);t.at(back.departure+600);t.air.handleResident(restored);assert.equal(restored.onPlane,true);

@@ -1,3 +1,4 @@
+import {addAviationBeacons} from './aviation-beacons.ts';
 import {createAirportImmigrationScene} from './airport-immigration-scene.ts';
 import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
 import * as THREE from 'three';
@@ -39,6 +40,7 @@ export function buildHansdrexTower(root:THREE.Group,make:Sign){
  box(g,3.65,.21,1,0,3.18,5.22,metal);
  box(g,2.78,2.73,.16,0,1.42,5.05,towerGlass);
  sign(g,make,'TOWER OBSERVATION DECK',0,3.85,5.62,23,1.3);
+ addAviationBeacons(g,[[0,250.3,0]],'tower');
  sign(g,make,'HANSDREX TOWER · 250 M',0,258,0,31,1.5);batchStaticMeshes(g);root.add(g);
 }
 export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
@@ -57,6 +59,7 @@ export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
  const windows=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),facade(),matrices.length);matrices.forEach((m,i)=>windows.setMatrixAt(i,m));g.add(windows);
  for(let i=0;i<4;i++){cylinder(g,1.1-i*.17,1.3-i*.17,1.6,175+i*1.7,i%2?gold:stone,8);}
  cylinder(g,.15,.53,14,188,metal,12);cylinder(g,.05,.15,2,196, warm,8);
+ addAviationBeacons(g,[[0,197.3,0]]);
  sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);batchStaticMeshes(g);root.add(g);return g;
 }
 export function buildAirportAndIsland(root:THREE.Group,make:Sign){
@@ -122,5 +125,6 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  }
  for(const x of [-1.5,1.5]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.35,10),asphalt);wheel.rotation.z=Math.PI/2;wheel.position.set(x,-1.55,-.5);plane.add(wheel);}
  sign(plane,make,'HANSDREX AIRLINE · HCA ↔ HWI',0,5,0,37,1.3);
+ addAviationBeacons(plane,[[-9.5,1.1,.8],[9.5,1.1,.8]]);
  root.add(plane);return {plane,propellers:plane.children.filter(c=>c instanceof THREE.Group)};
 }

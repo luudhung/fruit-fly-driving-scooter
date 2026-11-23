@@ -1,3 +1,4 @@
+import {PLAYER_FLIGHT_SPEED} from '../worker/aircraft-speed.mjs';
 import {northF1MovementBlocked} from '../worker/north-f1-closure.mjs';
 import {NORTH_MILITARY_WALLS} from '../worker/country-map.mjs';
 import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
@@ -120,7 +121,7 @@ export class PlayerController{
    this.x=lift.x;this.z=lift.z;this.y+=step;this.verticalVelocity=0;this.grounded=true;
    if(Math.abs(delta)<.015||Math.abs(step)>=Math.abs(delta)){this.y=lift.target+PLAYER_EYE;this.metroLift=null;this.liftCooldown=1.2;}return;
   }
-  const length=Math.max(1,Math.hypot(input.forward,input.strafe)),speed=(this.flying?22:this.swimming?2.5:4.4)*input.sprint;
+  const length=Math.max(1,Math.hypot(input.forward,input.strafe)),speed=(this.flying?PLAYER_FLIGHT_SPEED:this.swimming?2.5:4.4)*input.sprint;
   const dx=(Math.sin(input.yaw)*input.forward-Math.cos(input.yaw)*input.strafe)/length*speed*dt;
   const dz=(Math.cos(input.yaw)*input.forward+Math.sin(input.yaw)*input.strafe)/length*speed*dt;
   const attempt=(x:number,z:number)=>{

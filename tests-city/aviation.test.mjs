@@ -4,7 +4,7 @@ import {RESIDENT_TARGET} from '../worker/population-limits.mjs';
 import {freshState,restoreState,bookIslandHoliday,simulateIslandHoliday,simulateHeliTour,liquidMoneySupply,startJourney,moveFly,gameClock,regionalAviation} from '../worker/civilization-engine.mjs';
 import {AIRPORT,ISLAND,LOCATIONS,entrance,pedestrianRoute,clearSegment,blocked,BUILDINGS,atSea} from '../worker/city-map.mjs';
 import {createTourismSystem} from '../worker/tourism.mjs';
-import {nextFlight,flightPose,AVIATION} from '../worker/aviation.mjs';
+import {nextFlight,flightPose,AVIATION,regionalFlightTiming} from '../worker/aviation.mjs';
 import {countryAt,NORTH_AIRPORT} from '../worker/country-map.mjs';
 import {INTERSECTIONS,signalBarrier} from '../worker/traffic.mjs';
 function setup(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0,lightning:0};s.simulationAgeSeconds=7*3600;return s;}
@@ -78,7 +78,7 @@ test('weather cancellation refunds escrow in full and never sells an uncovered r
 });
 test('a paid holiday physically flies over sea, visits the resort and beach, survives save/restore and returns',()=>{
  let s=setup();let f=guest(s);bookIslandHoliday(f);const before=liquidMoneySupply(),out=f.airTrip.outbound;
- s.simulationAgeSeconds=out.departure+600;simulateIslandHoliday(f,gameClock());assert.equal(f.onPlane,true);assert.ok(f.y>100);assert.equal(s.businesses['travel-escrow'].cash,0);
+ s.simulationAgeSeconds=out.departure+regionalFlightTiming(out)[6][0];simulateIslandHoliday(f,gameClock());assert.equal(f.onPlane,true);assert.ok(f.y>100);assert.equal(s.businesses['travel-escrow'].cash,0);
  s.simulationAgeSeconds=out.arrival;simulateIslandHoliday(f,gameClock());assert.equal(f.currentLocationId,'island-airport');assert.equal(f.onPlane,false);
  for(let i=0;i<200&&f.traveling;i++){s.simulationAgeSeconds+=120;moveFly(f);}assert.equal(f.currentLocationId,'island-resort');
  // Exercise promenade and paid leisure, without advancing unrelated world finances.

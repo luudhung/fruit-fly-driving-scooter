@@ -1,5 +1,5 @@
 export type VisitorAircraft = {
- id:string; standId:string; sector:string; direction:number; inboundAt:number; parkedAt:number;airportId?:string;arrivalStand?:{id:string;x:number;z:number};
+ motionVersion?:number; id:string; standId:string; sector:string; direction:number; inboundAt:number; parkedAt:number;airportId?:string;arrivalStand?:{id:string;x:number;z:number};
  outboundAt:number|null; exitAt:number|null; boardAt?:number|null; boardingStartedAt?:number; arrivingGuests?:number; passengerIds?:string[]; hold?:{x:number;y:number;z:number;at:number};
  kind?:'passenger'|'ferry'|'positioning'; runwayId?:string; aircraftGone?:boolean; standReleasedAt?:number; expectedStandReleaseAt?:number; arrivalPassengerIds?:string[]; arrivalCompleteAt?:number; landedAt?:number; disembarkAt?:number;
 };
@@ -33,3 +33,9 @@ export type AirportArrivalMotion={at:number;speed:number;mode:'walk';timed:true;
 export function visitorArrivalMotion(now:number,flight:VisitorAircraft,index?:number,timeScale?:number):AirportArrivalMotion|null;
 
 export function visitorBoardingMotion(now:number,flight:VisitorAircraft,index?:number,timeScale?:number):AirportArrivalMotion|null;
+
+export function visitorRunwayTiming(flight:VisitorAircraft,outbound?:boolean):{path:number[][];duration:number;touchdown:number;clear:number;release:number;runwayEnter:number;ground:number[]};
+export function visitorFlightDuration(flight:VisitorAircraft,outbound?:boolean):number;
+export function visitorTouchdownSeconds(flight:VisitorAircraft):number;
+export function visitorRunwayClearSeconds(flight:VisitorAircraft):number;
+export function visitorStandReleaseSeconds(flight:VisitorAircraft):number;

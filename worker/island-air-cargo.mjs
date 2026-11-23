@@ -21,7 +21,7 @@ export function createIslandAirCargo({world,mayDepart=()=>true,emit=()=>{}}){
  }
  function dispatch(flight,at){
   const d=data(),day=Math.floor(flight.departure/DAY);
-  if(d.shipments.some(p=>p.status!=='delivered')||d.lastDispatchDay>=day||flight.from!=='city'||flight.to!=='island'||at<flight.departure-3600||at>=flight.arrival||!mayDepart(flight))return;
+  if(d.shipments.some(p=>p.status!=='delivered')||d.lastDispatchDay>=day||flight.from!=='city'||flight.to!=='island'||at<flight.departure-3600||at>flight.departure||!mayDepart(flight))return;
   const s=world(),residents=(s.flies||[]).filter(f=>f.alive&&(f.residencyCountryId===COUNTRY_IDS.hawaii||!f.residencyCountryId&&countryAt(f)===COUNTRY_IDS.hawaii)).length;
   const visitors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[])].filter(f=>f.alive&&f.residencyCountryId!==COUNTRY_IDS.hawaii&&countryAt(f)===COUNTRY_IDS.hawaii&&!f.onPlane).length;
   const daily=Math.min(CAPACITY,Math.max(100,residents*2+visitors*2)),manifest=[],suppliers=sources(),treasury=s.businesses?.['treasury:hawaii'];
@@ -49,7 +49,7 @@ export function createIslandAirCargo({world,mayDepart=()=>true,emit=()=>{}}){
    }
   }
   if(!manifest.length)return;
-  const shipment={id:`HAWAII-FOOD-${day}`,day,flight:{id:flight.id,from:flight.from,to:flight.to,departure:flight.departure,arrival:flight.arrival,regional:true},loadedAt:at,unloadAt:flight.arrival+UNLOAD_SECONDS,status:at<flight.departure?'loaded':'in-flight',manifest,quantity:manifest.reduce((n,line)=>n+line.quantity,0)};
+  const shipment={id:`HAWAII-FOOD-${day}`,day,flight:{id:flight.id,from:flight.from,to:flight.to,departure:flight.departure,arrival:flight.arrival,regional:true,motionVersion:flight.motionVersion},loadedAt:at,unloadAt:flight.arrival+UNLOAD_SECONDS,status:at<flight.departure?'loaded':'in-flight',manifest,quantity:manifest.reduce((n,line)=>n+line.quantity,0)};
   d.shipments.push(shipment);d.lastDispatchDay=day;
   d.shipments=d.shipments.filter(p=>p.status!=='delivered'||p.day>=day-14);
   emit('island_food_loaded','Paid Hawaii food supplies loaded onto the scheduled Hansdrex passenger aircraft.',{shipmentId:shipment.id,flightId:flight.id,quantity:shipment.quantity});
@@ -70,7 +70,7 @@ export function createIslandAirCargo({world,mayDepart=()=>true,emit=()=>{}}){
    emit('island_food_unloaded','The scheduled aircraft parked at Hawaii and unloaded its paid daily food shipment.',{shipmentId:shipment.id,flightId:shipment.flight.id,quantity:shipment.quantity});
   }
   const current=scheduledAircraft(at);dispatch(current,at);
-  if(current.to==='city'&&current.phase==='parked')dispatch({...nextFlight(at,'city',0),regional:true},at);
+  dispatch({...nextFlight(at,'city',0),regional:true},at);
  }
  return {init:data,tick,snapshot:()=>({...data(),capacity:CAPACITY,unloadSeconds:UNLOAD_SECONDS})};
 }
