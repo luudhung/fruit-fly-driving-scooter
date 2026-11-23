@@ -1,3 +1,4 @@
+import {ancestorNameRecord} from '../../worker/expired-world-data.mjs';
 import {readJsonLines} from '../../worker/json-lines.mjs';
 import {parseJsonFields} from '../../worker/json-fields.mjs';
 const META_KEY = "snapshot:meta";
@@ -32,7 +33,7 @@ function* snapshotJson(state) {
   yield encoder.encode(']}\n');
 }
 
-async function readStoredSnapshot(storage) {
+async function readStoredSnapshot(storage,{lazy=false}={}) {
   const meta = await storage.get(META_KEY);
   if (meta == null) return null;
   const count = Number(meta.chunks);
@@ -40,6 +41,7 @@ async function readStoredSnapshot(storage) {
     throw new Error("Invalid civilization snapshot metadata");
   }
   const keys = Array.from({length: count}, (_, index) => chunkKey(index));
+  if(lazy)return {meta,json:streamFrom((async function*(){for(const key of keys){const part=await storage.get(key,{noCache:true});if(!part)throw Error(`Missing civilization snapshot chunk: ${key}`);yield part instanceof ArrayBuffer?new Uint8Array(part):new Uint8Array(part.buffer,part.byteOffset,part.byteLength);}})()).pipeThrough(new DecompressionStream('gzip'))};
   const stored = await storage.get(keys, {noCache: true});
   const parts = keys.map(key => {
     const part = stored.get(key);
@@ -83,7 +85,7 @@ async function readFramedJson(stream, mapResident = null, livingOnly = false) {
  * base header to validate its generation; historical private brains stay in
  * storage until an explicit export/compaction streams them. */
 export async function loadSnapshotHeader(storage,{identityOnly=false}={}){
-  const saved=await readStoredSnapshot(storage);if(!saved)return null;
+  const saved=await readStoredSnapshot(storage,{lazy:true});if(!saved)return null;
   if(saved.meta.version!==2)return loadSnapshot(storage,{mapResident:f=>f.alive?f:null});
   let state;
   for await(const line of readJsonLines(saved.json)){
@@ -146,7 +148,7 @@ async function* storedResidentRecords(saved){
   let lineIndex=0,finished=false;
   for await(const line of readJsonLines(saved.json)){
       if(finished)throw Error('Unexpected archived snapshot data');
-      if(lineIndex===0){JSON.parse(line+'}');lineIndex++;continue;}
+      if(lineIndex===0){lineIndex++;continue;}
       if(lineIndex===1){
         if(line!==',"flies":['&&line!=='"flies":[')throw Error('Invalid resident list');
         lineIndex++;continue;
@@ -162,14 +164,14 @@ export async function* archiveRecordStream(storage){
   if(saved)yield* storedResidentRecords(saved);
 }
 
-async function* mappedResidentRecords(saved,actors){
+async function* mappedResidentRecords(saved,actors,cleanHistory=false){
   const seen=new Set();
   if(saved)for await(const old of storedResidentRecords(saved)){
     if(seen.has(old.id))throw Error(`Duplicate archived resident: ${old.id}`);
     seen.add(old.id);
-    yield Object.hasOwn(actors,old.id)?actors[old.id]:old;
+    const actor=Object.hasOwn(actors,old.id)?actors[old.id]:old;yield cleanHistory&&!actor.alive?ancestorNameRecord(actor):actor;
   }
-  for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield actor;
+  for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield cleanHistory&&!actor.alive?ancestorNameRecord(actor):actor;
 }
 
 async function* mappedSnapshotJson(saved,document){
@@ -177,7 +179,7 @@ async function* mappedSnapshotJson(saved,document){
   yield encoder.encode(header.slice(0,-1)+'\n');
   yield encoder.encode((header.length>2?',':'')+'"flies":[\n');
   let count=0;
-  for await(const resident of mappedResidentRecords(saved,document.actors)){
+  for await(const resident of mappedResidentRecords(saved,document.actors,document.world.historyCleanupVersion===1)){
     yield encoder.encode((count++?',':'')+JSON.stringify(resident)+'\n');
   }
   yield encoder.encode(']}\n');
@@ -187,7 +189,7 @@ async function* mappedSnapshotJson(saved,document){
  * historical models into the engine. Deaths/births replace or append by stable
  * ID; every omitted historical resident and private brain remains untouched. */
 export async function saveSnapshotMapped(storage,document,lastWallClockMs){
-  const saved=await readStoredSnapshot(storage);
+  const saved=await readStoredSnapshot(storage,{lazy:true});
   return saveSnapshotStream(storage,streamFrom(mappedSnapshotJson(saved,document)),document.world,lastWallClockMs);
 }
 

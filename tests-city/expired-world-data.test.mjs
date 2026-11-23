@@ -1,0 +1,6 @@
+import test from'node:test';import assert from'node:assert/strict';import{cleanupPastWorld,ancestorNameRecord}from'../worker/expired-world-data.mjs';
+test('automatic cleanup discards completed journeys and settled private death profiles without changing live people or totals',()=>{
+ const alive={id:'A',alive:true,brain:{memory:['family']},money:50},dead={id:'D',name:'Ancestor',parents:['P'],alive:false,estateSettled:true,brain:{weights:[1]},money:0},unsettled={id:'U',alive:false,money:80};
+ const active={id:'FLIGHT-ACTIVE',guests:[{id:'G',money:200,leg:{key:'keep',index:2}}]},state={flies:[alive,dead,unsettled],deaths:25,moneySupply:500,northF1:{previousTours:[{charters:[{departed:true,guests:[{id:'DONE'}]},active],tourPaths:{keep:[{x:1}],unused:[{x:2}]}}]}};
+ cleanupPastWorld(state);assert.equal(state.flies[0],alive);assert.equal(state.flies[2],unsettled);assert.deepEqual(state.flies[1],ancestorNameRecord(dead));assert.equal(state.flies[1].brain,undefined);assert.equal(state.deaths,25);assert.equal(state.moneySupply,500);assert.deepEqual(state.northF1.previousTours[0].charters,[active]);assert.deepEqual(Object.keys(state.northF1.previousTours[0].tourPaths),['keep']);
+});

@@ -1,3 +1,4 @@
+import {cleanupPastWorld} from './expired-world-data.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {createSpaceProgram} from './space-program.mjs';
@@ -4949,7 +4950,7 @@ async function tick(options = {}) {
 
       if(state.foodReserve<2000)restockEssentials();
       // Archived deaths must never disable the emergency population floor.
-      maintainPopulation();
+      maintainPopulation();cleanupPastWorld(state);
     }
   } catch (error) {
     console.error("[civilization] tick failed", error);

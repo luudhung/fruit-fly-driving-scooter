@@ -75,6 +75,6 @@ test('background cold resume omits the duplicate observer graph without losing t
  const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s),observer={simulationAgeSeconds:100,large:Array.from({length:3000},(_,i)=>({id:i,label:'state, braces { \\" }'}))};
  await saveLocalHostBase(db,doc,lease,{observer});
  const cold=await loadLocalHostJournal(db,s,0,()=>{},{includeObserver:false});
- assert.equal(cold.observer,null);assert.deepEqual(cold.document,doc);assert.equal(cold.state.flies.find(f=>f.id==='OLD').brain.id,'ARCHIVE');
+ assert.equal(cold.observer,null);assert.deepEqual(cold.document,{...doc,world:{...doc.world,historyCleanupVersion:1}});assert.equal(cold.state.flies.find(f=>f.id==='OLD').brain.id,'ARCHIVE');
  assert.deepEqual((await loadLocalHostJournal(db,s)).observer,observer,'an active owner can still resume its exact observer baseline');
 });
