@@ -1,4 +1,5 @@
 import {readJsonLines} from '../../worker/json-lines.mjs';
+import {parseJsonFields} from '../../worker/json-fields.mjs';
 const META_KEY = "snapshot:meta";
 const CHUNK_SIZE = 1_500_000;
 const MAX_CHUNKS = 128;
@@ -86,8 +87,7 @@ export async function loadSnapshotHeader(storage,{identityOnly=false}={}){
   if(saved.meta.version!==2)return loadSnapshot(storage,{mapResident:f=>f.alive?f:null});
   let state;
   for await(const line of readJsonLines(saved.json)){
-    state=JSON.parse(line+'}');
-    if(identityOnly)state={worldId:state.worldId,mapVersion:state.mapVersion,simulationAgeSeconds:state.simulationAgeSeconds,timeScale:state.timeScale};
+    state=identityOnly?parseJsonFields(line+'}',['worldId','mapVersion','simulationAgeSeconds','timeScale']):JSON.parse(line+'}');
     state.flies=[];break;
   }
   if(!state)throw Error('Missing civilization snapshot header');

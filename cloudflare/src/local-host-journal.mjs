@@ -21,7 +21,7 @@ function mergedState(base,document){
  for(const f of incoming.flies)if(!ids.has(f.id))flies.push(f);
  return {...incoming,flies,locations:base.locations};
 }
-export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=()=>{}){
+export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=()=>{},{includeObserver=true}={}){
  const meta=await storage.get(META);
  if(!meta)return null;
  onStage('metadata',{overlayChunks:meta.overlayKeys?.length,deltaCount:meta.entries?.length,journalBytes:meta.journalBytes,sequence:meta.sequence});
@@ -31,14 +31,14 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
  const parts=[];
  for(const key of meta.overlayKeys){const b=await storage.get(key);if(!b)throw Error('missing local save overlay');parts.push(b);}
  onStage('overlay read',{compressedBytes:parts.reduce((n,p)=>n+p.byteLength,0)});
- const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage);
+ const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver});
  onStage('overlay parsed',{actors:overlay.state.flies.length});
  let document=projectLocalDocument(overlay.state),observer=overlay.observer||null,sequence=meta.overlaySequence;
  for(const entry of meta.entries){
   const packed=await storage.get(entry.key);if(!packed)throw Error('missing local save delta');
   const delta=await new Response(unpack(packed)).json();
   if(delta.baseSequence!==sequence||delta.sequence!==sequence+1)throw Error('non-contiguous local save journal');
-  document=applyLocalDelta(document,delta.patch);sequence=delta.sequence;observer=delta.observer||observer;onStage('delta applied',{sequence});
+  document=applyLocalDelta(document,delta.patch);sequence=delta.sequence;if(includeObserver)observer=delta.observer||observer;onStage('delta applied',{sequence});
  }
  if(sequence!==meta.sequence||Number(document.world.simulationAgeSeconds)!==Number(meta.age))throw Error('local save journal metadata mismatch');
  return {state:mergedState(base,document),document,observer,meta,lastWallClockMs:meta.lastWallClockMs,savedAtMs:meta.savedAtMs};

@@ -70,3 +70,11 @@ test('header-only cold resume retains current money, deaths and births while arc
  await saveSnapshotMapped(db,resumed.document,resumed.lastWallClockMs);
  const complete=await loadSnapshot(db);assert.equal(complete.state.flies.length,3);assert.deepEqual(complete.state.flies.find(f=>f.id==='OLD'),original.flies.find(f=>f.id==='OLD'));assert.equal(complete.state.flies.find(f=>f.id==='A').money,72);assert.equal(complete.state.flies.find(f=>f.id==='CHILD').brain.id,'NEW-BRAIN');assert.equal(complete.lastWallClockMs,5678);
 });
+
+test('background cold resume omits the duplicate observer graph without losing the accepted world or its actors',async()=>{
+ const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s),observer={simulationAgeSeconds:100,large:Array.from({length:3000},(_,i)=>({id:i,label:'state, braces { \\" }'}))};
+ await saveLocalHostBase(db,doc,lease,{observer});
+ const cold=await loadLocalHostJournal(db,s,0,()=>{},{includeObserver:false});
+ assert.equal(cold.observer,null);assert.deepEqual(cold.document,doc);assert.equal(cold.state.flies.find(f=>f.id==='OLD').brain.id,'ARCHIVE');
+ assert.deepEqual((await loadLocalHostJournal(db,s)).observer,observer,'an active owner can still resume its exact observer baseline');
+});

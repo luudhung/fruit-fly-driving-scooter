@@ -1,4 +1,5 @@
 import {readJsonLines} from './json-lines.mjs';
+import {parseJsonFields} from './json-fields.mjs';
 export const LOCAL_HOST_TTL_MS=120000;
 export const LOCAL_HOST_HEARTBEAT_MS=5000;
 export const LOCAL_HOST_CHECKPOINT_MS=5000;
@@ -52,11 +53,11 @@ export function localHostCheckpointStream(state,metadata){
  const lines=[head.slice(0,-2)+'\n',',"flies":[\n',...flies.map((f,i)=>(i?',':'')+JSON.stringify(f)+'\n'),']}}\n'];
  return jsonLinesStream(lines);
 }
-export async function readLocalHostCheckpoint(stream,onProgress=()=>{}){
+export async function readLocalHostCheckpoint(stream,onProgress=()=>{},{includeObserver=true}={}){
  let envelope,opened=false,closed=false;
  for await(const line of readJsonLines(stream)){
   if(closed)throw Error('trailing checkpoint data');
-  if(!envelope){envelope=JSON.parse(line+'}}');envelope.state.flies=[];onProgress('header',{headerBytes:line.length});}
+  if(!envelope){envelope=includeObserver?JSON.parse(line+'}}'):parseJsonFields(line+'}}',['state']);envelope.state.flies=[];onProgress('header',{headerBytes:line.length});}
   else if(!opened){if(line!==',"flies":[')throw Error('invalid resident frame');opened=true;}
   else if(line===']}}')closed=true;
   else {envelope.state.flies.push(JSON.parse(envelope.state.flies.length?line.slice(1):line));if(envelope.state.flies.length%100===0)onProgress('actors',{actors:envelope.state.flies.length});}

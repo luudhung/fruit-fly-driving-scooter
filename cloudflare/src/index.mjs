@@ -82,14 +82,14 @@ export class CivilizationWorld extends DurableObject {
       // Reconstruct against the persisted schema BEFORE the engine migrates maps.
       // A new map release must preserve every already-acknowledged browser save.
       bootStage('reading save journal');
-      const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0,(stage,extra)=>bootStage('journal '+stage,extra));
+      this.localHost=await this.ctx.storage.get('localHostLease')||null;
+      const journal=await loadLocalHostJournal(this.ctx.storage,base,saved?.savedAtMs||0,(stage,extra)=>bootStage('journal '+stage,extra),{includeObserver:Boolean(this.localHost?.protocol===3&&this.localHost.expiresAt>Date.now())});
       if(hasJournal&&(!journal||journal.stale)){
         saved=await loadSnapshot(this.ctx.storage,{mapResident,livingOnly:true});if(!saved||!snapshotLooksUsable(saved.state))throw Error('Invalid fallback civilization snapshot');
         base=saved.state;this.storageStats=saved.stats;this.lastWallClockMs=saved.lastWallClockMs;this.lastPersistMs=saved.savedAtMs;
         this.baseKnownIds=storedKnown;this.baseAliveIds=storedAlive;
       }
       bootStage('journal decoded',{journalSequence:journal?.meta?.sequence||0});
-      this.localHost=await this.ctx.storage.get('localHostLease')||null;
       this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
       const compatibleOwner=this.localHost?.protocol===3&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
       if(journal&&!journal.stale){
@@ -219,10 +219,9 @@ export class CivilizationWorld extends DurableObject {
     const now = Date.now();
     if (!force && now - this.lastPersistMs < ACTIVE_PERSIST_INTERVAL_MS) return this.storageStats;
     await this.materializeLocalDocument();
-    const observer=getState({observer:true,compactObserver:true});
     const document=this.journalDocument(projectLocalDocument(localHostSnapshot(getRawState())));
     this.localJournalMeta=await saveLocalHostBase(this.ctx.storage,document,null,{
-      observer,lastWallClockMs:this.lastWallClockMs,epoch:this.localEpoch,
+      lastWallClockMs:this.lastWallClockMs,epoch:this.localEpoch,
       sequence:this.localJournalMeta?.sequence||0,
     });
     this.lastPersistMs = now;
