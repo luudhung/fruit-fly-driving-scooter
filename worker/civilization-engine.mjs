@@ -4438,7 +4438,7 @@ function maintainHouseholds(){
   }
   if(f.alive&&f.partnerId&&!state.flies.some(p=>p.id===f.partnerId&&p.alive)){
     const partner=state.flies.find(p=>p.id===f.partnerId);
-    if(partner?.alive===false&&!partner.migratedOut)brainRemember(f,'lost_partner',{partnerId:f.partnerId,locationId:f.currentLocationId});
+    if(partner?.alive===false&&!partner.migratedOut||state.ancestors?.[f.partnerId])brainRemember(f,'lost_partner',{partnerId:f.partnerId,locationId:f.currentLocationId});
     f.partnerId=null;f.relationshipSince=null;f.affection=0;
   }
   if(!f.alive||!f.partnerId||f.id>f.partnerId||f.affection<55||f.traveling)continue;

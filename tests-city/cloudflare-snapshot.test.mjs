@@ -154,3 +154,10 @@ test('living-only cold boot skips large archived brains without changing the dur
  assert.deepEqual(mapped,['LIVE']);assert.deepEqual(current.state.flies,[nested]);assert.deepEqual((await loadSnapshot(storage)).state,state);
  const journalHeader=await import('../cloudflare/src/civilization-snapshot.mjs');assert.equal((await journalHeader.loadSnapshotHeader(storage)).state.flies.length,0);
 });
+
+test('authorized history cleanup replaces archived dead profiles with names while retaining all living brains',async()=>{
+ const db=new SnapshotStorage(),live={id:'LIVE',alive:true,name:'Resident',brain:{id:'KEEP',weights:[1,2]}},dead={id:'DEAD',alive:false,name:'Ancestor',parents:['ROOT'],brain:{id:'DELETE',weights:[8,9]},money:0};
+ await saveSnapshot(db,{worldId:'WORLD-A',simulationAgeSeconds:100,flies:[live,dead]},1000);
+ const stats=await saveSnapshotMapped(db,{world:{worldId:'WORLD-A',simulationAgeSeconds:200,historyCleanupVersion:1},actors:{LIVE:live}},2000);
+ const restored=await loadSnapshot(db);assert.equal(stats.historyCleanupVersion,1);assert.deepEqual(restored.state.flies.find(f=>f.id==='LIVE'),live);const ancestor=restored.state.flies.find(f=>f.id==='DEAD');assert.equal(ancestor.name,'Ancestor');assert.deepEqual(ancestor.parents,['ROOT']);assert.equal(ancestor.brain,undefined);assert.equal(ancestor.money,undefined);
+});

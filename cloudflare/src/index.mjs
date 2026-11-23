@@ -235,7 +235,7 @@ export class CivilizationWorld extends DurableObject {
     if(this.localHost&&this.localHost.expiresAt>Date.now())return false;
     await this.materializeLocalDocument();
     const state=getRawState(),dead=state.flies.filter(f=>!f.alive);
-    if(dead.length<32)return false;
+    if(dead.length<32&&(state.historyCleanupVersion!==1||this.storageStats?.historyCleanupVersion===1))return false;
     const document=this.journalDocument(projectLocalDocument(state));
     // This is a separate alarm work unit: stream the old archive, replace only
     // current identities, then evict completed deaths without dropping history.

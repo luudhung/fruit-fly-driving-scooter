@@ -11,7 +11,7 @@ export function cleanupPastWorld(state){
  trimF1RouteCaches(state);
  if(state.cityVisitors?.visitors)state.cityVisitors.visitors=state.cityVisitors.visitors.filter(f=>!f.departed);
  if(state.events?.length>100)state.events=state.events.slice(-100);
- if(state.flies)state.flies=state.flies.map(f=>!f.alive&&f.estateSettled&&!f.historyPruned?ancestorNameRecord(f):f);
+ if(state.flies)state.flies=state.flies.filter(f=>{if(f.alive||!f.estateSettled)return true;(state.ancestors||={})[f.id]={name:f.name||f.id,parents:f.parents||[]};return false;});
  state.historyCleanupVersion=1;
  return state;
 }

@@ -93,7 +93,7 @@ export async function loadSnapshotHeader(storage,{identityOnly=false}={}){
     state.flies=[];break;
   }
   if(!state)throw Error('Missing civilization snapshot header');
-  return {state,lastWallClockMs:Number(saved.meta.lastWallClockMs||Date.now()),savedAtMs:Number(saved.meta.savedAtMs||0),stats:{chunks:saved.meta.chunks,compressedBytes:saved.meta.compressedBytes}};
+  return {state,lastWallClockMs:Number(saved.meta.lastWallClockMs||Date.now()),savedAtMs:Number(saved.meta.savedAtMs||0),stats:{chunks:saved.meta.chunks,compressedBytes:saved.meta.compressedBytes,historyCleanupVersion:saved.meta.historyCleanupVersion||0}};
 }
 
 export async function loadSnapshot(storage, {mapResident=null,livingOnly=false}={}) {
@@ -106,7 +106,7 @@ export async function loadSnapshot(storage, {mapResident=null,livingOnly=false}=
     state,
     lastWallClockMs: Number(meta.lastWallClockMs || Date.now()),
     savedAtMs: Number(meta.savedAtMs || 0),
-    stats: {chunks: meta.chunks, compressedBytes: meta.compressedBytes},
+    stats: {chunks: meta.chunks, compressedBytes: meta.compressedBytes,historyCleanupVersion:meta.historyCleanupVersion||0},
   };
 }
 
@@ -115,7 +115,7 @@ async function saveSnapshotStream(storage,json,world,lastWallClockMs){
   const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
   const chunks=Math.ceil(compressed.byteLength/CHUNK_SIZE);
   if(chunks>MAX_CHUNKS)throw new Error(`Civilization snapshot needs ${chunks} chunks`);
-  const stats={chunks,compressedBytes:compressed.byteLength};
+  const stats={chunks,compressedBytes:compressed.byteLength,historyCleanupVersion:Number(world.historyCleanupVersion||0)};
   // Compression completes before any base chunks are replaced. Transactional
   // publication keeps either complete generation readable after a failed write.
   await storage.transaction(async transaction=>{
