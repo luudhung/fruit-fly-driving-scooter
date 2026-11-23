@@ -59,6 +59,9 @@ export class CivilizationWorld extends DurableObject {
     this.queue = Promise.resolve();
     this.localHost=null;this.localEpoch=0;this.localDocument=null;this.localObserver=null;this.localJournalMeta=null;this.archiveDormant=false;
     this.baseKnownIds=new Set();this.baseAliveIds=new Set();
+    // Incident-only read access to the last accepted journal, without loading
+    // the simulation. Never reset/import or replace a checkpoint to recover it.
+    if(env.CIV_RECOVERY_READONLY==='1'){this.ready=Promise.resolve();return;}
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const bootAt=Date.now(),bootStage=(stage,extra={})=>console.log(JSON.stringify({event:'city_boot',stage,elapsedMs:Date.now()-bootAt,...extra}));
@@ -249,6 +252,7 @@ export class CivilizationWorld extends DurableObject {
   }
 
   async alarm() {
+    if(this.env.CIV_RECOVERY_READONLY==='1')return;
     return this.withLock(async () => {
       await this.ready;
       try {
@@ -267,6 +271,7 @@ export class CivilizationWorld extends DurableObject {
   }
 
   async watchdog() {
+    if(this.env.CIV_RECOVERY_READONLY==='1')return;
     return this.withLock(async () => {
       await this.ready;
       await this.ensureAlarm();
@@ -426,6 +431,15 @@ export class CivilizationWorld extends DurableObject {
   async fetch(request) {
     if(request.method==='OPTIONS')return new Response(null,{status:204,headers:corsHeaders()});
     const url=new URL(request.url);
+    if(this.env.CIV_RECOVERY_READONLY==='1'){
+      if(request.method!=='GET'||url.pathname!=='/api/civilization/export')return json({error:'recovering_saved_world'},503);
+      const meta=await this.ctx.storage.get('local-save:meta');if(!meta)return json({error:'no_saved_journal'},404);
+      const part=url.searchParams.get('part');if(part==='meta')return json(meta);
+      const keys=part==='overlay'?meta.overlayKeys:part?.startsWith('delta-')?[meta.entries[Number(part.slice(6))]?.key].filter(Boolean):[];
+      if(!keys.length)return json({error:'unknown_saved_part'},404);
+      const storage=this.ctx.storage;let index=0;
+      return new Response(new ReadableStream({async pull(controller){if(index===keys.length){controller.close();return;}const value=await storage.get(keys[index++]);controller.enqueue(new Uint8Array(value));}}),{headers:corsHeaders({'content-type':'application/gzip'})});
+    }
     if(request.method==='POST'&&url.pathname.startsWith('/api/civilization/local/'))return this.localSession(request,url);
     if(request.method==='GET'&&['/health','/api/civilization/state','/api/civilization/neural'].includes(url.pathname)){
       await this.ready;
