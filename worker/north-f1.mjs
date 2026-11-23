@@ -1,3 +1,4 @@
+import {trimF1RouteCaches} from './route-cache-budget.mjs';
 import {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 import {createF1Charters,f1VisitorTravel} from './north-f1-charters.mjs';
 import {northF1ClosureWindow,isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
@@ -474,7 +475,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    if(now()>=d.nextAt-PREPARATION_HOURS*HOUR)openRace(d);
   }
   const e=d.event;
-  if(!e)return;
+  if(!e){trimF1RouteCaches(raw());return;}
   if(e.format===2)charterService.make(e);else {makeCharters(e);if(e.charterPlanned)charterService.migrate(e);}
   if(now()>=e.startsAt){directory(d);startRace(d,e);}
   if(e.format===2)charterService.tick(e);else {processCharters(d,e);charterService.tick(e);}
@@ -482,7 +483,7 @@ export function createNorthF1({world,northAccount,onVehicleCollision,emit=()=>{}
    const driver=actorsById.get(c.driverId);
    if(c.retiredAt==null&&now()<c.finishedAt&&!healthy(driver||{}))c.retiredAt=now();
   }
-  finishRace(d,e);
+  finishRace(d,e);trimF1RouteCaches(raw());
  }
  function charters(){
   const d=raw().northF1;

@@ -1,3 +1,4 @@
+import {trimF1RouteCaches} from '../../worker/route-cache-budget.mjs';
 import {projectLocalDocument,applyLocalDelta,localDocumentState} from '../../worker/local-host-delta.mjs';
 import {readLocalHostCheckpoint} from '../../worker/local-host-state.mjs';
 const META='local-save:meta',CHUNK=1000000,MAX_ENTRIES=12,MAX_JOURNAL_BYTES=3000000;
@@ -31,7 +32,7 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
  const parts=[];
  for(const key of meta.overlayKeys){const b=await storage.get(key);if(!b)throw Error('missing local save overlay');parts.push(b);}
  onStage('overlay read',{compressedBytes:parts.reduce((n,p)=>n+p.byteLength,0)});
- const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver});
+ const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver,onState:includeObserver?()=>{}:trimF1RouteCaches});
  onStage('overlay parsed',{actors:overlay.state.flies.length});
  let document=projectLocalDocument(overlay.state),observer=overlay.observer||null,sequence=meta.overlaySequence;
  for(const entry of meta.entries){
