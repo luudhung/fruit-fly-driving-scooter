@@ -93,6 +93,15 @@ export class CivilizationWorld extends DurableObject {
         this.baseKnownIds=storedKnown;this.baseAliveIds=storedAlive;
       }
       bootStage('journal decoded',{journalSequence:journal?.meta?.sequence||0});
+      if(journal&&!journal.stale&&journal.state.historyCleanupVersion===1&&this.storageStats?.historyCleanupVersion!==1&&Number(this.storageStats?.compressedBytes)>8000000&&!(this.localHost?.expiresAt>Date.now())){
+        // Compact the large historical archive BEFORE engine initialization
+        // allocates routing indexes and live neural/service working sets.
+        bootStage('compacting expired archive');
+        this.storageStats=await saveSnapshotMapped(this.ctx.storage,journal.document,journal.lastWallClockMs);
+        journal.meta=await saveLocalHostBase(this.ctx.storage,journal.document,null,{lastWallClockMs:journal.lastWallClockMs,epoch:journal.meta.epoch,sequence:journal.meta.sequence});
+        this.localHost=null;
+        bootStage('expired archive compacted',{compressedBytes:this.storageStats.compressedBytes});
+      }
       this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
       const compatibleOwner=this.localHost?.protocol===3&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
       if(journal&&!journal.stale){
