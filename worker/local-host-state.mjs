@@ -17,13 +17,16 @@ export function mergeLocalHostCheckpoint(current,incoming,lease,now){
  if(!Number.isFinite(age)||age<base||age>maximum)throw Error('local clock outside session bounds');
  const records=new Map(incoming.flies.map(f=>[f.id,f]));
  if(records.size!==incoming.flies.length||incoming.flies.some(f=>typeof f.id!=='string'||!Number.isFinite(f.x)||!Number.isFinite(f.z)||!Number.isFinite(f.health)))throw Error('invalid local residents');
- if(current.flies.some(f=>f.alive&&!records.has(f.id)))throw Error('missing living resident');
+ const removed=current.flies.filter(f=>f.alive&&!records.has(f.id));
+ const recordedDeaths=Math.max(0,Number(incoming.deaths||0)-Number(current.deaths||0));
+ if(removed.length&&(incoming.historyCleanupVersion!==1||removed.length>recordedDeaths||removed.some(f=>!Object.hasOwn(incoming.ancestors||{},f.id))))throw Error('missing living resident');
  const prior=new Map(current.flies.map(f=>[f.id,f]));
  for(const f of incoming.flies){
   const old=prior.get(f.id);
   if(old&&old.brain?.id!==f.brain?.id)throw Error('resident brain identity changed');
  }
- const flies=current.flies.map(f=>records.get(f.id)||f);
+ const removedIds=new Set(removed.map(f=>f.id));
+ const flies=current.flies.filter(f=>!removedIds.has(f.id)).map(f=>records.get(f.id)||f);
  for(const f of incoming.flies)if(!prior.has(f.id))flies.push(f);
  return {...incoming,flies,locations:current.locations};
 }

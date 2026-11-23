@@ -164,12 +164,12 @@ export async function* archiveRecordStream(storage){
   if(saved)yield* storedResidentRecords(saved);
 }
 
-async function* mappedResidentRecords(saved,actors,cleanHistory=false){
+async function* mappedResidentRecords(saved,actors,cleanHistory=false,ancestors={}){
   const seen=new Set();
   if(saved)for await(const old of storedResidentRecords(saved)){
     if(seen.has(old.id))throw Error(`Duplicate archived resident: ${old.id}`);
     seen.add(old.id);
-    const actor=Object.hasOwn(actors,old.id)?actors[old.id]:old;yield cleanHistory&&!actor.alive?ancestorNameRecord(actor):actor;
+    const actor=Object.hasOwn(actors,old.id)?actors[old.id]:Object.hasOwn(ancestors,old.id)?{...ancestorNameRecord(old),...ancestors[old.id]}:old;yield cleanHistory&&!actor.alive?ancestorNameRecord(actor):actor;
   }
   for(const [id,actor]of Object.entries(actors))if(!seen.has(id))yield cleanHistory&&!actor.alive?ancestorNameRecord(actor):actor;
 }
@@ -179,7 +179,7 @@ async function* mappedSnapshotJson(saved,document){
   yield encoder.encode(header.slice(0,-1)+'\n');
   yield encoder.encode((header.length>2?',':'')+'"flies":[\n');
   let count=0;
-  for await(const resident of mappedResidentRecords(saved,document.actors,document.world.historyCleanupVersion===1)){
+  for await(const resident of mappedResidentRecords(saved,document.actors,document.world.historyCleanupVersion===1,document.world.ancestors||{})){
     yield encoder.encode((count++?',':'')+JSON.stringify(resident)+'\n');
   }
   yield encoder.encode(']}\n');

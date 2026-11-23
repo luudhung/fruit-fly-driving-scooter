@@ -384,3 +384,9 @@ test('a live export freezes only current identities without claiming ownership, 
  const response=await t.world.fetch(new Request('https://city/api/civilization/export?view=live'));
  const body=await response.json();assert.equal(body.state.flies.length,1);assert.equal(body.state.flies[0].id,'A');assert.equal(t.saves,before);assert.equal(t.loads.length,reads);assert.equal(t.ticks,ticks);assert.equal(t.world.localHost,null);assertArchiveRetained(t);
 });
+
+test('automatic death cleanup checkpoints a counted death and ancestor name without resurrecting the omitted private actor',()=>{
+ const current={worldId:'W',mapVersion:36,simulationAgeSeconds:100,timeScale:120,deaths:0,flies:[{id:'A',alive:true,x:0,z:0,health:90,brain:{id:'B'}}]},incoming={...current,historyCleanupVersion:1,simulationAgeSeconds:110,deaths:1,ancestors:{A:{name:'Ancestor',parents:[]}},flies:[{id:'C',alive:true,x:1,z:2,health:90,brain:{id:'C-BRAIN'}}]},lease={baseAge:100,startedAt:0};
+ const merged=mergeLocalHostCheckpoint(current,incoming,lease,1000);assert.deepEqual(merged.flies.map(f=>f.id),['C']);assert.equal(merged.ancestors.A.name,'Ancestor');
+ assert.throws(()=>mergeLocalHostCheckpoint(current,{...incoming,deaths:0},lease,1000),/missing living/);assert.throws(()=>mergeLocalHostCheckpoint(current,{...incoming,ancestors:{}},lease,1000),/missing living/);
+});
