@@ -4,7 +4,7 @@ export const AIRPORT_TERMINAL_STATIONS:Array<{id:string;terminalId:string;x:numb
 export function airportTerminalForStand(standOrId:string|{id?:string}|null|undefined):HansdrexTerminal;
 export function airportTerminalById(id?:string):HansdrexTerminal;
 export function airportTerminalAccess(id?:string):Array<{x:number;y:number;z:number}>;
-export function airportTerminalTrainStates(seconds:number):Array<{id:string;direction:number;fare:number;x:number;y:number;z:number;heading:number;dwelling:boolean;stationId:string|null;visible:boolean}>;
+export function airportTerminalTrainStates(seconds:number):Array<{id:string;direction:number;fare:number;x:number;y:number;z:number;heading:number;dwelling:boolean;stationId:string|null;visible:boolean;returning:boolean}>;
 export function airportTerminalTransfer(fromId:string,toId:string,at?:number,timeScale?:number):{fare:number;arrivalAt:number;trainId?:string;direction?:number;waypoints:Array<{x:number;y:number;z:number;at:number;mode:string;stage:string;lineId:string;fare:number}>};
 
 export function airportDeparturePath(standOrId:string|{id?:string;x:number;z:number},terminalId?:string):Array<{x:number;y:number;z:number;stage:string}>;

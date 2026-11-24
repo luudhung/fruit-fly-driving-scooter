@@ -840,9 +840,9 @@ function renderSnapshot(s: CivilizationSnapshot) {
   nationalDefenseVisuals.sync(s.nationalDefense,s.nationalServices);
   countryUI.sync(s);
   updateSocietyBoard(s);
-  // Snapshot time never paints lighting; the animation frame owns the one visual clock.
+  // The animation frame owns lighting and signals. A delayed snapshot must not
+  // repaint a past signal phase between frames using the presentation clock.
   lastSkyMinute=-1;
-  updateTrafficSignals((s.simulationAgeSeconds || 0) / Math.max(1, s.timeScale || 60));
 
   if (selectedFlyId && latestFlyStates.has(selectedFlyId)) {
     renderInspector(latestFlyStates.get(selectedFlyId) || null);

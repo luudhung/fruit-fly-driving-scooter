@@ -155,7 +155,12 @@ export function visitorDepartureCompleteAt(flight,count=10,timeScale=120){
 }
 export function visitorBoardingPose(now,flight,index=0,timeScale=120){
  const path=visitorDeparturePath(flight,index,timeScale);if(!path.length)return null;
- if(now>=path.at(-1).at)return {...visitorAircraftPose(now,flight),onPlane:true};
+ if(now>=path.at(-1).at){
+  const pose=visitorAircraftPose(now,flight);
+  // A parked aircraft pose includes its stand's id. Never merge that identity
+  // into the passenger: ten people must remain ten independently tracked guests.
+  return pose?{x:pose.x,y:pose.y,z:pose.z,heading:pose.heading,onPlane:true}:{onPlane:true};
+ }
  const i=path.findIndex(p=>p.at>now);if(i<=0)return {...path[0],onPlane:false};
  const a=path[i-1],b=path[i],u=Math.max(0,Math.min(1,(now-a.at)/Math.max(1,b.at-a.at)));
  return{x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u,z:a.z+(b.z-a.z)*u,onPlane:false};

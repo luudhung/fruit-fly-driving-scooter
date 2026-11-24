@@ -260,6 +260,13 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   }
   if(f.phase!=='visiting')return;
   if(f.hansTowerTrip||f.heliPassenger){visitAttraction?.(f,null,{hour:Math.floor(now()%DAY/HOUR)});return;}
+  // An obsolete sightseeing route must not own the guest forever after their
+  // booked stay ends. Replan from the actual position, retaining visa and fare.
+  const exit=airportById(flight.airportId).locationId;
+  if(f.leg&&f.leg.destination!==exit&&now()>=Number(f.departAt??f.touringUntil??e.endsAt)&&now()>=Number(f.returnRouteRetryAt||0)){
+   f.returnRouteRetryAt=now()+600;
+   begin(e,f,exit,{x:f.x,z:f.z,y:f.y??1.1});
+  }
   if(f.leg&&!f.rentalCar&&!f.watched&&f.leg.destination!==spectator.id&&now()>=e.startsAt-36*HOUR&&now()<Math.min(e.endsAt,f.leaveRaceAt)&&e.status!=='cancelled')
    begin(e,f,spectator.id,{x:f.x,z:f.z,y:f.y??1.1});
   if(f.leg?.blocked&&f.rentalCar){
@@ -360,9 +367,14 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     const stairsClear=visitorStairsClearAt(flight,flight.guests.length,scale())||flight.parkedAt+900;
     outbound(e,flight,Math.max(flight.parkedAt+1200,stairsClear+120));
    }
+   const waiting=flight.guests.filter(f=>f.phase==='airport-ready');
+   if(waiting.length)flight.returnReadyAt??=now();else delete flight.returnReadyAt;
    const ready=flight.guests.every(f=>['airport-ready','denied','departed','cancelled'].includes(f.phase));
-   if(ready&&!flight.returnLeg&&flight.guests.some(f=>f.phase==='airport-ready')){
-    const plane={...carrier,id:flight.id+'-RETURN',airportId:flight.airportId,kind:'positioning',arrivingGuests:0,sector:flight.sector,
+   // A stranded or late holidaymaker cannot hold every other passenger forever.
+   // Depart after a bounded boarding wait; missing people retain their own trip.
+   if(waiting.length&&!flight.returnLeg&&(ready||now()-flight.returnReadyAt>=HOUR)){
+    const returnNumber=Number(flight.completedReturnFlights||0)+1;
+    const plane={...carrier,id:flight.id+'-RETURN'+(returnNumber>1?'-'+returnNumber:''),airportId:flight.airportId,kind:'positioning',arrivingGuests:0,sector:flight.sector,
      direction:flight.direction,earliestAt:now()+120,inboundAt:null,parkedAt:null,outboundAt:null,exitAt:null};
     if(schedule(e,plane,plane.earliestAt,8*HOUR))flight.returnLeg=plane;
    }
@@ -371,11 +383,14 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    stepPlane(e,plane);
    if(plane.landed&&plane.boardingStartedAt==null){
     plane.boardingStartedAt=now();
-    const duration=visitorDepartureCompleteAt(plane,flight.guests.length,scale())-now();
+    plane.boardingGuestIds=flight.guests.filter(f=>f.phase==='airport-ready').map(f=>f.id);
+    const duration=visitorDepartureCompleteAt(plane,plane.boardingGuestIds.length,scale())-now();
     if(plane.outboundAt==null||plane.outboundAt<now()+duration+600)outbound(e,plane,now()+duration+600);
     plane.boardAt=now()+duration;plane.passengerIds=[];
    }
-   if(plane.boardingStartedAt!=null)for(const [index,f] of flight.guests.entries()){
+   if(plane.boardingStartedAt!=null&&!plane.boardingGuestIds)plane.boardingGuestIds=flight.guests.filter(f=>['airport-ready','boarding','return-flight'].includes(f.phase)).map(f=>f.id);
+   if(plane.boardingStartedAt!=null)for(const [index,id] of plane.boardingGuestIds.entries()){
+    const f=flight.guests.find(f=>f.id===id);if(!f)continue;
     if(!['airport-ready','boarding','return-flight'].includes(f.phase))continue;
     const pose=boardingPose(plane,index);if(!pose)continue;
     if(pose.onPlane&&!f.legacyAirlineContract&&!chargeHansdrexFare(world(),f,'outbound',{reference:plane.id})){
@@ -390,11 +405,12 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(plane.aircraftGone){
     const totals=stats();
     for(const f of flight.guests){
-     if(['return-flight','airport-ready','boarding'].includes(f.phase)){totals.charterDepartures++;totals.externalOutflow+=f.money+f.savings;}
-     if(f.phase==='stranded')continue;
+     if(!plane.passengerIds?.includes(f.id)||f.phase!=='return-flight')continue;
+     totals.charterDepartures++;totals.externalOutflow+=f.money+f.savings;
      f.phase='departed';f.departedAt=now();f.money=f.savings=0;f.onPlane=false;
     }
     flight.departed=flight.guests.every(f=>['departed','denied','cancelled'].includes(f.phase));
+    if(!flight.departed){flight.completedReturnFlights=Number(flight.completedReturnFlights||0)+1;flight.returnLeg=null;delete flight.returnReadyAt;}
    }
   }
  }

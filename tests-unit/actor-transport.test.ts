@@ -32,3 +32,14 @@ test('old car-motion snapshots recover while explicit walking and passengers nev
  assert.equal(isCarTrip({...guest,alive:false}),false);
  assert.equal(showResidentBody({...guest,alive:false}),false);
 });
+
+test('predicted cars turn with their rendered route instead of sliding sideways under a stale source heading',()=>{
+ const scene=new THREE.Scene(),cars=new PersonalCars(scene);
+ const guest={id:'CAR-TURN-1',alive:true,vehicle:'compact car',x:0,y:1.1,z:1000,vx:11,vz:0,vehicleHeading:Math.PI/2,traveling:true,transitMode:'car',trafficSignalPermit:true,motion:{at:0,speed:11,mode:'car',signalPermit:true,points:[{x:4,y:1.1,z:1000},{x:4,y:1.1,z:1040}]}};
+ cars.sync([guest]);for(let i=0;i<120;i++)cars.update(1/60,i*2);
+ const body=scene.children.find((m):m is THREE.InstancedMesh=>m instanceof THREE.InstancedMesh&&m.geometry instanceof THREE.BoxGeometry)!;
+ const matrix=new THREE.Matrix4();body.getMatrixAt(0,matrix);const direction=new THREE.Vector3(0,0,1).transformDirection(matrix);
+ assert.ok(matrix.elements[14]>1010);assert.ok(direction.z>.999&&Math.abs(direction.x)<.001,'car long axis follows the northbound segment');
+ assert.ok(Math.abs(cars.trafficActors[0].vehicleHeading!)<.001,'collision rectangle uses the same turned heading');
+ cars.sync([{...guest,motion:{...guest.motion,at:120}}]);cars.update(1/60,242);body.getMatrixAt(0,matrix);direction.set(0,0,1).transformDirection(matrix);assert.ok(direction.z>.999,'a late eastbound source heading does not rotate a predicted northbound car back');
+});

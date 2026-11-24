@@ -15,7 +15,7 @@ import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RE
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,NORTH_RIVERSIDE_LINK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 36;
+export const MAP_VERSION = 37;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -262,7 +262,6 @@ export const METRO_LINES = [
  {id:"M10",countryId:'north-city',height:35,points:[[-80,-1000],[-80,-950],[-80,-830],[-80,-710],[50,-710],[50,-600]]},
  {id:"M11",height:39,points:[[-1000,-260],[-840,-260],[-840,0],[-840,260],[-680,260],[-520,260],[-430,260],[-310,260],[-310,87]]},
  {id:"M12",height:27,points:[[-430,-400],[-310,-400],[-310,-340],[-210,-340],[-210,-220],[-210,-116],[-210,0],[-210,87],[-210,145],[-210,260],[-210,340]]},
- {id:"M13",height:35,points:[[50,-400],[122,-400],[122,-340]]},
  {id:"N1",countryId:'north-city',height:43,points:[[-880,-830],[-880,-950],[-600,-950],[-430,-950],[-260,-950],[-80,-950],[50,-950]]}
 ];
 for(const line of METRO_LINES)line.countryId??=COUNTRY_IDS.hansdrex;

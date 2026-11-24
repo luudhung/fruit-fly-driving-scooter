@@ -56,3 +56,13 @@ test('timed route validation rejects corrupt clocks and normal street movement r
  m.accept({x:500,z:500},invalid);assert.deepEqual(position(m),before);
  m.accept({x:0,z:0},{at:at+300,speed:2,mode:'walk',points:[{x:10,z:0}]});m.advance(.1,at+312);assert.equal(m.z,0);assert.ok(m.x>0&&m.x<1);assert.equal(m.timed,false);
 });
+
+test('a T4 arrival and upstairs return retain the full timed itinerary beyond sixteen points, including the terminal train',()=>{
+ const base={...flight('city'),arrivalStand:visitorStands('city').at(-1),standId:visitorStands('city').at(-1)!.id,terminalId:'T4',boardingStartedAt:150000};
+ for(const direction of ['arrival','departure']){
+  const arrival=direction==='arrival',motion=arrival?visitorArrivalMotion(visitorArrivalPath(base,9)[0].at,base,9)!:visitorBoardingMotion(base.boardingStartedAt,base,9)!;
+  const m=new CityMotion(),start=motion.points[0];assert.ok(motion.points.length>16);m.accept(start,motion);
+  for(let i=16;i<motion.points.length;i++){const p=motion.points[i];m.advance(.02,p.at!);assert.deepEqual(position(m),{x:p.x,y:p.y??1.1,z:p.z},`${direction} waypoint ${i}`);}
+  const end=motion.points.at(-1)!;m.accept({...end},{...motion,at:motion.at+120});m.advance(.02,end.at!+1);assert.deepEqual(position(m),{x:end.x,y:end.y??1.1,z:end.z});
+ }
+});

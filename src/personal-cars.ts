@@ -66,7 +66,7 @@ export class PersonalCars{
   if(car.hasMotion){car.motion ||=new CityMotion(CITY_ROUTE_PREDICTION_SECONDS);car.motion.accept(f,f.motion!);car.route.length=0;}
   else car.motion=undefined;
   car.signalPermit=Boolean(f.trafficSignalPermit);car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;
-  car.actor.vehicleHeading=f.vehicleHeading;car.targetX=p.x;car.targetY=driving?(f.y??1.1):1.1;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
+  car.actor.vehicleHeading=car.heading;car.targetX=p.x;car.targetY=driving?(f.y??1.1):1.1;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
  }
  private reconcile(){
   if(this.camera)this.view.setCamera(this.camera);
@@ -115,7 +115,7 @@ export class PersonalCars{
   if(this.dirty||this.selectionAge>=.12)this.reconcile();
   let driving=false;
   for(const car of this.cars.values()){
-   const actor=car.actor;actor.x=car.x;actor.y=car.y;actor.z=car.z;actor.vehicle='compact car';actor.parkedCar=car.driving?null:{x:car.x,z:car.z,heading:car.heading};
+   const actor=car.actor;actor.x=car.x;actor.y=car.y;actor.z=car.z;actor.vehicleHeading=car.heading;actor.vehicle='compact car';actor.parkedCar=car.driving?null:{x:car.x,z:car.z,heading:car.heading};
    actor.targetX=car.motion?.targetX??car.targetX;actor.targetZ=car.motion?.targetZ??car.targetZ;actor.traveling=car.driving;driving ||=car.driving;
   }
   if(!driving&&!this.uploadDirty)return;
@@ -132,7 +132,10 @@ export class PersonalCars{
    car.x+=dx*safeFraction;car.y+=dy*safeFraction;car.z+=dz*safeFraction;
    if(car.driving&&length>.05)car.pitch=Math.atan2(dy,length);else if(!car.driving)car.pitch=0;
    if(car.route.length&&length<.35)car.route.shift();
-   if(car.driving&&Number.isFinite(car.actor.vehicleHeading))car.heading=car.actor.vehicleHeading!;else if(car.driving&&length>.05)car.heading=Math.atan2(dx,dz);else if(!car.driving)car.heading=car.targetHeading;
+   // Prediction may have turned a corner since the last authoritative heading.
+   // Orient the visible body and collision rectangle along its actual motion.
+   if(car.driving&&length*safeFraction>.001)car.heading=Math.atan2(dx,dz);else if(!car.driving)car.heading=car.targetHeading;
+   car.actor.vehicleHeading=car.heading;
    const distance=this.view.distanceSquared(car);
    d.rotation.set(-car.pitch,car.heading,0,'YXZ');d.position.set(car.x,car.y-.31,car.z);d.updateMatrix();this.body.setMatrixAt(index,d.matrix);
    if(this.colorsDirty)this.body.setColorAt(index,car.color);index++;

@@ -10,7 +10,10 @@ export class CityMotion{
  constructor(predictionSeconds=8){this.predictionSeconds=predictionSeconds;}
  accept(position:MotionPoint,plan:MotionPlan){
   if(!Number.isFinite(plan.at)||!Number.isFinite(position.x)||!Number.isFinite(position.z)||this.plan&&plan.at<=this.plan.at)return;
-  plan={...plan,speed:Number.isFinite(plan.speed)?Math.max(0,Math.min(40,plan.speed)):0,points:plan.points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,16)};
+  // Timed airport trips include stairs, kiosks, inter-terminal trains and the
+  // final apron walk. Truncating them to a street look-ahead leaves passengers
+  // frozen midway through a transfer until every subsequent snapshot rewinds.
+  plan={...plan,speed:Number.isFinite(plan.speed)?Math.max(0,Math.min(40,plan.speed)):0,points:plan.points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).slice(0,plan.timed?96:16)};
   if(plan.timed){
    if(plan.mode!=='walk'||!plan.points.length||plan.points.some((p,i)=>!Number.isFinite(p.at)||i>0&&p.at! < plan.points[i-1].at!))return;
    this.plan=plan;this.index=0;this.remaining=0;

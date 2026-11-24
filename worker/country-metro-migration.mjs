@@ -1,3 +1,4 @@
+import {retireAirportMetro} from './retired-metro.mjs';
 import {METRO_LINES,metroStationGeometry,pedestrianRoute,LOCATIONS,entrance} from './city-map.mjs';
 import {countryAt} from './country-map.mjs';
 import {repairMetroRoute} from './metro-planner.mjs';
@@ -20,7 +21,7 @@ export function migrateCountryMetroJourneys(state,{replanResident}={}){
   if(!legacy)continue;
   const destination=Number.isFinite(f.finalTargetX)&&Number.isFinite(f.finalTargetZ)?{x:f.finalTargetX,z:f.finalTargetZ}:entrance(LOCATIONS.find(l=>l.id===f.targetLocationId)||{x:f.homeX??f.x,z:f.homeZ??f.z});
   if(f.onTrain||Number(f.y||1.1)>2){
-   const country=countryAt(f),lines=METRO_LINES.filter(l=>[legacy.northLineId,legacy.mainLineId].includes(l.id)&&l.countryId===country);
+   const country=countryAt(f),lines=METRO_LINES.filter(l=>([legacy.northLineId,legacy.mainLineId].includes(l.id)||legacy.mainLineId==='M13'&&country==='hansdrex')&&l.countryId===country);
    const stations=lines.flatMap(line=>line.points.map((_,index)=>({line,index,geo:metroStationGeometry(line,index,f.metroTrainDirection||1)}))).sort((a,b)=>Math.hypot(a.geo.platform.x-f.x,a.geo.platform.z-f.z)-Math.hypot(b.geo.platform.x-f.x,b.geo.platform.z-f.z));
    if(!stations.length){result.unresolved.push(f.id);continue;}
    Object.assign(f,stations[0].geo.access,{y:1.1,vx:0,vz:0,movementTrace:[]});result.alighted++;
@@ -34,6 +35,8 @@ export function migrateCountryMetroJourneys(state,{replanResident}={}){
  }
  if(!result.unresolved.length)state.countryMetroMigrationVersion=COUNTRY_METRO_MIGRATION_VERSION;
  }
+ const retired=retireAirportMetro(state,{replanResident});
+ result.replanned+=retired.replanned;result.alighted+=retired.alighted;result.unresolved.push(...retired.unresolved);
  const airport=migrateNorthAirportMetroJourneys(state,{replanResident});
  result.replanned+=airport.replanned;result.alighted+=airport.alighted;result.unresolved.push(...airport.unresolved);
  return result;

@@ -117,13 +117,13 @@ test('Westborough homes have two nearby lines and interchange journeys to the co
 });
 
 test('Hansdrex retained lines keep domestic interchange itineraries after the border split',()=>{
- assert.equal(METRO_LINES.length,14);
+ assert.equal(METRO_LINES.length,13);
  const target=entrance(LOCATIONS.find(l=>l.id==='riverside-market'));
- for(const id of ['M9','M11','M12','M13']){
+ for(const id of ['M9','M11','M12']){
   const line=METRO_LINES.find(line=>line.id===id),from=metroStationGeometry(line,0).access;
-  const plan=planNetworkMetroRoute(from,id==='M13'?metroStationGeometry(line,line.points.length-1).access:target);
+  const plan=planNetworkMetroRoute(from,target);
   assert.ok(plan?.legs.some(leg=>leg.lineId===id),`${id} must carry a real itinerary into the shared network`);
-  if(id!=='M13'){assert.ok(plan.transfers>=1);assert.ok(plan.waypoints.some(p=>p.stage==='interchange-walk'));}
+  {assert.ok(plan.transfers>=1);assert.ok(plan.waypoints.some(p=>p.stage==='interchange-walk'));}
   assert.ok(plan.legs.every(leg=>leg.entryIndex!==leg.exitIndex));
  }
 });

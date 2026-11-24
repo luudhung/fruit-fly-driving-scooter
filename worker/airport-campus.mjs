@@ -48,9 +48,15 @@ const schedules=[timetable(1),timetable(-1)];
 export function airportTerminalTrainStates(seconds){
  return [1,-1].map((direction,index)=>{
   const schedule=schedules[index],phase=((seconds%schedule.cycle)+schedule.cycle)%schedule.cycle,visits=schedule.visits;
+  // The existing return slot belongs to an empty express movement, not an
+  // invisible reset. Keep the timetable of already booked transfers unchanged.
+  if(phase>=visits.at(-1).until){
+   const last=visits.at(-1),first=visits[0],u=(phase-last.until)/(schedule.cycle-last.until);
+   return {id:`HCA-FREE-${direction>0?'A':'B'}`,direction:-direction,fare:0,x:last.station.x+(first.station.x-last.station.x)*u,y:AIRPORT_TERMINAL_RAIL.y,z:AIRPORT_TERMINAL_RAIL.z+direction*AIRPORT_TERMINAL_RAIL.trackOffset,heading:direction>0?-Math.PI/2:Math.PI/2,dwelling:false,stationId:null,visible:true,returning:true};
+  }
   const i=visits.findIndex(v=>phase<v.until),current=visits[i<0?visits.length-1:i],previous=visits[Math.max(0,i-1)];
   const dwelling=i>=0&&phase>=current.at,progress=dwelling||i===0||i<0?1:Math.max(0,Math.min(1,(phase-previous.until)/(current.at-previous.until)));
-  return {id:`HCA-FREE-${direction>0?'A':'B'}`,direction,fare:0,x:progress===1?current.station.x:previous.station.x+(current.station.x-previous.station.x)*progress,y:AIRPORT_TERMINAL_RAIL.y,z:AIRPORT_TERMINAL_RAIL.z+direction*AIRPORT_TERMINAL_RAIL.trackOffset,heading:direction>0?Math.PI/2:-Math.PI/2,dwelling,stationId:dwelling?current.station.id:null,visible:i>=0};
+  return {id:`HCA-FREE-${direction>0?'A':'B'}`,direction,fare:0,x:progress===1?current.station.x:previous.station.x+(current.station.x-previous.station.x)*progress,y:AIRPORT_TERMINAL_RAIL.y,z:AIRPORT_TERMINAL_RAIL.z+direction*AIRPORT_TERMINAL_RAIL.trackOffset,heading:direction>0?Math.PI/2:-Math.PI/2,dwelling,stationId:dwelling?current.station.id:null,visible:true,returning:false};
  });
 }
 /** A real zero-fare departure after the caller reaches the platform; no money mutation. */

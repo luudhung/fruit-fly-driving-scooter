@@ -62,3 +62,9 @@ test('M12 has no airport bend stop and continues on the same avenue to the south
  assert.deepEqual(line.points.filter(([x])=>x===-210).map(([,z])=>z),[-340,-220,-116,0,87,145,260,340]);
  for(let i=0;i<line.points.length;i++)for(const direction of [-1,1])assert.equal(metroStationGeometry(line,i,direction).accessViolations,0);
 });
+
+test('terminal trains visibly traverse the empty return slot without disappearing or jumping at a cycle boundary',()=>{
+ const renderer=new AirportTerminalTrains(new THREE.Group(),()=>new THREE.Sprite());let previous=airportTerminalTrainStates(0),sawReturn=false;
+ for(let at=.05;at<300;at+=.05){const poses=airportTerminalTrainStates(at);renderer.update(at);for(let i=0;i<2;i++){assert.ok(poses[i].visible&&renderer.trains[i].visible);assert.ok(Math.abs(poses[i].x-previous[i].x)<=2.01,'including the last instant of each cycle');sawReturn||=Boolean(poses[i].returning);}previous=poses;}
+ assert.ok(sawReturn);assert.equal(renderer.trains.length,2);
+});
