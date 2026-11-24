@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createUrbanWorld} from '../worker/urban-world.mjs';
 import {BUILDINGS,LOCATIONS,entrance,blocked,applyUrbanGeometry,pedestrianRoute} from '../worker/city-map.mjs';
+import {countryAt} from '../worker/country-map.mjs';
 
 function setup(){
  applyUrbanGeometry();
@@ -19,6 +20,59 @@ test('a building fire evacuates occupants, persists damage, and paid firefighter
  const initial=supply(t.s),fire=t.urban.ignite(t.target.id);assert.ok(fire);assert.equal(f.indoors,false);assert.ok(f.displacedFrom);assert.equal(t.s.urbanWorld.buildings[t.target.id].stage,'unsafe');
  t.step();assert.ok(fire.detected);assert.ok(fire.teamIds.length>0);const intensity=fire.intensity;t.restore();assert.equal(t.s.urbanWorld.fires[0].intensity,intensity);assert.ok(t.s.urbanWorld.buildings[t.target.id].health<100);
  const restored=t.s.urbanWorld.fires[0];t.onsite(restored);for(let i=0;i<10&&!restored.containedAt;i++)t.step();assert.ok(restored.containedAt);assert.ok(t.events.some(e=>e.type==='fire_extinguished'));assert.ok(Math.abs(supply(t.s)-initial)<1e-7,'firefighter wages conserve cash');
+});
+test('a large building contains an ordinary fire to one floor and funded sprinklers reopen it without a demolition contract',()=>{
+ const t=setup(),b=BUILDINGS.find(b=>b.kind==='block'&&b.h>30),fire=t.urban.ignite(b.id);
+ assert.equal(fire.scope,'floor');assert.equal(fire.floorCount,1);
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=1e12;
+ for(const f of t.s.flies)f.sleeping=true;
+ const water=t.s.urbanWorld.safety.water;
+ for(let i=0;i<20&&!fire.containedAt;i++)t.step(600);
+ const stored=t.s.urbanWorld.buildings[b.id];
+ assert.ok(fire.containedAt,'a floor fire is easy to put out even before an engine arrives');
+ assert.equal(fire.teamIds.length,0);assert.ok(fire.sprinklerWaterUsed>0);
+ assert.equal(t.s.urbanWorld.safety.water,water-fire.sprinklerWaterUsed,'suppression uses existing water');
+ assert.equal(stored.stage,'operational');assert.ok(stored.health>=80);
+ assert.equal(t.s.urbanWorld.projects.some(p=>p.buildingId===b.id),false);
+ assert.ok(!t.events.some(e=>e.type==='building_collapsed'&&e.buildingId===b.id));
+});
+test('an unattended floor fire with no water damages its floor but cannot demolish the whole tower or spread',()=>{
+ const t=setup(),b=BUILDINGS.find(b=>b.kind==='block'&&b.h>30),fire=t.urban.ignite(b.id);
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=1e12;t.s.urbanWorld.safety.water=0;t.s.treasury.cash=0;
+ for(const f of t.s.flies)f.sleeping=true;
+ for(let i=0;i<24;i++)t.step(3600);
+ const stored=t.s.urbanWorld.buildings[b.id];
+ assert.ok(stored.health>=100-100/fire.totalFloors);assert.ok(stored.fireFloorDamage[fire.floorStart]>0);
+ assert.notEqual(stored.stage,'collapsed');assert.equal(fire.sprinklerWaterUsed,0);assert.equal(t.s.urbanWorld.fires.length,1);
+ assert.equal(fire.spreadAttempted,undefined);
+});
+test('old active tower fires acquire a durable floor profile once and keep the same affected floor after reload',()=>{
+ const t=setup(),b=BUILDINGS.find(b=>b.kind==='block'&&b.h>30),fire=t.urban.ignite(b.id);
+ for(const key of ['version','scope','floorStart','floorCount','totalFloors','floorHeight','initialHealth'])delete fire[key];
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=1e12;t.step(1);
+ assert.equal(fire.version,2);assert.equal(fire.scope,'floor');const floor=fire.floorStart;
+ t.restore();assert.equal(t.s.urbanWorld.fires[0].floorStart,floor);assert.equal(t.s.urbanWorld.fires[0].scope,'floor');
+});
+test('residents displaced by a contained high-rise floor fire can return without a demolition project',()=>{
+ const t=setup(),tower=BUILDINGS.find(b=>b.kind==='block'&&b.h>30),resident=t.s.flies[0];
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=1e12;
+ for(const f of t.s.flies)f.sleeping=true;
+ t.s.housing.households.TOWER={id:'TOWER',unitId:tower.id,members:[resident.id]};resident.householdId='TOWER';
+ const fire=t.urban.ignite(tower.id);assert.equal(fire.scope,'floor');const initialWater=t.s.urbanWorld.safety.water;
+ for(let i=0;i<20&&!fire.containedAt;i++)t.step();
+ assert.ok(fire.containedAt);assert.equal(fire.teamIds.length,0);assert.ok(fire.sprinklerWaterUsed>0);assert.equal(t.s.urbanWorld.safety.water,initialWater-fire.sprinklerWaterUsed);
+ const record=t.s.urbanWorld.buildings[tower.id];assert.equal(record.stage,'operational');assert.ok(record.health>95);assert.equal(resident.displacedFrom,null);assert.equal(t.s.urbanWorld.projects.some(p=>p.buildingId===tower.id),false);
+});
+test('North sprinklers purchase finite water from their own budget and never consume Hans water or treasury',()=>{
+ const t=setup(),tower=BUILDINGS.find(b=>countryAt(b)==='north-city'&&b.h>30&&b.kind==='apartment');
+ t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=1e12;t.s.businesses['treasury:north-city']={cash:0};
+ for(const f of t.s.flies)f.sleeping=true;
+ const fire=t.urban.ignite(tower.id),water=t.s.urbanWorld.safety.water,hans=t.s.treasury.cash,total=supply(t.s);
+ t.step(600);assert.equal(fire.sprinklerWaterUsed,0);assert.equal(t.s.urbanWorld.safety.water,water);assert.equal(t.s.treasury.cash,hans);
+ t.s.businesses['treasury:north-city'].cash=120;
+ for(let i=0;i<20&&!fire.containedAt;i++)t.step(600);
+ assert.ok(fire.containedAt);assert.equal(t.s.businesses['treasury:north-city'].cash,0);assert.equal(t.s.businesses['north-civic-materials'].cash,120);
+ assert.equal(t.s.urbanWorld.safety.sprinklerStocks['north-city'].water,14000-fire.sprinklerWaterUsed);assert.equal(t.s.urbanWorld.safety.water,water);assert.equal(t.s.treasury.cash,hans);assert.ok(Math.abs(supply(t.s)-total-120)<1e-6);
 });
 test('a damaged building requires workers, a single paid physical delivery and labor before inspection',()=>{
  const t=setup(),id=t.target.id;t.s.urbanWorld.buildings[id]={...t.target,stage:'damaged',health:30,progress:1};applyUrbanGeometry({buildings:Object.values(t.s.urbanWorld.buildings)});

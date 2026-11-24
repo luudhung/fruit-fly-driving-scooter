@@ -68,7 +68,7 @@ test('unfunded national recovery and a fire still burning do not suspend all oth
  t.step();assert.ok(t.s.urbanWorld.projects.filter(p=>p.kind==='new').every(p=>!p.recoveryPaused));
 });
 
-test('one requested restoration refunds only unused escrow once, keeps new sites, and never auto-heals future fires',()=>{
+test('one requested restoration leaves active repairs and their escrow unchanged and does not heal future fires',()=>{
  const t=fixture(),b=t.home,owner=t.s.flies[0];
  t.s.housing.households.HH={id:'HH',unitId:b.id,members:[owner.id]};Object.assign(owner,{householdId:'HH',housingUnitId:b.id,displacedFrom:{buildingId:b.id}});
  t.s.urbanWorld.buildings[b.id]={...b,originalHeight:b.h,stage:'damaged',health:30,progress:1,lastDamageAt:120};
@@ -78,8 +78,8 @@ test('one requested restoration refunds only unused escrow once, keeps new sites
  delete t.s.urbanWorld.ownerRestoration;
  const before=owner.money+owner.savings,treasury=t.s.treasury.cash,total=supply(t.s);t.restore();
  const restoredOwner=t.s.flies.find(f=>f.id===owner.id),saved=t.s.urbanWorld.projects.find(q=>q.id===p.id);
- assert.equal(saved.stage,'complete');assert.equal(saved.refunded,p.budget-30);assert.equal(restoredOwner.money+restoredOwner.savings,before);assert.equal(t.s.treasury.cash,treasury+p.budget-30);
- assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);assert.equal(t.s.urbanWorld.buildings[b.id].health,100);assert.equal(restoredOwner.displacedFrom,null);
+ assert.equal(saved.stage,p.stage);assert.equal(Number(saved.refunded||0),0);assert.equal(restoredOwner.money+restoredOwner.savings,before);assert.equal(t.s.treasury.cash,treasury);
+ assert.equal(t.s.urbanWorld.buildings[b.id].h,b.h);assert.equal(t.s.urbanWorld.buildings[b.id].health,30);assert.ok(restoredOwner.displacedFrom);
  assert.equal(t.s.urbanWorld.buildings['CIVIC-UNFINISHED'].stage,'cleared');assert.ok(Math.abs(supply(t.s)-total)<1e-6);
  const balance=restoredOwner.money+restoredOwner.savings;t.restore();assert.equal(t.s.flies.find(f=>f.id===owner.id).money+t.s.flies.find(f=>f.id===owner.id).savings,balance);
  for(const f of t.s.flies)f.sleeping=true;

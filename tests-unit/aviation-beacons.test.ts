@@ -2,3 +2,10 @@ import test from'node:test';import assert from'node:assert/strict';import * as T
 test('red wing and tower-blue warning beacons flash with shared self-lit materials and no real lights',()=>{
  const root=new THREE.Group(),a=addAviationBeacons(root,[[-8.5,0,0],[8.5,0,0]]),b=addAviationBeacons(root,[[0,190,0]]),blue=addAviationBeacons(root,[[0,250,0]],'tower');assert.equal(a.material,b.material);assert.equal(blue.material.color.getHex(),0x42b6ff);updateAviationBeacons(.05);assert.equal(a.material.opacity,1);updateAviationBeacons(.8);assert.equal(a.material.opacity,.08);let lights=0;root.traverse(o=>{if(o instanceof THREE.Light)lights++;});assert.equal(lights,0);const count=root.children.length;for(let i=0;i<200;i++)updateAviationBeacons(i/60);assert.equal(root.children.length,count);
 });
+
+test('warning lights are small solid round meshes with shared geometry rather than square point sprites',()=>{
+ const root=new THREE.Group(),a=addAviationBeacons(root,[[0,0,0]]),b=addAviationBeacons(root,[[0,0,0]]);
+ assert.ok(a instanceof THREE.Mesh);assert.equal(a.geometry,b.geometry);
+ a.geometry.computeBoundingSphere();assert.ok(Math.abs(a.geometry.boundingSphere!.radius-.32)<.01);
+ assert.ok(a.geometry.getAttribute('normal').count>20);
+});

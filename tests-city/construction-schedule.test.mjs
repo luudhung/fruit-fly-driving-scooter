@@ -14,7 +14,7 @@ test('a small house requires two full game days of structural work even with exc
  assert.equal(first.activeWorkers,schedule.targetCrew);
 });
 
-test('structural time grows with height and footprint, including beyond the crew cap',()=>{
+test('structural time grows with height and footprint up to the ten-day cap',()=>{
  const base=constructionSchedule(house);
  const tall=constructionSchedule({...house,h:12});
  const taller=constructionSchedule({...house,h:24});
@@ -25,7 +25,7 @@ test('structural time grows with height and footprint, including beyond the crew
  const tower=constructionSchedule({w:100,d:100,h:300});
  const largerTower=constructionSchedule({w:120,d:100,h:400});
  assert.equal(tower.targetCrew,25);assert.equal(largerTower.targetCrew,25);
- assert.ok(largerTower.structureSeconds>tower.structureSeconds);
+ assert.equal(tower.structureSeconds,10*GAME_DAY_SECONDS);assert.equal(largerTower.structureSeconds,10*GAME_DAY_SECONDS);
 });
 
 test('reconstruction schedules retain original dimensions and height after collapse',()=>{
@@ -70,3 +70,5 @@ test('partial funding and final ticks charge only work actually performed',()=>{
  assert.ok(Math.abs(final.workerSeconds-schedule.workerSeconds*.01)<1e-7);
  assert.equal(constructionWorkStep(schedule,{progress:1,onsiteCount:25,dt:100}).wages,0);
 });
+
+test('a funded, working single-person crew finishes even a large tower within ten productive days',()=>{const schedule=constructionSchedule({w:100,d:100,h:300});assert.equal(constructionWorkStep(schedule,{onsiteCount:1,dt:10*GAME_DAY_SECONDS-1}).progress<1,true);assert.equal(constructionWorkStep(schedule,{onsiteCount:1,dt:10*GAME_DAY_SECONDS}).progress,1);});

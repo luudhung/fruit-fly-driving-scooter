@@ -1,6 +1,6 @@
-import {constructionSchedule,constructionWorkStep} from './construction-schedule.mjs';
+import {CONSTRUCTION_SCHEDULE_VERSION,constructionSchedule,constructionWorkStep} from './construction-schedule.mjs';
 import {HANSDREX_FRUIT_FARM} from './fruit-farm-map.mjs';
-import {accidentalFireCandidates} from './fire-risk.mjs';
+import {accidentalFireCandidates,buildingFireProfile} from './fire-risk.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
 import {NORTH_F1_RESERVED,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS} from './north-f1-map.mjs';
@@ -124,7 +124,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   // Completed location pins are reconstructed from durable buildings on a cold Worker start.
   for(const b of Object.values(v.buildings))if(b.id?.startsWith('CIVIC-')&&b.stage==='operational')addLocation(b.id,b.frontage||b,b.name||'Resident-built premises');
  }
- function restoreRequestedDamage(){restoreInitialFireDamage(raw(),{completeProject:finishProject,reopen:reopenBuilding,report});}
+ function restoreRequestedDamage(){restoreInitialFireDamage(raw(),{reopen:reopenBuilding,cancelUnstartedProject:p=>{refundProject(p);p.stage='cancelled';p.cancelledAt=now();p.pauseReason='owner restored an unstarted repair';},report});}
  function init(){ensure();apply();fireService.init();restoreRequestedDamage();apply();return snapshot();}
  function rememberEvent(f,kind,payload){remember(f,kind,payload);f.urbanMemories=(f.urbanMemories||[]).concat({kind,t:now(),...payload}).slice(-8);}
  function householdUnits(b){return Object.values(raw().housing?.households||{}).filter(h=>h.unitId===b.id);}
@@ -146,7 +146,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   ensure();if(u().fires.length>=MAX_FIRES||u().fires.some(f=>f.buildingId===buildingId))return null;
   const b=stateFor(buildingId);if(!b||['collapsed','cleared','construction'].includes(b.stage)||['landmark','mansion','airport'].includes(b.kind))return null;
   rememberBlueprint(b);
-  const fire={id:`FIRE-${u().nextIncidentId++}`,buildingId,reason,startedAt:now(),lastAt:now(),intensity:18,detected:false,teamIds:[],waterUsed:0,spreadAttemptAt:now()+3600};u().fires.push(fire);
+  const fire={id:`FIRE-${u().nextIncidentId++}`,buildingId,reason,startedAt:now(),lastAt:now(),intensity:18,detected:false,teamIds:[],waterUsed:0,spreadAttemptAt:now()+3600,...buildingFireProfile(b,roll)};u().fires.push(fire);
   b.recoveryReadyAt=fire.startedAt;b.recoveryDeadlineAt=fire.startedAt+DAY;
   report('fire_started',`A fire started at ${buildingId}: ${reason}.`,{buildingId,incidentId:fire.id});evacuate(b,'fire');setStage(b,'unsafe');return fire;
  }
@@ -215,8 +215,21 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   for(const id of ids){const f=byId.get(id);if(!f)continue;const amount=Math.min(Math.max(0,maxPayment-paid),Number(escrow.cash||0),budget/Math.max(1,ids.length)*seconds/3600);if(amount<=0)break;escrow.cash-=amount;f.money=Number(f.money||0)+amount;raw().totalTransactions++;paid+=amount;}
   return paid;
  }
+ function sprinklerWater(b,dt){
+  const country=ownership(b),required=Math.max(0,dt*.02),safety=u().safety;
+  if(country===COUNTRY_IDS.hansdrex){const water=Math.min(safety.water,required);safety.water-=water;return water;}
+  // Automatic suppression has the same national funding boundary as engines.
+  // A North/Hawaii building cannot draw from Hansdrex's municipal reserve.
+  const stocks=safety.sprinklerStocks||={},stock=stocks[country]||={water:0};
+  if(stock.water<required){
+   const payer=fundingSource(publicTreasury(country));
+   if(Number(payer?.cash||0)>=120){transfer(payer,account(materialSupplier(country)),120);stock.water+=14000;}
+  }
+  const water=Math.min(stock.water,required);stock.water-=water;return water;
+ }
  function detectAndFight(fire,dt){
   const b=stateFor(fire.buildingId);if(!b)return;
+  if(fire.version!==2)Object.assign(fire,buildingFireProfile(b,roll));
   if(!fire.detected){
    const witness=raw().flies.find(f=>f.alive&&!f.indoors&&Math.hypot(f.x-b.x,f.z-b.z)<65);
    if(witness||now()-fire.startedAt>=1800){fire.detected=true;fire.reporterId=witness?.id||'building-alarm';report('fire_reported',`${fire.reporterId} reported the fire at ${b.id}.`,{incidentId:fire.id,buildingId:b.id});if(witness)rememberEvent(witness,'reported_fire',{buildingId:b.id});}
@@ -224,21 +237,24 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   if(fire.detected)crewFor(fire,'fire',b,4);
   const onsite=fire.teamIds.map(id=>byId.get(id)).filter(f=>!f?.onFireEngine&&(!f?.fireEngineDuty||f.fireEngineDuty.phase==='on-scene')&&present(f,`CIVIC-FIRE-${fire.id}`));
   const supply=fireService.consumeWater(fire,onsite,dt),water=supply?supply.water:Math.min(u().safety.water,onsite.length*dt*.12);if(!supply)u().safety.water-=water;fire.waterUsed+=water;
-  const suppression=water*.09;fire.intensity=clamp(fire.intensity+dt*.0016-suppression,0,100);
-  const loss=dt*(fire.intensity/100)*.0018;b.health=clamp(b.health-loss);b.lastDamageAt=now();
+  const floorFire=fire.scope==='floor',sprinklers=floorFire?sprinklerWater(b,dt):0;fire.waterUsed+=sprinklers;fire.sprinklerWaterUsed=Number(fire.sprinklerWaterUsed||0)+sprinklers;
+  const suppression=water*(floorFire?.27:.09)+sprinklers*.12;fire.intensity=clamp(fire.intensity+dt*(floorFire?.0004:.0016)-suppression,0,100);
+  const localLoss=dt*(fire.intensity/100)*.0018,loss=floorFire?localLoss/fire.totalFloors:localLoss;
+  const minimum=floorFire?Math.max(18.01,fire.initialHealth-100/fire.totalFloors):0;b.health=clamp(b.health-Math.min(loss,Math.max(0,b.health-minimum)));b.lastDamageAt=now();
+  if(floorFire){b.fireFloorDamage||={};b.fireFloorDamage[fire.floorStart]=clamp(Number(b.fireFloorDamage[fire.floorStart]||0)+localLoss);}
   if(b.health<18&&b.stage!=='collapsed'){setStage(b,'collapsed');report('building_collapsed',`${b.id} collapsed after fire damage. The site remains blocked until cleared.`,{buildingId:b.id,incidentId:fire.id});}
   else if(b.health<60&&b.stage==='operational')setStage(b,'unsafe');
   if(onsite.length){const source=fireService.fundingAccount(fire),funding=source?transfer(source,account('civic-escrow'),dt*14/3600):0;payCrew(onsite.map(f=>f.id),14,dt,funding);}
-  if(!fire.spreadAttempted&&now()>=fire.spreadAttemptAt&&fire.intensity>75&&u().fires.length<MAX_FIRES){
+  if(fire.scope!=='floor'&&!fire.spreadAttempted&&now()>=fire.spreadAttemptAt&&fire.intensity>75&&u().fires.length<MAX_FIRES){
    fire.spreadAttempted=true;const nearest=BUILDINGS.filter(other=>other.id!==b.id&&!u().fires.some(f=>f.buildingId===other.id)&&Math.hypot(other.x-b.x,other.z-b.z)<22&&other.kind!=='landmark').sort((a,c)=>Math.hypot(a.x-b.x,a.z-b.z)-Math.hypot(c.x-b.x,c.z-b.z))[0];
    if(nearest&&roll()<.18+Number(raw().weather?.wind||0)*.2)ignite(nearest.id,'spread from a nearby fire');
   }
   // With no fuel/surviving structure the fire burns out; the damage is still permanent.
   if(fire.intensity<=.05||b.health<=0){
-   fire.containedAt=now();u().extinguishedFires++;setStage(b,b.health<18?'collapsed':'damaged');for(const id of fire.teamIds){const crew=byId.get(id);if(!crew?.fireEngineDuty)releaseTask(crew);}
+   fire.containedAt=now();u().extinguishedFires++;setStage(b,fire.scope==='floor'&&b.health>=80?'operational':b.health<18?'collapsed':'damaged');for(const id of fire.teamIds){const crew=byId.get(id);if(!crew?.fireEngineDuty)releaseTask(crew);}
    report('fire_extinguished',`The fire at ${b.id} is out. Inspection and repair are still required.`,{buildingId:b.id,waterUsed:fire.waterUsed});
    b.recoveryReadyAt=Number(fire.startedAt);b.recoveryDeadlineAt=b.recoveryReadyAt+DAY;
-   b.lastFireId=fire.id;u().history.push({type:'fire',buildingId:b.id,t:now(),damage:100-b.health});u().history=u().history.slice(-24);
+   b.lastFireId=fire.id;if(fire.scope==='floor'&&b.stage==='operational'){for(const person of raw().flies)if(person.displacedFrom?.buildingId===b.id){person.displacedFrom=null;u().displaced=Math.max(0,u().displaced-1);}for(const business of Object.values(raw().enterprises||{}))if(business.locationId===b.id){business.urbanSuspended=false;delete business.suspendedReason;}}u().history.push({type:'fire',buildingId:b.id,t:now(),damage:100-b.health});u().history=u().history.slice(-24);
   }
  }
  function estimate(b){return Math.max(220,Math.round(b.w*b.d*(.4+b.h*.018)));}
@@ -435,7 +451,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
  }
  function projectSchedule(p,b){
-  if(!p.constructionSchedule)p.constructionSchedule=constructionSchedule(b,{kind:p.kind,targetHeight:p.targetHeight,materialsRequired:p.materialsRequired,roadMaterialsRequired:p.roadMaterialsRequired,roadLength:u().roads.filter(r=>p.roadIds?.includes(r.id)).reduce((n,r)=>n+Math.max(r.w,r.d),0),needsClearance:p.stage==='clearance'||p.queuedStage==='clearance'});
+  if(!p.constructionSchedule||p.constructionSchedule.version!==CONSTRUCTION_SCHEDULE_VERSION)p.constructionSchedule=constructionSchedule(b,{kind:p.kind,targetHeight:p.targetHeight,materialsRequired:p.materialsRequired,roadMaterialsRequired:p.roadMaterialsRequired,roadLength:u().roads.filter(r=>p.roadIds?.includes(r.id)).reduce((n,r)=>n+Math.max(r.w,r.d),0),needsClearance:p.stage==='clearance'||p.queuedStage==='clearance'});
   return p.constructionSchedule;
  }
  function rebalanceRecoveryCrews(){
@@ -554,7 +570,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
  }
  function reopenBuilding(b){
   restoreBlueprint(b);
-  b.health=100;b.progress=1;setStage(b,'operational');
+  b.health=100;b.progress=1;delete b.fireFloorDamage;setStage(b,'operational');
   if(b.warRecovery?.active){b.warRecovery.active=false;b.warRecovery.restoredAt=now();}
   for(const f of raw().flies)if(f.displacedFrom?.buildingId===b.id){f.displacedFrom=null;f.actionUntil=0;u().displaced=Math.max(0,u().displaced-1);rememberEvent(f,'home_restored',{buildingId:b.id});}
   for(const business of Object.values(raw().enterprises||{}))if(business.locationId===b.id){business.urbanSuspended=false;delete business.suspendedReason;}

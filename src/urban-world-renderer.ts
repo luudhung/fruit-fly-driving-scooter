@@ -10,7 +10,7 @@ import type {FireServiceSnapshot} from '../worker/fire-service.mjs';
 import * as THREE from 'three';
 import {BUILDINGS,ROADS,applyUrbanGeometry,type UrbanBuildingRecord,type UrbanFlood} from '../worker/city-map.mjs';
 export type UrbanRoad={id:string;x:number;z:number;w:number;d:number;stage:string;progress?:number;projectId?:string};
-export type UrbanWorldSnapshot={workforce?:{target:number;assigned:number;onsite:number;activeSites:number};roads?:UrbanRoad[];completedRoads?:number;fireService?:FireServiceSnapshot;buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
+export type UrbanWorldSnapshot={workforce?:{target:number;assigned:number;onsite:number;activeSites:number};roads?:UrbanRoad[];completedRoads?:number;fireService?:FireServiceSnapshot;buildings:UrbanBuildingRecord[];fires:Array<{id:string;buildingId:string;x:number;z:number;h:number;scope?:'floor'|'building';baseY?:number;offsetX?:number;offsetZ?:number;intensity:number;teamIds:string[];crew?:Array<{x:number;z:number}>}>;projects:Array<{id:string;buildingId:string;x:number;z:number;stage:string;progress:number;pauseReason?:string}>;floods:UrbanFlood[];completedProjects?:number;extinguishedFires?:number;displaced?:number};
 type Registered={group:THREE.Group;originalMaterials:Map<THREE.Material,THREE.Color>;height:number;privateMaterials?:boolean};
 /** Only the viewer animates particles and machinery; durable world outcomes come from the server. */
 export class UrbanWorldRenderer{
@@ -131,16 +131,16 @@ export class UrbanWorldRenderer{
   this.phase+=Math.min(.1,dt);let flames=0,smoke=0,jets=0;const d=this.dummy,jet=this.jets.geometry.getAttribute('position') as THREE.BufferAttribute;
   for(const fire of this.state.fires.slice(0,3)){
    if(!Number.isFinite(fire.x)||!Number.isFinite(fire.z))continue;
-   const scale=Math.max(.5,Math.min(2,fire.intensity/40)),base=Math.min(12,Math.max(1,fire.h*.15));
-   for(let i=0;i<20;i++){
-    const a=i*2.399,t=this.phase*3+i*.7,pulse=.7+Math.sin(t)*.2,r=1.5+(i%4)*.8;
-    d.position.set(fire.x+Math.cos(a)*r,base+(i%3)*2,fire.z+Math.sin(a)*r);d.rotation.set(0,a,.1*Math.sin(t));d.scale.set(.7*scale*pulse,(2.3+i%3)*scale*pulse,.7*scale*pulse);d.updateMatrix();this.flames.setMatrixAt(flames++,d.matrix);
+   const floor=fire.scope==='floor',scale=Math.max(.5,Math.min(floor?1:2,fire.intensity/40)),base=fire.baseY??Math.min(12,Math.max(1,fire.h*.15)),x=fire.x+(fire.offsetX||0),z=fire.z+(fire.offsetZ||0);
+   for(let i=0;i<(floor?8:20);i++){
+    const a=i*2.399,t=this.phase*3+i*.7,pulse=.7+Math.sin(t)*.2,r=floor?.4+(i%3)*.25:1.5+(i%4)*.8;
+    d.position.set(x+Math.cos(a)*r,base+(i%3)*(floor?.5:2),z+Math.sin(a)*r);d.rotation.set(0,a,.1*Math.sin(t));d.scale.set(.7*scale*pulse,(floor?1.1:2.3+i%3)*scale*pulse,.7*scale*pulse);d.updateMatrix();this.flames.setMatrixAt(flames++,d.matrix);
    }
-   for(let i=0;i<28;i++){
+   for(let i=0;i<(floor?14:28);i++){
     const age=((this.phase*.17+i/28)%1),r=.7+age*4,a=i*2.399;
-    d.position.set(fire.x+Math.sin(a)*r+age*3,base+3+age*28,fire.z+Math.cos(a)*r);d.rotation.set(age,i,0);d.scale.setScalar(1+age*3);d.updateMatrix();this.smoke.setMatrixAt(smoke++,d.matrix);
+    d.position.set(x+Math.sin(a)*r+age*3,base+3+age*(floor?14:28),z+Math.cos(a)*r);d.rotation.set(age,i,0);d.scale.setScalar(1+age*3);d.updateMatrix();this.smoke.setMatrixAt(smoke++,d.matrix);
    }
-   for(const crew of (fire.crew||[]).slice(0,4))if(jets<12){jet.setXYZ(jets*2,crew.x,2,crew.z);jet.setXYZ(jets*2+1,fire.x,base+2,fire.z);jets++;}
+   for(const crew of (fire.crew||[]).slice(0,4))if(jets<12){jet.setXYZ(jets*2,crew.x,2,crew.z);jet.setXYZ(jets*2+1,x,base+2,z);jets++;}
   }
   this.flames.count=flames;this.smoke.count=smoke;this.flames.instanceMatrix.needsUpdate=true;this.smoke.instanceMatrix.needsUpdate=true;this.jets.geometry.setDrawRange(0,jets*2);jet.needsUpdate=true;
  }

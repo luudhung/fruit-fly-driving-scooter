@@ -1,4 +1,4 @@
-export const CONSTRUCTION_SCHEDULE_VERSION=1;
+export const CONSTRUCTION_SCHEDULE_VERSION=2;
 export const GAME_DAY_SECONDS=86400;
 export const CONSTRUCTION_HOURLY_WAGE=3;
 
@@ -9,7 +9,7 @@ const boundedProgress=value=>Math.min(1,nonnegative(value));
 /**
  * A structural schedule uses the undamaged blueprint, never the burnt shell.
  * Two game days is the floor for a small, low house (up to 120 m² and 6 m).
- * More floors and a larger footprint each require progressively more time.
+ * More floors and a larger footprint require more time, capped at ten game days.
  * targetCrew is both the planned crew and the maximum productive structural
  * crew: adding workers cannot compress this minimum building duration.
  */
@@ -19,7 +19,7 @@ export function constructionSchedule(building={},options={}){
  const depth=positive(blueprint.d,positive(building.d,12));
  const height=positive(options.targetHeight,positive(blueprint.h,positive(building.originalHeight,positive(building.h,6))));
  const footprint=width*depth;
- const structureSeconds=Math.ceil(2*GAME_DAY_SECONDS*Math.sqrt(Math.max(1,footprint/120))*Math.sqrt(Math.max(1,height/6)));
+ const structureSeconds=Math.min(10*GAME_DAY_SECONDS,Math.ceil(2*GAME_DAY_SECONDS*Math.sqrt(Math.max(1,footprint/120))*Math.sqrt(Math.max(1,height/6))));
  const crewLimit=Math.max(1,Math.floor(positive(options.crewLimit,25)));
  const targetCrew=Math.min(crewLimit,Math.max(2,Math.ceil(footprint/120)+Math.ceil(height/6)));
  const workerSeconds=structureSeconds*targetCrew;
@@ -47,7 +47,11 @@ export function constructionWorkStep(schedule,{progress=0,onsiteCount=0,dt=0,ava
  const current=boundedProgress(progress);
  const targetCrew=positive(schedule?.targetCrew,1);
  const activeWorkers=Math.min(Math.floor(nonnegative(onsiteCount)),targetCrew);
- const required=positive(schedule?.workerSeconds,positive(schedule?.structureSeconds,2*GAME_DAY_SECONDS)*targetCrew);
+ const planned=positive(schedule?.structureSeconds,2*GAME_DAY_SECONDS);
+ // A smaller paid crew may take longer, but even the largest structure has a
+ // ten-day productive work ceiling once people and materials are on site.
+ const duration=activeWorkers?Math.min(10*GAME_DAY_SECONDS,planned*targetCrew/activeWorkers):planned;
+ const required=duration*Math.max(1,activeWorkers);
  const budget=availableWages===Infinity?Infinity:nonnegative(availableWages);
  const remaining=(1-current)*required;
  const workerSeconds=Math.min(remaining,activeWorkers*nonnegative(dt),budget*3600/CONSTRUCTION_HOURLY_WAGE);
