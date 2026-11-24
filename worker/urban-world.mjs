@@ -124,7 +124,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   // Completed location pins are reconstructed from durable buildings on a cold Worker start.
   for(const b of Object.values(v.buildings))if(b.id?.startsWith('CIVIC-')&&b.stage==='operational')addLocation(b.id,b.frontage||b,b.name||'Resident-built premises');
  }
- function restoreRequestedDamage(){restoreInitialFireDamage(raw(),{reopen:reopenBuilding,cancelUnstartedProject:p=>{refundProject(p);p.stage='cancelled';p.cancelledAt=now();p.pauseReason='owner restored an unstarted repair';},report});}
+ function restoreRequestedDamage(){let changed=false;restoreInitialFireDamage(raw(),{reopen:b=>{reopenBuilding(b,false);changed=true;},cancelUnstartedProject:p=>{refundProject(p);p.stage='cancelled';p.cancelledAt=now();p.pauseReason='owner restored an unstarted repair';},report});if(changed)apply();}
  function init(){ensure();apply();fireService.init();restoreRequestedDamage();apply();return snapshot();}
  function rememberEvent(f,kind,payload){remember(f,kind,payload);f.urbanMemories=(f.urbanMemories||[]).concat({kind,t:now(),...payload}).slice(-8);}
  function householdUnits(b){return Object.values(raw().housing?.households||{}).filter(h=>h.unitId===b.id);}
@@ -568,9 +568,9 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
   }
   report('construction_complete',`${b.id} passed inspection and reopened.`,{projectId:p.id,buildingId:b.id,ownerId:p.ownerId});
  }
- function reopenBuilding(b){
+ function reopenBuilding(b,refreshGeometry=true){
   restoreBlueprint(b);
-  b.health=100;b.progress=1;delete b.fireFloorDamage;setStage(b,'operational');
+  b.health=100;b.progress=1;delete b.fireFloorDamage;if(refreshGeometry)setStage(b,'operational');else if(b.stage!=='operational'){b.stage='operational';b.lastStageAt=now();}
   if(b.warRecovery?.active){b.warRecovery.active=false;b.warRecovery.restoredAt=now();}
   for(const f of raw().flies)if(f.displacedFrom?.buildingId===b.id){f.displacedFrom=null;f.actionUntil=0;u().displaced=Math.max(0,u().displaced-1);rememberEvent(f,'home_restored',{buildingId:b.id});}
   for(const business of Object.values(raw().enterprises||{}))if(business.locationId===b.id){business.urbanSuspended=false;delete business.suspendedReason;}
