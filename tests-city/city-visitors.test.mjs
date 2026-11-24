@@ -13,10 +13,10 @@ function setup(){
 function money(s){return s.flies.reduce((n,f)=>n+f.money+f.savings,0)+s.cityVisitors.visitors.reduce((n,f)=>n+f.money+f.savings,0)+Object.values(s.businesses).reduce((n,b)=>n+b.cash,0)+s.treasury.cash;}
 
 test('visitors own independent brains and finite prepaid hotel rooms; foreign cash is accounted explicitly',()=>{
- const h=setup(),before=money(h.state),visitors=Array.from({length:40},()=>h.system.spawnVisitor({budget:1000}));
- assert.ok(visitors.every(Boolean));assert.equal(new Set(visitors.map(v=>v.brain.id)).size,40);assert.equal(h.system.spawnVisitor(),null);assert.equal(h.state.flies.length,0);
- const rooms=h.system.snapshot().hotelRooms;assert.equal(rooms.reduce((n,x)=>n+x.occupied,0),40);assert.ok(rooms.every(x=>x.occupied<=x.capacity));
- assert.equal(h.state.cityVisitors.externalInflow,40000);assert.ok(Math.abs(money(h.state)-before-40000)<1e-6);
+ const h=setup(),before=money(h.state),visitors=Array.from({length:80},()=>h.system.spawnVisitor({budget:1000}));
+ assert.ok(visitors.every(Boolean));assert.equal(new Set(visitors.map(v=>v.brain.id)).size,80);assert.equal(h.system.spawnVisitor(),null);assert.equal(h.state.flies.length,0);
+ const rooms=h.system.snapshot().hotelRooms;assert.equal(rooms.reduce((n,x)=>n+x.occupied,0),80);assert.ok(rooms.every(x=>x.occupied<=x.capacity));
+ assert.equal(h.state.cityVisitors.externalInflow,80000);assert.ok(Math.abs(money(h.state)-before-80000)<1e-6);
  const v=visitors[0],cash=v.money,total=money(h.state);assert.ok(h.system.reserveRoom(v,v.hotelId,4));assert.equal(v.money,cash);assert.equal(money(h.state),total);
 });
 test('airport visitors choose an affordable taxi or public transport from their own traits and brain draw',()=>{

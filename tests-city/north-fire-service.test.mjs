@@ -13,7 +13,7 @@ function setup({northBudget=10000}={}){
  for(const job of ['fire','medical'])for(let i=0;i<4;i++){const home=job==='fire'?NORTH_FIRE_STATION:location('north-hospital'),f=person(`N-${job}-${i}`,home.x,home.z);Object.assign(f,{citizenshipCountryId:'north-city',publicServiceCountryId:'north-city',publicServiceRole:job,nationalServiceRole:job,jobId:`north-${job}`,publicServicePayrollManaged:true,preferredWorkStart:0,preferredWorkHours:8,currentLocationId:home.id,nationalServiceDuty:{kind:job,targetId:home.id}});s.flies.push(f);s.nationalServices.rosters[job].push(f.id);}
  function journey(f,q){journeyRequests.push({flyId:f.id,...q});f.action=q.action;f.targetLocationId=q.id;const p=location(q.id);if(!p)return;if(!f.traveling&&f.currentLocationId===q.id&&Math.hypot(f.x-p.x,f.z-p.z)<32)return;const country=countryAt(p),origin=countryAt(f);
  if(country!==origin){
-  const port=BORDER_CHECKPOINTS.find(b=>b.id==='NORTH-CITY-BRIDGE-3'),dir=borderDirection(port,country,'walk');
+  const port=BORDER_CHECKPOINTS.find(b=>b.id==='NORTH-RIVERSIDE-BRIDGE'),dir=borderDirection(port,country,'walk');
   f.routeWaypoints=[...pedestrianRoute(f,dir.queuePoint),{...dir.admissionPoint,stage:'border-entry',portId:port.id},...pedestrianRoute(dir.admissionPoint,p)];
  }else f.routeWaypoints=pedestrianRoute(f,p);
  f.routeIndex=0;f.traveling=Boolean(f.routeWaypoints.length);f.indoors=false;}

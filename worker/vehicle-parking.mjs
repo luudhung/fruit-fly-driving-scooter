@@ -4,7 +4,7 @@ import {countryAt} from './country-map.mjs';
 /** The same guest/car must reserve space across residents, tourism and freight. */
 export function roadActors(s){
  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[])];
- for(const event of [...(s.northF1?.previousTours||[]),s.northF1?.event].filter(Boolean))
+ for(const event of [...(s.northF1?.previousTours||[]),s.northF1?.event,...(s.worldCup?.previousTours||[]),s.worldCup?.event].filter(Boolean))
   for(const flight of event.charters||[])for(const f of flight.guests||[])if(!['departed','denied','cancelled'].includes(f.phase))actors.push(f);
  return [...new Map(actors.map(f=>[f.id,f])).values()];
 }

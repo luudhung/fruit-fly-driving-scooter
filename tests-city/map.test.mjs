@@ -117,7 +117,7 @@ test('Central Park interior is a walkable free-roam district, not sidewalk-only'
 
 test('Riverside has exactly one-third the urban core footprint and a long connected river',async()=>{
  const {RIVERSIDE,RIVER,BRIDGES,SPORTS_VENUES,LOCATIONS}=await import('../worker/city-map.mjs');
- assert.equal(RIVERSIDE.w*RIVERSIDE.d,720*720/3);assert.ok(RIVER.d>=1000&&RIVER.w>=90);assert.equal(BRIDGES.length,3);
+ assert.equal(RIVERSIDE.w*RIVERSIDE.d,720*720/3);assert.ok(RIVER.d>=1000&&RIVER.w>=90);assert.equal(BRIDGES.length,4);
  assert.ok(BUILDINGS.filter(b=>b.x>480&&b.h>=50).length>=6);
  for(const v of SPORTS_VENUES){assert.ok(LOCATIONS.some(l=>l.id===v.id));assert.ok(!BUILDINGS.some(b=>overlaps(b,v)));}
 });
@@ -136,7 +136,7 @@ test('people and vehicles reach the far bank through real bridges, including a m
 test('the east-bank bridge approaches continue straight without park trees or building footprints',async()=>{
  const {BRIDGES,SPORTS_VENUES,contains}=await import('../worker/city-map.mjs');
  const park=SPORTS_VENUES.find(v=>v.id==='riverside-park');
- for(const bridge of BRIDGES){
+ for(const bridge of BRIDGES.filter(b=>!b.atGrade)){
   for(let x=500;x<=850;x+=2){
    const point={x,z:bridge.z};assert.ok(ROADS.some(r=>contains(r,point,.01)),`missing road at ${x},${bridge.z}`);
    assert.equal(contains(park,point,2),false);assert.equal(blocked(point),false,`obstruction at ${x},${bridge.z}`);

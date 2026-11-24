@@ -33,7 +33,8 @@ for(const s of baseSignals){
   if(distance>20||Math.hypot(x-j.x,z-j.z)>20)continue;
   candidates.push({x,z,distance});
  }
- candidates.sort((a,b)=>a.distance-b.distance||a.x-b.x||a.z-b.z);
+ const wrongCorner=p=>(Math.sign(p.x-j.x)!==Math.sign(original.x-j.x)?30:0)+(Math.sign(p.z-j.z)!==Math.sign(original.z-j.z)?30:0);
+ candidates.sort((a,b)=>wrongCorner(a)+a.distance-wrongCorner(b)-b.distance||a.x-b.x||a.z-b.z);
  const chosen=candidates.find(p=>signalPoseLegal(p)&&reservedSignals.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>.7));
  if(!chosen)signalIssues.push(signalKey(j,axis));
  const pose=Object.freeze(chosen?{x:chosen.x,z:chosen.z}:original);

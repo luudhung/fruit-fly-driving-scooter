@@ -11,7 +11,8 @@ export function createAirportImmigrationScene(make?:(text:string,w:number,h:numb
  const indicator=new THREE.MeshBasicMaterial({color:0x63edb2,toneMapped:false});
  const geometry=new THREE.BoxGeometry(1,1,1);let count=0;
  for(const airport of COUNTRY_AIRPORTS){
-  const layout=airportImmigrationLayout(airport.id);if(!layout)continue;
+  for(const terminalId of airport.terminals?.map(t=>t.id)||['T1']){
+  const layout=airportImmigrationLayout(airport.id,terminalId);if(!layout)continue;
   const floor=airport.id==='island'?1.1:.35;
   for(const gate of layout.gates){
    const station=new THREE.Group();station.name=gate.id;station.position.set(gate.x,floor,gate.z);station.rotation.y=gate.axis==='x'?Math.PI/2:0;
@@ -26,6 +27,7 @@ export function createAirportImmigrationScene(make?:(text:string,w:number,h:numb
    root.add(station);count++;
   }
   if(make){const sign=make('AUTOMATED IMMIGRATION · VISA H$ 50',Math.min(layout.terminal.w-2,35),1.1);sign.position.set(layout.terminal.x,floor+3.6,layout.terminal.z);root.add(sign);}
+ }
  }
  root.userData={gateCount:count,lights:0};batchStaticMeshes(root);return root;
 }

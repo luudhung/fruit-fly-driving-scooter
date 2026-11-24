@@ -27,6 +27,8 @@ export const COUNTRY_AIRPORTS=[
 export const COUNTRY_AIRPORT_ALIASES={airport:'city','north-airport':'north','island-airport':'island',hawaii:'island'};
 export const NORTH_AIRPORT=COUNTRY_AIRPORTS[1];
 export const NORTH_FARM={id:'north-farm',locationId:'north-farm',name:'North City Rice and Vegetable Cooperative',ownerCountryId:COUNTRY_IDS.north,kind:'farm',x:260,z:-790,w:230,d:280,capacity:40,gate:{x:138,z:-790},crops:['rice','vegetables'],fields:[{id:'north-rice-west',crop:'rice',x:202,z:-860,w:98,d:116},{id:'north-rice-east',crop:'rice',x:318,z:-860,w:98,d:116},{id:'north-vegetables-west',crop:'vegetables',x:202,z:-720,w:98,d:116},{id:'north-vegetables-east',crop:'vegetables',x:318,z:-720,w:98,d:116}]};
+// Public bank road stays west of the main river and outside all airport taxiways.
+export const NORTH_RIVERSIDE_LINK=Object.freeze({id:'NORTH-RIVERSIDE-BRIDGE',x:374,z:-570,europeBridgeZ:-505,europeEastX:510});
 export const NORTH_LANDMARK={id:'north-aurora-tower',name:'North City Aurora Tower',x:-198,z:-970,w:18,d:18,h:196,kind:'landmark',countryId:COUNTRY_IDS.north,capacity:16,rent:40,purchaseValue:240000,officeCapacity:24};
 export const NORTH_MILITARY={id:'north-army-compound',x:270,z:-1020,w:180,d:100,drill:{x:270,z:-995,w:80,d:36},gate:{x:270,z:-961}};
 /** One physical perimeter for AI, the player and static presentation. */
@@ -105,7 +107,7 @@ const bridge=(id,x,z,axis,width,motorway=false)=>{
  const north=direction(1,2.6),hans=direction(-1,2.6);
  return{id,fromCountryId:COUNTRY_IDS.hansdrex,toCountryId:COUNTRY_IDS.north,axis,crossingValue:axis==='z'?z:x,bounds:{x,z,w:axis==='z'?width:24,d:axis==='x'?width:24},queuePoint:north.queuePoint,admissionPoint:north.admissionPoint,modes:motorway?['car','scooter','freight','emergency']:['walk','car','scooter','freight','emergency'],motorway,visaFee:50,directions:{[COUNTRY_IDS.north]:north,[COUNTRY_IDS.hansdrex]:hans},walkDirections:{[COUNTRY_IDS.north]:direction(1,6.2),[COUNTRY_IDS.hansdrex]:direction(-1,6.2)}};
 };
-export const BORDER_CHECKPOINTS=[bridge('NORTH-CITY-BRIDGE-1',-520,-570,'z',16),bridge('NORTH-CITY-BRIDGE-2',-380,-570,'z',16),bridge('NORTH-CITY-BRIDGE-3',50,-570,'z',16),bridge('NORTH-RIVER-MOTORWAY',-1080,-570,'z',38,true),bridge('RING-NORTH-RIVER',430,-1100,'x',38,true)];
+export const BORDER_CHECKPOINTS=[bridge('NORTH-CITY-BRIDGE-1',-520,-570,'z',16),bridge('NORTH-CITY-BRIDGE-2',-380,-570,'z',16),bridge(NORTH_RIVERSIDE_LINK.id,NORTH_RIVERSIDE_LINK.x,NORTH_RIVERSIDE_LINK.z,'z',16),bridge('NORTH-RIVER-MOTORWAY',-1080,-570,'z',38,true),bridge('RING-NORTH-RIVER',430,-1100,'x',38,true)];
 export const COUNTRY_BORDER_PORTS=BORDER_CHECKPOINTS;
 export function borderDirection(port,toCountryId,mode='car'){return (mode==='walk'?port.walkDirections:port.directions)?.[toCountryId]||null;}
 export const BORDER_CUSTOMS_DECKS=BORDER_CHECKPOINTS.map(p=>({id:`${p.id}-CUSTOMS-DECK`,x:p.bounds.x,z:p.bounds.z,w:p.axis==='z'?(p.motorway?46:24):24,d:p.axis==='x'?(p.motorway?46:24):24}));
@@ -117,7 +119,7 @@ export const BORDER_CUSTOMS_BUILDINGS=BORDER_CHECKPOINTS.flatMap(port=>[-1,1].ma
  return {
   id:`${port.id}-CUSTOMS-${north?'W':'E'}`,
   name:north?'North City Customs':'Hansdrex Customs',
-  x:port.bounds.x+(port.axis==='z'?side*offset:side*8),
+  x:port.bounds.x+(port.id===NORTH_RIVERSIDE_LINK.id?-offset:port.axis==='z'?side*offset:side*8),
   z:port.bounds.z+(port.axis==='x'?side*offset:side*8),
   w:2.4,d:4,h:3,kind:'customs',countryId
  };

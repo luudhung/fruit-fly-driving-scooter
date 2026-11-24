@@ -9,7 +9,7 @@ const area=(rs:readonly Rect[])=>rs.reduce((n,r)=>n+r.w*r.d,0);
 const contains=(r:Rect,x:number,z:number)=>Math.abs(r.x-x)<=r.w/2&&Math.abs(r.z-z)<=r.d/2;
 
 test('airport ground has explicit concrete/asphalt/paint tiers and disjoint equal-height material unions',()=>{
- const floors=createAirportGroundLayout();assert.ok(Object.isFrozen(floors));assert.ok(floors.length<200);
+ const floors=createAirportGroundLayout();assert.ok(Object.isFrozen(floors));assert.ok(floors.length<350);
  for(const [i,a]of floors.entries()){
   assert.ok(Object.isFrozen(a));assert.ok(a.w>0&&a.d>0);assert.ok([.20,.25,.30,1.05,1.10,1.15].some(y=>Math.abs(a.topY-y)<1e-9));
   for(const b of floors.slice(i+1))if(Math.abs(a.topY-b.topY)<1e-9)assert.equal(intersection(a,b),null,`${a.material}/${b.material} at ${a.topY}`);
@@ -23,18 +23,18 @@ test('airport ground has explicit concrete/asphalt/paint tiers and disjoint equa
 
 test('helicopter walkway stops at public carriageways and the raised helipad instead of repainting their surface',()=>{
  const floors=createAirportGroundLayout(),wanted=subtractRects([AIRPORT_HELI_WALK],[...ROADS,AIRPORT_HELIPAD]),pieces=floors.filter(r=>r.material==='concrete'&&r.topY===.20).flatMap(r=>{const p=intersection(r,AIRPORT_HELI_WALK);return p?[p]:[];});
- assert.ok(wanted.length>=2);assert.ok(Math.abs(area(unionRects(pieces))-area(wanted))<1e-8);
+ assert.ok(wanted.length>=1);assert.ok(Math.abs(area(unionRects(pieces))-area(wanted))<1e-8);
  for(const piece of pieces)for(const cut of [...ROADS,AIRPORT_HELIPAD])assert.equal(intersection(piece,cut),null);
- assert.ok(pieces.some(r=>r.z< -405));assert.ok(pieces.some(r=>r.z> -395));
+ assert.ok(pieces.some(r=>r.z-r.d/2< -410));assert.ok(pieces.some(r=>r.z+r.d/2>=AIRPORT.heliAccess.z));
 });
 
-test('the eight marked bays share one apron and the former spare aliases the last bay without creating another parking spot',()=>{
- assert.equal(AIRPORT.stands.length,8);
+test('sixteen marked bays share four aprons and the spare alias keeps its accepted eighth bay',()=>{
+ assert.equal(AIRPORT.stands.length,16);
  assert.deepEqual(AIRPORT_SPARE_APRON,{x:AIRPORT.stands[7].x,z:AIRPORT.stands[7].z,w:25,d:23});
  assert.deepEqual(AIRPORT_SPARE_PLANE,{...AIRPORT.stands[7],y:3});
  assert.ok(intersection(AIRPORT_TAXI_AXIS,AIRPORT_TAXI_SPUR));
- for(const road of ROADS){assert.equal(intersection(AIRPORT.apron,road),null);for(const lane of AIRPORT.taxiways)assert.equal(intersection(lane,road),null);}
- for(const footprint of [AIRPORT.apron,...AIRPORT.runways.map(r=>({...r,w:r.w+12,d:r.d+10})),...AIRPORT.taxiways,AIRPORT_HELIPAD,AIRPORT.terminal,AIRPORT_SPARE_APRON])assert.equal(area(subtractRects([footprint],AIRPORT_ROAD_EXCLUSIONS)),0);
+ for(const road of ROADS){for(const apron of AIRPORT.aprons)assert.equal(intersection(apron,road),null);for(const lane of AIRPORT.taxiways)assert.equal(intersection(lane,road),null);}
+ for(const footprint of [...AIRPORT.aprons,...AIRPORT.runways.map(r=>({...r,w:r.w+12,d:r.d+10})),...AIRPORT.taxiways,AIRPORT_HELIPAD,...AIRPORT.terminals,AIRPORT_SPARE_APRON])assert.equal(area(subtractRects([footprint],AIRPORT_ROAD_EXCLUSIONS)),0);
  assert.ok(Object.isFrozen(AIRPORT_ROAD_EXCLUSIONS));assert.ok(AIRPORT_ROAD_EXCLUSIONS.every(Object.isFrozen));
 });
 

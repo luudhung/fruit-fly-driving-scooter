@@ -29,8 +29,8 @@ test('signal collider poles exactly match all rendered signal instance positions
   const axis=i%2?'ew':'ns',head=new THREE.Vector3(),bulb=new THREE.Vector3();
   signals.heads.getMatrixAt(i,matrix);head.setFromMatrixPosition(matrix);assert.ok(close(head.x,p.x)&&close(head.z,p.z)&&close(head.y,3.1));
   for(let color=0;color<3;color++){
-   signals.bulbs.getMatrixAt(i*3+color,matrix);bulb.setFromMatrixPosition(matrix);
-   assert.ok(close(bulb.x,p.x+(axis==='ew'?.19:0))&&close(bulb.z,p.z+(axis==='ns'?.19:0))&&close(bulb.y,3.48-color*.39));
+   for(const [face,sign]of [1,-1].entries()){signals.bulbs.getMatrixAt(i*6+face*3+color,matrix);bulb.setFromMatrixPosition(matrix);
+   assert.ok(close(bulb.x,p.x+(axis==='ew'?sign*.19:0))&&close(bulb.z,p.z+(axis==='ns'?sign*.19:0))&&close(bulb.y,3.48-color*.39));}
   }
  }
  assert.equal(cs.filter(c=>ROADS.some(r=>contains(r,c,.15))).length,0);
@@ -112,7 +112,7 @@ test('every shortened main rail and raised hanger has the same rendered and coll
  const root=new THREE.Group();buildRiverBridges(root);const records=transforms(root),rails=records.filter(v=>v.geometry instanceof THREE.CylinderGeometry&&close(v.geometry.parameters.radiusTop,1)&&close(v.scale.x,.3)&&close(v.position.y,1.2)),hangers=records.filter(v=>v.geometry instanceof THREE.CylinderGeometry&&close(v.geometry.parameters.radiusTop,1)&&close(v.scale.x,.12));
  assert.equal(rails.length,named('bridge-rail:').length);for(const c of named('bridge-rail:'))assert.ok(rails.some(v=>matches(c,v.position)&&close(v.scale.y,c.w!)&&close(c.d!,v.scale.x*2)));
  assert.equal(hangers.length,named('bridge-suspender:').length);for(const c of named('bridge-suspender:'))assert.ok(hangers.some(v=>matches(c,v.position)&&close(v.scale.y,c.maxY-c.minY)&&close(v.scale.x,c.radius!)));
- assert.ok(named('bridge-lamp:').length>=BRIDGES.length*14,'own parallel footway cannot remove all bridge lamps');
+ for(const bridge of BRIDGES)assert.ok(named('bridge-lamp:').filter(c=>c.id.startsWith(`bridge-lamp:${bridge.z}:`)).length>=8,'each bridge retains lamps clear of transverse entrances');
  assert.equal(playerCarClear(372,7.35,0,roadTravelY({x:372,z:7.35},'z')-.9),true,'an underpass car remains below the preserved upper rail');
  for(const b of BRIDGES)for(const sign of [-1,1])assert.equal(playerCarClear(364,b.z+sign*7.4,0,.2),true,'the actual west-bank sidewalk entrance also admits a car without an invisible guard');
 });

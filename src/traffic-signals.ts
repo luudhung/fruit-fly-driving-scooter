@@ -32,7 +32,7 @@ export class TrafficSignals{
   ]).filter(bar=>crossingFits(bar,crossingSurface));
   this.poles=new THREE.InstancedMesh(new THREE.CylinderGeometry(.07,.09,3.2,6),new THREE.MeshStandardMaterial({color:0x303638,roughness:.72,metalness:.42}),count*2);
   this.heads=new THREE.InstancedMesh(new THREE.BoxGeometry(.56,1.28,.34),new THREE.MeshStandardMaterial({color:0x111615,roughness:.82}),count*2);
-  this.bulbs=new THREE.InstancedMesh(new THREE.SphereGeometry(.16,7,5),new THREE.MeshBasicMaterial({color:0xffffff}),count*6);
+  this.bulbs=new THREE.InstancedMesh(new THREE.SphereGeometry(.16,7,5),new THREE.MeshBasicMaterial({color:0xffffff}),count*12);
   this.crossings=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:0xf1f2ed,toneMapped:false}),crossingPlans.length);
   this.poles.name='Traffic signal poles';this.heads.name='Traffic signal heads';this.bulbs.name='Traffic signal bulbs';this.crossings.name='Pedestrian crossings';
   const dummy=new THREE.Object3D();let headIndex=0,bulbIndex=0,crossingIndex=0;
@@ -44,8 +44,10 @@ export class TrafficSignals{
     const {x,z}=signalPolePose(junction,axis);
     place(this.poles,headIndex,x,1.6,z);
     place(this.heads,headIndex++,x,3.1,z,axis==='ew'?Math.PI/2:0);
-    this.signalAxes.push(axis);
-    for(let color=0;color<3;color++)place(this.bulbs,bulbIndex++,x+(axis==='ew'?.19:0),3.48-color*.39,z+(axis==='ns'?.19:0));
+    // Opposing approaches each see a lit face, never the back of a signal.
+    for(const facing of [1,-1]){this.signalAxes.push(axis);
+     for(let color=0;color<3;color++)place(this.bulbs,bulbIndex++,x+(axis==='ew'?facing*.19:0),3.48-color*.39,z+(axis==='ns'?facing*.19:0));
+    }
    }
   }
   for(const bar of crossingPlans)place(this.crossings,crossingIndex++,bar.x,bar.y,bar.z,0,bar.w,.008,bar.d);

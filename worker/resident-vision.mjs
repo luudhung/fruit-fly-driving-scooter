@@ -74,7 +74,7 @@ export function createResidentVision({world,buildings=BUILDINGS,clock}={}){
    if((maxX-minX+1)*(maxZ-minZ+1)>4096){const list=blockers.get('*')||[];list.push(item);blockers.set('*',list);continue;}
    for(let x=minX;x<=maxX;x++)for(let z=minZ;z<=maxZ;z++){const key=x+':'+z,list=blockers.get(key)||[];list.push(item);blockers.set(key,list);}
   }
-  const raceGuests=[s.northF1?.event,...(s.northF1?.previousTours||[])].filter(Boolean).flatMap(event=>(event.charters||[]).filter(flight=>!flight.departed&&(flight.landed||finite(flight.inboundAt)&&flight.inboundAt<=at)).flatMap(flight=>(flight.guests||[]).filter(guest=>!['departed','denied','cancelled'].includes(guest.phase))));
+  const raceGuests=[s.northF1?.event,...(s.northF1?.previousTours||[]),s.worldCup?.event,...(s.worldCup?.previousTours||[])].filter(Boolean).flatMap(event=>(event.charters||[]).filter(flight=>!flight.departed&&(flight.landed||finite(flight.inboundAt)&&flight.inboundAt<=at)).flatMap(flight=>(flight.guests||[]).filter(guest=>!['departed','denied','cancelled'].includes(guest.phase))));
   const people=[...(s.flies||[]),...(s.cityVisitors?.visitors||[]),...raceGuests];
   for(const f of people){
    if(!f?.alive||f.departed||!validId(f.id)||!pos(f))continue;

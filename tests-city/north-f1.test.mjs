@@ -1,3 +1,4 @@
+import {visitorStairsClearAt} from '../worker/visitor-aviation.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createNorthF1,NORTH_F1_RULES} from '../worker/north-f1.mjs';
@@ -70,7 +71,7 @@ test('North GP professional field has ten real teams, twenty local drivers, a si
  assert.equal(system.snapshot().lastRace.results.length,20);
  assert.ok(system.snapshot().lastRace.results.every(r=>r.laps===62&&r.stops>=1));
  step(event.endsAt+1);
- assert.equal(state.northF1.nextAt,event.startsAt+5*DAY);
+ assert.equal(state.northF1.nextAt,event.startsAt+NORTH_F1_RULES.cadenceDays*DAY);
 });
 
 test('foreign visitor snapshots identify the active car leg and stop prediction before the walk back onto the pavement',()=>{
@@ -132,12 +133,12 @@ test('a grandstand ticket requires physically arriving, and is charged only once
  assert.equal(f.countryEntryReceipts[0].fee,50);
 });
 
-test('three hundred physically present foreign fans can buy tickets without consuming either national quota',()=>{
+test('six hundred physically present foreign fans can buy tickets without consuming either national quota',()=>{
  const hansFans=Array.from({length:12},(_,i)=>({...patron('HANS-LOCAL-'+i,0,0),homeX:0,homeZ:0}));
  const northFans=Array.from({length:12},(_,i)=>({...patron('NORTH-LOCAL-'+i,spectator.x,spectator.z),citizenshipCountryId:'north-city',homeX:spectator.x,homeZ:spectator.z}));
  const {system,intl,event,step,state}=fixture([...Array.from({length:20},(_,i)=>driver(i)),...hansFans,...northFans]);
  step(event.startsAt-HOUR);
- assert.equal(NORTH_F1_RULES.charterLimit,300);
+ assert.equal(NORTH_F1_RULES.charterLimit,600);
  assert.ok(event.fanTarget>0&&event.northFanTarget>0);
  const present=(f,id)=>{
   assert.ok(intl.aviationAdmission(f,{airportId:'north',flightId:id,toCountryId:'north-city'}).allowed);
@@ -148,18 +149,18 @@ test('three hundred physically present foreign fans can buy tickets without cons
  Object.assign(northFans[0],{currentLocationId:spectator.id,traveling:false});
  assert.ok(system.attend(northFans[0]));
  const quotas={hansdrex:event.audience.hansdrex,north:event.audience.north};
- const guests=Array.from({length:301},(_,i)=>({...patron('OUTSIDE-FAN-'+i,0,0),kind:'visitor',citizenshipCountryId:'outside',originCountryId:'outside',money:1000,returnFareReserve:200}));
- for(const f of guests.slice(0,300))assert.ok(system.attend(present(f,'visitor-flight-'+Math.floor(Number(f.id.split('-').at(-1))/10))),f.id);
- assert.equal(event.audience.visitors,300);
- assert.equal(event.audience.total,302);
+ const guests=Array.from({length:601},(_,i)=>({...patron('OUTSIDE-FAN-'+i,0,0),kind:'visitor',citizenshipCountryId:'outside',originCountryId:'outside',money:1000,returnFareReserve:200}));
+ for(const f of guests.slice(0,600))assert.ok(system.attend(present(f,'visitor-flight-'+Math.floor(Number(f.id.split('-').at(-1))/10))),f.id);
+ assert.equal(event.audience.visitors,600);
+ assert.equal(event.audience.total,602);
  assert.ok(event.audience.total<NORTH_F1_CIRCUIT.capacity);
  assert.deepEqual({hansdrex:event.audience.hansdrex,north:event.audience.north},quotas);
  const revenue=state.northF1.revenue,firstMoney=guests[0].money;
  assert.equal(system.attend(guests[0]),false,'the same visitor cannot buy a duplicate entry');
- assert.equal(system.attend(present(guests[300],'extra-visitor-flight')),false,'the foreign quota stops at300');
+ assert.equal(system.attend(present(guests[600],'extra-visitor-flight')),false,'the foreign quota stops at600');
  assert.equal(guests[0].money,firstMoney);
  assert.equal(state.northF1.revenue,revenue);
- assert.equal(guests.slice(0,300).filter(f=>f.lastNorthF1Ticket===event.id).length,300);
+ assert.equal(guests.slice(0,600).filter(f=>f.lastNorthF1Ticket===event.id).length,600);
 });
 
 test('the starter refunds sold tickets when the track is unsafe, and refunds only once',()=>{
@@ -181,14 +182,14 @@ test('the starter refunds sold tickets when the track is unsafe, and refunds onl
  assert.equal(fan.money,150);
 });
 
-test('200–300 overseas fans arrive through both airports and choose day trips or paid Hansdrex stays',()=>{
+test('400–600 overseas fans arrive through both airports and choose day trips or paid Hansdrex stays',()=>{
  const {system,intl,event,step,state,totalCash,initialCash}=fixture(Array.from({length:20},(_,i)=>driver(i)));
  const endDay=Math.floor(event.startsAt/DAY)*DAY+DAY;
- for(let at=event.startsAt-72*HOUR;at<=event.startsAt+4*DAY;at+=240)step(at);
+ for(let at=event.startsAt-72*HOUR;at<=event.startsAt+7*DAY;at+=240)step(at);
  const report=system.snapshot(),flights=event.charters;
  const guests=flights.flatMap(f=>f.guests);
  assert.equal(flights.reduce((n,f)=>n+f.guests.length,0),event.charterDemand);
- assert.ok(event.charterDemand>=200&&event.charterDemand<=300);
+ assert.ok(event.charterDemand>=400&&event.charterDemand<=600);
  assert.ok(flights.every(f=>f.guests.length===10));
  assert.deepEqual(new Set(flights.map(f=>f.airportId)),new Set(['city','north']));
  assert.ok(flights.filter(f=>f.parkedAt<event.startsAt-DAY).length>=2);
@@ -199,7 +200,7 @@ test('200–300 overseas fans arrive through both airports and choose day trips 
  assert.ok(event.audience.visitors>=Math.floor(event.charterDemand*.95)&&event.audience.visitors<=event.charterDemand,`Only ${report.visitors} charter visitors were counted at the circuit`);
  assert.ok(report.hotelBookings>100);
  assert.ok(report.hansdrexSightVisits>50);
- assert.ok(flights.every(f=>f.exitAt<event.startsAt),'arrival aircraft vacate the stands before the race');
+ assert.ok(flights.every(f=>f.outboundAt>=visitorStairsClearAt(f,f.guests.length,120)&&f.exitAt>f.outboundAt),'arrival equipment leaves after the last real passenger clears its stairs');
  assert.ok(flights.every(f=>f.returnLeg?.exitAt>event.startsAt),'actual return equipment collects the guests after their visits');
  assert.ok(guests.some(f=>f.nights===0)&&guests.some(f=>f.nights>0));
  assert.ok(intl.snapshot().visaRevenue>=50*event.charterDemand);
@@ -349,6 +350,6 @@ test('retirement promotes a licensed reserve before a higher rated untrained roo
 
 test('a cancelled weekend does not suspend retirement succession while old spectator journeys finish',()=>{
  const people=[...Array.from({length:20},(_,i)=>driver(i)),{...driver(20),id:'NORTH-BETWEEN-RACES'}];
- const {state,event,step,system}=fixture(people);event.status='cancelled';assert.equal(system.snapshot().nextAt,event.startsAt+5*DAY);const old=people.find(f=>f.citizenshipCountryId==='north-city'&&state.northF1.teams.flatMap(t=>t.drivers).includes(f.id));old.ageYears=69;
+ const {state,event,step,system}=fixture(people);event.status='cancelled';assert.equal(system.snapshot().nextAt,event.startsAt+NORTH_F1_RULES.cadenceDays*DAY);const old=people.find(f=>f.citizenshipCountryId==='north-city'&&state.northF1.teams.flatMap(t=>t.drivers).includes(f.id));old.ageYears=69;
  step(state.simulationAgeSeconds+1);assert.equal(event.status,'cancelled');assert.ok(!state.northF1.teams.flatMap(t=>t.drivers).includes(old.id));assert.equal(state.northF1.teams.flatMap(t=>t.drivers).filter(Boolean).length,20);assert.ok(old.racingRetiredAt!=null);
 });

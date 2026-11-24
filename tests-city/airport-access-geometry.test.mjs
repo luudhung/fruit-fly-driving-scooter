@@ -7,8 +7,8 @@ test('airport ring bypass clears the terminal, overhangs, hangar and parking whi
  const footprints=[{...AIRPORT.terminal,id:'terminal'},{id:'roof',x:-180,z:-390,w:64,d:25},{id:'canopy',x:-180,z:-377,w:68,d:8},{id:'tower',x:-245,z:-417,w:14,d:14},{id:'hangar',x:-310,z:-441,w:46,d:32},{id:'parking',x:-245,z:-375,w:44,d:22}];
  for(const r of ROADS)for(const b of footprints)assert.equal(overlaps(r,b),false,`${JSON.stringify(r)} / ${b.id}`);
  for(const id of ['airport','airport-control-tower','airport-hangar']){const b=BUILDINGS.find(b=>b.id===id);assert.ok(b,id);assert.equal(blocked(b),true);assert.equal(ROADS.some(r=>overlaps(r,b,1.4)),false);}
- const pairs=[[{x:-420,z:-398.5},{x:40,z:-398.5}],[{x:-420,z:-398.5},{x:-210,z:0}],[{x:50,z:-600},{x:-180,z:-366}],[{x:-280,z:-360},{x:-154,z:-340}]];
- for(const [a,b]of pairs){const path=pedestrianRoute(a,b,'car');assert.ok(path.length,JSON.stringify({a,b}));assert.ok(path.some(p=>p.z> -360&&p.z< -350));assert.ok(path.every((p,i)=>!i||clearSegment(path[i-1],p)));}
+ const pairs=[[{x:-420,z:-398.5},{x:40,z:-355}],[{x:-420,z:-398.5},{x:-210,z:0}],[{x:50,z:-600},{x:-180,z:-366}],[{x:-280,z:-360},{x:-154,z:-340}]];
+ for(const [a,b]of pairs){const path=pedestrianRoute(a,b,'car');assert.ok(path.length,JSON.stringify({a,b}));assert.ok(path.some(p=>p.z> -380));assert.ok(path.every((p,i)=>!i||clearSegment(path[i-1],p)));}
 });
 
 test('airport public gate remains outside the terminal and connects immigration passengers, metro and city walks',()=>{

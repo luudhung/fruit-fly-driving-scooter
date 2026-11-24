@@ -208,7 +208,7 @@ test('war home repair never charges its household and an unfunded country cannot
 test('damaged customs and North barracks receive matching country budgets even when Hans works are full',()=>{
  const t=setup(),north=t.s.businesses['treasury:north-city']={cash:1000000};t.s.treasury.cash=10000000;
  t.s.urbanWorld.nextFireAt=t.s.urbanWorld.nextGrowthAt=t.s.urbanWorld.development.nextReviewAt=1e12;
- const barracks=BUILDINGS.find(b=>b.id==='north-army'),northBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-W'),hansBooth=BUILDINGS.find(b=>b.id==='NORTH-CITY-BRIDGE-3-CUSTOMS-E');
+ const barracks=BUILDINGS.find(b=>b.id==='north-army'),northBooth=BUILDINGS.find(b=>b.id==='NORTH-RIVERSIDE-BRIDGE-CUSTOMS-W'),hansBooth=BUILDINGS.find(b=>b.id==='NORTH-RIVERSIDE-BRIDGE-CUSTOMS-E');
  for(const b of [barracks,northBooth,hansBooth])t.s.urbanWorld.buildings[b.id]={...b,health:4,stage:'collapsed'};
  const hansPlots=BUILDINGS.filter(b=>b.kind==='house'&&b.x<360&&b.z>-500).slice(0,24);
  assert.equal(hansPlots.length,24);

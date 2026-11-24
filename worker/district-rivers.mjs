@@ -1,3 +1,4 @@
+import {NORTH_RIVERSIDE_LINK} from './country-map.mjs';
 /** Compact canals occupy existing undeveloped corridors; no home parcel moves. */
 export function districtRiverTopology(worldHalf=1150){
  const west={id:'west-city-river',name:'Sông thành phố phía Tây',x:-430,z:(worldHalf+2-570)/2,w:20,d:worldHalf+2+570};
@@ -5,7 +6,7 @@ export function districtRiverTopology(worldHalf=1150){
  const westStreets=[-400,-340,-260,-180,-116,0,116,180,260,340,400];
  const bridges=[
   ...westStreets.map((z,i)=>({id:`WEST-CITY-BRIDGE-${i+1}`,riverId:west.id,x:west.x,z,w:64,d:16,axis:'x',roadWidth:z===400||z===-400?12:9,walkOffset:6.2,from:'west',to:'main'})),
-  ...[-520,-380,50].map((x,i)=>({id:`NORTH-CITY-BRIDGE-${i+1}`,riverId:north.id,x,z:north.z,w:16,d:72,axis:'z',roadWidth:9.5,walkOffset:6.2,from:'north',to:x===-520?'west':'main'})),
+  ...[-520,-380,NORTH_RIVERSIDE_LINK.x].map((x,i)=>({id:i===2?NORTH_RIVERSIDE_LINK.id:`NORTH-CITY-BRIDGE-${i+1}`,riverId:north.id,x,z:north.z,w:16,d:72,axis:'z',roadWidth:9.5,walkOffset:6.2,from:'north',to:x===-520?'west':'main'})),
   {id:'WEST-RIVER-MOTORWAY',riverId:west.id,x:west.x,z:440,w:64,d:38,axis:'x',roadWidth:34,motorway:true,from:'west',to:'main'},
   {id:'NORTH-RIVER-MOTORWAY',riverId:north.id,x:-1080,z:north.z,w:38,d:72,axis:'z',roadWidth:34,motorway:true,from:'north',to:'west'},
  ];
@@ -19,6 +20,9 @@ export function districtRiverTopology(worldHalf=1150){
   {id:'NORTH-WEST-BRIDGE-AVENUE',x:-520,z:-470,w:9.5,d:260},
   {id:'NORTH-WEST-BRIDGE-CONNECTOR',x:-475,z:-600,w:90,d:9},
   {id:'NORTH-MAIN-WEST-BRIDGE-AVENUE',x:-380,z:-500,w:9.5,d:200},
+  {id:'NORTH-RIVERSIDE-ACCESS',x:NORTH_RIVERSIDE_LINK.x,z:-477.5,w:9.5,d:245},
+  {id:'EUROPE-RIVERSIDE-SHORTCUT',x:442,z:NORTH_RIVERSIDE_LINK.europeBridgeZ,w:136,d:9.5},
+  {id:'EUROPE-NORTH-BANK-AVENUE',x:500,z:-372.5,w:9.5,d:265},
  ];
  return{rivers:[west,north],bridges,promenades,approachRoads};
 }

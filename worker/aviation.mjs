@@ -1,5 +1,5 @@
 import {aircraftPathTiming,timedAircraftPose} from './aircraft-speed.mjs';
-import {AIRPORT,ISLAND} from './city-map.mjs';
+import {AIRPORT,ISLAND,BUILDINGS,urbanGeometryRevision} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_AIRPORT_ALIASES} from './country-map.mjs';
 export {HANSDREX_AIRLINE} from './hansdrex-airline.mjs';
 
@@ -13,11 +13,11 @@ export function tourismFares(priceLevel=1){
 export function nextFlight(now,from='city',minimumLead=AVIATION.checkInSeconds){
  const interval=AVIATION.islandIntervalSeconds,offset=from==='city'?0:AVIATION.islandReturnOffsetSeconds;
  const departure=Math.ceil((now+minimumLead-offset)/interval)*interval+offset;
- return {id:`${from}-${departure}-V2`,from,to:from==='city'?'island':'city',departure,arrival:departure+regionalFlightTiming({from,to:from==='city'?'island':'city'}).at(-1)[0],motionVersion:1};
+ return {id:`${from}-${departure}-V3`,from,to:from==='city'?'island':'city',departure,arrival:departure+regionalFlightTiming({from,to:from==='city'?'island':'city'}).at(-1)[0],motionVersion:2};
 }
 /** Match the published service without hiding older, already-paid flight IDs. */
 export function isScheduledIslandFlight(flight){
- return Boolean(flight&&[`${flight.from}-${flight.departure}`,`${flight.from}-${flight.departure}-V2`].includes(flight.id)&&(
+ return Boolean(flight&&[`${flight.from}-${flight.departure}`,`${flight.from}-${flight.departure}-V2`,`${flight.from}-${flight.departure}-V3`].includes(flight.id)&&(
   flight.from==='city'&&flight.to==='island'&&flight.departure%AVIATION.islandIntervalSeconds===0||
   flight.from==='island'&&flight.to==='city'&&flight.departure%AVIATION.islandIntervalSeconds===AVIATION.islandReturnOffsetSeconds));
 }
@@ -29,21 +29,30 @@ export function nextRegionalFlight(now,from,to,minimumLead=AVIATION.checkInSecon
  if(from==='north'&&to==='island'||from==='island'&&to==='north')return null;
  if(from==='city'&&to==='island'||from==='island'&&to==='city')return nextFlight(now,from,minimumLead);
  const first=from==='north'?(to==='city'?8.75:9.75):from==='city'?9.75:8.75;
- for(let day=Math.floor(now/86400);day<=Math.floor(now/86400)+2;day++)for(let hour=first;hour<=21;hour+=2){const departure=day*86400+hour*3600;if(departure>=now+minimumLead)return{id:`${from}-${to}-${departure}`,from,to,departure,arrival:departure+regionalFlightTiming({from,to}).at(-1)[0],motionVersion:1};}
+ for(let day=Math.floor(now/86400);day<=Math.floor(now/86400)+2;day++)for(let hour=first;hour<=21;hour+=2){const departure=day*86400+hour*3600;if(departure>=now+minimumLead)return{id:`${from}-${to}-${departure}`,from,to,departure,arrival:departure+regionalFlightTiming({from,to}).at(-1)[0],motionVersion:2};}
  return null;
 }
+const regionalPaths=new Map();
 export function regionalFlightPath(flight){
+ const routeKey=[flight.from,flight.to,flight.motionVersion||2,urbanGeometryRevision].join('|');
+ if(regionalPaths.has(routeKey))return regionalPaths.get(routeKey);
  const from=airportById(flight.from),to=airportById(flight.to|| (flight.from==='city'?'island':'city'));if(!from||!to)return null;
- const port=p=>{const r=p.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=vertical?cross+26:(p.taxiwayZ??cross+46),world=(a,c,y=3)=>vertical?[c,y,a]:[a,y,c],stand=p.stands.at(-1);return{stand:[stand.x,3,stand.z],taxiStand:world(vertical?stand.z:stand.x,taxi),taxiThreshold:world(along-half,taxi),threshold:world(along-half,cross),end:world(along+half,cross),climb:world(along+half+190,cross,110),approach:world(along-half-190,cross,110),taxiEnd:world(along+half,taxi)};};
- const a=port(from),b=port(to),mid=[(from.gate.x+to.gate.x)/2,260,(from.gate.z+to.gate.z)/2];
- return[a.stand,a.taxiStand,a.taxiThreshold,a.threshold,[a.end[0],4,a.end[2]],a.climb,mid,b.approach,b.threshold,b.end,b.taxiEnd,b.taxiStand,b.stand];
+ const port=p=>{const r=p.runway,vertical=r.d>r.w,half=(vertical?r.d:r.w)/2-24,along=vertical?r.z:r.x,cross=vertical?r.x:r.z,taxi=vertical?cross+26:(p.taxiwayZ??cross+46),world=(a,c,y=3)=>vertical?[c,y,a]:[a,y,c],stand=p.id==='city'&&flight.motionVersion===1?p.stands[7]:p.stands.at(-1);return{stand:[stand.x,3,stand.z],taxiStand:world(vertical?stand.z:stand.x,taxi),taxiThreshold:world(along-half,taxi),threshold:world(along-half,cross),end:world(along+half,cross),climb:world(along+half+190,cross,110),approach:world(along-half-190,cross,110),taxiEnd:world(along+half,taxi)};};
+ const a=port(from),b=port(to);
+ // The pilot reads the current city envelope before departure. Climb outside
+ // the built-up blocks, then cross above every roof with a wing-height margin.
+ const altitude=Math.max(260,...BUILDINGS.map(b=>Math.max(Number(b.originalHeight)||0,Number(b.h)||0)))+60;
+ a.climb[1]=altitude;b.approach[1]=altitude;
+ const mid=[(from.gate.x+to.gate.x)/2,altitude,(from.gate.z+to.gate.z)/2];
+ const path=[a.stand,a.taxiStand,a.taxiThreshold,a.threshold,[a.end[0],4,a.end[2]],a.climb,mid,b.approach,b.threshold,b.end,b.taxiEnd,b.taxiStand,b.stand];
+ if(regionalPaths.size>=24)regionalPaths.clear();regionalPaths.set(routeKey,path);return path;
 }
 const regionalTimings=new Map();
 export function regionalFlightTiming(flight){
- const key=flight.from+'>'+flight.to;if(!regionalTimings.has(key)){const path=regionalFlightPath(flight);if(!path)return null;regionalTimings.set(key,aircraftPathTiming(path,i=>i<=3||i>=10));}return regionalTimings.get(key);
+ const key=flight.from+'>'+flight.to+'@'+(flight.motionVersion||2)+'@'+urbanGeometryRevision;if(!regionalTimings.has(key)){const path=regionalFlightPath(flight);if(!path)return null;if(regionalTimings.size>=32)regionalTimings.clear();regionalTimings.set(key,aircraftPathTiming(path,i=>i<=3||i>=10,flight.motionVersion===1?{cruiseSpeed:22,accelerate:false}:{}));}return regionalTimings.get(key);
 }
 export function regionalRunwayWindow(flight,airportId){
- if(flight.motionVersion===1){const p=regionalFlightTiming(flight);return airportId===flight.from?[flight.departure+p[3][0],flight.departure+p[4][0]]:[flight.departure+p[8][0],flight.departure+p[9][0]];}
+ if(flight.motionVersion>=1){const p=regionalFlightTiming(flight);return airportId===flight.from?[flight.departure+p[3][0],flight.departure+p[4][0]]:[flight.departure+p[8][0],flight.departure+p[9][0]];}
  return airportId===flight.from?[flight.departure,flight.departure+AVIATION.flightSeconds/3]:[flight.arrival-AVIATION.flightSeconds/3,flight.arrival];
 }
 const mix=(a,b,t)=>a+(b-a)*t;
@@ -55,8 +64,8 @@ export function pathPose(points,progress){
 export function flightPose(now,flight){
  if(flight.regional||flight.from==='north'||flight.to==='north'||flight.from==='city'||flight.from==='island'){
   const points=regionalFlightPath(flight);if(!points)return null;
-  if(now>=flight.arrival){const port=airportById(flight.to||(flight.from==='city'?'island':'city')),stand=port.stands.at(-1);return{...stand,y:3,heading:0,phase:'parked'};}
-  return {...(flight.motionVersion===1?timedAircraftPose(regionalFlightTiming(flight),now-flight.departure):pathPose(points,(now-flight.departure)/Math.max(1,flight.arrival-flight.departure))),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
+  if(now>=flight.arrival){const port=airportById(flight.to||(flight.from==='city'?'island':'city')),stand=port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);return{...stand,y:3,heading:0,phase:'parked'};}
+  return {...(flight.motionVersion>=1?timedAircraftPose(regionalFlightTiming(flight),(now-flight.departure)*regionalFlightTiming(flight).at(-1)[0]/Math.max(1,flight.arrival-flight.departure)):pathPose(points,(now-flight.departure)/Math.max(1,flight.arrival-flight.departure))),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
  }
  const city=[AIRPORT.terminal.x,3,-420],island=[ISLAND.terminal.x,3,ISLAND.gate.z];
  const outbound=[city,[-315,3,-520],[-70,18,-520],[440,180,-430],[580,220,180],
@@ -67,7 +76,7 @@ export function flightPose(now,flight){
 export function scheduledAircraft(now){
  const interval=AVIATION.islandIntervalSeconds,cycle=Math.floor(now/interval)*interval;
  const from=now-cycle<AVIATION.islandReturnOffsetSeconds?'city':'island',departure=cycle+(from==='island'?AVIATION.islandReturnOffsetSeconds:0);
- const flight={id:`${from}-${departure}-V2`,from,to:from==='city'?'island':'city',departure,arrival:departure+regionalFlightTiming({from,to:from==='city'?'island':'city'}).at(-1)[0],regional:true,motionVersion:1};
+ const flight={id:`${from}-${departure}-V3`,from,to:from==='city'?'island':'city',departure,arrival:departure+regionalFlightTiming({from,to:from==='city'?'island':'city'}).at(-1)[0],regional:true,motionVersion:2};
  return {...flightPose(now,flight),...flight};
 }
 export function scheduledAircraftFlights(now){

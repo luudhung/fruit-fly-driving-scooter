@@ -47,7 +47,7 @@ function makeApron() {
  const yellow=0xf6cb5f,white=0xf5ebcd;
  // Taxi surfaces belong to the shared airport ground layout; stand markings
  // use their own higher tier and never duplicate the runway/taxi asphalt.
- ground(AIRPORT.apron.x,-414,228,4,0x889293,.21);
+ for(const apron of AIRPORT.aprons||[AIRPORT.apron])ground(apron.x,-414,apron.w,4,0x889293,.21);
  ground(AIRPORT.terminal.x,-405,4,20,0x889293,.21);
  const digits=[[0,1,2,3,4,5],[1,2],[0,1,6,4,3],[0,1,6,2,3],[5,6,1,2],[0,5,6,2,3],[0,5,6,4,2,3],[0,1,2],[0,1,2,3,4,5,6],[0,1,2,3,5,6]];
  AIRPORT.stands.forEach(({x,z},index)=>{
@@ -58,9 +58,9 @@ function makeApron() {
   ground(x,z+8,4,.23,white);
   ground(x-6,(-414+z+4)/2,2,-414-z-4,0x889293,.26);
   const segments=[[0,-1.15,1,.13],[.49,-.55,.13,1],[.49,.55,.13,1],[0,1.15,1,.13],[-.49,.55,.13,1],[-.49,-.55,.13,1],[0,0,1,.13]];
-  for(const i of digits[index+1]){const [dx,dz,w,d]=segments[i];ground(x+dx,z+9.6+dz,w,d,white);}
+  const label=String(index+1);for(const [digit,char] of [...label].entries())for(const i of digits[Number(char)]){const [dx,dz,w,d]=segments[i];ground(x+dx+(digit-(label.length-1)/2)*1.4,z+9.6+dz,w,d,white);}
  });
- const mesh=new THREE.Mesh(coloredGeometry(parts),new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));mesh.name='Hansdrex Airline · eight marked stands';return mesh;
+ const mesh=new THREE.Mesh(coloredGeometry(parts),new THREE.MeshStandardMaterial({vertexColors:true,roughness:.9}));mesh.name='Hansdrex Airline · sixteen marked stands';return mesh;
 }
 
 function boardingStairsGeometry() {
@@ -86,7 +86,7 @@ export class VisitorAviationRenderer {
   root.add(makeApron());
   const geometry=airlinerGeometry();
   const material=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.55,metalness:.08});
-  // Eight city parking bays, North bays and simultaneous runway/approach traffic.
+  // Sixteen city parking bays, North bays and simultaneous runway/approach traffic.
   const slots=Array.from({length:Math.max(16,AIRPORT.stands.length+visitorStands('north').length+6)});
   this.aircraft=slots.map(()=>{
    const mesh=new THREE.Mesh(geometry,material);

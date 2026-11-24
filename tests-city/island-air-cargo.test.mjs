@@ -23,7 +23,7 @@ test('Hawaii passenger departures are two real minutes apart at scale120 and eac
 });
 test('paid finite daily food remains aboard until actual landing, parking and unloading; restore never duplicates a receipt',()=>{
  const t=fixture(),before=cash(t.s);t.at(8*3600);
- const shipment=t.cargo.snapshot().shipments[0];assert.equal(shipment.quantity,100);assert.equal(shipment.flight.id,'city-28800-V2');
+ const shipment=t.cargo.snapshot().shipments[0];assert.equal(shipment.quantity,100);assert.equal(shipment.flight.id,'city-28800-V3');
  assert.equal(t.s.foodReserve,1400);assert.equal(t.s.businesses.farm.inventory,50);assert.equal(t.s.businesses['island-market'].inventory,0);assert.equal(cash(t.s),before);
  assert.equal(t.cargo.snapshot().publicAdvanceOutstanding,165);assert.equal(t.s.businesses['treasury:hawaii'].cash,835);
  t.at(shipment.flight.arrival-1);assert.equal(t.s.businesses['island-market'].inventory,0);

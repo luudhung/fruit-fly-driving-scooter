@@ -16,7 +16,7 @@ const WATCH='heading to the North City Grand Prix';
 const PREPARATION_HOURS=72;
 const driverCountry=(team,slot)=>team*2+slot<15?HANS:NORTH;
 const DRIVE='reporting for the North City Grand Prix';
-export const NORTH_F1_RULES={cadenceDays:5,startHour:19,laps:62,entryPrice:18,charterLimit:300};
+export const NORTH_F1_RULES={cadenceDays:4,startHour:19,laps:62,entryPrice:18,charterLimit:600};
 const TEAM_COLORS=[0xe83c42,0x17adca,0x24a97b,0xffa022,0x5641c8,0xe14d99,0x3b68f1,0xc5d138,0xf0f4f8,0x903b2b];
 const TEAM_NAMES=['Aurora GP','Northstar Racing','Riverline Works','Circuit Horizon','Midnight Motorsport','Apex Union','Beacon Racing','Polar Dynamics','Argent Grand Prix','Redleaf Engineering'];
 const signature=text=>{let key=2166136261;for(const c of String(text))key=Math.imul(key^c.charCodeAt(0),16777619);return (key>>>0)/4294967296;};

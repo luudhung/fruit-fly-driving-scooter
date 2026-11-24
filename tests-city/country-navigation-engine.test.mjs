@@ -1,10 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {freshState,restoreState,startJourney,moveFly,chooseDestination,countries,liquidMoneySupply,maybeRoamInsidePark} from '../worker/civilization-engine.mjs';
 import {LOCATIONS,clearSegment,METRO_LINES,PARK} from '../worker/city-map.mjs';
-import {countryAt,BORDER_CHECKPOINTS,borderDirection} from '../worker/country-map.mjs';
+import {countryAt,BORDER_CHECKPOINTS,borderDirection,NORTH_RIVERSIDE_LINK} from '../worker/country-map.mjs';
+const crossingX=NORTH_RIVERSIDE_LINK.x,northWalkX=crossingX+6.2,hansWalkX=crossingX-6.2;
 const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
 function point(id,x,z){let p=LOCATIONS.find(p=>p.id===id);if(p)Object.assign(p,{x,z});else LOCATIONS.push(p={id,x,z,type:'country-test',name:id});return p;}
-function fixture(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0};const f=s.flies.find(f=>f.alive&&f.ageYears>23&&!f.publicServiceRole&&!f.facilityEmployment&&!f.businessId&&!f.businessEmployeeOf);Object.assign(f,{x:56.2,y:1.1,z:-550,indoors:false,traveling:false,onTrain:false,onPlane:false,onPrivateHelicopter:false,heliPassenger:false,onFireEngine:false,onAmbulance:false,jobId:null,vehicle:null,money:200,savings:0,health:100,energy:95,hunger:10,thirst:10,stress:5,actionUntil:0,sleeping:false,recoveringEnergy:false,citizenshipCountryId:'hansdrex',countryPresence:{countryId:'hansdrex',entryId:'INITIAL'},routeWaypoints:[],routeIndex:0});point('COUNTRY-NAV-NORTH',56.2,-650);point('COUNTRY-NAV-HANS',43.8,-540);return{s,f};}
+function fixture(){const s=freshState();s.weather={condition:'clear',precipitation:0,wind:0};const f=s.flies.find(f=>f.alive&&f.ageYears>23&&!f.publicServiceRole&&!f.facilityEmployment&&!f.businessId&&!f.businessEmployeeOf);Object.assign(f,{x:northWalkX,y:1.1,z:-550,indoors:false,traveling:false,onTrain:false,onPlane:false,onPrivateHelicopter:false,heliPassenger:false,onFireEngine:false,onAmbulance:false,jobId:null,vehicle:null,money:200,savings:0,health:100,energy:95,hunger:10,thirst:10,stress:5,actionUntil:0,sleeping:false,recoveringEnergy:false,citizenshipCountryId:'hansdrex',countryPresence:{countryId:'hansdrex',entryId:'INITIAL'},routeWaypoints:[],routeIndex:0});point('COUNTRY-NAV-NORTH',northWalkX,-650);point('COUNTRY-NAV-HANS',hansWalkX,-540);return{s,f};}
 function finish(s,f,limit=500){for(let i=0;i<limit&&f.traveling;i++){s.simulationAgeSeconds+=1200;moveFly(f,0,10);}assert.equal(f.traveling,false,JSON.stringify({x:f.x,z:f.z,action:f.action,route:f.routeWaypoints,denied:f.countryTravelDenied}));}
 
 test('checkpoint directions keep opposite cars apart and pedestrians on distinct bridge footpaths',()=>{
@@ -23,8 +24,8 @@ test('an unaffordable foreign journey preserves the indoor pose and a poor hungr
 });
 
 test('tiny waypoint snaps and forged river shortcuts cannot charge through blocked geometry or bypass entry funds',()=>{
- const {s,f}=fixture(),before=liquidMoneySupply();Object.assign(f,{x:62.3,z:-569.7,targetX:62.7,targetZ:-570.1,transitMode:'walk',traveling:true,routeWaypoints:[{x:62.7,z:-570.1,mode:'walk'}],routeIndex:0});assert.equal(clearSegment(f,{x:f.targetX,z:f.targetZ}),false);const pose=[f.x,f.z];moveFly(f);assert.deepEqual([f.x,f.z],pose);assert.equal(f.money,200);assert.equal(f.countryEntryReceipts,undefined);close(liquidMoneySupply(),before);
- Object.assign(f,{x:56.2,z:-569.7,targetX:56.2,targetZ:-570.1,traveling:true,routeWaypoints:[{x:56.2,z:-570.1,mode:'walk'}],money:0,savings:0});assert.ok(clearSegment(f,{x:f.targetX,z:f.targetZ}));moveFly(f);assert.deepEqual([f.x,f.z],[56.2,-569.7]);assert.equal(f.traveling,false);assert.equal(f.countryEntryReceipts,undefined);
+ const {s,f}=fixture(),before=liquidMoneySupply();Object.assign(f,{x:crossingX+12.3,z:-569.7,targetX:crossingX+12.7,targetZ:-570.1,transitMode:'walk',traveling:true,routeWaypoints:[{x:crossingX+12.7,z:-570.1,mode:'walk'}],routeIndex:0});assert.equal(clearSegment(f,{x:f.targetX,z:f.targetZ}),false);const pose=[f.x,f.z];moveFly(f);assert.deepEqual([f.x,f.z],pose);assert.equal(f.money,200);assert.equal(f.countryEntryReceipts,undefined);close(liquidMoneySupply(),before);
+ Object.assign(f,{x:northWalkX,z:-569.7,targetX:northWalkX,targetZ:-570.1,traveling:true,routeWaypoints:[{x:northWalkX,z:-570.1,mode:'walk'}],money:0,savings:0});assert.ok(clearSegment(f,{x:f.targetX,z:f.targetZ}));moveFly(f);assert.deepEqual([f.x,f.z],[northWalkX,-569.7]);assert.equal(f.traveling,false);assert.equal(f.countryEntryReceipts,undefined);
 });
 
 test('a border closed after departure holds the same physical route and peace resumes it without a duplicate fee',()=>{

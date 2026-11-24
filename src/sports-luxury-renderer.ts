@@ -18,6 +18,9 @@ export class SportsLuxuryRenderer{
  private skid:THREE.InstancedMesh;
  private tailRotor:THREE.InstancedMesh;
  private ball:THREE.Mesh;
+ private worldCup:null|{id:string;startsAt:number;endsAt:number;status:string;score:number[];players:number}=null;
+ private scoreLabel:THREE.Sprite|null=null;
+ private scoreKey='';
  private tennisBalls:THREE.InstancedMesh;
  private padDecks:THREE.InstancedMesh;
  private padRings:THREE.InstancedMesh;
@@ -50,6 +53,13 @@ export class SportsLuxuryRenderer{
   this.tailRotor=fleet(new THREE.BoxGeometry(.09,1.8,.12),dark);
   this.ball=new THREE.Mesh(new THREE.SphereGeometry(.35,8,6),new THREE.MeshBasicMaterial({color:0xfff4dc}));this.ball.visible=false;this.root.add(this.ball);
   this.tennisBalls=fleet(new THREE.SphereGeometry(.16,6,4),new THREE.MeshBasicMaterial({color:0xe6f441}),2);
+ }
+ syncWorldCup(event:SportsLuxuryRenderer['worldCup']){
+  this.worldCup=event;
+  const key=event?`${event.id}:${event.status}:${event.score.join('–')}`:'';
+  if(key===this.scoreKey)return;this.scoreKey=key;
+  if(this.scoreLabel){this.scoreLabel.removeFromParent();this.scoreLabel.material.map?.dispose();this.scoreLabel.material.dispose();this.scoreLabel=null;}
+  if(event&&this.makeSign){this.scoreLabel=this.makeSign(`WORLD CUP · ${event.score.join(' – ')} · ${event.status.toUpperCase()}`,20,12);this.scoreLabel.position.set(770,13,231);this.root.add(this.scoreLabel);}
  }
  sync(data:SportsLuxurySnapshot){
   this.data=data;this.fleet=data.helicopters||[];
@@ -104,7 +114,7 @@ export class SportsLuxuryRenderer{
   this.body.count=this.cabin.count=this.tail.count=this.fin.count=this.tailRotor.count=i;this.rotor.count=this.skid.count=i*2;
   for(const mesh of [this.body,this.cabin,this.tail,this.fin,this.tailRotor,this.rotor,this.skid])mesh.instanceMatrix.needsUpdate=true;
   if(this.body.instanceColor)this.body.instanceColor.needsUpdate=true;if(this.fin.instanceColor)this.fin.instanceColor.needsUpdate=true;
-  const m=this.data?.match;this.ball.visible=Boolean(m&&m.players.length>=2&&gameNow>=m.startsAt&&gameNow<m.endsAt);
+  const m=this.data?.match,cup=this.worldCup;this.ball.visible=Boolean(cup&&cup.status==='playing'&&cup.players>=22&&gameNow>=cup.startsAt&&gameNow<cup.endsAt||!cup&&m&&m.players.length>=2&&gameNow>=m.startsAt&&gameNow<m.endsAt);
   if(this.ball.visible){const phase=gameNow/95;this.ball.position.set(770+Math.sin(phase)*10,.6+Math.abs(Math.sin(phase*2))*.8,200+Math.sin(phase*.63)*17);}
   const participants=this.data?.participants.filter(p=>p.kind==='tennis')||[],courts=Math.ceil(participants.length/2);this.tennisBalls.count=Math.min(2,courts);
   for(let court=0;court<this.tennisBalls.count;court++){const t=gameNow/28+court;this.place(this.tennisBalls,court,830+(court?10:-10)+Math.sin(t*.7)*4,.7+Math.abs(Math.cos(t))*2,120+Math.sin(t)*11,0);}

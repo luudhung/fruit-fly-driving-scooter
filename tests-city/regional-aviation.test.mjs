@@ -5,13 +5,15 @@ import {nextRegionalFlight,flightPose,AVIATION,regionalFlightTiming} from '../wo
 import {createRegionalAviationSystem,regionalJourneyBudget} from '../worker/regional-aviation.mjs';
 import {createInternationalLife} from '../worker/international-life.mjs';
 import {visitorArrivalPath} from '../worker/visitor-aviation.mjs';
+import {visitorDeparturePath,visitorDepartureCompleteAt} from '../worker/visitor-aviation.mjs';
+import {airportTerminalForStand} from '../worker/airport-campus.mjs';
 
 const supply=s=>(s.flies||[]).reduce((n,f)=>n+f.money+f.savings,0)+s.treasury.cash+Object.values(s.businesses).reduce((n,b)=>n+Number(b.cash||0),0);
 function fixture(from='north',count=1){
  let s={simulationAgeSeconds:7*3600,timeScale:120,flies:[],treasury:{cash:10000},businesses:{},totalTransactions:0,cityVisitors:{visitors:[],hotels:{}}};
  const airport=COUNTRY_AIRPORTS.find(p=>p.id===from);s.flies=Array.from({length:count},(_,i)=>({id:`RES-${i}`,alive:true,ageYears:30,citizenshipCountryId:airport.countryId,originCountryId:airport.countryId,money:500,savings:1000,health:95,energy:90,x:airport.gate.x,z:airport.gate.z,y:1.1,currentLocationId:airport.locationId,brain:{id:`BRAIN-${i}`}}));
  let countries,air;const build=()=>{countries=createInternationalLife({world:()=>s,redistribute:false});countries.init();air=createRegionalAviationSystem({world:()=>s,aviationAdmission:countries.aviationAdmission,requestAirClearance:countries.requestAirClearance});air.init();};build();
- return{get s(){return s;},get air(){return air;},get countries(){return countries;},restore(){s=structuredClone(s);build();},at(time){s.simulationAgeSeconds=time;},arrive(f,leg,index=0){const p=COUNTRY_AIRPORTS.find(p=>p.id===leg.to),stand=p.stands.at(-1),path=visitorArrivalPath({airportId:p.id,standId:stand.id,arrivalStand:stand,inboundAt:leg.departure,parkedAt:leg.arrival},index,120);s.simulationAgeSeconds=path.at(-1).at+1;air.handleResident(f,{hour:12});}};
+ return{get s(){return s;},get air(){return air;},get countries(){return countries;},restore(){s=structuredClone(s);build();},at(time){s.simulationAgeSeconds=time;},arrive(f,leg,index=0){const p=COUNTRY_AIRPORTS.find(p=>p.id===leg.to),stand=p.id==='city'&&leg.motionVersion===1?p.stands[7]:p.stands.at(-1),path=visitorArrivalPath({...leg,terminalId:p.id==='city'&&leg.motionVersion>=2?airportTerminalForStand(stand).id:undefined,airportId:p.id,standId:stand.id,arrivalStand:stand,inboundAt:leg.departure,parkedAt:leg.arrival},index,120);s.simulationAgeSeconds=path.at(-1).at+1;air.handleResident(f,{hour:12});}};
 }
 
 test('the four direct airport pairs have ten-seat schedules and actual runway/taxi/flight/immigration trajectories; North-Hawaii requires Hansdrex',()=>{
@@ -22,7 +24,7 @@ test('the four direct airport pairs have ten-seat schedules and actual runway/ta
   t.at(flight.departure+regionalFlightTiming(flight)[6][0]);t.air.handleResident(f);assert.equal(f.onPlane,true);assert.ok(f.y>20);assert.deepEqual({x:f.x,y:f.y,z:f.z},{x:flightPose(t.s.simulationAgeSeconds,flight).x,y:flightPose(t.s.simulationAgeSeconds,flight).y,z:flightPose(t.s.simulationAgeSeconds,flight).z});
   t.at(flight.arrival+180);t.air.handleResident(f);assert.equal(f.onPlane,false);assert.equal(f.airportMotion?.timed,true);assert.ok(f.y>=1.1&&f.y<=3.4);assert.equal(t.countries.snapshot().visaRevenue,0,'no airport fee is charged during overflight or on the aircraft');
   t.arrive(f,flight);assert.equal(f.currentLocationId,to.locationId);assert.equal(f.airportMotion,null);assert.equal(t.countries.snapshot().visaRevenue,50);assert.equal(trip.phase,'visiting');assert.equal(t.s.cityVisitors.hotels[trip.hotelId].rooms[f.id].checkedIn,false,'a reserved room is not a remote check-in');
-  t.restore();const restored=t.s.flies[0],back=restored.countryAirTrip.inbound;Object.assign(restored,{currentLocationId:to.locationId,x:to.gate.x,z:to.gate.z,traveling:false});t.at(back.departure-1200);t.air.handleResident(restored);t.at(back.departure+600);t.air.handleResident(restored);assert.equal(restored.onPlane,true);
+  t.restore();const restored=t.s.flies[0],back=restored.countryAirTrip.inbound;Object.assign(restored,{currentLocationId:to.locationId,x:to.gate.x,z:to.gate.z,traveling:false});restored.countryAirTrip.returningToGate=true;t.at(back.departure-(back.from==='city'?18*3600:1200));t.air.handleResident(restored);t.at(back.departure+600);t.air.handleResident(restored);assert.equal(restored.onPlane,true);
   t.arrive(restored,back);assert.equal(restored.countryAirTrip,null);assert.equal(restored.currentLocationId,from.locationId);assert.equal(t.countries.snapshot().visaRevenue,50,'the home-country return is exempt');assert.equal(supply(t.s),total);assert.equal(t.air.snapshot().completedTrips,1);
  }
 });
@@ -32,6 +34,31 @@ test('both manifests reject seat eleven, keep identity/fare/hotel escrow on rest
  assert.equal(t.air.book(t.s.flies[10],'city'),false);assert.equal(t.s.flies[10].money,500);assert.equal(t.s.businesses['regional-flight-escrow'].cash,10*134);assert.equal(supply(t.s),total);
  const identities=t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]);t.restore();assert.deepEqual(t.s.flies.map(f=>[f.id,f.brain.id,f.money,f.savings]),identities);assert.equal(t.s.businesses['regional-flight-escrow'].cash,10*134);
  const legacy=t.s.flies[10];legacy.airTrip={phase:'outbound-wait',outbound:nextRegionalFlight(t.s.simulationAgeSeconds,'city','island'),inbound:nextRegionalFlight(t.s.simulationAgeSeconds+86400,'island','city'),cost:134};assert.equal(t.air.book(legacy,'island'),false);assert.equal(legacy.airTrip.cost,134);
+});
+
+test('new Hansdrex regional passengers take the free terminal train, check in upstairs and reach the aircraft before its published departure',()=>{
+ const t=fixture('city',11),initial=supply(t.s);
+ for(const f of t.s.flies.slice(0,10))assert.ok(t.air.book(f,'island'));
+ assert.equal(t.air.book(t.s.flies[10],'island'),false,'preparing early does not create an eleventh seat');
+ const f=t.s.flies[0],trip=f.countryAirTrip,plan=trip.outboundBoarding,path=visitorDeparturePath(plan,0,120),checkIn=path.find(p=>p.stage==='departure-check-in');
+ assert.equal(plan.terminalId,'T4');assert.ok(path.some(p=>p.stage==='terminal-train'));
+ assert.equal(checkIn.y,6.52);assert.ok(visitorDepartureCompleteAt(plan,10,120)<trip.outbound.departure,'all ten seats have time for stairs, train, security and boarding');
+ const identity=[f.id,f.brain.id],balance=[f.money,f.savings],escrow=t.s.businesses['regional-flight-escrow'].cash,reservation=structuredClone(trip.outbound);
+ t.at(checkIn.at+60);t.air.handleResident(f);assert.equal(f.onPlane,false);assert.equal(f.y,6.52);assert.ok(f.airportMotion?.timed);assert.equal(f.x,checkIn.x);assert.equal(trip.settled,false);
+ t.restore();const saved=t.s.flies[0],savedTrip=saved.countryAirTrip;
+ assert.deepEqual([saved.id,saved.brain.id],identity);assert.deepEqual([saved.money,saved.savings],balance);assert.deepEqual(savedTrip.outbound,reservation);assert.deepEqual(savedTrip.outboundBoarding,plan);assert.equal(t.s.businesses['regional-flight-escrow'].cash,escrow);
+ t.at(trip.outbound.departure-59-(AVIATION.seats-1)*36);t.air.handleResident(saved);assert.equal(saved.onPlane,true);assert.equal(saved.x,plan.arrivalStand.x);assert.equal(saved.airportMotion,null);assert.equal(savedTrip.settled,false);
+ t.at(savedTrip.outbound.departure+1);t.air.handleResident(saved);assert.equal(savedTrip.phase,'outbound');assert.equal(savedTrip.settled,true);const airline=t.s.businesses['regional-air'].cash;t.air.handleResident(saved);assert.equal(t.s.businesses['regional-air'].cash,airline);assert.equal(supply(t.s),initial);
+});
+
+test('already paid version-one regional departures keep their original gate, timetable and fare across reload',()=>{
+ const t=fixture('city'),f=t.s.flies[0];assert.ok(t.air.book(f,'island'));const trip=f.countryAirTrip;
+ for(const flight of [trip.outbound,trip.inbound]){flight.motionVersion=1;flight.id=flight.id.replace(/-V3$/,'-V2');flight.arrival=flight.departure+regionalFlightTiming(flight).at(-1)[0];}
+ delete trip.outboundBoarding;
+ const original=structuredClone(trip.outbound),money=[f.money,f.savings],position=[f.x,f.y,f.z],total=supply(t.s);
+ t.restore();const saved=t.s.flies[0];t.at(original.departure-120);t.air.handleResident(saved);
+ assert.deepEqual(saved.countryAirTrip.outbound,original);assert.equal(saved.countryAirTrip.outboundBoarding,undefined);assert.deepEqual([saved.x,saved.y,saved.z],position);assert.deepEqual([saved.money,saved.savings],money);
+ t.at(original.departure+120);t.air.handleResident(saved);assert.equal(saved.onPlane,true);assert.deepEqual(saved.countryAirTrip.outbound,original);assert.equal(supply(t.s),total);
 });
 
 test('a North traveller checks in for Hawaii only after reaching Hansdrex airport',()=>{

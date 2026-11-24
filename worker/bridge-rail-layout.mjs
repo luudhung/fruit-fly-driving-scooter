@@ -47,10 +47,10 @@ export function bridgeFurnitureLayout({bridges,districtBridges,roads,walks,roadH
    const z=b.z+sign*side,rails=bridgeRailPieces({x:b.x,z,w:b.w,d:.6},'x',accesses,{accept});
    rails.forEach((p,index)=>layout.archRails.push({...p,id:`bridge-rail:${b.z}:${sign}:${index}`,bridgeZ:b.z,side:sign,minY:.9,maxY:1.5}));
    for(const p of bridgeRailPieces({x:b.x,z:b.z+sign*4.65,w:b.w,d:.16},'x',accesses,{accept}))layout.archCurbs.push({...p,bridgeZ:b.z});
-   for(let i=0;i<steps;i+=2){const x=b.x-half+b.w*i/steps,top=2.6+rise*Math.sin(Math.PI*i/steps),bottom=rails.some(p=>x>=p.x-p.w/2-1e-6&&x<=p.x+p.w/2+1e-6)?1.2:6.5;
+   if(!b.atGrade)for(let i=0;i<steps;i+=2){const x=b.x-half+b.w*i/steps,top=2.6+rise*Math.sin(Math.PI*i/steps),bottom=rails.some(p=>x>=p.x-p.w/2-1e-6&&x<=p.x+p.w/2+1e-6)?1.2:6.5;
     if(top>bottom+.05)layout.archHangers.push({id:`bridge-suspender:${b.z}:${sign}:${i}`,bridgeZ:b.z,side:sign,index:i,x,z,radius:.12,minY:bottom,maxY:top});
    }
-   for(const end of [-1,1]){let x=b.x+end*(half+4);const width=main?5:3,pierZ=z+sign*3.5;
+   if(!b.atGrade)for(const end of [-1,1]){let x=b.x+end*(half+4);const width=main?5:3,pierZ=z+sign*3.5;
     for(let step=0;step<6&&bridgeAccessOverlaps({x,z:pierZ,w:width,d:4},accesses,accept);step++)x+=end*2;
     layout.archPiers.push({id:`bridge-pier:${b.z}:${sign}:${end}`,bridgeZ:b.z,side:sign,x,z:pierZ,w:width,d:4,minY:0,maxY:main?12:5});
    }

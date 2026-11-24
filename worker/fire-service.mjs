@@ -1,3 +1,4 @@
+import {strandedInDistrictRiver,safeDistrictRiverPoint} from './district-river-migration.mjs';
 import {provisionDutyMeal} from './duty-meals.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {hasCountryCommitment} from './country-commitments.mjs';
@@ -50,6 +51,7 @@ export function createFireService({world,emit=()=>{},remember=()=>{},startJourne
   syncDepots();
   for(const vehicle of fleet()){
    vehicle.countryId||=COUNTRY_IDS.hansdrex;
+   if(strandedInDistrictRiver(vehicle)){const old={x:vehicle.x,z:vehicle.z},safe=safeDistrictRiverPoint(vehicle,{vehicle:true,preserveCountry:true});if(safe){Object.assign(vehicle,safe,{route:[],routeIndex:0,traveling:false,blocked:false,retryRouteAt:0});if(vehicle.pickup&&dist(vehicle.pickup,old)<6)Object.assign(vehicle.pickup,{x:vehicle.x,z:vehicle.z});}}
    vehicle.crewIds||=[];vehicle.route||=[];if(vehicle.pickup)pickupLocation(vehicle,vehicle.pickup);
    for(const id of vehicle.crewIds){const f=alive(id);if(!f)continue;if(!f.fireEngineDuty){f.fireEngineDuty={vehicleId:vehicle.id,kind:vehicle.kind,phase:vehicle.phase};if(['pullout','enroute','returning','pullin','hospital'].includes(vehicle.phase))f.onFireEngine=vehicle.kind==='fire',f.onAmbulance=vehicle.kind==='ambulance';}}
   }

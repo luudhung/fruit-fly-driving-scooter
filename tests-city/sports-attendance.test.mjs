@@ -20,7 +20,7 @@ function setup({north=24,hans=12,denied=false}={}){
    Object.assign(f,{traveling:true,targetLocationId:chosen.id,pendingAction:chosen.action,action:chosen.action,indoors:false});return true;
   },moveFly:f=>{if(!f.testArrive)return;const place=LOCATIONS.find(l=>l.id===f.targetLocationId);Object.assign(f,{x:place.x,z:place.z,currentLocationId:place.id,traveling:false,action:f.pendingAction});},
   needsAndActivities:()=>{},payAndFinance:()=>{},emit:(type,text,data)=>events.push({type,...data}),remember:(f,type,data)=>memories.push({id:f.id,type,...data})};
- let system=createSportsLuxury(hooks);system.init();
+ let system=createSportsLuxury(hooks);system.init();system.snapshot();state.sportsClubs.nextReviewAt=Infinity;
  return{get state(){return state;},get system(){return system;},journeys,events,memories,
   tick(dt=120){state.simulationAgeSeconds+=dt;system.tick(dt,{hour:state.simulationAgeSeconds%86400/3600});},
   arrive(){for(const f of state.flies)if(f.sportsInvitation){f.testArrive=true;system.handleResident(f,{hour:8});}},

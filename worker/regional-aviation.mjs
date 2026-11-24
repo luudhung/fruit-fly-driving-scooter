@@ -1,9 +1,10 @@
+import {airportTerminalForStand} from './airport-campus.mjs';
 import {createIslandAirCargo} from './island-air-cargo.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraftFlights,isScheduledIslandFlight} from './aviation.mjs';
-import {visitorArrivalPose,visitorArrivalMotion,visitorArrivalPath,visitorRunwaySlot} from './visitor-aviation.mjs';
+import {visitorArrivalPose,visitorArrivalMotion,visitorRunwaySlot,visitorDeparturePath,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const SPORTS_STOP_SECONDS=3600;
 const STUDY_NIGHTS=2,STUDY_TUITION=15,STUDY_COOLDOWN=18*DAY;
@@ -44,6 +45,51 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function hotels(){raw().cityVisitors||={visitors:[],hotels:{}};raw().cityVisitors.hotels||={};return raw().cityVisitors.hotels;}
  function init(){data();cargo.init();for(const id of ['regional-air','regional-flight-escrow'])account(id);return data();}
  function availableSeat(flight,except){return occupancy(flight)-(except?.countryAirTrip&&[except.countryAirTrip.outbound.id,except.countryAirTrip.inbound.id].includes(flight.id)?1:0)<AVIATION.seats;}
+ function departurePlan(flight,boardingStartedAt){
+  if(flight.from!=='city'||!(flight.motionVersion>=2))return null;
+  const stand=airportById('city').stands.at(-1);
+  return {...flight,airportId:'city',standId:stand.id,arrivalStand:stand,terminalId:airportTerminalForStand(stand).id,boardingStartedAt,parkedAt:boardingStartedAt,outboundAt:flight.departure,exitAt:flight.arrival};
+ }
+ function nextReadyFlight(at,from,to,minimumLead=AVIATION.checkInSeconds){
+  let flight=nextRegionalFlight(at,from,to,minimumLead);if(!flight)return null;
+  const plan=departurePlan(flight,at);
+  if(plan){const readyAt=visitorDepartureCompleteAt(plan,AVIATION.seats,raw().timeScale||120)+60+(AVIATION.seats-1)*36;if(flight.departure<readyAt)flight=nextRegionalFlight(readyAt,from,to,0);}
+  for(let i=0;flight&&i<24;i++){
+   const conflict=people().some(person=>person.alive&&[person.countryAirTrip?.outbound,person.countryAirTrip?.inbound,person.airTrip?.outbound,person.airTrip?.inbound].some(leg=>leg&&leg.from===from&&leg.id!==flight.id&&Math.abs(leg.departure-flight.departure)<10800));
+   if(!conflict)return flight;flight=nextRegionalFlight(flight.departure+1,from,to,0);
+  }
+  return flight;
+ }
+ function boardingLead(flight,at=now()){
+  const plan=departurePlan(flight,at);return plan?visitorDepartureCompleteAt(plan,AVIATION.seats,raw().timeScale||120)-at+600:AVIATION.checkInSeconds;
+ }
+ function standFor(flight,airportId){const port=airportById(airportId);return port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);}
+ function activeFlights(at){
+  const flights=new Map(scheduledAircraftFlights(at).map(f=>[f.id,f]));
+  for(const person of people())if(person.alive)for(const flight of [person.countryAirTrip?.outbound,person.countryAirTrip?.inbound,person.airTrip?.outbound,person.airTrip?.inbound])if(flight&&at>=flight.departure&&at<=flight.arrival+900)flights.set(flight.id,flight);
+  return [...flights.values()];
+ }
+ function atStand(flight,at,airportId){
+  const port=at>=flight.arrival?flight.to:flight.from;if(port!==airportId)return false;
+  const pose=flightPose(at,flight),stand=standFor(flight,port);return pose.y<6&&Math.hypot(pose.x-stand.x,pose.z-stand.z)<8;
+ }
+ function groundAircraft(airportId,at=now()){
+  const active=activeFlights(at).filter(f=>atStand(f,at,airportId)).sort((a,b)=>(at>=a.arrival?a.arrival:a.departure)-(at>=b.arrival?b.arrival:b.departure)||a.id.localeCompare(b.id));
+  if(active.length)return active[0];
+  const upcoming=new Map();
+  for(const person of people())if(person.alive){const trip=person.countryAirTrip;if(!trip)continue;for(const key of ['outbound','inbound']){const flight=trip[key];if(flight?.from===airportId&&flight.departure>at&&trip[`${key}Boarding`]?.id===flight.id)upcoming.set(flight.id,flight);}}
+  return [...upcoming.values()].sort((a,b)=>a.departure-b.departure||a.id.localeCompare(b.id))[0]||null;
+ }
+ function departureWalk(plan,index){
+  const path=visitorDeparturePath(plan,index,raw().timeScale||120),gateIndex=path.findIndex(p=>p.stage==='departure-concourse');if(gateIndex<0)return {path,gateIndex};
+  const gate=path[gateIndex],delay=Math.max(0,plan.departure-60-(AVIATION.seats-1-index)*36-path.at(-1).at),result=path.slice(0,gateIndex+1);
+  if(delay>0)result.push({...gate,at:gate.at+delay});
+  result.push(...path.slice(gateIndex+1).map(p=>({...p,at:p.at+delay})));return {path:result,gateIndex};
+ }
+ function pathPoseAt(path,at){
+  if(at<=path[0].at)return path[0];if(at>=path.at(-1).at)return path.at(-1);
+  const i=path.findIndex(p=>p.at>at),a=path[i-1],b=path[i],u=(at-a.at)/Math.max(1,b.at-a.at);return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u,z:a.z+(b.z-a.z)*u};
+ }
  function book(f,toId,{staySeconds=DAY,hotelId,studySchoolId,race=false,visitAirportId=null}={}){
   init();const from=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f)),to=airportById(toId);
   if(!f.alive||f.countryAirTrip||f.airTrip||f.onPlane||f.onTrain||f.traveling||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.taxiJobId||f.urbanTask||!from||!to||from.id===to.id||f.currentLocationId!==from.locationId||Math.hypot(f.x-from.terminal.x,f.z-from.terminal.z)>55||weatherDanger()>.3)return false;
@@ -54,7 +100,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   if(race&&!raceEvent)return false;
   const nights=studySchoolId?STUDY_NIGHTS:1;
   if(studySchoolId)staySeconds=STUDY_NIGHTS*DAY;
-  const outbound=nextRegionalFlight(now(),from.id,to.id),inbound=nextRegionalFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),defaultHotel=hotelId||(from.id==='city'&&to.id==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex?NORTH_SPORTS_PARK.clubhouse.id:hotelFor[visitAirportId||to.id]),roomCost=fares.resortNight*nights,tuition=studySchoolId?STUDY_TUITION:0,cost=fares.roundTrip+roomCost+tuition;
+  const outbound=nextReadyFlight(now(),from.id,to.id),inbound=nextReadyFlight(outbound.arrival+Math.max(7200,staySeconds),to.id,from.id,0),fares=tourismFares(raw().centralBank?.priceLevel),defaultHotel=hotelId||(from.id==='city'&&to.id==='north'&&f.citizenshipCountryId===COUNTRY_IDS.hansdrex?NORTH_SPORTS_PARK.clubhouse.id:hotelFor[visitAirportId||to.id]),roomCost=fares.resortNight*nights,tuition=studySchoolId?STUDY_TUITION:0,cost=fares.roundTrip+roomCost+tuition;
   if(raceEvent&&(outbound.arrival>raceEvent.startsAt-7200||inbound.departure<raceEvent.endsAt+7200))return false;
   const budget=regionalJourneyBudget(f,visitAirportId||to.id,{priceLevel:raw().centralBank?.priceLevel}),visas=budget.visaReserve;
   if(wallet(f)<cost+visas+80||!availableSeat(outbound)||!availableSeat(inbound))return false;
@@ -71,6 +117,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   if(!charge(f,cost,account('regional-flight-escrow')))return false;
   h.rooms[f.id]={visitorId:f.id,bookedAt:now(),checkoutAt:inbound.departure,nights,paid:roomCost,checkedIn:false};
   f.countryAirTrip={phase:'outbound-wait',from:from.id,to:to.id,...(visitAirportId?{visitAirportId}:{}),outbound:{...outbound,regional:true},inbound:{...inbound,regional:true},outboundIndex:occupancy(outbound),inboundIndex:occupancy(inbound),hotelId:hotel,cost,fares,settled:false,bookedAt:now(),visaReserve:visas,...(studySchoolId?{studySchoolId,roomCost,tuition}:{}),...(raceEvent?{raceEvent}:{} )};
+  const boarding=departurePlan(f.countryAirTrip.outbound,now());if(boarding)f.countryAirTrip.outboundBoarding=boarding;
   f.countryFlightPlan=null;f.sleeping=false;f.action='waiting at the regional gate with a paid return ticket';data().ticketsSold+=2;
   remember(f,'regional_flight_booked',{from:from.id,to:to.id,cost,outbound:outbound.id,inbound:inbound.id});return true;
  }
@@ -88,8 +135,8 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function releaseRoom(f,t){const h=hotels()[t.hotelId];if(h?.rooms)delete h.rooms[f.id];}
  function cancel(f,t){if(!t.settled){account('regional-flight-escrow').cash-=t.cost;f.money=Number(f.money||0)+t.cost;f.expensesLifetime=Number(f.expensesLifetime||0)-t.cost;}releaseRoom(f,t);f.countryAirTrip=null;f.onPlane=false;f.action='regional trip refunded because flying weather is unsafe';data().cancellations++;}
  function settle(t){if(t.settled)return;account('regional-flight-escrow').cash-=t.cost;account('regional-air').cash+=t.fares.roundTrip;account(t.hotelId).cash+=t.roomCost??t.fares.resortNight;if(t.tuition)account(t.studySchoolId).cash+=t.tuition;t.settled=true;data().revenue+=t.cost;}
- function arrivalFlight(flight){const port=airportById(flight.to),stand=port.stands.at(-1);return{...flight,airportId:port.id,standId:stand.id,arrivalStand:stand,sector:'north',direction:1,inboundAt:flight.departure,parkedAt:flight.arrival,outboundAt:null,exitAt:null};}
- function delayReturn(f,t){const destination=t.to==='island'&&t.from==='north'?'city':t.from;let next=nextRegionalFlight(now(),t.to,destination);if(!next)return false;for(let i=0;i<24&&!availableSeat(next,f);i++)next=nextRegionalFlight(next.departure+1,t.to,destination,0);if(!availableSeat(next,f)||!clearLeg(next,airportById(t.from).countryId))return false;t.inbound={...next,regional:true};t.inboundIndex=occupancy(next);const room=hotels()[t.hotelId]?.rooms?.[f.id];if(room)room.checkoutAt=next.departure;return true;}
+ function arrivalFlight(flight){const port=airportById(flight.to),stand=port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);return{...flight,terminalId:port.id==='city'&&flight.motionVersion>=2?airportTerminalForStand(stand).id:undefined,airportId:port.id,standId:stand.id,arrivalStand:stand,sector:'north',direction:1,inboundAt:flight.departure,parkedAt:flight.arrival,outboundAt:null,exitAt:null};}
+ function delayReturn(f,t){const destination=t.to==='island'&&t.from==='north'?'city':t.from;let next=nextReadyFlight(now(),t.to,destination);if(!next)return false;for(let i=0;i<24&&!availableSeat(next,f);i++)next=nextRegionalFlight(next.departure+1,t.to,destination,0);if(!availableSeat(next,f)||!clearLeg(next,airportById(t.from).countryId))return false;t.inbound={...next,regional:true};t.inboundIndex=occupancy(next);delete t.inboundBoarding;const room=hotels()[t.hotelId]?.rooms?.[f.id];if(room)room.checkoutAt=next.departure;return true;}
  function care(f,clock){
   if(f.regionalCareAt===now())return;
   f.regionalCareAt=now();needsAndActivities(f,clock);payAndFinance(f,clock);
@@ -118,11 +165,33 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   }
   const t=f.countryAirTrip;if(!t)return false;
   if(!f.alive){releaseRoom(f,t);if(!t.settled){account('regional-flight-escrow').cash-=t.cost;if(f.estateSettled){const heir=(raw().flies||[]).find(h=>h.alive&&(h.id===f.partnerId||(f.children||[]).includes(h.id)));if(heir)heir.savings=Number(heir.savings||0)+t.cost;else raw().treasury.cash+=t.cost;}else f.money=Number(f.money||0)+t.cost;f.expensesLifetime=Number(f.expensesLifetime||0)-t.cost;}f.countryAirTrip=null;f.onPlane=false;return true;}
-  const out=['outbound-wait','outbound','arrival'].includes(t.phase),leg=out?t.outbound:t.inbound;
+  const out=['outbound-wait','outbound','arrival'].includes(t.phase);let leg=out?t.outbound:t.inbound;
   if(t.phase==='outbound-wait'||t.phase==='inbound-wait'){
+   const key=out?'outboundBoarding':'inboundBoarding';
+   if(departurePlan(leg,now())){
+    let plan=t[key];
+    if(!plan||plan.id!==leg.id){
+     plan=departurePlan(leg,now());
+     if(visitorDepartureCompleteAt(plan,AVIATION.seats,raw().timeScale||120)+60>leg.departure){
+      if(!out){if(!delayReturn(f,t))return true;leg=t.inbound;}
+      else{
+       let next=nextReadyFlight(now(),leg.from,leg.to);
+       for(let i=0;next&&i<24&&!availableSeat(next,f);i++)next=nextRegionalFlight(next.departure+1,leg.from,leg.to,0);
+       if(!next||!availableSeat(next,f)||!clearLeg(next,airportById(leg.from).countryId)){f.action='waiting for an available cleared flight after upstairs check-in';return true;}
+       t.outbound={...next,regional:true};t.outboundIndex=occupancy(next);leg=t.outbound;
+      }
+      plan=departurePlan(leg,now());
+     }
+     t[key]=plan;
+    }
+    const index=out?t.outboundIndex||0:t.inboundIndex||0,walk=departureWalk(plan,index),path=walk.path,completeAt=path.at(-1)?.at||now(),boarded=now()>=completeAt;
+    const pose=boarded?flightPose(Math.min(now(),leg.departure),leg):pathPoseAt(path,now());
+    Object.assign(f,{x:pose.x,y:pose.y,z:pose.z,onPlane:boarded,indoors:!boarded&&pose.y>3.5,traveling:false,airportMotion:boarded?null:{at:now(),speed:1.8,mode:'walk',timed:true,points:path.map(({x,y,z,at})=>({x,y,z,at}))},transitMode:boarded?'airplane':'walk',currentLocationId:null,action:boarded?'seated on the reserved regional flight':'taking the terminal train and checking in upstairs for the reserved flight'});
+
+   }
    if(now()<leg.departure)return true;
    if(weatherDanger()>.3){if(out)cancel(f,t);else delayReturn(f,t);return true;}
-   if(out)settle(t);t.phase=out?'outbound':'inbound';f.onPlane=true;f.indoors=false;f.traveling=false;
+   if(out)settle(t);t.phase=out?'outbound':'inbound';f.onPlane=true;f.indoors=false;f.traveling=false;f.airportMotion=null;
   }
   if(t.phase==='outbound'||t.phase==='inbound'||t.phase==='arrival'||t.phase==='return-arrival'){
    const returning=t.phase==='inbound'||t.phase==='return-arrival',flight=returning?t.inbound:t.outbound;
@@ -151,10 +220,10 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
 
    if(!f.traveling&&f.currentLocationId===t.hotelId){const room=hotels()[t.hotelId]?.rooms?.[f.id];if(room)room.checkedIn=true;}
    const airport=airportById(t.to);
-   const extendedReturn=t.hotelId===NORTH_SPORTS_PARK.clubhouse.id||Boolean(t.studySchoolId||t.raceEvent||t.visitAirportId);
+   const extendedReturn=t.hotelId===NORTH_SPORTS_PARK.clubhouse.id||Boolean(t.studySchoolId||t.raceEvent||t.visitAirportId||departurePlan(t.inbound,now()));
    const walkLead=extendedReturn?Math.min(14*3600,Math.hypot(f.x-airport.gate.x,f.z-airport.gate.z)*Number(raw().timeScale||120)/2.5*1.35):0;
    // Preserve the longer return buffer after the traveller starts moving.
-   if(t.returningToGate||t.northSportsReturning||now()>=t.inbound.departure-AVIATION.checkInSeconds-walkLead){
+   if(t.returningToGate||t.northSportsReturning||now()>=t.inbound.departure-boardingLead(t.inbound)-walkLead){
     if(extendedReturn)t.returningToGate=true;
     if(!f.traveling&&f.currentLocationId===airport.locationId){t.phase='inbound-wait';return handleResident(f,clock);}
     if(now()>=t.inbound.departure)delayReturn(f,t);
@@ -196,7 +265,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    if(!trip||!f.alive)continue;
    for(const leg of [trip.outbound,trip.inbound]){
     if(!leg||at<leg.departure-300||at>leg.arrival+900)continue;
-    if(isScheduledIslandFlight(leg)&&leg.motionVersion===1&&!manifests.has(leg.id))continue;
+    if(isScheduledIslandFlight(leg)&&leg.motionVersion>=1&&!manifests.has(leg.id))continue;
     let record=manifests.get(leg.id);
     if(!record){
      record=manifest(leg,airportById(leg.from).countryId,flightPose(at,leg));
@@ -204,6 +273,12 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
     }
     record.passengerIds.push(f.id);
    }
+  }
+  // Only one physical plane owns a regional stand while boarding. Other paid
+  // departures wait upstairs until that actual aircraft has cleared the stand.
+  for(const port of COUNTRY_AIRPORTS){
+   const owner=groundAircraft(port.id,at);if(!owner||at>=owner.departure)continue;
+   if(!manifests.has(owner.id))manifests.set(owner.id,manifest(owner,port.countryId,flightPose(at,owner)));
   }
   const airports=COUNTRY_AIRPORTS.map(port=>({id:port.id,countryId:port.countryId,
    nextFlights:COUNTRY_AIRPORTS.map(to=>nextRegionalFlight(at,port.id,to.id,0)).filter(Boolean)}));

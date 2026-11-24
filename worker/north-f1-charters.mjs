@@ -1,4 +1,5 @@
-import {visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
+import {airportTerminalForStand} from './airport-campus.mjs';
+import {visitorDepartureCompleteAt,visitorBoardingPose,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
 import {BUILDINGS,LOCATIONS,clearSegment,entrance,pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {trafficActors,reserveRoadParking} from './vehicle-parking.mjs';
 import {createVehicleIndex,signalBarrier} from './traffic.mjs';
@@ -29,14 +30,15 @@ export function f1VisitorTravel(event,guest,at){
  return {traveling:true,transitMode,motion:{at,speed:transitMode==='car'?11:2.8,mode:transitMode,blocked:Boolean(leg.blocked),points},routeWaypoints:route.slice(leg.index),routeIndex:0};
 }
 
-export function createF1Charters({world,signature,admit,intercept,weatherClosed,movementBlocked,account,bookHotel,releaseHotel,visitAttraction,attend,onVehicleCollision}){
+export function createF1Charters({world,signature,admit,intercept,weatherClosed,movementBlocked,account,bookHotel,releaseHotel,visitAttraction,attend,onVehicleCollision,eventKey='northF1',eventVenue=null,foreignDemand=null,teamPlayers=0}){
  const now=()=>Number(world().simulationAgeSeconds||0);
  const scale=()=>Number(world().timeScale||120);
  const ports=['city','north'].map(airportById);
  const byLocation=id=>ports.some(p=>p.locationId===id)
   ?airportPoint(ports.find(p=>p.locationId===id).id)
   :(()=>{const l=LOCATIONS.find(p=>p.id===id)||BUILDINGS.find(p=>p.id===id);return l?{...entrance(l),id}:null;})();
- const {spectator}=NORTH_F1_CIRCUIT;
+ const spectator=eventVenue||NORTH_F1_CIRCUIT.spectator;
+ const stats=()=>world()[eventKey];
  function charge(f,price,to){
   const reserve=f.legacyAirlineContract||f.returnFarePaid?0:200;
   if(Number(f.money||0)<price+reserve)return false;
@@ -158,19 +160,19 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  }
  function traffic(e,id,except){
   const city=world().cityVisitors?.airportTraffic?.flights||[];
-  const events=[...(world().northF1?.previousTours||[]),e];
-  const planes=events.flatMap(event=>(event.charters||[]).flatMap(f=>[f,...(f.returnLeg?[f.returnLeg]:[])]));
+  const events=[...(world().northF1?.previousTours||[]),world().northF1?.event,...(world().worldCup?.previousTours||[]),world().worldCup?.event,e].filter(Boolean);
+  const planes=[...new Set(events)].flatMap(event=>(event.charters||[]).flatMap(f=>[f,...(f.returnLeg?[f.returnLeg]:[])]));
   return [...city,...planes].filter(f=>f!==except&&(f.airportId||'city')===id&&!f.aircraftGone&&Number.isFinite(f.inboundAt));
  }
  function schedule(e,flight,earliest,stay=1800){
   const others=traffic(e,flight.airportId,flight);
   for(let tries=0;tries<40;tries++){
-   const reservation=visitorStandReservation(earliest,others,flight.airportId,stay,{...flight,motionVersion:1});
+   const reservation=visitorStandReservation(earliest,others,flight.airportId,stay,{...flight,motionVersion:2});
    if(!reservation)return false;
-   const candidate={...flight,motionVersion:1,standId:reservation.stand.id,arrivalStand:reservation.stand,runwayId:reservation.runwayId,
+   const candidate={...flight,motionVersion:2,standId:reservation.stand.id,arrivalStand:reservation.stand,terminalId:flight.airportId==='city'?airportTerminalForStand(reservation.stand).id:undefined,runwayId:reservation.runwayId,
     inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration};
    const path=visitorArrivalPath(candidate,Math.max(0,(flight.guests?.length||10)-1),scale());
-   const ground=candidate.kind==='positioning'?visitorArrivalCompleteAt(candidate,flight.guests?.length||10,scale())-path[0].at+780:Math.max(1200,visitorStairsClearAt(candidate,flight.guests?.length||10,scale())-candidate.parkedAt+120);
+   const ground=candidate.kind==='positioning'?visitorDepartureCompleteAt({...candidate,boardingStartedAt:candidate.parkedAt},flight.guests?.length||10,scale())-candidate.parkedAt+780:Math.max(1200,visitorStairsClearAt(candidate,flight.guests?.length||10,scale())-candidate.parkedAt+120);
    outbound(e,candidate,candidate.parkedAt+ground);
    const actualStay=candidate.standReleasedAt-candidate.parkedAt;
    if(actualStay>stay){stay=actualStay;continue;}
@@ -213,19 +215,19 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  function make(e){
   if(e.charterPlanned){migrate(e);return;}
   e.charterPlanned=true;e.tenPassengerVersion=1;e.airportItineraryVersion=1;
-  e.charterDemand=200+Math.min(10,Math.floor(signature(e.id+'crowd')*11))*10;
-  const count=e.charterDemand/10,shortCount=Math.max(1,Math.round(count*.25));
+  e.charterDemand=foreignDemand??400+Math.min(10,Math.floor(signature(e.id+'crowd')*11))*20;
+  const count=Math.ceil((e.charterDemand+teamPlayers)/10),shortCount=foreignDemand===null?Math.max(1,Math.round(count*.25)):0;
   for(let i=0;i<count;i++){
    const short=i>=count-shortCount,airport=short?'north':'city',id=e.id+'-TOUR-'+(i+1);
    const day=Math.floor(e.startsAt/DAY)*DAY;
-   const earliest=short?e.startsAt-(16+signature(id+'hour')*4)*HOUR:e.startsAt-(60+signature(id+'hour')*10)*HOUR;
+   const earliest=short?e.startsAt-(28+signature(id+'hour')*2)*HOUR:e.startsAt-(60+signature(id+'hour')*10)*HOUR;
    const flight={...carrier,id,airportId:airport,sector:sectors[Math.floor(signature(id)*3)],direction:signature(id+'wind')<.5?-1:1,
     earliestAt:Math.max(now()+60,earliest),inboundAt:null,parkedAt:null,arrivingGuests:10,kind:'passenger',guests:[],
     outboundAt:null,exitAt:null,landed:false};
    for(let n=0;n<10;n++){
     const uid=id+'-'+(n+1),temperament=signature(uid+'stay'),long=!short;
     const budget=long?1450+Math.round(signature(uid+'wallet')*550):750+Math.round(signature(uid+'wallet')*190);
-    flight.guests.push({id:uid,name:'Grand Prix visitor '+(i*10+n+1),kind:'visitor',alive:true,ageYears:18+Math.floor(signature(uid+'age')*65),
+    flight.guests.push({id:uid,name:(eventKey==='worldCup'?'World Cup guest ':'Grand Prix visitor ')+(i*10+n+1),kind:'visitor',eventRole:i*10+n>=e.charterDemand?'football-player':'spectator',alive:true,ageYears:i*10+n>=e.charterDemand?20+Math.floor(signature(uid+'age')*16):18+Math.floor(signature(uid+'age')*65),
      entryAirportId:airport,citizenshipCountryId:'outside',originCountryId:'outside',money:budget,savings:0,initialCash:budget,phase:'inbound',
      nights:long?2+Math.floor(temperament*2):0,visitorReservedBudget:330,attractionOffset:Math.floor(signature(uid+'interests')*spots.length),
      touringUntil:long?e.startsAt+HOUR*(32+Math.floor(temperament*10)):e.startsAt+16*HOUR,leaveRaceAt:long?e.endsAt:e.startsAt+16*HOUR});
@@ -246,14 +248,14 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(admit?.(f,{airportId:port.id,flightId:flight.id,toCountryId:port.countryId})?.allowed===false){f.phase='denied';return;}
    if(!f.legacyAirlineContract&&!chargeHansdrexFare(world(),f,'inbound',{reference:flight.id})){f.action='waiting for airline ticket payment';return;}
    Object.assign(f,port.gate,{phase:'visiting',y:1.1,currentLocationId:port.locationId,traveling:false,motion:null,arrivedAt:now()});
-   const stats=world().northF1;
-   stats.charterArrivals++;stats.externalInflow+=f.initialCash;
+   const totals=stats();
+   totals.charterArrivals++;totals.externalInflow+=f.initialCash;
    f.immigrationClearedAt=now();f.visitorReservedBudget=Math.max(200,Number(f.visitorReservedBudget||0));
    if(f.nights>0){
     f.departAt=f.touringUntil+20*HOUR;f.visitorReservedBudget=330;
     bookHotel?.(f,f.nights);
     if(!f.hotelId)f.nights=0;
-    else stats.hotelBookings=Number(stats.hotelBookings||0)+1;
+    else totals.hotelBookings=Number(totals.hotelBookings||0)+1;
    }
   }
   if(f.phase!=='visiting')return;
@@ -267,7 +269,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     // walks from the actual roadside position; no jump to the destination.
     const destination=f.leg.destination;f.rentalCar=false;
     const key=makeRoute(e,f,destination,{x:f.x,z:f.z,y:f.y??1.1});
-    if(key){charge(f,35,account('vehicle-showroom'));f.leg={key,destination,index:0,at:now(),parkingVersion:1};f.parkedCar=null;f.destinationParking=null;f.rentalRecoveredAt=now();world().northF1.rentalRecoveries=Number(world().northF1.rentalRecoveries||0)+1;}
+    if(key){charge(f,35,account('vehicle-showroom'));f.leg={key,destination,index:0,at:now(),parkingVersion:1};f.parkedCar=null;f.destinationParking=null;f.rentalRecoveredAt=now();stats().rentalRecoveries=Number(stats().rentalRecoveries||0)+1;}
     else f.rentalCar=true;
    }
   }else if(f.leg)delete f.leg.blockedSince;
@@ -297,7 +299,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     if(paid&&(f.hansTowerTrip||f.heliPassenger))return;
     f.sights=count+1;f.nextSightAt=now()+2*HOUR;
     if(!paid)charge(f,12,account('city-tourism'));
-    world().northF1.hansdrexSightVisits=Number(world().northF1.hansdrexSightVisits||0)+1;
+    stats().hansdrexSightVisits=Number(stats().hansdrexSightVisits||0)+1;
    }else if(byLocation(site))begin(e,f,site);
    else {f.sights=count+1;f.nextSightAt=now()+600;}
    return;
@@ -307,7 +309,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   f.phase='airport-ready';f.action='waiting for the Hansdrex Airline return flight';releaseHotel?.(f);
  }
  function outbound(e,plane,earliest){
-  const at=visitorRunwaySlot(earliest,visitorFlightDuration(plane,true),traffic(e,plane.airportId,plane),plane.airportId,plane.runwayId,plane.motionVersion===1?visitorRunwayTiming(plane,true):null);
+  const at=visitorRunwaySlot(earliest,visitorFlightDuration(plane,true),traffic(e,plane.airportId,plane),plane.airportId,plane.runwayId,plane.motionVersion>=1?visitorRunwayTiming(plane,true):null);
   plane.outboundAt=at;plane.exitAt=at+visitorFlightDuration(plane,true);
   plane.expectedStandReleaseAt=plane.standReleasedAt=at+visitorStandReleaseSeconds(plane);
  }
@@ -327,15 +329,8 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   }
   if(plane.tookOff&&now()>=plane.exitAt)plane.aircraftGone=true;
  }
- function boardingPose(plane,index){
-  const path=visitorArrivalPath(plane,index,scale()).toReversed(),first=path[0].at,last=path.at(-1).at;
-  const elapsed=now()-plane.boardingStartedAt;
-  if(elapsed>=first-last)return {onPlane:true,...visitorAircraftPose(now(),plane)};
-  const target=first-elapsed;
-  let i=path.findIndex(p=>p.at<=target);i=Math.max(1,i);
-  const a=path[i-1],b=path[i],u=Math.min(1,Math.max(0,(a.at-target)/Math.max(1,a.at-b.at)));
-  return{x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u,z:a.z+(b.z-a.z)*u,onPlane:false};
- }
+ function boardingPose(plane,index){return visitorBoardingPose(now(),plane,index,scale());}
+
  function tick(e){
   migrate(e);
   headway=createVehicleIndex(trafficActors(world()),onVehicleCollision);
@@ -376,7 +371,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    stepPlane(e,plane);
    if(plane.landed&&plane.boardingStartedAt==null){
     plane.boardingStartedAt=now();
-    const duration=Math.max(...flight.guests.map((_,i)=>{const p=visitorArrivalPath(plane,i,scale());return p.at(-1).at-p[0].at;}));
+    const duration=visitorDepartureCompleteAt(plane,flight.guests.length,scale())-now();
     if(plane.outboundAt==null||plane.outboundAt<now()+duration+600)outbound(e,plane,now()+duration+600);
     plane.boardAt=now()+duration;plane.passengerIds=[];
    }
@@ -393,9 +388,9 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     }
    }
    if(plane.aircraftGone){
-    const stats=world().northF1;
+    const totals=stats();
     for(const f of flight.guests){
-     if(['return-flight','airport-ready','boarding'].includes(f.phase)){stats.charterDepartures++;stats.externalOutflow+=f.money+f.savings;}
+     if(['return-flight','airport-ready','boarding'].includes(f.phase)){totals.charterDepartures++;totals.externalOutflow+=f.money+f.savings;}
      if(f.phase==='stranded')continue;
      f.phase='departed';f.departedAt=now();f.money=f.savings=0;f.onPlane=false;
     }

@@ -102,7 +102,7 @@ export const NORTH_F1_PIT_BOXES=Array.from({length:20},(_,index)=>{
 });
 export const NORTH_F1_CIRCUIT=Object.freeze({
  id:NORTH_F1_ID,name:'North City Waterfront Grand Prix',width:16,lapLength,
- points:Object.freeze(samples),spectator,paddock,capacity:900,pit:Object.freeze({enter:13/lapLength,box:.43,exit:188/lapLength,length:pitLength}),
+ points:Object.freeze(samples),spectator,paddock,capacity:1200,pit:Object.freeze({enter:13/lapLength,box:.43,exit:188/lapLength,length:pitLength}),
 });
 const bounds={
  minX:Math.min(...samples.map(p=>p.x))-14,maxX:Math.max(...samples.map(p=>p.x))+14,

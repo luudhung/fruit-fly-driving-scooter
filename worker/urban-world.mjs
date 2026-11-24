@@ -1,7 +1,7 @@
 import {CONSTRUCTION_SCHEDULE_VERSION,constructionSchedule,constructionWorkStep} from './construction-schedule.mjs';
 import {HANSDREX_FRUIT_FARM} from './fruit-farm-map.mjs';
 import {accidentalFireCandidates,buildingFireProfile} from './fire-risk.mjs';
-import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
+import {MAIN_SCHOOL_CAMPUSES,relocateGatewaySchool} from './education-map.mjs';
 import {SPACEPORT} from './spaceport-map.mjs';
 import {NORTH_F1_RESERVED,NORTH_F1_GARAGES,NORTH_F1_GRANDSTANDS} from './north-f1-map.mjs';
 import {BORDER_CUSTOMS_BUILDINGS,COUNTRY_IDS,NORTH_AIRPORT,NORTH_FARM,NORTH_MILITARY,NORTH_MATERIALS_YARD,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
@@ -29,7 +29,7 @@ const NORTH=COUNTRY_IDS.north;
 const materialSupplier=country=>country===NORTH?'north-civic-materials':country===COUNTRY_IDS.hawaii?'hawaii-civic-materials':'civic-materials';
 const materialDepot=country=>country===NORTH?NORTH_MATERIALS_YARD.id:country===COUNTRY_IDS.hawaii?'island-airport':'construction';
 const publicTreasury=country=>country===COUNTRY_IDS.hansdrex?'treasury':`treasury:${country}`;
-const available=(f,now,mealIntake=false)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.fruitFarmDuty&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&(mealIntake||f.hunger<80)&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
+const available=(f,now,mealIntake=false)=>live(f)&&!hasCountryCommitment(f,now)&&!f.publicServiceRole&&!f.internationalWork&&!f.fruitFarmDuty&&!f.facilityEmployment&&!f.industrialFreightDuty&&!f.socialTask&&!f.clubDuty&&!f.worldCupDuty&&!f.urbanTask&&!f.civicDuty&&!f.airTrip&&!f.privateHeliTrip&&!f.taxiTrip&&!f.taxiJob&&!f.cityService&&!f.taxiJobId&&!f.taxiPassenger&&!f.privateFlight&&!f.onPrivateHelicopter&&!f.sportsSession&&!f.fireEngineDuty&&!f.ambulanceDuty&&!f.onFireEngine&&!f.onAmbulance&&!f.onPlane&&!f.onTrain&&!f.heliPassenger&&!f.arrested&&!f.sleeping&&f.energy>25&&(mealIntake||f.hunger<80)&&!['doctor','school','police','military','power','power-evening','power-night','grid-dispatch','firefighter','paramedic'].includes(f.jobId);
 
 /** Durable civic work: only active incidents and projects cost simulation time. No server animation. */
 export function createUrbanWorld({world,random,emit,remember,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted=()=>false}){
@@ -87,6 +87,7 @@ export function createUrbanWorld({world,random,emit,remember,startJourney,moveFl
    }
    v.northF1VenueVersion=2;
   }
+  relocateGatewaySchool(s);
   if(!v.mainEducationVersion){
    for(const campus of MAIN_SCHOOL_CAMPUSES)Object.assign(stateFor(campus.id),campus,{fundingAccountId:'treasury'});
    v.mainEducationVersion=1;

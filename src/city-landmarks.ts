@@ -76,10 +76,10 @@ export function buildAirportAndIsland(root:THREE.Group,make:Sign){
  g.add(createAirportImmigrationScene(make));
  const groundMaterials={concrete,asphalt,white,yellow};
  for(const floor of createAirportGroundLayout()){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(floor.w,floor.d),groundMaterials[floor.material]);mesh.rotation.x=-Math.PI/2;mesh.position.set(floor.x,floor.topY,floor.z);g.add(mesh);}
- for(const [index,strip]of AIRPORT.runways.entries())runway(strip,index===0?'09L  HANSDREX CITY AIRPORT  27R':'09R  HANSDREX CITY AIRPORT  27L');
- for(const t of [AIRPORT.terminal,ISLAND.terminal]){
-  const city=t===AIRPORT.terminal;
-  g.add(createPassengerTerminal(city?AIRPORT:ISLAND,make,{name:city?'Hansdrex International · HCA':'Hawaii Island Airport',modern:city,height:city?10:6}));
+ for(const strip of AIRPORT.runways)runway(strip,`${strip.id} · HANSDREX INTERNATIONAL`);
+ for(const t of [...AIRPORT.terminals,ISLAND.terminal]){
+  const city=t!==ISLAND.terminal;
+  g.add(createPassengerTerminal(city?{terminal:t,gate:AIRPORT.terminals.find(q=>q===t)!.gate}:ISLAND,make,{name:city?`Hansdrex International · ${(t as typeof AIRPORT.terminal).id}`:'Hawaii Island Airport',modern:city,height:city?10:6}));
  }
  sign(g,make,'HCA · HANSDREX CITY AIRPORT',-180,16,-390,66,2.3);
  sign(g,make,'HANSDREX AIRLINE · DEPARTURES & ARRIVALS',-180,10,-376,54,1.5);

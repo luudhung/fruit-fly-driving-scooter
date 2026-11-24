@@ -32,7 +32,7 @@ export function buildRiverBridges(root:THREE.Group){
    const z=bridge.z+direction*side;
    const protectedRail=furniture.archRails.filter(p=>p.bridgeZ===bridge.z&&p.side===direction);rails.push(...protectedRail);
    for(const p of protectedRail)add(p.x-p.w/2,1.2,z,p.x+p.w/2,1.2,z,.3);
-   for(let i=0;i<steps;i++){
+   if(!bridge.atGrade)for(let i=0;i<steps;i++){
     const a=i/steps,b=(i+1)/steps,x=bridge.x-half+bridge.w*a,next=bridge.x-half+bridge.w*b;
     add(x,arch(a),z,next,arch(b),z,main?.42:.28);
     add(x,arch(a)+2.1,z,next,arch(b)+2.1,z,main?.26:.18);
@@ -44,10 +44,10 @@ export function buildRiverBridges(root:THREE.Group){
   }
   const mesh=new THREE.InstancedMesh(beam,steel,bars.length);
   bars.forEach(({a,b,r},i)=>{const delta=b.clone().sub(a);dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,delta.clone().normalize());dummy.scale.set(r,delta.length(),r);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});root.add(mesh);
-  const lamps:number[]=[];for(let i=0;i<=steps;i++){const t=i/steps;for(const sideSign of [-1,1])lamps.push(bridge.x-half+bridge.w*t,arch(t),bridge.z+sideSign*side);}
+  const lamps:number[]=[];if(!bridge.atGrade)for(let i=0;i<=steps;i++){const t=i/steps;for(const sideSign of [-1,1])lamps.push(bridge.x-half+bridge.w*t,arch(t),bridge.z+sideSign*side);}
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(lamps,3));
   const pinLight=new THREE.PointsMaterial({color:0xffd488,size:.55,toneMapped:false,transparent:true,depthWrite:false});bridgeLights.push(pinLight);root.add(new THREE.Points(geo,pinLight));
-  const ribbon:number[]=[];for(let i=0;i<steps;i++)for(const sign of [-1,1])ribbon.push(bridge.x-half+bridge.w*i/steps,arch(i/steps)+.18,bridge.z+sign*side,bridge.x-half+bridge.w*(i+1)/steps,arch((i+1)/steps)+.18,bridge.z+sign*side);
+  const ribbon:number[]=[];if(!bridge.atGrade)for(let i=0;i<steps;i++)for(const sign of [-1,1])ribbon.push(bridge.x-half+bridge.w*i/steps,arch(i/steps)+.18,bridge.z+sign*side,bridge.x-half+bridge.w*(i+1)/steps,arch((i+1)/steps)+.18,bridge.z+sign*side);
   const ribbonGeo=new THREE.BufferGeometry();ribbonGeo.setAttribute('position',new THREE.Float32BufferAttribute(ribbon,3));const glow=new THREE.LineBasicMaterial({color:0xffd19a,transparent:true,depthWrite:false,toneMapped:false});bridgeLights.push(glow);root.add(new THREE.LineSegments(ribbonGeo,glow));
   const count=(Math.floor(bridge.w/20)+1)*2,posts=new THREE.InstancedMesh(new THREE.CylinderGeometry(.065,.09,2.8,5),steel,count),bulbMaterial=new THREE.MeshBasicMaterial({color:0xffe1a1,toneMapped:false,transparent:true});bridgeLights.push(bulbMaterial);
   const bulbs=new THREE.InstancedMesh(new THREE.SphereGeometry(.22,6,4),bulbMaterial,count);let lampIndex=0;
@@ -76,14 +76,14 @@ export function buildSportsDistrict(root:THREE.Group,makeSign:Sign){
    fieldLines(g,[[-13,-23,13,-23],[13,-23,13,23],[13,23,-13,23],[-13,23,-13,-23],[-13,0,13,0],[-8,-23,-8,-14],[-8,-14,8,-14],[8,-14,8,-23],[-8,23,-8,14],[-8,14,8,14],[8,14,8,23]],0,0);
    const circle=new THREE.BufferGeometry().setFromPoints(Array.from({length:49},(_,i)=>new THREE.Vector3(Math.cos(i/48*Math.PI*2)*5,.245,Math.sin(i/48*Math.PI*2)*5)));g.add(new THREE.Line(circle,white));
    const standMatrices:THREE.Matrix4[]=[],d=new THREE.Object3D();
-   for(let row=0;row<5;row++)for(const side of [-1,1]){
+   for(let row=0;row<8;row++)for(const side of [-1,1]){
     d.position.set(side*(15+row*1.4),.4+row*.8,0);d.scale.set(1.5,.8,48);d.updateMatrix();standMatrices.push(d.matrix.clone());
    }
    const stands=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),concrete,standMatrices.length);standMatrices.forEach((m,i)=>stands.setMatrixAt(i,m));g.add(stands);
    const roof=new THREE.MeshStandardMaterial({color:0x366075,metalness:.25,roughness:.6});
-   for(const side of [-1,1]){block(g,8,.45,51,side*19,8,0,roof);for(const z of [-23,23])block(g,.5,8,.5,side*21,4,z,steel);}
+   for(const side of [-1,1]){block(g,10,.45,57,side*21,10,0,roof);for(const z of [-23,23])block(g,.5,10,.5,side*24,5,z,steel);}
    const goalMat=new THREE.MeshBasicMaterial({color:0xf3ede4});for(const side of [-1,1]){for(const x of [-4,4])block(g,.18,3,.18,x,1.7,side*23,goalMat);block(g,8.2,.18,.18,0,3.2,side*23,goalMat);}
-   const label=makeSign('RIVERSIDE STADIUM',32,1.3);label.position.set(0,11,-25);g.add(label);
+   const label=makeSign('HANSDREX WORLD CUP STADIUM',32,1.3);label.position.set(0,11,-25);g.add(label);
   }else{
    for(const x of [-10,10]){
     block(g,16,.06,34,x,.2,0,court);fieldLines(g,[[-7,-14,7,-14],[7,-14,7,14],[7,14,-7,14],[-7,14,-7,-14],[-5,-14,-5,14],[5,-14,5,14],[-5,-6,5,-6],[-5,6,5,6],[0,-6,0,6]],x,0);

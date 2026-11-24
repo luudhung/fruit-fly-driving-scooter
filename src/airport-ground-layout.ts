@@ -1,3 +1,4 @@
+import {AIRPORT_TAXI_BAYS} from '../worker/airport-campus.mjs';
 import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
 import {AIRPORT,ISLAND,ROADS} from '../worker/city-map.mjs';
 import {subtractRects,unionRects,type Rect} from './surface-rectangles.ts';
@@ -13,15 +14,15 @@ export const AIRPORT_SPARE_PLANE=Object.freeze({...AIRPORT.stands[7],y:3});
 export const AIRPORT_TAXI_AXIS=rect(AIRPORT.taxiways[0].x,AIRPORT.taxiways[0].z,AIRPORT.taxiways[0].w,AIRPORT.taxiways[0].d);
 export const AIRPORT_TAXI_SPUR=rect(AIRPORT.taxiways[1].x,AIRPORT.taxiways[1].z,AIRPORT.taxiways[1].w,AIRPORT.taxiways[1].d);
 export const AIRPORT_HELIPAD=rect(AIRPORT.helipad.x,AIRPORT.helipad.z,26,26);
-export const AIRPORT_HELI_WALK=rect(AIRPORT.heliAccess.x,-395,5,70);
+export const AIRPORT_HELI_WALK=rect(AIRPORT.heliAccess.x,(AIRPORT.helipad.z+AIRPORT.heliAccess.z)/2,5,AIRPORT.heliAccess.z-AIRPORT.helipad.z);
 const LAND_SIDE_WALK=rect(-180,-375,65,8),PARKING=rect(-245,-375,44,22);
 
 /** Public streets and curb edges stop at airport-owned pavement/building boundaries. */
 export const AIRPORT_ROAD_EXCLUSIONS:readonly Rect[]=Object.freeze([
- rect(AIRPORT.apron.x,AIRPORT.apron.z,AIRPORT.apron.w,AIRPORT.apron.d),
+ ...AIRPORT.aprons.map(a=>rect(a.x,a.z,a.w,a.d)),
  ...AIRPORT.runways.map(runway=>expanded(runway,12,10)),...AIRPORT.taxiways.map(t=>rect(t.x,t.z,t.w,t.d)),AIRPORT_HELIPAD,
- rect(AIRPORT.terminal.x,AIRPORT.terminal.z,AIRPORT.terminal.w,AIRPORT.terminal.d),
- AIRPORT_SPARE_APRON,LAND_SIDE_WALK,PARKING,
+ ...AIRPORT.terminals.map(t=>rect(t.x,t.z,t.w,t.d)),
+ AIRPORT_SPARE_APRON,LAND_SIDE_WALK,PARKING,...AIRPORT_TAXI_BAYS.map(b=>rect(b.x,b.z,b.w,b.d)),
 ]);
 
 /** Explicit top heights give all asphalt/paint real clearance without depth bias. */
@@ -33,10 +34,16 @@ export function createAirportGroundLayout(publicRoads:readonly Rect[]=ROADS):rea
   for(let x=r.x-r.w/2+16;x<r.x+r.w/2-14;x+=18)add(rect(x,r.z,8,.55),'white',level+.30);
   for(const side of [-1,1])for(let i=0;i<5;i++)add(rect(r.x+side*(r.w/2-13),r.z+(i-2)*2.3,12,1.1),'white',level+.30);
  }
- add(AIRPORT.apron,'concrete',.20);
+ for(const apron of AIRPORT.aprons)add(apron,'concrete',.20);
+ for(const terminal of AIRPORT.terminals)for(const walk of subtractRects([rect(terminal.gate.x,-375,terminal.w,8)],publicRoads))add(walk,'concrete',.20);
  for(const taxiway of AIRPORT.taxiways){add(taxiway,'asphalt',.25);add(rect(taxiway.x,taxiway.z,taxiway.w>taxiway.d?taxiway.w:.3,taxiway.w>taxiway.d?.3:taxiway.d),'yellow',.30);}
  add(LAND_SIDE_WALK,'concrete',.20);
  for(const piece of subtractRects([AIRPORT_HELI_WALK],[...publicRoads,AIRPORT_HELIPAD]))add(piece,'concrete',.20);
+ for(const bay of AIRPORT_TAXI_BAYS){
+  add(rect(bay.x,bay.z,bay.w,bay.d),'asphalt',.25);
+  for(const side of [-1,1])add(rect(bay.x+side*(bay.w/2-.3),bay.z,.25,bay.d-.4),'yellow',.30);
+  add(rect(bay.access.x,(bay.z+bay.access.z)/2,5,bay.access.z-bay.z),'asphalt',.25);
+ }
  add(PARKING,'asphalt',.25);for(let i=0;i<7;i++)add(rect(-262+i*6,-375,.3,18),'white',.30);
  add(AIRPORT_HELIPAD,'asphalt',.25);
  for(const x of [-2,2])add(rect(AIRPORT.helipad.x+x,AIRPORT.helipad.z,.65,6),'white',.30);

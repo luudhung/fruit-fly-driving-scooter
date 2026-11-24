@@ -32,6 +32,7 @@ import {batchStaticBoxes,batchStaticMeshes} from './static-box-batches.ts';
 import {createRoadMaterial,updateRoadLighting} from './road-lighting.ts';
 import {buildMarinaBay} from './marina-bay.ts';
 import {MetroRenderer} from './metro-renderer.ts';
+import {AirportTerminalTrains} from './airport-terminal-trains.ts';
 import {NewYorkArchitecture} from './new-york-architecture.ts';
 import {buildAirportGardens} from './airport-gardens.ts';
 import {buildMotorway} from './motorway.ts';
@@ -231,6 +232,7 @@ type NationalSummary = {residents:number;working:number;traveling:number;indoors
 type CivilizationSnapshot = {
   runtime?:{platform?:string;sampledCatchup?:{snapshotAgeSeconds?:number}};
   spaceProgram?:SpaceProgramView|null;
+  worldCup?:{matches:number;nextAt:number;hostingRevenue:number;revenue:number;charterDepartures?:number;foreignVisitors:FlyState[];event:null|{id:string;startsAt:number;endsAt:number;status:string;score:number[];players:number;foreignFans:number;localFans:number}};
   northF1?:(NorthF1View & {foreignVisitors?:FlyState[]})|null;
   mainlandStats?:Record<'hansdrex'|'north-city',NationalSummary>;
   international?:CountrySnapshot['international'] & {economy?:{fruitFarm?:{workers:number;capacity:number;inventory:number};farm?:{workers:number;stock?:{rice?:number;vegetables?:number;seeds?:number}};trucks?:Array<{id:string;x:number;y:number;z:number;heading:number;phase:string;driverId:string|null;orderId:string|null;speed:number;routeWaypoints:Array<{x:number;z:number;y?:number}>}>}};
@@ -807,7 +809,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
   }));
   if (!rows.length) events.textContent = "Civilization is running; no recent events.";
 
-  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[]),...(s.northF1?.foreignVisitors||[])];
+  const actors=[...(s.flies||[]),...(s.cityVisitors?.visitors||[]),...(s.northF1?.foreignVisitors||[]),...(s.worldCup?.foreignVisitors||[])];
   latestFlyStates = new Map(actors.map((fly) => [fly.id, fly]));
   syncFlyMeshes(actors);
   updateHeliTourState(actors);
@@ -829,6 +831,7 @@ function renderSnapshot(s: CivilizationSnapshot) {
       return s.mapVersion===MAP_VERSION && building?.kind!=='landmark' && building && !['cleared','collapsed','construction'].includes(building.urbanStage ?? '');
     });
     sportsVisuals.sync({...s.sportsLuxury,pads});
+    sportsVisuals.syncWorldCup(s.worldCup?.event||null);
     setPlayerHelipads(pads);
   }
   if(s.cityVisitors){visitorVisuals.sync(s.cityVisitors,actors);visitorAircraft.sync(s.cityVisitors.airportTraffic?.flights);photoAlbum.sync(s.cityVisitors.photos||[]);}
@@ -1054,11 +1057,13 @@ function updateSocietyBoard(s:CivilizationSnapshot){
  const urban=document.getElementById("urban-activity"),visitors=document.getElementById("visitor-activity"),sports=document.getElementById("sports-activity");
  const district=document.getElementById("riverside-residents");if(district&&s.districts)district.textContent=`Tiểu khu châu Âu: ${s.districts.riverside.residents} dân · Phía Bắc: ${s.districts.airport?.residents||0} dân · Phía Tây: ${s.districts.west?.residents||0} dân`;
  if(urban)urban.textContent=s.urbanWorld?`🔥 ${s.urbanWorld.fires.length} đám cháy · ${s.urbanWorld.projects.length} công trình · ${s.urbanWorld.completedProjects||0} hoàn thành · ${s.urbanWorld.floods.length} vùng ngập${s.urbanWorld.workforce?` · Thợ ${s.urbanWorld.workforce.assigned}/${s.urbanWorld.workforce.target} (${s.urbanWorld.workforce.onsite} tại công trường)`:""}`:"Đang kết nối cứu hỏa & xây dựng…";
-  if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length+(s.northF1?.foreignVisitors?.length||0)} khách · ${s.cityVisitors.totalDepartures+(s.northF1?.charterDepartures||0)} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
+  if(visitors)visitors.textContent=s.cityVisitors?`Du lịch: ${s.cityVisitors.visitors.length+(s.northF1?.foreignVisitors?.length||0)+(s.worldCup?.foreignVisitors?.length||0)} khách · ${s.cityVisitors.totalDepartures+(s.northF1?.charterDepartures||0)+(s.worldCup?.charterDepartures||0)} đã về · taxi ${s.cityVisitors.taxiCompleted} chuyến · ${s.cityVisitors.hotelRooms.reduce((n,h)=>n+h.occupied,0)} phòng có khách · ${s.cityVisitors.photoCount} ảnh cư dân`:"Đang kết nối du lịch…";
   const airline=s.cityVisitors?.airportTraffic?.airline;
   if(visitors&&airline)visitors.textContent+=`\n${airline.name} · ${num(airline.oneWayFare)} H$/chiều · khứ hồi + nhập cảnh ${num(airline.roundTripFare+airline.arrivalVisa)} H$ · doanh thu ${num(airline.revenue)} H$`;
  const civic=document.getElementById("civic-activity");if(civic)civic.textContent=s.civicConflict?`Xã hội: ${s.civicConflict.active.length} cuộc tập hợp · ${s.civicConflict.peacefulResolutions} hòa giải · niềm tin ${s.civicConflict.confidence}%`:"";
  if(sports)sports.textContent=s.sportsLuxury?`Thể thao: ${s.sportsLuxury.matchesCompleted} trận · ${s.sportsLuxury.tennisSessions} lượt tennis · ${s.sportsLuxury.helicopters.length} trực thăng riêng · ${s.sportsLuxury.privateFlights} chuyến`:"Đang kết nối thể thao…";
+ if(sports&&s.sportsLuxury?.clubs)for(const club of s.sportsLuxury.clubs)sports.textContent+=`\n${club.kind.toUpperCase()} CLUB · ${club.members} hội viên · ${club.event?.playing.length||0} thi đấu · ${club.event?.spectators.length||0} khán giả · vé ${num(club.ticketRevenue)} H$ · thưởng ${num(club.prizes)} H$`;
+ if(sports&&s.worldCup)sports.textContent+=`\nWORLD CUP · ${s.worldCup.matches} trận · ${s.worldCup.event?.score.join('–')||'chưa bắt đầu'} · ${s.worldCup.event?.players||0} cầu thủ quốc tế · ${s.worldCup.event?.foreignFans||0}/350 khách · ${s.worldCup.event?.localFans||0}/150 cư dân · vé ${num(s.worldCup.revenue)} H$ · phí đăng cai ${num(s.worldCup.hostingRevenue)} H$`;
 }
 
 const cityRoot = new THREE.Group();
@@ -1435,6 +1440,7 @@ for (const x of avenueXs) {
 // ---------- elevated metro network: two tracks and two physical trains per line ----------
 const metroVisuals=new MetroRenderer(cityRoot,makeCanvasSprite,updateSpriteText,graphics.metroDetail);
 const metroTrains=metroVisuals.trains;
+const airportTerminalTrains=new AirportTerminalTrains(cityRoot,makeCanvasSprite);
 renderer.domElement.dataset.metroTracks=String(METRO_LINES.length*2);
 renderer.domElement.dataset.metroTrains=String(metroTrains.length);
 renderer.domElement.dataset.metroPlatforms=String(metroVisuals.stations.length);
@@ -1462,7 +1468,7 @@ heliTailRotor.matrixAutoUpdate=true;
 
 let snapshotReceivedAt=0;
 function updateMetroStationOccupancy(flies:FlyState[]){metroVisuals.syncOccupancy(flies);}
-function updateMetroTrains(now:number){metroVisuals.update(presentationClock.read(now)/Math.max(1,snapshot?.timeScale||120));}
+function updateMetroTrains(now:number){metroVisuals.update(presentationClock.read(now)/Math.max(1,snapshot?.timeScale||120));airportTerminalTrains.update(presentationClock.read(now)/Math.max(1,snapshot?.timeScale||120));}
 
 // ---------- fly rendering ----------
 type FlyVisual = {

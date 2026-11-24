@@ -18,15 +18,16 @@ test('graphics detail changes windows, never removes physical carriages',()=>{
 
 test('rail infrastructure remains visible from across the map while nearby trains resume their current poses',()=>{
  const renderer=setup(),camera=new THREE.PerspectiveCamera(68,1,.1,7000);
- camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.setView(camera);renderer.update(45);
+ const train=METRO_LINES.flatMap(l=>trainStates(l,45)).find(p=>p.active&&p.z< -600)!;
+ assert.ok(train);camera.position.set(train.x,train.y+35,train.z-65);camera.lookAt(train.x,train.y,train.z);renderer.setView(camera);renderer.update(45);
  assert.ok(renderer.stats.visibleChunks>0&&renderer.stats.visibleChunks<renderer.stats.totalChunks);
  const closeTrains=renderer.stats.visibleTrains;assert.ok(closeTrains>0);
- camera.position.set(-260,1100,-850);camera.lookAt(-260,10,-700);renderer.update(45.18);
+ camera.position.set(train.x,train.y+1100,train.z-65);camera.lookAt(train.x,train.y,train.z);renderer.update(45.18);
  assert.ok(renderer.stats.visibleChunks>0);assert.equal(renderer.stats.visibleTrains,0);
  const all=renderer.stats.totalStaticInstances;
  camera.position.set(20000,100,20000);camera.lookAt(21000,100,21000);renderer.update(45.37);
  assert.equal(renderer.stats.visibleChunks,0);assert.equal(renderer.stats.visibleStaticInstances,0);assert.equal(renderer.stats.visibleTrains,0);
- camera.position.set(-260,70,-850);camera.lookAt(-260,10,-700);renderer.update(45.6);
+ camera.position.set(train.x,train.y+35,train.z-65);camera.lookAt(train.x,train.y,train.z);renderer.update(45.6);
  assert.equal(renderer.stats.totalStaticInstances,all);assert.ok(renderer.stats.visibleChunks>0);
  for(const train of renderer.trains.filter(t=>t.group.visible)){
   const line=METRO_LINES[train.lineIndex],pose=trainStates(line,45.6).find(p=>p.id===train.id)!;

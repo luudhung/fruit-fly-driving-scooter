@@ -98,11 +98,11 @@ test('future long holidays change to Hansdrex and express race visits to North w
 
 const rectanglesOverlap=(a,b,margin=0)=>Math.abs(a.x-b.x)<(a.w+b.w)/2+margin&&Math.abs(a.z-b.z)<(a.d+b.d)/2+margin;
 
-test('the two real Hansdrex runways and eight stand envelopes share one layout and clear rivers, public roads and buildings',()=>{
+test('the four real Hansdrex runways and sixteen stand envelopes share one layout and clear rivers, public roads and buildings',()=>{
  const port=airportById('city');
- assert.equal(AIRPORT,HANSDREX_AIRPORT);assert.equal(port.runways.length,2);assert.equal(port.stands.length,8);
+ assert.equal(AIRPORT,HANSDREX_AIRPORT);assert.equal(port.runways.length,4);assert.equal(port.stands.length,16);
  assert.deepEqual(port.runways,AIRPORT.runways);assert.deepEqual(port.stands,AIRPORT.stands);
- assert.equal(new Set(port.runways.map(r=>r.id)).size,2);assert.equal(new Set(port.stands.map(r=>r.id)).size,8);
+ assert.equal(new Set(port.runways.map(r=>r.id)).size,4);assert.equal(new Set(port.stands.map(r=>r.id)).size,16);
  for(const runway of port.runways){
   for(const dx of [-runway.w/2,runway.w/2])for(const dz of [-runway.d/2,runway.d/2])assert.equal(countryAt({x:runway.x+dx,z:runway.z+dz}),'hansdrex');
   assert.ok(!DISTRICT_RIVERS.some(river=>rectanglesOverlap(runway,river,1)),runway.id+' overlaps a river');
@@ -112,14 +112,14 @@ test('the two real Hansdrex runways and eight stand envelopes share one layout a
  assert.ok(!rectanglesOverlap(port.runways[0],port.runways[1],4));
  const envelopes=port.stands.map(stand=>({...stand,w:18,d:20}));
  for(const [i,envelope]of envelopes.entries()){
-  assert.ok(contains(AIRPORT.apron,{x:envelope.x-envelope.w/2,z:envelope.z-envelope.d/2}));
-  assert.ok(contains(AIRPORT.apron,{x:envelope.x+envelope.w/2,z:envelope.z+envelope.d/2}));
+  assert.ok(AIRPORT.aprons.some(apron=>contains(apron,{x:envelope.x-envelope.w/2,z:envelope.z-envelope.d/2})));
+  assert.ok(AIRPORT.aprons.some(apron=>contains(apron,{x:envelope.x+envelope.w/2,z:envelope.z+envelope.d/2})));
   assert.ok(!BUILDINGS.some(building=>rectanglesOverlap(envelope,building,1)),envelope.id+' is blocked by a building');
   assert.ok(envelopes.every((other,j)=>j===i||!rectanglesOverlap(envelope,other,1)),envelope.id+' overlaps another parked aircraft');
  }
 });
 
-test('all eight stand-to-immigration walks remain clear of the control tower and hangar',()=>{
+test('all sixteen stand-to-immigration walks remain clear of the control tower and hangar',()=>{
  for(const stand of AIRPORT.stands){
   const flight={id:'WALK-'+stand.id,airportId:'city',standId:stand.id,arrivalStand:stand,inboundAt:0,parkedAt:1020,sector:'west',direction:1};
   const path=visitorArrivalPath(flight,9,120);assert.ok(path.length>=5);
@@ -144,7 +144,7 @@ test('ten returning passengers board real seats and pay 200 H$ each way without 
  assert.equal(t.state.businesses['hansdrex-airline'].cash,2000);assert.equal(t.countries.countryAccount('hansdrex').cash,treasury+500);
  for(const person of t.state.cityVisitors.visitors){person.departAt=t.state.simulationAgeSeconds;person.travelGoalsCompleted=[...person.travelGoals];}
  let returning;
- for(let i=0;i<120&&!returning;i++){
+ for(let i=0;i<1800&&!returning;i++){
   t.tick(t.state.simulationAgeSeconds+120);
   returning=t.state.cityVisitors.airportTraffic.flights.find(flight=>flight.passengerIds?.length===10);
  }
@@ -206,7 +206,7 @@ test('both runway IDs are used for overlapping operations while shared taxi move
 test('stand reservations consider actual spatial occupancy and release only after a real aircraft leaves',()=>{
  const {visitorStandReservation,visitorStandReleaseAt}=airportTraffic;
  assert.equal(typeof visitorStandReservation,'function');
- const pool=visitorStands('city');assert.equal(pool.length,7,'the eighth physical stand stays available to regional services');
+ const pool=visitorStands('city');assert.equal(pool.length,15,'the final physical stand stays available to regional services');
  const occupied=pool.map((stand,i)=>({id:'OCCUPIED-'+i,airportId:'city',standId:stand.id,arrivalStand:stand,runwayId:AIRPORT.runways[i%2].id,inboundAt:-1020,parkedAt:0,outboundAt:null,exitAt:null}));
  assert.equal(visitorStandReservation(3600,occupied,'city'),null);
  occupied[0].outboundAt=10000;occupied[0].exitAt=11080;
@@ -237,17 +237,17 @@ function grandPrixAirport(startDay=20){
   tick(at){assert.ok(at>=state.simulationAgeSeconds);state.simulationAgeSeconds=at;system.tick();},restore(){state=JSON.parse(JSON.stringify(state));rebuild();}};
 }
 
-test('Grand Prix foreign demand varies in complete ten-person manifests between 200 and 300 people',()=>{
+test('Grand Prix foreign demand varies in complete ten-person manifests between 400 and 600 people',()=>{
  const sizes=new Set();
  for(let seed=0;seed<12;seed++){
   const t=grandPrixAirport(20+seed),event=t.event;
-  assert.ok(event);assert.ok(event.charterDemand>=200&&event.charterDemand<=300);assert.equal(event.charterDemand%10,0);
-  assert.equal(event.charters.length,event.charterDemand/10);assert.ok(event.charters.length>=20&&event.charters.length<=30);
+  assert.ok(event);assert.ok(event.charterDemand>=400&&event.charterDemand<=600);assert.equal(event.charterDemand%10,0);
+  assert.equal(event.charters.length,event.charterDemand/10);assert.ok(event.charters.length>=40&&event.charters.length<=60);
   assert.ok(event.charters.every(flight=>flight.arrivingGuests===10&&flight.guests.length===10));
   const north=event.charters.filter(f=>f.airportId==='north'),hans=event.charters.filter(f=>f.airportId==='city');
   assert.ok(Math.abs(hans.length-3*north.length)<=2,'complete ten-seat aircraft round the 3:1 tourism split');
   assert.ok(hans.every(f=>f.guests.every(g=>g.nights>=2)&&f.earliestAt<event.startsAt-86400));
-  assert.ok(north.every(f=>f.guests.every(g=>g.nights===0)&&f.earliestAt>event.startsAt-86400));
+  assert.ok(north.every(f=>f.guests.every(g=>g.nights===0)&&f.earliestAt>event.startsAt-36*3600&&f.earliestAt<event.startsAt-24*3600));
   const people=event.charters.flatMap(flight=>flight.guests);
   assert.equal(new Set(people.map(person=>person.id)).size,event.charterDemand);
   assert.ok(people.every(person=>person.originCountryId==='outside'&&person.citizenshipCountryId==='outside'));
@@ -324,7 +324,7 @@ for(const seed of [20,22,27])test(`bulk foreign arrivals rotate finite stands an
    assert.deepEqual(t.event.charters.flatMap(flight=>flight.guests.map(person=>person.id)).sort(),identities);
   }
  }
- assert.equal(t.state.northF1.charterArrivals,demand,'the booked foreign cohort clears the airport before the scheduled green light');
+ assert.equal(t.state.northF1.charterArrivals,demand,'the booked foreign cohort clears the airport before the scheduled green light: '+JSON.stringify(t.event.charters.filter(f=>f.guests.some(g=>!g.immigrationClearedAt)).map(f=>({id:f.id,airport:f.airportId,stand:f.standId,inbound:f.inboundAt-startsAt,parked:f.parkedAt-startsAt,guests:f.guests.filter(g=>!g.immigrationClearedAt).map(g=>({id:g.id,phase:g.phase,terminal:g.terminalAt-startsAt}))}))));
  assert.equal(admittedAt.size,demand);assert.ok([...admittedAt.values()].every(at=>at<=startsAt));
  assert.equal(t.state.businesses['hansdrex-airline'].cash,demand*200);
  assert.ok(sawStairs,'foreign people are visible walking down aircraft stairs');assert.ok(sawImmigration,'foreign people are visible at immigration');

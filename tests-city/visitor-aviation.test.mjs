@@ -118,12 +118,12 @@ test('airport postpones a passenger service when fewer than ten real rooms or ad
  const state={simulationAgeSeconds:0,timeScale:120,flies:[],businesses:{},treasury:{cash:0},centralBank:{priceLevel:1},weather:{precipitation:0}};
  const system=createCityVisitors({world:()=>state,createVisitor:(_name,index)=>({ageYears:30,brain:{id:`CAP-${index}`,memory:{episodes:[]}}})});
  system.init();
- for(let i=0;i<31;i++)assert.ok(system.spawnVisitor({budget:1000}));
+ for(let i=0;i<71;i++)assert.ok(system.spawnVisitor({budget:1000}));
  Object.assign(state.cityVisitors,{nextArrivalAt:0,rngState:1});state.simulationAgeSeconds=120;system.tick(120,{hour:0});
  assert.equal(system.snapshot().airportTraffic.flights.length,0);
  const guest=state.cityVisitors.visitors[0];system.depart(guest);
  Object.assign(state.cityVisitors,{nextArrivalAt:0,rngState:1});state.simulationAgeSeconds=240;system.tick(120,{hour:0});
  const flight=system.snapshot().airportTraffic.flights[0];assert.equal(flight.arrivingGuests,10);
- assert.equal(state.cityVisitors.visitors.filter(v=>v.alive&&!v.departed).length,40);
+ assert.equal(state.cityVisitors.visitors.filter(v=>v.alive&&!v.departed).length,80);
  assert.ok(system.snapshot().hotelRooms.every(h=>h.occupied<=h.capacity));
 });

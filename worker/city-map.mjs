@@ -13,7 +13,7 @@ import {apartmentHouseholdCapacity} from './housing-capacity.mjs';
 import {MOTORWAY_ROADS,MOTORWAY_DECKS,chooseMotorwayLane} from './motorway.mjs';
 import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RESERVED,militaryPerimeterBlocked} from './government-map.mjs';
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
-import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
+import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,NORTH_RIVERSIDE_LINK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
 export const MAP_VERSION = 36;
 export const SKYLINE_PLOTS = {
@@ -81,7 +81,7 @@ export const RIVER={id:"hansdrex-river",x:430,z:0,w:96,d:WORLD_HALF*2+4};
 // Administrative footprint: 360×480 is exactly one third of the 720×720 original urban core.
 export const RIVERSIDE={id:'riverside',name:'Tiểu khu châu Âu',x:680,z:0,w:360,d:480};
 export const SPORTS_VENUES=[
- {id:'stadium',name:'Hansdrex Riverside Stadium',x:770,z:200,w:44,d:62},
+ {id:'stadium',name:'Hansdrex Riverside Stadium',x:770,z:200,w:52,d:72},
  {id:'tennis',name:'Riverside Tennis Club',x:830,z:120,w:42,d:56},
  {id:'riverside-park',name:'Riverside Gardens',x:530,z:120,w:42,d:58},
 ];
@@ -115,7 +115,10 @@ for(const z of STREETS){
 // Outer ring and bridge approaches keep the expanded city connected.
 for(const x of [-430,SOUTH_RING_EAST])road(x,0,8,820);
 // The north ring skirts the terminal on its landside instead of entering its rear wall.
-road(-355,-400,150,10);road(120,-400,500,10);
+road(-355,-400,150,10);road(-10,-355,240,10);road(253,-365,234,6);
+for(const x of [159,210,260,310])road(x,-360,9.5,10);
+// The public ring turns south before the four airside terminals.
+road(370,-377.5,10,45);
 road(-280,-377.5,10,45);road(-130,-377.5,10,45);road(-205,-355,150,10);
 // Join the bypass centerline, not just its asphalt edge, to the Manhattan avenues.
 for(const x of [-260,-210,-154])road(x,-357.5,9.5,5);
@@ -131,7 +134,7 @@ for(const z of [-180,180])road(685,z,350,6);
 const AIRPORT_AVENUES=[-430,-370,-310,-260,-80,-20,50];
 const AIRPORT_STREETS=[-1060,-1000,-950,-890,-830,-770,-710,-650,-600];
 for(const x of AIRPORT_AVENUES){
- const south=x===-430||x===50?-400:-600;
+ const south=x===-430?-400:-600;
  road(x,(-1060+south)/2,9.5,south+1060);
 }
 for(const z of AIRPORT_STREETS){
@@ -145,7 +148,7 @@ for(const x of WEST_AVENUES)road(x,0,9.5,680);
 for(const z of WEST_STREETS)road(-680,z,640,9);
 road(122,-380,9.5,40);
 ROADS.push(...MOTORWAY_ROADS);
-export const BRIDGES=[-180,0,180].map(z=>({x:430,z,w:160,d:16,landmark:z===0}));
+export const BRIDGES=[...[-180,0,180].map(z=>({x:430,z,w:160,d:16,landmark:z===0})),{id:'EUROPE-RIVERSIDE-BRIDGE',x:442,z:NORTH_RIVERSIDE_LINK.europeBridgeZ,w:136,d:16,landmark:false,atGrade:true}];
 // South ring carriageway and its shore approaches sit on a separate harbor
 // causeway. Its narrow deck footprint must match the sidewalks in the viewer.
 const harborShore=HARBOR.z-HARBOR.d/2-3,harborWest=HARBOR.x-HARBOR.w/2-4;
@@ -158,7 +161,7 @@ export const HARBOR_CAUSEWAYS=[
 export function onWaterCrossing(p){
  return BRIDGES.some(bridge=>contains(bridge,p))||DISTRICT_BRIDGES.some(bridge=>contains(bridge,p))||HARBOR_CAUSEWAYS.some(deck=>contains(deck,p))||MOTORWAY_DECKS.some(deck=>contains(deck,p))||BORDER_CUSTOMS_DECKS.some(deck=>contains(deck,p));
 }
-export const UNDERPASSES=BRIDGES.flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
+export const UNDERPASSES=BRIDGES.filter(b=>!b.atGrade).flatMap(b=>[372,500].map(x=>({id:`UNDERPASS-${x}-${b.z}`,x,z:b.z,axis:'z',w:x===372?8:9.5,halfLength:42,coveredHalf:10,depth:6.2})));
 export function underpassAt(p){return UNDERPASSES.find(t=>Math.abs(p.x-t.x)<=t.w/2+.2&&Math.abs(p.z-t.z)<t.halfLength);}
 export function roadTravelY(p,axis='z'){
  if(axis!=='z')return 1.1;const t=underpassAt(p);if(!t)return 1.1;
@@ -258,7 +261,7 @@ export const METRO_LINES = [
  {id:"M9",height:31,points:[[-1000,0],[-920,0],[-840,0],[-760,0],[-680,0],[-600,0],[-520,0],[-430,0],[-310,0]]},
  {id:"M10",countryId:'north-city',height:35,points:[[-80,-1000],[-80,-950],[-80,-830],[-80,-710],[50,-710],[50,-600]]},
  {id:"M11",height:39,points:[[-1000,-260],[-840,-260],[-840,0],[-840,260],[-680,260],[-520,260],[-430,260],[-310,260],[-310,87]]},
- {id:"M12",height:27,points:[[-430,-400],[-210,-400],[-210,-340]]},
+ {id:"M12",height:27,points:[[-430,-400],[-310,-400],[-310,-340],[-210,-340],[-210,-220],[-210,-116],[-210,0],[-210,87],[-210,145],[-210,260],[-210,340]]},
  {id:"M13",height:35,points:[[50,-400],[122,-400],[122,-340]]},
  {id:"N1",countryId:'north-city',height:43,points:[[-880,-830],[-880,-950],[-600,-950],[-430,-950],[-260,-950],[-80,-950],[50,-950]]}
 ];
@@ -269,7 +272,7 @@ function place(b) {
  if([...SPORTS_VENUES,...GOVERNMENT_RESERVED,...INDUSTRIAL_RESERVED].some(r=>overlaps(b,r,2)) || ROADS.some(r=>overlaps(b,r,2.6)) || WATER.some(r=>overlaps(b,r,1)) || [PARK,AIRPORT_PARK].some(park=>overlaps(b,park,1)) || BUILDINGS.some(r=>overlaps(b,r,1))) return false;
  BUILDINGS.push(b);return true;
 }
-place({id:'airport',...AIRPORT.terminal,h:10,kind:'airport'});
+for(const [index,terminal]of AIRPORT.terminals.entries())place({...terminal,id:index?`airport-terminal-${index+1}`:'airport',h:13,kind:'airport'});
 // These existing landmark meshes also need authoritative ground collision footprints.
 place({id:'airport-control-tower',...AIRPORT.controlTower,kind:'airport-service'});
 place({id:'airport-hangar',...AIRPORT.hangar,kind:'airport-service'});
@@ -605,11 +608,11 @@ const NAV_REGIONS=[
 ].map(r=>({...r,nx:(r.maxX-r.minX)/STEP+1,nz:(r.maxZ-r.minZ)/STEP+1}));
 const HAWAII_NAV_REGION={id:'hawaii',minX:-170,maxX:370,minZ:570,maxZ:1010,nx:271,nz:221};
 const regionFor=p=>NAV_REGIONS[countryAt(p)===COUNTRY_IDS.north?2:p.x>430?1:p.x<-440?3:0];
-const AIRPORT_WALK_PORTALS=[{x:-373.8,z:-540},{x:56.2,z:-540}];
+const AIRPORT_WALK_PORTALS=[{x:-373.8,z:-540},{x:367.8,z:-540}];
 const WEST_WALK_PORTALS=DISTRICT_BRIDGES.filter(b=>b.riverId==='west-city-river'&&!b.motorway).map(b=>({x:b.x+b.w/2,z:b.z+6.2}));
 const NORTH_INDUSTRY_PORTALS=[{x:-466,z:-1006.4}];
 const publicDistrictPortals=region=>region.id==='north-industry'?NORTH_INDUSTRY_PORTALS:region.id==='airport'?AIRPORT_WALK_PORTALS:region.id==='west'?WEST_WALK_PORTALS:null;
-function airportAirside(p){return AIRPORT.runways.some(runway=>contains(runway,p,10))||AIRPORT.taxiways.some(taxiway=>contains(taxiway,p,4))||contains(AIRPORT.apron,p,4)||contains(NORTH_AIRPORT.runway,p,10)||contains(NORTH_AIRPORT.apron,p,4)||contains(ISLAND.runway,p,4);}
+function airportAirside(p){return AIRPORT.runways.some(runway=>contains(runway,p,10))||AIRPORT.taxiways.some(taxiway=>contains(taxiway,p,4))||(AIRPORT.aprons||[AIRPORT.apron]).some(apron=>contains(apron,p,4))||contains(NORTH_AIRPORT.runway,p,10)||contains(NORTH_AIRPORT.apron,p,4)||contains(ISLAND.runway,p,4);}
 function publicMotorway(p){return nearbyGeometry(roadBins,p).some(road=>road.motorway&&contains(road,p,.35));}
 const costCache=new Map();
 const segmentCache=new Map();
@@ -667,9 +670,9 @@ export function pedestrianRoute(start,dest,mode="walk") {
  }
  const from=regionFor(start),to=regionFor(dest);
  // A route restarted on a bridge first reaches a bank before entering its local region lattice.
- if(start.x>380&&start.x<480){
+ if(contains(RIVER,start)){
   const bridge=BRIDGES.find(b=>contains(b,start));if(!bridge)return [];
-  const side=Math.sign(start.z-bridge.z)||1,bank={x:to.id==='riverside'?510:350,z:bridge.z+side*6};
+  const side=Math.sign(start.z-bridge.z)||1,bank={x:to.id==='riverside'?bridge.x+bridge.w/2:bridge.x-bridge.w/2,z:bridge.z+side*6};
   const tail=pedestrianRoute(bank,dest,mode);return clearSegment(start,bank)&&tail.length?[{...start,mode,stage:'bridge'},...tail]:[];
  }
  // Outer neighbourhoods each use a compact cached lattice. Public sidewalk
@@ -694,7 +697,7 @@ export function pedestrianRoute(start,dest,mode="walk") {
  if(from!==to){
   const bridge=BRIDGES.reduce((best,b)=>Math.abs(start.z-b.z)+Math.abs(dest.z-b.z)<Math.abs(start.z-best.z)+Math.abs(dest.z-best.z)?b:best,BRIDGES[1]);
   const side=Math.sign(start.z+dest.z-bridge.z*2)||1,walkOffset=mode==='walk'?side*6:0;
-  const west={x:350,z:bridge.z+walkOffset},east={x:510,z:bridge.z+walkOffset},entry=from.id==='city'?west:east,exit=from.id==='city'?east:west;
+  const west={x:bridge.x-bridge.w/2,z:bridge.z+walkOffset},east={x:bridge.x+bridge.w/2,z:bridge.z+walkOffset},entry=from.id==='city'?west:east,exit=from.id==='city'?east:west;
   const a=localRoute(start,entry,mode,from),b=localRoute(exit,dest,mode,to);
   if(!a.length||!b.length||!clearSegment(entry,exit))return [];
   return [...a,{...exit,mode,stage:'bridge'},...b];
