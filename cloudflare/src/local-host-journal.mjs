@@ -36,10 +36,9 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
  const parts=[];
  for(const key of meta.overlayKeys){const b=await storage.get(key);if(!b)throw Error('missing local save overlay');parts.push(b);}
  onStage('overlay read',{compressedBytes:parts.reduce((n,p)=>n+p.byteLength,0)});
- const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver,onState:includeObserver?()=>{}:cleanupPastWorld});
+ const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver});
  if(overlay.state.worldId!==meta.worldId||overlay.state.mapVersion!==meta.mapVersion)throw Error('local save overlay schema mismatch');
  onStage('overlay parsed',{actors:overlay.state.flies.length});
- if(!includeObserver)cleanupPastWorld(overlay.state);
  let document=projectLocalDocument(overlay.state),observer=overlay.observer||null,sequence=meta.overlaySequence;
  for(const entry of meta.entries){
   const packed=await storage.get(entry.key);if(!packed)throw Error('missing local save delta');
@@ -48,6 +47,12 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
   document=applyLocalDelta(document,delta.patch);sequence=delta.sequence;if(includeObserver)observer=delta.observer||observer;onStage('delta applied',{sequence});
  }
  if(sequence!==meta.sequence||Number(document.world.simulationAgeSeconds)!==Number(meta.age))throw Error('local save journal metadata mismatch');
+ // Every accepted delta is relative to the exact saved overlay. Pruning first
+ // deletes object branches and shifts array indices that later entries still
+ // reference, making a valid journal fail (or apply to the wrong visitor).
+ // An expired owner needs no observer graph, but its baseline must still be
+ // replayed intact before disposable history is removed for background work.
+ if(!includeObserver)document=projectLocalDocument(cleanupPastWorld(localDocumentState(document)));
  return {state:mergedState(base,document),document,observer,meta,lastWallClockMs:meta.lastWallClockMs,savedAtMs:meta.savedAtMs};
 }
 export async function clearLocalHostJournal(storage){

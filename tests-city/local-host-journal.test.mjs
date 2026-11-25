@@ -79,6 +79,26 @@ test('background cold resume omits the duplicate observer graph without losing t
  assert.deepEqual((await loadLocalHostJournal(db,s)).observer,observer,'an active owner can still resume its exact observer baseline');
 });
 
+test('background restart replays accepted deltas before pruning past tour caches, visitor indices or settled deaths',async()=>{
+ const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s);
+ doc.world.northF1={previousTours:[{id:'FINISHED',charters:[{id:'OLD-FLIGHT',departed:true,guests:[]}]}],event:{tourPaths:{finished:{points:[{x:1,z:2}],seconds:20}},charters:[]}};
+ doc.world.cityVisitors={visitors:[{id:'DEPARTED',departed:true,money:40,brain:{id:'VISITOR-OLD'}},{id:'STAYING',departed:false,money:100,brain:{id:'VISITOR-LIVE'}}]};
+ doc.actors.SETTLED={id:'SETTLED',name:'Ancestor',alive:false,estateSettled:true,parents:['P'],brain:{id:'PRIVATE-OLD'}};
+ await saveLocalHostBase(db,doc,lease,{observer:{privateView:'omitted'}});
+ const next=change(doc,1);next.world.northF1.event.tourPaths.finished.seconds=19;
+ next.world.cityVisitors.visitors[1].money=75;next.actors.SETTLED.finalReceipt={id:'ESTATE',amount:50};
+ await appendLocalHostDelta(db,next,{epoch:4,sequence:1,baseSequence:0,patch:diffLocalDocument(doc,next)},null,null);
+ const exact=await loadLocalHostJournal(db,s);assert.deepEqual(exact.document,next);
+ const cold=await loadLocalHostJournal(db,s,0,()=>{},{includeObserver:false});
+ assert.equal(cold.meta.sequence,1);assert.equal(cold.state.simulationAgeSeconds,700);assert.equal(cold.observer,null);
+ assert.deepEqual(cold.state.northF1.event.tourPaths,{});assert.deepEqual(cold.state.northF1.previousTours,[]);
+ assert.deepEqual(cold.state.cityVisitors.visitors,[next.world.cityVisitors.visitors[1]]);
+ assert.equal(cold.state.cityVisitors.visitors[0].id,'STAYING');assert.equal(cold.state.cityVisitors.visitors[0].money,75);assert.equal(cold.state.cityVisitors.visitors[0].brain.id,'VISITOR-LIVE');
+ assert.equal(cold.document.actors.SETTLED,undefined);assert.deepEqual(cold.state.ancestors.SETTLED,{name:'Ancestor',parents:['P']});
+ assert.equal(cold.document.actors.A.money,next.actors.A.money);assert.equal(cold.state.totalTransactions,next.world.totalTransactions);
+ assert.deepEqual((await loadLocalHostJournal(db,s)).document,next,'cleanup must never rewrite the saved journal or a live owner baseline');
+});
+
 test('a newer acknowledged map overlay cold-resumes over the older archive without discarding progress, money or brain identities',async()=>{
  const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s);doc.world.mapVersion=37;doc.world.simulationAgeSeconds=700;doc.world.totalTransactions=19;doc.actors.A.x=27;doc.actors.A.money=321;doc.world.airportSpurRetiredVersion=1;
  await saveLocalHostBase(db,doc,lease,{lastWallClockMs:12345});
