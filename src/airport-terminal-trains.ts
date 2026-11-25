@@ -16,6 +16,9 @@ export class AirportTerminalTrains{
    for(const side of [-1,1])box(infrastructure,middle,4.88,z+side*.68,length,.15,.12,metal);
    for(let x=first.x-10;x<=last.x+10;x+=25)box(infrastructure,x,2.3,z,.55,4.6,.65,stone);
    const car=new THREE.Group();car.name=`HCA-FREE-${direction>0?'A':'B'}`;
+   // The city freezes static local matrices after construction. Its moving
+   // branches must opt out, or changing position never reaches the GPU.
+   car.userData.dynamicCity=true;
    // Long axis x matches the horizontal guideway; no animated doors or lights.
    box(car,0,1.22,0,12,2.4,2.8,stone);box(car,0,1.75,0,10,.8,2.86,glass);box(car,0,2.5,0,12.4,.16,3,metal);
    box(car,0,.45,0,12,.14,2.88,green);
@@ -31,5 +34,5 @@ export class AirportTerminalTrains{
   for(const bay of AIRPORT_TAXI_BAYS){const label=make(`${bay.terminalId} · TAXI ${bay.kind.toUpperCase()}`,18,.65);label.position.set(bay.x,2.7,bay.z);infrastructure.add(label);}
   batchStaticMeshes(infrastructure);this.root.add(infrastructure);this.root.userData={fare:0,trainCount:2,stations:4,lights:0};this.update(0);
  }
- update(seconds:number){for(const [i,pose]of airportTerminalTrainStates(seconds).entries()){const train=this.trains[i];train.visible=pose.visible;train.position.set(pose.x,4.95,pose.z);train.userData={trainId:pose.id,fare:0,direction:pose.direction,stationId:pose.stationId,dwelling:pose.dwelling};}}
+ update(seconds:number){for(const [i,pose]of airportTerminalTrainStates(seconds).entries()){const train=this.trains[i];train.visible=pose.visible;train.position.set(pose.x,4.95,pose.z);Object.assign(train.userData,{trainId:pose.id,fare:0,direction:pose.direction,stationId:pose.stationId,dwelling:pose.dwelling});}}
 }

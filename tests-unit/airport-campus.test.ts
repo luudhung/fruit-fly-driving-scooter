@@ -68,3 +68,25 @@ test('terminal trains visibly traverse the empty return slot without disappearin
  for(let at=.05;at<300;at+=.05){const poses=airportTerminalTrainStates(at);renderer.update(at);for(let i=0;i<2;i++){assert.ok(poses[i].visible&&renderer.trains[i].visible);assert.ok(Math.abs(poses[i].x-previous[i].x)<=2.01,'including the last instant of each cycle');sawReturn||=Boolean(poses[i].returning);}previous=poses;}
  assert.ok(sawReturn);assert.equal(renderer.trains.length,2);
 });
+
+test('terminal train bodies move in rendered world space after the full city static-matrix optimization',()=>{
+ const scene=new THREE.Scene(),city=new THREE.Group();scene.add(city);
+ const renderer=new AirportTerminalTrains(city,()=>new THREE.Sprite());
+ scene.updateMatrix();scene.matrixAutoUpdate=false;
+ city.traverse(object=>{object.updateMatrix();object.matrixAutoUpdate=Boolean(object.userData.dynamicCity);});
+ const draw=(time:number)=>{
+  renderer.update(time);scene.updateMatrixWorld();
+  return renderer.trains.map(train=>{
+   const body=train.children.find(child=>child instanceof THREE.Mesh)!;
+   return new THREE.Vector3().setFromMatrixPosition(body.matrixWorld);
+  });
+ };
+ const before=draw(12),after=draw(14),expected=airportTerminalTrainStates(14);
+ for(let i=0;i<after.length;i++){
+  assert.ok(Math.abs(after[i].x-before[i].x)>20,'position changes must reach the drawn body matrix, not just Object3D.position');
+  assert.ok(Math.abs(after[i].x-expected[i].x)<1e-6);assert.equal(after[i].z,expected[i].z);
+ }
+ assert.equal(city.matrixAutoUpdate,false);assert.equal(renderer.root.matrixAutoUpdate,false);
+ const fixed:THREE.Object3D[]=[];renderer.root.traverse(object=>{if(object instanceof THREE.Mesh)fixed.push(object);});
+ assert.ok(fixed.every(object=>!object.matrixAutoUpdate),'only each movable car root needs per-frame local matrices');
+});
