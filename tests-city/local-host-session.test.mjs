@@ -196,6 +196,18 @@ test('a new durable checkpoint restores heartbeat grace even when the original b
  assert.equal((await t.post('heartbeat',lease)).status,200);assert.ok(t.world.localHost.expiresAt>Date.now()+100000);
 });
 
+test('sparse visitor and tour array saves replay through the durable journal and a cold restart without losing payments or brains',async()=>{
+ const t=fixture();await t.world.ready;
+ t.state.northF1={previousTours:[{id:'PAST-RACE',guests:[{id:'TOURIST',money:400,brain:{id:'VISITOR-BRAIN'},receipts:[{id:'VISA',amount:50}]}]}]};
+ const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;
+ const guest=state.northF1.previousTours[0].guests[0];guest.money-=200;guest.receipts.push({id:'RETURN-AIRFARE',amount:200});
+ assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ const cold=t.restart(36);await cold.ready;
+ const retained=Delta.localDocumentState(cold.localDocument).northF1.previousTours[0].guests[0];
+ assert.deepEqual(retained,guest);assert.equal(retained.brain.id,'VISITOR-BRAIN');assert.equal(retained.money,200);assert.equal(retained.receipts.length,2);
+ assert.equal(cold.localHost.sequence,1);assertArchiveRetained(t);
+});
+
 test('the same closing tab resumes immediately with clock catch-up, while other tabs cannot replace the owner',async()=>{
  const t=fixture();await t.world.ready;const first=await t.claim();
  first.state.simulationAgeSeconds+=120;first.state.flies[0].money=37;

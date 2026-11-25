@@ -18,6 +18,19 @@ function equal(a,b){
 }
 function difference(a,b){
  if(Object.is(a,b))return null;
+ if(Array.isArray(a)&&Array.isArray(b)){
+  if(b.length>500000)return equal(a,b)?null:[0,b];
+  const entries=[];
+  for(let index=0;index<b.length;index++){
+   const patch=index<a.length?difference(a[index],b[index]):[0,b[index]];
+   if(patch)entries.push([index,patch]);
+  }
+  if(!entries.length&&a.length===b.length)return null;
+  // Replacing a wholly changed primitive list is smaller than indexing every
+  // element; nested visitor records retain sparse patches and shared brains.
+  if(entries.length===b.length&&entries.length&&entries.every(([,patch])=>patch[0]===0))return [0,b];
+  return [2,b.length,entries];
+ }
  if(object(a)&&object(b)){
   const entries=[],deleted=[];
   for(const key of Object.keys(a))if(a[key]!==undefined&&(!own(b,key)||b[key]===undefined)){safe(key);deleted.push(key);}
@@ -39,6 +52,19 @@ export function applyLocalDelta(document,patch){
   if(p===null)return value;
   if(!Array.isArray(p))throw Error('invalid delta node');
   if(p[0]===0&&p.length===2)return p[1];
+  if(p[0]===2){
+   if(p.length!==3||!Array.isArray(value)||!Number.isSafeInteger(p[1])||p[1]<0||p[1]>500000||!Array.isArray(p[2]))throw Error('invalid array delta');
+   if(p[2].length>500000-nodes)throw Error('delta exceeds structural bounds');
+   const indices=new Set();let extensions=0;
+   for(const entry of p[2]){
+    if(!Array.isArray(entry)||entry.length!==2||!Number.isSafeInteger(entry[0])||entry[0]<0||entry[0]>=p[1]||indices.has(entry[0]))throw Error('invalid array index');
+    indices.add(entry[0]);if(entry[0]>=value.length){if(!Array.isArray(entry[1])||entry[1][0]!==0||entry[1].length!==2)throw Error('invalid array extension');extensions++;}
+   }
+   if(extensions!==Math.max(0,p[1]-value.length))throw Error('incomplete array extension');
+   const result=value.slice(0,p[1]);result.length=p[1];
+   for(const [index,child]of p[2])result[index]=apply(value[index],child,depth+1);
+   return result;
+  }
   if(p[0]!==1||p.length!==3||!Array.isArray(p[1])||!Array.isArray(p[2])||!object(value))throw Error('invalid object delta');
   const result={...value};
   for(const key of p[2]){if(typeof key!=='string')throw Error('invalid delta key');safe(key);delete result[key];}
