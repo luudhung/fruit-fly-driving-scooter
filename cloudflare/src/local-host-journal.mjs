@@ -26,13 +26,18 @@ export async function loadLocalHostJournal(storage,base,baseSavedAtMs=0,onStage=
  const meta=await storage.get(META);
  if(!meta)return null;
  onStage('metadata',{overlayChunks:meta.overlayKeys?.length,deltaCount:meta.entries?.length,journalBytes:meta.journalBytes,sequence:meta.sequence});
- if(meta.version!==1||meta.worldId!==base.worldId||meta.mapVersion!==base.mapVersion)throw Error('incompatible local save journal');
+ if(meta.version!==1||meta.worldId!==base.worldId||!Number.isSafeInteger(meta.mapVersion)||!Number.isSafeInteger(base.mapVersion))throw Error('incompatible local save journal');
  // The full base may have committed immediately before cleanup was interrupted.
  if(Number(base.simulationAgeSeconds)>Number(meta.age)||(Number(base.simulationAgeSeconds)===Number(meta.age)&&baseSavedAtMs>meta.savedAtMs))return {stale:true,meta};
+ // The living overlay contains the complete current world schema. A map upgrade
+ // can commit it before the cold historical archive is compacted. Replay that
+ // acknowledged newer overlay instead of rejecting every subsequent cold boot.
+ if(meta.mapVersion<base.mapVersion)throw Error('incompatible local save journal');
  const parts=[];
  for(const key of meta.overlayKeys){const b=await storage.get(key);if(!b)throw Error('missing local save overlay');parts.push(b);}
  onStage('overlay read',{compressedBytes:parts.reduce((n,p)=>n+p.byteLength,0)});
  const overlay=await readLocalHostCheckpoint(new Blob(parts).stream().pipeThrough(new DecompressionStream('gzip')),onStage,{includeObserver,onState:includeObserver?()=>{}:cleanupPastWorld});
+ if(overlay.state.worldId!==meta.worldId||overlay.state.mapVersion!==meta.mapVersion)throw Error('local save overlay schema mismatch');
  onStage('overlay parsed',{actors:overlay.state.flies.length});
  if(!includeObserver)cleanupPastWorld(overlay.state);
  let document=projectLocalDocument(overlay.state),observer=overlay.observer||null,sequence=meta.overlaySequence;

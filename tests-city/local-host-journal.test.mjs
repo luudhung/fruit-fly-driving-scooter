@@ -78,3 +78,16 @@ test('background cold resume omits the duplicate observer graph without losing t
  assert.equal(cold.observer,null);assert.deepEqual(cold.document,{...doc,world:{...doc.world,historyCleanupVersion:1}});assert.equal(cold.state.flies.find(f=>f.id==='OLD').brain.id,'ARCHIVE');
  assert.deepEqual((await loadLocalHostJournal(db,s)).observer,observer,'an active owner can still resume its exact observer baseline');
 });
+
+test('a newer acknowledged map overlay cold-resumes over the older archive without discarding progress, money or brain identities',async()=>{
+ const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s);doc.world.mapVersion=37;doc.world.simulationAgeSeconds=700;doc.world.totalTransactions=19;doc.actors.A.x=27;doc.actors.A.money=321;doc.world.airportSpurRetiredVersion=1;
+ await saveLocalHostBase(db,doc,lease,{lastWallClockMs:12345});
+ const cold=await loadLocalHostJournal(db,s);assert.equal(cold.state.mapVersion,37);assert.equal(cold.state.simulationAgeSeconds,700);assert.equal(cold.state.totalTransactions,19);assert.equal(cold.state.airportSpurRetiredVersion,1);assert.equal(cold.state.flies.find(f=>f.id==='A').money,321);assert.equal(cold.state.flies.find(f=>f.id==='A').brain.id,'B');assert.deepEqual(cold.state.flies.find(f=>f.id==='OLD'),s.flies.find(f=>f.id==='OLD'));assert.equal(cold.lastWallClockMs,12345);assert.deepEqual(cold.document,doc);
+ const again=await loadLocalHostJournal(db,s);assert.deepEqual(again.state,cold.state);assert.equal((await db.get('local-save:meta')).mapVersion,37);
+});
+
+test('map compatibility still rejects an unacknowledged older schema or inconsistent overlay metadata',async()=>{
+ const db=storage(),s=base(),lease=owner(),doc=aliveDoc(s);doc.world.simulationAgeSeconds=700;await saveLocalHostBase(db,doc,lease);
+ await assert.rejects(loadLocalHostJournal(db,{...s,mapVersion:37}),/incompatible local save journal/);
+ const meta=await db.get('local-save:meta');meta.mapVersion=37;await db.put('local-save:meta',meta);await assert.rejects(loadLocalHostJournal(db,s),/overlay schema mismatch/);
+});
