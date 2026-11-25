@@ -18,3 +18,10 @@ test('ready airport guests depart independently of a missing tour member, who la
  assert.equal(s.northF1.charterDepartures,10);assert.equal(flight.departed,true);assert.equal(flight.returnLeg.id,firstId+'-2');assert.equal(s.businesses['hansdrex-airline'].cash,2000);assert.equal(new Set(guests.map(g=>g.id)).size,10);
  service.tick(e);assert.equal(s.businesses['hansdrex-airline'].cash,2000);
 });
+
+test('a backlog books at most two new return aircraft per airport and sample, then drains on later samples without charging waiting guests',()=>{
+ const at=10*86400,port=airportById('city'),e={id:'BACKLOG',format:2,tenPassengerVersion:1,airportItineraryVersion:1,startsAt:at-20000,endsAt:at-15000,tourPaths:{},charters:[]};
+ for(let i=0;i<5;i++)e.charters.push({id:'OLD-COHORT-'+i,airportId:'city',sector:'east',direction:1,inboundAt:at-30000,parkedAt:at-20000,outboundAt:at-15000,exitAt:at-14000,landed:true,aircraftGone:true,guests:[{id:'READY-'+i,kind:'visitor',alive:true,money:1000,savings:0,phase:'airport-ready',x:port.gate.x,y:1.1,z:port.gate.z,currentLocationId:'airport'},{id:'MISSING-'+i,alive:true,phase:'visiting',hansTowerTrip:true,money:1000,savings:0}]});
+ const s={simulationAgeSeconds:at,timeScale:120,flies:[],businesses:{},northF1:{event:e,previousTours:[]}},service=createF1Charters({world:()=>s,signature:()=>.5,weatherClosed:()=>false,account:()=>({cash:0}),visitAttraction:()=>{}}),count=()=>e.charters.filter(f=>f.returnLeg).length;
+ service.tick(e);s.simulationAgeSeconds+=HOUR;service.tick(e);assert.equal(count(),2);service.tick(e);assert.equal(count(),2);s.simulationAgeSeconds+=120;service.tick(e);assert.equal(count(),4);s.simulationAgeSeconds+=120;service.tick(e);assert.equal(count(),5);assert.ok(e.charters.every(f=>f.guests.every(g=>g.money===1000)));
+});

@@ -38,7 +38,7 @@ import {signalBarrier,createVehicleIndex} from './traffic.mjs';
 import {planNetworkMetroRoute,repairMetroRoute,METRO_ACCESS_VERSION} from './metro-planner.mjs';
 import {createRoadLife} from './road-life.mjs';
 import {trafficActors} from './vehicle-parking.mjs';
-import { MAP_VERSION, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, AIRPORT_PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
+import { MAP_VERSION, urbanGeometryRevision, SKYLINE_PLOTS, SKY_LOUNGE, LUXURY_RESIDENCES, SKYLINE_REDEVELOPMENTS, AIRPORT, ISLAND, onIsland, PARK, AIRPORT_PARK, PARK_PONDS, contains, FERRIS_WHEEL, wheelCabin, LOCATIONS, METRO_LINES, BUILDINGS, APARTMENTS, HOUSE_LOTS, entrance, blocked, clearSegment, clearMetroAccessSegment, pedestrianRoute, vehicleRoute, parkingPoint, trainState, trainStates, trainById, metroServiceBetween, metroStationGeometry } from "./city-map.mjs";
 import {AVIATION,tourismFares,helicopterPose} from "./aviation.mjs";
 import {createTourismSystem} from "./tourism.mjs";
 const ENV = globalThis.process?.env || {};
@@ -796,6 +796,17 @@ function jittered(loc, radius = 3) {
 const buildPedestrianRoute=pedestrianRoute;
 const buildRoadRoute=vehicleRoute;
 const legalDestinationPoint=entrance;
+let shelterBuildingIds=new Set(),shelterBuildingCount=-1,shelterGeometryRevision=-1;
+function nearestRainShelter(fly){
+ if(shelterBuildingCount!==BUILDINGS.length||shelterGeometryRevision!==urbanGeometryRevision){shelterBuildingCount=BUILDINGS.length;shelterGeometryRevision=urbanGeometryRevision;shelterBuildingIds=new Set(BUILDINGS.map(b=>b.id));}
+ let nearest=null,best=Infinity;
+ for(const site of LOCATIONS){
+  if(!shelterBuildingIds.has(site.id))continue;
+  const distance=(site.x-fly.x)**2+(site.z-fly.z)**2;
+  if(distance<best&&!urbanWorld.isUnavailable(site.id,fly)){nearest=site;best=distance;}
+ }
+ return nearest;
+}
 function stopForSignal(fly,end){
  if(!["car","scooter"].includes(fly.transitMode))return null;
  return signalBarrier(fly,end,state.simulationAgeSeconds/Math.max(1,GAME_SECONDS_PER_REAL_SECOND));
@@ -4536,7 +4547,7 @@ function tickFly(fly, clock) {
   // Replacing it with a ground route while elevated sends passengers back down on every shower.
   const committedMetro=fly.traveling&&fly.metroLineId&&(fly.routeWaypoints||[]).slice(fly.routeIndex||0).some(p=>p.mode==='metro'||p.stage?.startsWith('station-')||p.stage==='interchange-walk');
   if(!committedMetro&&!String(fly.pendingAction||'').startsWith('working as')&&!fly.roadDuty&&!fly.mobilityShopping&&fly.transitMode!=="car"&&!fly.onTrain&&!fly.heliPassenger&&!fly.indoors&&Number(state.weather?.precipitation||0)>.32&&fly.pendingAction!=="sheltering from bad weather"&&fly.action!=="sheltering from bad weather"){
-    const shelter=LOCATIONS.filter(l=>BUILDINGS.some(b=>b.id===l.id)&&!urbanWorld.isUnavailable(l.id,fly)).sort((a,b)=>Math.hypot(a.x-fly.x,a.z-fly.z)-Math.hypot(b.x-fly.x,b.z-fly.z))[0];
+    const shelter=nearestRainShelter(fly);
     const route=shelter?buildPedestrianRoute(fly,shelter):[];
     if(route.length){fly.targetLocationId=shelter.id;fly.pendingAction="sheltering from bad weather";fly.action="walking to shelter";fly.routeWaypoints=route;fly.routeIndex=0;fly.targetX=route[0].x;fly.targetZ=route[0].z;fly.traveling=true;fly.transitMode="walk";fly.metroLineId=null;}
   }

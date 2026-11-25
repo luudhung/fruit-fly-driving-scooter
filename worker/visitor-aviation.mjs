@@ -234,6 +234,18 @@ export function visitorStandReleaseAt(flight){
  if(Number.isFinite(flight.outboundAt))return flight.outboundAt+visitorStandReleaseSeconds(flight);
  return Number.isFinite(flight.expectedStandReleaseAt)?flight.expectedStandReleaseAt:Infinity;
 }
+function terminalStandRanks(flights,airportId,at){
+ const stands=visitorStands(airportId),capacity=new Map(),occupied=new Map(),scheduled=new Map(),uses=new Map();
+ const terminal=stand=>airportId==='city'?airportTerminalForStand(stand).id:airportId;
+ for(const stand of stands){const id=terminal(stand);capacity.set(id,(capacity.get(id)||0)+1);}
+ for(const flight of flights){
+  if(flight.aircraftGone||(flight.airportId||'city')!==airportId)continue;
+  const stand=flightStand(flight);if(!stand)continue;const id=terminal(stand);
+  uses.set(stand.id,(uses.get(stand.id)||0)+1);scheduled.set(id,(scheduled.get(id)||0)+1);
+  if(Number.isFinite(flight.parkedAt)&&flight.parkedAt<=at&&visitorStandReleaseAt(flight)>at)occupied.set(id,(occupied.get(id)||0)+1);
+ }
+ return stand=>{const id=terminal(stand),size=capacity.get(id)||1;return[(occupied.get(id)||0)/size,(scheduled.get(id)||0)/size,uses.get(stand.id)||0];};
+}
 export function visitorStandReservation(earliest,flights,airportId='city',groundStay=21600,profile=null){
  const all=flights.filter(f=>(f.airportId||'city')===airportId&&!f.aircraftGone),operations=reservedOperations(all,airportId),runways=visitorRunways(airportId);
  const choices=[];
@@ -251,7 +263,13 @@ export function visitorStandReservation(earliest,flights,airportId='city',ground
    at=Math.max(at+1,until+120-runway.duration);
   }
  }
- return choices.sort((a,b)=>a.at-b.at||a.stand.id.localeCompare(b.stand.id))[0]||null;
+ // Never delay a safe landing merely to fill a preferred terminal. Among equally
+ // early slots, fill the least occupied terminal, then spread future bookings.
+ if(airportId!=='city')return choices.sort((a,b)=>a.at-b.at||a.stand.id.localeCompare(b.stand.id))[0]||null;
+ const rank=terminalStandRanks(all,airportId,earliest);
+ for(const choice of choices)choice.rank=rank(choice.stand);
+ const selected=choices.sort((a,b)=>a.at-b.at||a.rank[0]-b.rank[0]||a.rank[1]-b.rank[1]||a.rank[2]-b.rank[2]||a.stand.id.localeCompare(b.stand.id,undefined,{numeric:true}))[0];
+ if(!selected)return null;const {rank:unused,...reservation}=selected;return reservation;
 }
 
 /** Once wheels are down, a late stand release is handled on the taxiway.
@@ -261,7 +279,8 @@ export function resolveVisitorTaxiStand(flight,flights,now){
  const occupied=stand=>flights.some(f=>f!==flight&&!f.aircraftGone&&(f.airportId||'city')===(flight.airportId||'city')&&flightStand(f)&&Math.hypot(flightStand(f).x-stand.x,flightStand(f).z-stand.z)<24&&Number(f.parkedAt)<Math.max(now+330,visitorStandReleaseAt(flight))&&visitorStandReleaseAt(f)>Math.max(now,flight.inboundAt+visitorRunwayClearSeconds(flight)));
  const current=flightStand(flight);
  if(current&&!occupied(current)&&!flight.taxiHold){flight.taxiStandChecked=true;return false;}
- const free=visitorStands(flight.airportId||'city').filter(p=>!occupied(p)).sort((a,b)=>Math.hypot(a.x-(current?.x||0),a.z-(current?.z||0))-Math.hypot(b.x-(current?.x||0),b.z-(current?.z||0)))[0];
+ const rank=terminalStandRanks(flights,flight.airportId||'city',now);
+ const free=visitorStands(flight.airportId||'city').filter(p=>!occupied(p)).sort((a,b)=>{const x=rank(a),y=rank(b),balance=(flight.airportId||'city')==='city'?(x[0]-y[0]||x[1]-y[1]):0;return balance||Math.hypot(a.x-(current?.x||0),a.z-(current?.z||0))-Math.hypot(b.x-(current?.x||0),b.z-(current?.z||0));})[0];
  const checkedAt=flight.taxiStandChecked?now:Math.min(now,flight.inboundAt+visitorRunwayClearSeconds(flight));
  const pose=flight.taxiHold?.pose||visitorAircraftPose(checkedAt,flight);
  if(!pose)return false;

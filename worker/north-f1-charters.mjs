@@ -337,6 +337,17 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   if(plane.tookOff&&now()>=plane.exitAt)plane.aircraftGone=true;
  }
  function boardingPose(plane,index){return visitorBoardingPose(now(),plane,index,scale());}
+ let returnDispatchAt=-Infinity;const returnDispatches=new Map();
+ function reserveReturn(e,flight,plane){
+  if(now()<Number(flight.returnBookingRetryAt||0))return false;
+  if(returnDispatchAt!==now()){returnDispatchAt=now();returnDispatches.clear();}
+  const airport=plane.airportId||'city',used=returnDispatches.get(airport)||0;
+  if(used>=2)return false;
+  returnDispatches.set(airport,used+1);
+  const accepted=schedule(e,plane,plane.earliestAt,8*HOUR);
+  if(!accepted)flight.returnBookingRetryAt=now()+HOUR;else delete flight.returnBookingRetryAt;
+  return accepted;
+ }
 
  function tick(e){
   migrate(e);
@@ -376,7 +387,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
     const returnNumber=Number(flight.completedReturnFlights||0)+1;
     const plane={...carrier,id:flight.id+'-RETURN'+(returnNumber>1?'-'+returnNumber:''),airportId:flight.airportId,kind:'positioning',arrivingGuests:0,sector:flight.sector,
      direction:flight.direction,earliestAt:now()+120,inboundAt:null,parkedAt:null,outboundAt:null,exitAt:null};
-    if(schedule(e,plane,plane.earliestAt,8*HOUR))flight.returnLeg=plane;
+    if(reserveReturn(e,flight,plane))flight.returnLeg=plane;
    }
    const plane=flight.returnLeg;if(!plane)continue;
    if(!Number.isFinite(plane.parkedAt))schedule(e,plane,Math.max(now()+60,plane.earliestAt||now()+60),8*HOUR);
