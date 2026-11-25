@@ -352,7 +352,10 @@ export class CivilizationWorld extends DurableObject {
       let bytes=0;const limit=checkpoint?12*1024*1024:4096;
       const bounded=stream.pipeThrough(new TransformStream({transform(chunk,controller){bytes+=chunk.byteLength;if(bytes>limit)throw Error('local request too large');controller.enqueue(chunk);}}));
       body=await new Response(bounded).json();
-    }catch{return json({error:'invalid_local_request'},400);}
+    }catch(error){
+      if(checkpoint){this.lastCheckpointError={at:Date.now(),error:String(error)};console.warn(JSON.stringify({event:'local_checkpoint_decode_rejected',...this.lastCheckpointError}));}
+      return json({error:'invalid_local_request'},400);
+    }
     return this.withLock(async()=>{
       const now=Date.now(),claim=path.endsWith('/claim'),lease=this.localHost;
       if(claim){
@@ -391,8 +394,14 @@ export class CivilizationWorld extends DurableObject {
       }
       if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
       if(path.endsWith('/heartbeat')){
-        const renewed={...lease,expiresAt:lease.leaving?lease.expiresAt:now+LOCAL_HOST_TTL_MS};
+        // Contact alone cannot pause the durable world forever when an older
+        // browser is alive but every progress upload fails. Permit two full
+        // lease windows for an in-flight save; only a durable receipt resets it.
+        const progressAt=Math.max(Number(lease.startedAt||0),Number(this.localJournalMeta?.savedAtMs||0));
+        const stalled=!lease.leaving&&progressAt>0&&now-progressAt>LOCAL_HOST_TTL_MS*2;
+        const renewed={...lease,...(stalled?{leaving:true}:{}),expiresAt:stalled?now:lease.leaving?lease.expiresAt:now+LOCAL_HOST_TTL_MS};
         await this.ctx.storage.put('localHostLease',renewed);this.localHost=renewed;
+        if(stalled){this.lastCheckpointError={at:now,error:'browser_checkpoint_stalled'};return json({error:'local_checkpoint_stalled'},409);}
         return json({ok:true,expiresAt:renewed.expiresAt,sequence:renewed.sequence,commands:renewed.commands||[]});
       }
       if(path.endsWith('/leave')){

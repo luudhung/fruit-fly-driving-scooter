@@ -176,6 +176,26 @@ test('heartbeats persist ownership and a closing tab shortens the fallback deadl
  assert.equal(t.metadata.has('localHostLease'),false);
 });
 
+test('heartbeats cannot keep an unsaved browser owner alive forever and background resumes the last durable progress',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
+ state.simulationAgeSeconds+=120;state.flies[0].x=17;assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ const stalledAt=Date.now()-LOCAL_HOST_TTL_MS*2-1000;
+ t.world.localHost.startedAt=stalledAt;t.world.localJournalMeta.savedAtMs=stalledAt;
+ const response=await t.post('heartbeat',lease);assert.equal(response.status,409);assert.equal((await response.json()).error,'local_checkpoint_stalled');
+ assert.ok(t.metadata.get('localHostLease').expiresAt<=Date.now());assert.equal(t.world.lastCheckpointError.error,'browser_checkpoint_stalled');
+ t.world.lastWallClockMs=Date.now()-4000;await t.world.alarm();
+ assert.ok(t.ticks>0);assert.equal(t.state.flies.find(f=>f.id==='A').x,17);assert.equal(t.state.flies.find(f=>f.id==='A').brain.id,'B');assertArchiveRetained(t);
+ assert.equal((await t.post('heartbeat',lease)).status,409);assert.equal((await t.claim()).granted,true);
+});
+
+test('a new durable checkpoint restores heartbeat grace even when the original browser claim is old',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
+ t.world.localHost.startedAt=Date.now()-LOCAL_HOST_TTL_MS*4;
+ t.world.localJournalMeta.savedAtMs=Date.now()-LOCAL_HOST_TTL_MS*3;
+ state.simulationAgeSeconds+=120;assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ assert.equal((await t.post('heartbeat',lease)).status,200);assert.ok(t.world.localHost.expiresAt>Date.now()+100000);
+});
+
 test('the same closing tab resumes immediately with clock catch-up, while other tabs cannot replace the owner',async()=>{
  const t=fixture();await t.world.ready;const first=await t.claim();
  first.state.simulationAgeSeconds+=120;first.state.flies[0].money=37;
@@ -230,6 +250,7 @@ test('invalid bodies and checkpoint sequences do not evict a valid host',async()
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();
  const broken=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-delta+gzip'},body:'not gzip'}));
  assert.equal(broken.status,400);
+ assert.ok(t.world.lastCheckpointError.error,'decode failures must be visible in health diagnostics too');
  assert.equal((await t.save({...lease,state,sequence:'bad'})).status,400);
  assert.equal(t.world.localHost.token,lease.token);
 });

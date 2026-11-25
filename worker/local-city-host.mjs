@@ -4,6 +4,10 @@ import {projectLocalDocument,diffLocalDocument} from './local-host-delta.mjs';
 setNeuralSyncEnabled(false);
 let api='',session=null,running=false,busy=false,selectedId=null,checkpointBusy=false,controlBusy=false,lastSave=0,lastTick=0;
 let baseline=null,pendingCheckpoint=null,latestPublished=null;
+// A heartbeat proves network reachability, not that the city is being saved.
+// Let a broken writer's lease expire so the cloud can resume its last good step.
+const SAVE_RENEWAL_GRACE_MS=Math.max(60000,LOCAL_HOST_CHECKPOINT_MS*12);
+const CHECKPOINT_COMPRESSION_TIMEOUT_MS=55000;
 const send=(type,extra={})=>postMessage({type,...extra});
 const processedCommands=new Set();
 function applyCommands(commands=[]){
@@ -27,6 +31,17 @@ async function request(path,body,compressed=false){
   return await response.json();
  }finally{clearTimeout(timeout);}
 }
+async function packCheckpoint(payload){
+ const controller=new AbortController();let timeout;
+ try{
+  const stream=new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'),{signal:controller.signal});
+  // Race the whole preparation, not just fetch: an unresponsive compression
+  // stream must not leave checkpointBusy locked while heartbeats stay healthy.
+  return await Promise.race([new Response(stream).arrayBuffer(),new Promise((_,reject)=>{
+   timeout=setTimeout(()=>{const error=Error('checkpoint compression timed out');controller.abort(error);reject(error);},CHECKPOINT_COMPRESSION_TIMEOUT_MS);
+  })]);
+ }finally{clearTimeout(timeout);}
+}
 async function save(release=false){
  if(!session||!baseline||checkpointBusy)return false;
  checkpointBusy=true;
@@ -37,7 +52,7 @@ async function save(release=false){
     const document=structuredClone(projectLocalDocument(getRawState()));
     const sequence=owner.sequence+1;
     const payload={token:owner.token,epoch:owner.epoch,sequence,baseSequence:owner.sequence,release,observer:latestPublished,acknowledgedCommands:[...processedCommands],patch:diffLocalDocument(baseline,document)};
-    const packed=await new Response(new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    const packed=await packCheckpoint(payload);
     pendingCheckpoint={document,sequence,packed,release};
    }
    const packet=pendingCheckpoint;
@@ -97,6 +112,7 @@ async function advance(){
 }
 async function heartbeat(){
  if(!session||!running||controlBusy)return;
+ if(Date.now()-lastSave>SAVE_RENEWAL_GRACE_MS){send('sync-pending',{message:'waiting for a durable checkpoint before renewing simulation ownership'});return;}
  controlBusy=true;
  try{
   const result=await request('/api/civilization/local/heartbeat',{token:session.token,epoch:session.epoch});
