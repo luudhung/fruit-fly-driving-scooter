@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {SceneViewBudget} from './view-budget.ts';
 import {BUILDINGS} from '../worker/city-map.mjs';
 import {privateHelicopterPose,type SportsLuxurySnapshot,type LuxuryHelicopter,type LuxuryPad} from '../worker/sports-luxury.mjs';
+import {sportsActivities,sportsBallPose,type SportsActivity} from './sports-activity.ts';
 
 /** Private aviation uses seven shared instanced batches for the entire ten-aircraft fleet. */
 export class SportsLuxuryRenderer{
@@ -21,7 +22,9 @@ export class SportsLuxuryRenderer{
  private worldCup:null|{id:string;startsAt:number;endsAt:number;status:string;score:number[];players:number}=null;
  private scoreLabel:THREE.Sprite|null=null;
  private scoreKey='';
- private tennisBalls:THREE.InstancedMesh;
+ private sportBalls:THREE.InstancedMesh;
+ private activities:SportsActivity[]=[];
+ private sportColor=new THREE.Color();
  private padDecks:THREE.InstancedMesh;
  private padRings:THREE.InstancedMesh;
  private padMarks:THREE.InstancedMesh;
@@ -29,6 +32,7 @@ export class SportsLuxuryRenderer{
  private padSignature='';
  private padLabels:THREE.Sprite[]=[];
  private elapsed=0;
+ private makeSign?: (text:string,fontSize?:number,scale?:number)=>THREE.Sprite;
  private view=new SceneViewBudget({enterDistance:1400,leaveDistance:1530,frustumMargin:16,retainedMargin:28});
  private viewReady=false;private viewKey='';private buildingVisible:(id:string)=>boolean=()=>true;
  setView(camera:THREE.Camera,buildingVisible:(id:string)=>boolean=()=>true){
@@ -36,7 +40,8 @@ export class SportsLuxuryRenderer{
   const key=(this.data?.pads||[]).filter(p=>this.view.visible(p,false,12)&&(!p.rooftop||buildingVisible(p.locationId))).map(p=>p.id).join('|');
   if(key!==this.viewKey){this.viewKey=key;this.padSignature='';if(this.data)this.sync(this.data);}
  }
- constructor(scene:THREE.Object3D,private makeSign?:(text:string,fontSize?:number,scale?:number)=>THREE.Sprite){
+ constructor(scene:THREE.Object3D,makeSign?:(text:string,fontSize?:number,scale?:number)=>THREE.Sprite){
+  this.makeSign=makeSign;
   scene.add(this.root);
   const paint=new THREE.MeshStandardMaterial({color:0xc5cbd0,metalness:.45,roughness:.35}),glass=new THREE.MeshStandardMaterial({color:0x83afba,metalness:.25,roughness:.3}),dark=new THREE.MeshStandardMaterial({color:0x242b31,metalness:.3,roughness:.55});
   const fleet=(geo:THREE.BufferGeometry,mat:THREE.Material,capacity=10)=>{const mesh=new THREE.InstancedMesh(geo,mat,capacity);mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);this.root.add(mesh);return mesh;};
@@ -52,7 +57,7 @@ export class SportsLuxuryRenderer{
   this.skid=fleet(new THREE.BoxGeometry(.12,.12,3.2),dark,20);
   this.tailRotor=fleet(new THREE.BoxGeometry(.09,1.8,.12),dark);
   this.ball=new THREE.Mesh(new THREE.SphereGeometry(.35,8,6),new THREE.MeshBasicMaterial({color:0xfff4dc}));this.ball.visible=false;this.root.add(this.ball);
-  this.tennisBalls=fleet(new THREE.SphereGeometry(.16,6,4),new THREE.MeshBasicMaterial({color:0xe6f441}),2);
+  this.sportBalls=fleet(new THREE.SphereGeometry(.16,6,4),new THREE.MeshBasicMaterial({color:0xffffff}),9);this.sportBalls.name='sports-activity-balls';
  }
  syncWorldCup(event:SportsLuxuryRenderer['worldCup']){
   this.worldCup=event;
@@ -63,6 +68,7 @@ export class SportsLuxuryRenderer{
  }
  sync(data:SportsLuxurySnapshot){
   this.data=data;this.fleet=data.helicopters||[];
+  this.activities=sportsActivities(data.participants||[]);
   const signature=(data.pads||[]).map(p=>`${p.id}:${p.x}:${p.y}:${p.z}:${p.householdIds?.join(",")}`).join('|');
   if(signature===this.padSignature)return;this.padSignature=signature;this.pads.clear();
   for(const label of this.padLabels){label.removeFromParent();label.material.map?.dispose();label.material.dispose();}this.padLabels=[];
@@ -114,10 +120,15 @@ export class SportsLuxuryRenderer{
   this.body.count=this.cabin.count=this.tail.count=this.fin.count=this.tailRotor.count=i;this.rotor.count=this.skid.count=i*2;
   for(const mesh of [this.body,this.cabin,this.tail,this.fin,this.tailRotor,this.rotor,this.skid])mesh.instanceMatrix.needsUpdate=true;
   if(this.body.instanceColor)this.body.instanceColor.needsUpdate=true;if(this.fin.instanceColor)this.fin.instanceColor.needsUpdate=true;
-  const m=this.data?.match,cup=this.worldCup;this.ball.visible=Boolean(cup&&cup.status==='playing'&&cup.players>=22&&gameNow>=cup.startsAt&&gameNow<cup.endsAt||!cup&&m&&m.players.length>=2&&gameNow>=m.startsAt&&gameNow<m.endsAt);
+  const m=this.data?.match,cup=this.worldCup;this.ball.visible=Boolean(cup&&cup.status==='playing'&&cup.players>=22&&gameNow>=cup.startsAt&&gameNow<cup.endsAt||m&&m.players.length>=2&&gameNow>=m.startsAt&&gameNow<m.endsAt);
   if(this.ball.visible){const phase=gameNow/95;this.ball.position.set(770+Math.sin(phase)*10,.6+Math.abs(Math.sin(phase*2))*.8,200+Math.sin(phase*.63)*17);}
-  const participants=this.data?.participants.filter(p=>p.kind==='tennis')||[],courts=Math.ceil(participants.length/2);this.tennisBalls.count=Math.min(2,courts);
-  for(let court=0;court<this.tennisBalls.count;court++){const t=gameNow/28+court;this.place(this.tennisBalls,court,830+(court?10:-10)+Math.sin(t*.7)*4,.7+Math.abs(Math.cos(t))*2,120+Math.sin(t)*11,0);}
-  this.tennisBalls.instanceMatrix.needsUpdate=true;
+  let bi=0;
+  for(const activity of this.activities){
+   const pose=sportsBallPose(activity,gameNow);if(!pose||this.viewReady&&!this.view.visible(pose,false,1))continue;
+   const size=activity.kind==='football'?2.2:activity.kind==='golf'?.5:1;
+   this.place(this.sportBalls,bi,pose.x,pose.y,pose.z,0,[size,size,size]);
+   this.sportBalls.setColorAt(bi++,this.sportColor.setHex(activity.kind==='tennis'?0xe6f441:0xfff4dc));
+  }
+  this.sportBalls.count=bi;this.sportBalls.instanceMatrix.needsUpdate=true;if(this.sportBalls.instanceColor)this.sportBalls.instanceColor.needsUpdate=true;
  }
 }

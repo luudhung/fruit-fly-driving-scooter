@@ -533,7 +533,7 @@ let vehicleHeadway=null;
 let activeGameStepSeconds=GAME_SECONDS_PER_REAL_SECOND;
 let nationalDefense=null;
 let nationalServices=null;
-const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request)});
+const tourism=createTourismSystem({world:()=>state,emit,remember:brainRemember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance:request=>countries.requestAirClearance(request),aviationAdmission:(f,request)=>countries.aviationAdmission(f,request),requestRegionalTrip:(f,to,options)=>regionalAviation.request(f,to,options)});
 const {bookIslandHoliday,simulateIslandHoliday,aviationSummary,aviationTick}=tourism;
 const roadLife=createRoadLife({world:()=>state,random:brainRand,remember:brainRemember,emit,neuralDrive,startJourney,isWorkCommitted});
 const cityServices={world:()=>state,random:brainRand,emit,remember:brainRemember,spend,startJourney,moveFly,needsAndActivities,payAndFinance,isWorkCommitted};

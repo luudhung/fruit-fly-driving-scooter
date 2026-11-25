@@ -2,7 +2,7 @@ import {COUNTRY_IDS} from './country-map.mjs';
 import {AIRPORT,ISLAND,onIsland} from './city-map.mjs';
 import {AVIATION,tourismFares,nextFlight,flightPose,scheduledAircraft} from './aviation.mjs';
 
-export function createTourismSystem({world,emit,remember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance=()=>({allowed:true}),aviationAdmission=()=>({allowed:true,fee:0})}){
+export function createTourismSystem({world,emit,remember,weatherDanger,startJourney,moveFly,needsAndActivities,payAndFinance,requestAirClearance=()=>({allowed:true}),aviationAdmission=()=>({allowed:true,fee:0}),requestRegionalTrip}){
  const money=f=>Math.max(0,f.money)+Math.max(0,f.savings);
  const reserve=f=>Math.max(80,Number(f.wage||5)*16);
  const fares=()=>tourismFares(world().centralBank?.priceLevel);
@@ -99,7 +99,11 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
   const s=world(),now=s.simulationAgeSeconds;
   if(!f.airTrip){
    if(f.currentLocationId==='airport'&&!f.traveling&&f.action==='taking a holiday on Hansdrex Island'){
-    if(!bookIslandHoliday(f)){f.action='island trip unavailable · keeping savings for essentials';f.actionUntil=now+3600;}
+    // New holidays share the current terminal/aircraft manifest. Keep this
+    // legacy state machine only for already prepaid airTrip reservations.
+    const booked=requestRegionalTrip?requestRegionalTrip(f,'island',{staySeconds:86400}):bookIslandHoliday(f);
+    if(booked)f.lastHolidayDay=Math.floor(now/86400);
+    else{f.action='island trip unavailable · keeping savings for essentials';f.actionUntil=now+3600;}
     return true;
    }
    return false;
