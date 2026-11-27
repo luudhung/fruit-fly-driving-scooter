@@ -164,11 +164,24 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   const planes=[...new Set(events)].flatMap(event=>(event.charters||[]).flatMap(f=>[f,...(f.returnLeg?[f.returnLeg]:[])]));
   return [...city,...planes].filter(f=>f!==except&&(f.airportId||'city')===id&&!f.aircraftGone&&Number.isFinite(f.inboundAt));
  }
+ let arrivalDispatchAt=-Infinity;const arrivalDispatches=new Map();
  function schedule(e,flight,earliest,stay=1800){
+  const fresh=!Number.isFinite(flight.inboundAt)&&!Number.isFinite(flight.parkedAt);
+  if(fresh){
+   if(now()<Number(flight.arrivalBookingRetryAt||0))return false;
+   if(arrivalDispatchAt!==now()){arrivalDispatchAt=now();arrivalDispatches.clear();}
+   const airport=flight.airportId||'city',used=arrivalDispatches.get(airport)||0;
+   // Planning a whole 38-plane football cohort against years of accepted tours
+   // exceeded the free worker's CPU allowance in a single atomic social step.
+   // Keep every guest/manifest, but assign a bounded number of new clearances
+   // per airport and step during the event's multi-day arrival lead time.
+   if(used>=2)return false;arrivalDispatches.set(airport,used+1);
+  }
+  const unavailable=()=>{if(fresh)flight.arrivalBookingRetryAt=now()+900;return false;};
   const others=traffic(e,flight.airportId,flight);
   for(let tries=0;tries<40;tries++){
    const reservation=visitorStandReservation(earliest,others,flight.airportId,stay,{...flight,motionVersion:2});
-   if(!reservation)return false;
+   if(!reservation)return unavailable();
    const candidate={...flight,motionVersion:2,standId:reservation.stand.id,arrivalStand:reservation.stand,terminalId:flight.airportId==='city'?airportTerminalForStand(reservation.stand).id:undefined,runwayId:reservation.runwayId,
     inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration};
    const path=visitorArrivalPath(candidate,Math.max(0,(flight.guests?.length||10)-1),scale());
@@ -176,9 +189,9 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    outbound(e,candidate,candidate.parkedAt+ground);
    const actualStay=candidate.standReleasedAt-candidate.parkedAt;
    if(actualStay>stay){stay=actualStay;continue;}
-   Object.assign(flight,candidate);return true;
+   Object.assign(flight,candidate);delete flight.arrivalBookingRetryAt;return true;
   }
-  return false;
+  return unavailable();
  }
  function migrate(e){
   if(e.tenPassengerVersion){routeFutureVisitors(e);return;}
@@ -352,10 +365,15 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  function tick(e){
   migrate(e);
   headway=createVehicleIndex(trafficActors(world()),onVehicleCollision);
+  // Keep the original earliest-arrival planning order while draining the
+  // bounded queue; array/team order must not push the overseas squads behind
+  // later-booked spectators and make them miss their fixed kickoff.
+  for(const flight of e.charters.filter(f=>(e.format===2||f.tenPassengerTour)&&!f.departed&&!Number.isFinite(f.parkedAt)).sort((a,b)=>(a.earliestAt||0)-(b.earliestAt||0))){
+   schedule(e,flight,Math.max(now()+60,flight.earliestAt||now()+60));
+  }
   for(const flight of e.charters){
    if(e.format!==2&&!flight.tenPassengerTour)continue;
    if(flight.departed)continue;
-   if(!Number.isFinite(flight.parkedAt))schedule(e,flight,Math.max(now()+60,flight.earliestAt||now()+60));
    if(!Number.isFinite(flight.parkedAt))continue;
    stepPlane(e,flight);
    for(const [index,f] of flight.guests.entries()){
