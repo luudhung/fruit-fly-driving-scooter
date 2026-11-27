@@ -337,6 +337,34 @@ test('an acknowledged browser save is replayed before a later map migration and 
  assert.equal(upgraded.localHost.leaving,true);assert.equal(upgraded.localDocument,null);
 });
 
+test('map migration immediately rejects old heartbeats and deltas instead of retrying a missing delta base',async()=>{
+ const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].money=42;
+ assert.equal((await t.save({...lease,sequence:1,state})).status,200);
+ const upgraded=t.restart(37);await upgraded.ready;
+ const oldHeartbeat=await upgraded.fetch(new Request('https://city/api/civilization/local/heartbeat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(lease)}));
+ assert.equal(oldHeartbeat.status,409);
+ const packet={...lease,sequence:2,baseSequence:1,patch:null};
+ const packed=await new Response(new Blob([JSON.stringify(packet)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+ const rejected=await upgraded.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',headers:{'content-type':'application/x-city-delta+gzip'},body:packed}));
+ assert.equal(rejected.status,409);assert.equal(upgraded.lastCheckpointError,undefined);
+ assert.equal(t.state.flies[0].money,42);assert.equal(t.state.flies[0].brain.id,'B');assertArchiveRetained(t);
+ const claim=await upgraded.fetch(new Request('https://city/api/civilization/local/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clientProtocol:3,clientMapVersion:37})}));
+ const next=await new Response(claim.body.pipeThrough(new DecompressionStream('gzip'))).json();
+ assert.equal(next.granted,true);assert.notEqual(next.lease.token,lease.token);assert.equal(next.state.flies[0].money,42);
+});
+
+test('a missing in-memory delta base fences its authenticated owner without extending a stalled lease',async()=>{
+ const t=fixture();await t.world.ready;const {lease}=await t.claim();
+ t.world.localHost.commands=[{requestId:'PENDING-CONFLICT',source:'test'}];
+ await t.world.materializeLocalDocument();
+ assert.equal(t.world.localDocument,null);
+ const response=await t.post('heartbeat',lease);assert.equal(response.status,409);
+ assert.ok(t.world.localHost.expiresAt<=Date.now());assert.equal(t.metadata.get('localHostLease').leaving,true);
+ assert.equal(t.world.lastCheckpointError,undefined);assert.equal(t.state.flies[0].brain.id,'B');assertArchiveRetained(t);
+ const next=await t.claim();assert.equal(next.granted,true);assert.notEqual(next.lease.token,lease.token);
+ assert.equal(t.commands.some(c=>c.requestId==='PENDING-CONFLICT'),true,'accepted commands survive the expired lease and are adopted on reclaim');
+});
+
 test('a lost receipt can retry the identical delta without duplicating finance or losing the next five-second update',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=600;state.flies[0].money=42;
  const request={...lease,sequence:1,state,retry:true};assert.equal((await t.save(request)).status,200);

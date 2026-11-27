@@ -116,7 +116,10 @@ export class CivilizationWorld extends DurableObject {
         if(journal?.stale)await clearLocalHostJournal(this.ctx.storage);
       }
       if(this.localHost&&!compatibleOwner){
-        this.localHost.leaving=true;this.localHost.expiresAt=Math.min(this.localHost.expiresAt,Date.now()+15000);
+        // A map migration has already adopted the saved document into the new
+        // engine. The old browser no longer has a compatible delta base, so it
+        // must be fenced immediately rather than renewing during leave grace.
+        this.localHost.leaving=true;this.localHost.expiresAt=Math.min(this.localHost.expiresAt,Date.now());
         await this.ctx.storage.put('localHostLease',this.localHost);
       }
       await this.ensureAlarm();
@@ -393,6 +396,16 @@ export class CivilizationWorld extends DurableObject {
         return new Response(localHostClaimStream(localDocumentState(document),next).pipeThrough(new CompressionStream('gzip')),{encodeBody:'manual',headers:corsHeaders({'content-type':'application/json','content-encoding':'gzip','access-control-expose-headers':'x-city-host-token,x-city-host-epoch','x-city-host-token':next.token,'x-city-host-epoch':String(next.epoch)})});
       }
       if(!lease||lease.expiresAt<=now||body.token!==lease.token||body.epoch!==lease.epoch)return json({error:'local_session_replaced'},409);
+      if(!this.localDocument||lease.clientMapVersion!==MAP_VERSION){
+        // Contact cannot keep an owner alive after its agreed base was adopted
+        // or became unavailable. Preserve the durable world and let this tab
+        // claim a fresh base; a 422 would retry the same unusable packet forever.
+        const fenced={...lease,leaving:true,expiresAt:now};
+        // Retain queued command receipts until advanceTo adopts them, just as
+        // on normal lease expiry; clearing the lease here would discard them.
+        await this.ctx.storage.put('localHostLease',fenced);this.localHost=fenced;
+        return json({error:'local_save_base_changed'},409);
+      }
       if(path.endsWith('/heartbeat')){
         // Contact alone cannot pause the durable world forever when an older
         // browser is alive but every progress upload fails. Permit two full
@@ -414,7 +427,6 @@ export class CivilizationWorld extends DurableObject {
         if(body.sequence<=lease.sequence)return json({ok:true,duplicate:true,sequence:lease.sequence,commands:lease.commands||[]});
         if(body.baseSequence!==lease.sequence||body.sequence!==lease.sequence+1)return json({error:'local_save_base_changed'},409);
         try{
-          if(!this.localDocument)throw Error('local delta base unavailable');
           const nextDocument=applyLocalDelta(this.localDocument,body.patch);
           // Validation reads canonical documents without mutating their agreed base.
           mergeLocalHostCheckpoint(localDocumentState(this.localDocument),localDocumentState(nextDocument),lease,now);
