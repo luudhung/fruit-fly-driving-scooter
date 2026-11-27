@@ -103,7 +103,7 @@ export class CivilizationWorld extends DurableObject {
         bootStage('expired archive compacted',{compressedBytes:this.storageStats.compressedBytes});
       }
       this.localEpoch=Math.max(Number(this.localHost?.epoch||0),Number(journal?.meta?.epoch||0));
-      const compatibleOwner=this.localHost?.protocol===3&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
+      const compatibleOwner=this.localHost?.protocol===3&&this.localHost.clientMapVersion===MAP_VERSION&&Number(journal?.meta?.mapVersion??base.mapVersion)===MAP_VERSION;
       if(journal&&!journal.stale){
         this.localJournalMeta=journal.meta;this.lastWallClockMs=journal.lastWallClockMs;
         if(compatibleOwner&&this.localHost.expiresAt>Date.now()){
@@ -359,7 +359,7 @@ export class CivilizationWorld extends DurableObject {
     return this.withLock(async()=>{
       const now=Date.now(),claim=path.endsWith('/claim'),lease=this.localHost;
       if(claim){
-        if(body.clientProtocol!==3)return json({granted:false,updateRequired:true});
+        if(body.clientProtocol!==3||body.clientMapVersion!==MAP_VERSION)return json({granted:false,updateRequired:true,mapVersion:MAP_VERSION});
         const resuming=Boolean(lease&&body.resume?.token===lease.token&&body.resume?.epoch===lease.epoch);
         if(lease&&lease.expiresAt>now&&!resuming)return json({granted:false,expiresAt:lease.expiresAt,sequence:lease.sequence});
         // The same tab proves ownership with its private resume credential,
@@ -380,7 +380,7 @@ export class CivilizationWorld extends DurableObject {
         raw.flies=raw.flies.filter(f=>f.alive||recentDead.includes(f));
         restoreState(raw);raw=getRawState();this.archiveDormant=true;
         const document=projectLocalDocument(localHostSnapshot(raw));
-        const next={protocol:3,mapVersion:raw.mapVersion,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
+        const next={protocol:3,mapVersion:raw.mapVersion,clientMapVersion:body.clientMapVersion,token:crypto.randomUUID(),epoch:++this.localEpoch,sequence:0,startedAt:now,baseAge:Number(raw.simulationAgeSeconds),expiresAt:now+LOCAL_HOST_TTL_MS,commands:[]};
         const journalDocument=this.journalDocument(document);
         this.localDocument=document;this.localObserver=initialObserver;
         try{

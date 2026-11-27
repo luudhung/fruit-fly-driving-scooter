@@ -34,7 +34,7 @@ function fixture(){
  const world=new Class(ctx,{NEURAL_ENABLED:'0'});
  const post=(path,body)=>world.fetch(new Request('https://city/api/civilization/local/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}));
  const claim=async()=>{
-  const response=await post('claim',{clientId:'test',clientProtocol:3});
+  const response=await post('claim',{clientId:'test',clientProtocol:3,clientMapVersion:36});
   const data=response.headers.get('content-encoding')==='gzip'?await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json():await response.json();
   if(data.granted){assert.equal(response.headers.get('x-city-host-token'),data.lease.token);assert.equal(Number(response.headers.get('x-city-host-epoch')),data.lease.epoch);}
   return data;
@@ -213,12 +213,12 @@ test('the same closing tab resumes immediately with clock catch-up, while other 
  first.state.simulationAgeSeconds+=120;first.state.flies[0].money=37;
  assert.equal((await t.save({...first.lease,sequence:1,state:first.state})).status,200);
  const resume={token:first.lease.token,epoch:first.lease.epoch};
- const beforeLeave=await (await t.post('claim',{clientProtocol:3})).json();assert.equal(beforeLeave.granted,false,'another device cannot take over the active owner');
+ const beforeLeave=await (await t.post('claim',{clientProtocol:3,clientMapVersion:36})).json();assert.equal(beforeLeave.granted,false,'another device cannot take over the active owner');
  await t.post('leave',resume);
- assert.equal((await (await t.post('claim',{clientProtocol:3,resume:{...resume,token:'wrong'}})).json()).granted,false);
- assert.equal((await (await t.post('claim',{clientProtocol:3,resume:{...resume,epoch:resume.epoch+1}})).json()).granted,false);
+ assert.equal((await (await t.post('claim',{clientProtocol:3,clientMapVersion:36,resume:{...resume,token:'wrong'}})).json()).granted,false);
+ assert.equal((await (await t.post('claim',{clientProtocol:3,clientMapVersion:36,resume:{...resume,epoch:resume.epoch+1}})).json()).granted,false);
  t.world.lastWallClockMs=Date.now()-5000;
- const response=await t.post('claim',{clientProtocol:3,resume});
+ const response=await t.post('claim',{clientProtocol:3,clientMapVersion:36,resume});
  const next=await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
  assert.equal(next.granted,true);assert.notEqual(next.lease.token,first.lease.token);
  assert.ok(next.state.simulationAgeSeconds>=first.state.simulationAgeSeconds+600,'five real seconds are advanced through the actual engine before the new base is agreed');
@@ -230,8 +230,8 @@ test('the same closing tab resumes immediately with clock catch-up, while other 
 test('a hard reload with the same private credential resumes even when its leave beacon was lost',async()=>{
  const t=fixture();await t.world.ready;const {lease,state}=await t.claim();state.simulationAgeSeconds+=120;state.flies[0].money=41;
  assert.equal((await t.save({...lease,sequence:1,state})).status,200);
- assert.equal((await (await t.post('claim',{clientProtocol:3,resume:{token:lease.token,epoch:lease.epoch+1}})).json()).granted,false);
- const response=await t.post('claim',{clientProtocol:3,resume:{token:lease.token,epoch:lease.epoch}});
+ assert.equal((await (await t.post('claim',{clientProtocol:3,clientMapVersion:36,resume:{token:lease.token,epoch:lease.epoch+1}})).json()).granted,false);
+ const response=await t.post('claim',{clientProtocol:3,clientMapVersion:36,resume:{token:lease.token,epoch:lease.epoch}});
  const next=await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
  assert.equal(next.granted,true);assert.ok(next.lease.epoch>lease.epoch);assert.equal(next.state.flies[0].money,41);
  assert.equal((await t.post('heartbeat',{token:lease.token,epoch:lease.epoch})).status,409);
@@ -316,6 +316,15 @@ test('older viewers remain observers and cannot trigger a buffered whole-world u
  const first=await t.claim();
  const response=await t.world.fetch(new Request('https://city/api/civilization/local/checkpoint',{method:'POST',body:'legacy-body-is-not-read'}));
  assert.equal(response.status,409);assert.equal(t.world.localHost.token,first.lease.token);
+});
+
+test('old or unknown map engines stay observers and cannot claim a current world even with the delta protocol',async()=>{
+ const t=fixture();await t.world.ready;
+ for(const version of [undefined,35,37]){
+  const result=await(await t.post('claim',{clientProtocol:3,clientMapVersion:version})).json();
+  assert.equal(result.granted,false);assert.equal(result.updateRequired,true);assert.equal(result.mapVersion,36);assert.equal(t.world.localHost,null);
+ }
+ assert.equal((await t.claim()).granted,true);
 });
 
 

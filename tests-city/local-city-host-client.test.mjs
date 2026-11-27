@@ -12,7 +12,7 @@ function fixture(options={}){
  const deferredHeartbeat=new Promise(resolve=>{heartbeatResolve=resolve;});
  const fetch=async(url,init)=>{
   const path=new URL(url).pathname.split('/').at(-1);calls.push(path);
-  if(path==='claim')return Response.json({granted:true,lease,state:structuredClone(initial)});
+  if(path==='claim'){assert.equal(JSON.parse(init.body).clientMapVersion,initial.mapVersion);return Response.json({granted:true,lease,state:structuredClone(initial)});}
   if(path==='heartbeat'){
    if(options.holdHeartbeat)await deferredHeartbeat;
    return Response.json({ok:true,sequence,commands:[]});
@@ -36,7 +36,7 @@ function fixture(options={}){
  const deps={restoreState:s=>{state=structuredClone(s);state.restoredLocally=true;},getRawState:()=>state,
   getState:()=>({simulationAgeSeconds:state.simulationAgeSeconds,flies:structuredClone(state.flies)}),
   tick:async({gameSeconds})=>{state.simulationAgeSeconds+=gameSeconds;},setNeuralSyncEnabled:()=>{},countries:{requestConflict:()=>({accepted:true})},
-  LOCAL_HOST_CHECKPOINT_MS,LOCAL_HOST_HEARTBEAT_MS,projectLocalDocument,diffLocalDocument,
+  LOCAL_HOST_CHECKPOINT_MS,LOCAL_HOST_HEARTBEAT_MS,MAP_VERSION:initial.mapVersion,projectLocalDocument,diffLocalDocument,
   postMessage:message=>messages.push(structuredClone(message)),self,fetch,
   setInterval:(callback,ms)=>{intervals.push({callback,ms});return intervals.length;},
   setTimeout:(callback,ms)=>{timeouts.push({callback,ms,active:true});return timeouts.length;},clearTimeout:id=>{if(timeouts[id-1])timeouts[id-1].active=false;},performance:{now:()=>now},Date:class extends Date{static now(){return now;}},

@@ -1,6 +1,7 @@
 import {restoreState,getRawState,getState,tick,setNeuralSyncEnabled,countries} from './civilization-engine.mjs';
 import {LOCAL_HOST_HEARTBEAT_MS,LOCAL_HOST_CHECKPOINT_MS} from './local-host-state.mjs';
 import {projectLocalDocument,diffLocalDocument} from './local-host-delta.mjs';
+import {MAP_VERSION} from './city-map.mjs';
 setNeuralSyncEnabled(false);
 let api='',session=null,running=false,busy=false,selectedId=null,checkpointBusy=false,controlBusy=false,lastSave=0,lastTick=0;
 let baseline=null,pendingCheckpoint=null,latestPublished=null;
@@ -78,7 +79,7 @@ async function start(resume=null){
  if(controlBusy||session)return;
  controlBusy=true;
  try{
-  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:3,resume});
+  const result=await request('/api/civilization/local/claim',{clientId:crypto.randomUUID(),clientProtocol:3,clientMapVersion:MAP_VERSION,resume});
   if(!result.granted){send('observer');return;}
   session=result.lease;processedCommands.clear();pendingCheckpoint=null;
   // Capture the agreed server base before restoration adds local runtime data.
