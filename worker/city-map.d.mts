@@ -47,6 +47,7 @@ export function clearMetroAccessSegment(a:Point&{y?:number},b:Point&{y?:number})
 export type MetroStationGeometry={track:Point&{y:number};platform:Point&{y:number};platformLength:number;access:Point&{y:number};axis:"x"|"z";side:number;direction:number;baseDirection:number;stairs:Array<Point&{y:number}>;sharedStairs:Array<Point&{y:number}>;crossover:Array<Point&{y:number}>;accessViolations:number};
 export type MetroTrainState=Point&{id:string;active:boolean;y:number;from:number;to:number;direction:number;runDirection:number;platformDirection:number;dwelling:boolean;alighting:boolean;cycleSeconds:number};
 export function metroTrackPoints(line:MetroLine,direction?:number):Array<Point&{y:number}>;
+export function metroSupportOffset(a:Point,b:Point,distance:number):number|undefined;
 export function metroStationGeometry(line:MetroLine,index:number,direction?:number):MetroStationGeometry;
 export function trainStates(line:MetroLine,seconds:number):MetroTrainState[];
 export function trainById(line:MetroLine,seconds:number,id:string):MetroTrainState|null;

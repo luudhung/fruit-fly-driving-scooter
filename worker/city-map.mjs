@@ -4,7 +4,8 @@ import {buildHansdrexTourismMap} from './hansdrex-tourism-map.mjs';
 import {MAIN_SCHOOL_CAMPUSES} from './education-map.mjs';
 import {SPACEPORT_BUILDINGS,SPACEPORT_LOCATIONS,SPACEPORT_ROADS} from './spaceport-map.mjs';
 import {FRUIT_FARM_BUILDINGS,FRUIT_FARM_LOCATIONS,FRUIT_FARM_ROADS} from './fruit-farm-map.mjs';
-import {NORTH_F1_BUILDINGS,NORTH_F1_LOCATIONS,NORTH_F1_ACCESS_ROADS} from './north-f1-map.mjs';
+import {NORTH_F1_BUILDINGS,NORTH_F1_LOCATIONS,NORTH_F1_ACCESS_ROADS,onNorthF1Track} from './north-f1-map.mjs';
+import {airportMetroSupportBlocked,airportMetroStairBlocked} from './metro-airport-clearance.mjs';
 import {northMilitaryPerimeterBlocked} from './country-map.mjs';
 import {INDUSTRIAL_BUILDINGS,INDUSTRIAL_LOCATIONS,INDUSTRIAL_ROADS,INDUSTRIAL_RESERVED,INDUSTRIAL_LOADING_BAYS} from './industry-map.mjs';
 import {districtProfile} from './district-economy.mjs';
@@ -16,7 +17,7 @@ import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,NORTH_RIVERSIDE_LINK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
 // Departure-deck routes and upper-hall boarding need the matching local engine.
-export const MAP_VERSION = 39;
+export const MAP_VERSION = 40;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},
@@ -742,6 +743,16 @@ const metroTracks=new WeakMap(),metroStations=new WeakMap(),metroSchedules=new W
 const metroStairReservations=[];
 function metroStairFootprint(stairs){const xs=stairs.map(p=>p.x),zs=stairs.map(p=>p.z),minX=Math.min(...xs)-.77,maxX=Math.max(...xs)+.77,minZ=Math.min(...zs)-.77,maxZ=Math.max(...zs)+.77;return {minX,maxX,minZ,maxZ};}
 function metroStairOverlap(a,b){return a.minX<b.maxX&&a.maxX>b.minX&&a.minZ<b.maxZ&&a.maxZ>b.minZ;}
+/** Both the rendered column and its collision box use this exact placement. */
+export function metroSupportOffset(a,b,d){
+ const dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<.01)return;
+ const t=d/length,sx=a.x+dx*t,sz=a.z+dz*t,px=-dz/length,pz=dx/length;
+ if(WATER.some(w=>contains(w,{x:sx,z:sz},4)))return;
+ return [6.4,-6.4].find(side=>{
+  const p={x:sx+px*side,z:sz+pz*side};
+  return !onNorthF1Track(p,.75)&&!ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1)&&!airportMetroSupportBlocked(p);
+ });
+}
 export function metroTrackPoints(line,direction=1){
  const sign=direction<0?-1:1;let cache=metroTracks.get(line);if(!cache){cache={};metroTracks.set(line,cache);}if(cache[sign])return cache[sign];
  const points=line.points,offset=2.2*sign;
@@ -766,6 +777,10 @@ export function metroStationGeometry(line,index,direction=1) {
   const stairs=[point(approach*21,side*offset-.5,1.1),point(approach*7,side*offset-.5,line.height/2+1.125),point(approach*7,side*offset+.5,line.height/2+1.125),point(approach*21,side*offset+.5,line.height+1.15)];
   let violations=0;for(let u=7;u<=21;u+=1)for(const v of [-.98,0,.98]){
    const q=point(approach*u,side*offset+v,1.1);if(nearbyGeometry(roadBins,q).some(r=>contains(r,q,.04))||blocked(q)||contains(PARK,q)||contains(AIRPORT_PARK,q)||airportAirside(q)||publicMotorway(q))violations++;
+  }
+  for(let j=1;j<stairs.length;j++){
+   const a=stairs[j-1],b=stairs[j],length=Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z);
+   for(let d=0;d<=length;d+=.5){const u=d/length,q={x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u,z:a.z+(b.z-a.z)*u};if(airportMetroStairBlocked(q))violations++;}
   }
   const footprint=metroStairFootprint(stairs),conflicts=metroStairReservations.filter(r=>r.line!==line&&metroStairOverlap(footprint,r.footprint)).length;
   candidates.push({side,stairs,violations,footprint,conflicts});

@@ -1,6 +1,5 @@
-import {onNorthF1Track} from '../worker/north-f1-map.mjs';
 import * as THREE from 'three';
-import {METRO_LINES,metroStationGeometry,metroTrackPoints,trainStates,ROADS,BUILDINGS,WATER,PARK,contains,type MetroLine} from '../worker/city-map.mjs';
+import {METRO_LINES,metroStationGeometry,metroTrackPoints,metroSupportOffset,trainStates,type MetroLine} from '../worker/city-map.mjs';
 import {batchStaticBoxes} from './static-box-batches.ts';
 import {buildElevatedMetroWalkways,buildMetroInterchanges} from './metro-interchanges.ts';
 import {SceneViewBudget} from './view-budget.ts';
@@ -109,8 +108,7 @@ export class MetroRenderer{
   for(let i=0;i<=sleepers;i++){const t=i/sleepers;this.box(.30,.12,3.05,a.x+dx*t,y-.34,a.z+dz*t,this.sleeper,yaw);}
   for(let d=13;d<length;d+=26){
    const t=d/length,sx=a.x+dx*t,sz=a.z+dz*t;
-   if(WATER.some(w=>contains(w,{x:sx,z:sz},4)))continue;
-   const offset=[6.4,-6.4].find(side=>{const p={x:sx+px*side,z:sz+pz*side};return !onNorthF1Track(p,.75)&&!ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1);});
+   const offset=metroSupportOffset(a,b,d);
    if(offset===undefined)continue;
    this.box(.72,y-.55,.72,sx+px*offset,(y-.55)/2,sz+pz*offset,this.beam);
    this.box(.8,.45,Math.abs(offset)+.8,sx+px*offset/2,y-.68,sz+pz*offset/2,this.beam,yaw);

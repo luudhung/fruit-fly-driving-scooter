@@ -1,6 +1,6 @@
 import {METRO_LINES,metroStationGeometry,pedestrianRoute,onIsland} from './city-map.mjs';
 import {countryAt} from './country-map.mjs';
-export const METRO_ACCESS_VERSION=3;
+export const METRO_ACCESS_VERSION=4;
 const nodes=METRO_LINES.flatMap(line=>line.points.map((p,index)=>({line,index,x:p[0],z:p[1],geo:metroStationGeometry(line,index)})));
 const edges=nodes.map((a,i)=>nodes.flatMap((b,j)=>{
  if(a.line.countryId!==b.line.countryId)return [];

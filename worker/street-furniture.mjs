@@ -1,5 +1,5 @@
 import {bridgeFurnitureLayout} from './bridge-rail-layout.mjs';
-import {ROADS,BUILDINGS,WATER,PARK,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,METRO_LINES,metroTrackPoints,contains,WALKWAYS,roadTravelY,clearSegment} from './city-map.mjs';
+import {ROADS,BUILDINGS,BRIDGES,DISTRICT_BRIDGES,UNDERPASSES,METRO_LINES,metroTrackPoints,metroSupportOffset,contains,WALKWAYS,roadTravelY,clearSegment} from './city-map.mjs';
 import {INTERSECTIONS} from './traffic.mjs';
 import {onNorthF1Track} from './north-f1-map.mjs';
 
@@ -62,11 +62,7 @@ for(const line of METRO_LINES)for(const direction of [1,-1]){
   const px=-dz/length,pz=dx/length;
   for(let d=13;d<length;d+=26){
    const t=d/length,sx=a.x+dx*t,sz=a.z+dz*t;
-   if(WATER.some(w=>contains(w,{x:sx,z:sz},4)))continue;
-   const offset=[6.4,-6.4].find(side=>{
-    const p={x:sx+px*side,z:sz+pz*side};
-    return !onNorthF1Track(p,.75)&&!ROADS.some(r=>contains(r,p,.75))&&!BUILDINGS.some(b=>contains(b,p,.75))&&!contains(PARK,p,1);
-   });
+   const offset=metroSupportOffset(a,b,d);
    if(offset===undefined)continue;
    box(`metro:${line.id}:${direction}:${i}:${d}`,sx+px*offset,sz+pz*offset,.72,.72,0,line.height-.55);
   }

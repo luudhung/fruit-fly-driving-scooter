@@ -38,7 +38,9 @@ function sceneryClear(x:number,z:number,heading:number,ground:number){
 }
 /** Choose the connected deck or ramp, retaining the current level at grade-separated crossings. */
 export function cityCarGround(x:number,z:number,previous:number){
- const departures=airportDepartureRoadLevels({x,z}).filter(y=>Math.abs(y-previous)<=.24).sort((a,b)=>Math.abs(a-previous)-Math.abs(b-previous));
+ // The flat merge shares the street's ground level. Its thin asphalt overlay
+ // must not bump a through car up and down as it crosses the slip-road mouth.
+ const departures=airportDepartureRoadLevels({x,z}).map(y=>y<=.25001?.2:y).filter(y=>Math.abs(y-previous)<=.24).sort((a,b)=>Math.abs(a-previous)-Math.abs(b-previous));
  if(departures.length)return departures[0];
  const p={x,z},levels=[roadTravelY(p,'z')-.9];
  if(BRIDGES.some(b=>contains(b,p)))levels.push(.2);
