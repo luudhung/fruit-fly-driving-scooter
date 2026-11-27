@@ -1,5 +1,8 @@
-import {airportTerminalForStand} from './airport-campus.mjs';
-import {visitorDepartureCompleteAt,visitorBoardingPose,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
+import {recoverAirportPassenger,rerouteAirportBoarding} from './airport-passenger-recovery.mjs';
+import {advanceRoadsideRecovery,roadsideRecoveryView} from './roadside-recovery.mjs';
+import {prioritizeGroundDeparture,priorityArrivalConflict,emptyAircraftDeadline} from './airport-ground-dispatch.mjs';
+import {airportTerminalForStand,airportTerminalById} from './airport-campus.mjs';
+import {visitorDepartureCompleteAt,visitorDeparturePath,airportDepartureEntranceFor,airportGroundDepartureTerminalFor,captureAirportDepartureEntrance,visitorBoardingPose,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
 import {BUILDINGS,LOCATIONS,clearSegment,entrance,pedestrianRoute,vehicleRoute} from './city-map.mjs';
 import {trafficActors,reserveRoadParking} from './vehicle-parking.mjs';
 import {createVehicleIndex,signalBarrier} from './traffic.mjs';
@@ -21,6 +24,8 @@ const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 /** Keep the current mode and its prediction window together at walk/car boundaries. */
 export function f1VisitorTravel(event,guest,at){
  const leg=guest.leg,route=leg?(event.tourPaths?.[leg.key]||[]):[];
+ const rescue=roadsideRecoveryView(guest,at);if(rescue)return rescue;
+ if(leg?.needsRecoveryRoute)return {traveling:false,transitMode:guest.transitMode==='car'?'walk':guest.transitMode||'walk',motion:null,routeWaypoints:[],routeIndex:0};
  if(!leg)return {traveling:Boolean(guest.motion),transitMode:guest.motion?.mode||'walk',motion:guest.motion||null,routeWaypoints:[],routeIndex:0};
  const transitMode=route[leg.index]?.mode==='car'?'car':'walk',points=[];
  for(let i=leg.index;i<route.length&&points.length<8;i++){
@@ -99,7 +104,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   // Each car has its own origin/arrival reservation. Reusing a route for all
   // 200 spectators used to send their vehicles onto the identical curb point.
   if(f.currentLocationId===destination)return null;
-  const from=fromPoint||byLocation(f.currentLocationId),to=byLocation(destination);
+  const from=fromPoint||(f.currentLocationId==='airport'&&Number.isFinite(f.x)&&Number.isFinite(f.z)?{x:f.x,y:f.y??1.1,z:f.z}:byLocation(f.currentLocationId)),to=byLocation(destination);
   if(!from||!to)return null;
   const path=groundPath(f,from,to);
   if(!path)return null;
@@ -162,7 +167,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   const city=world().cityVisitors?.airportTraffic?.flights||[];
   const events=[...(world().northF1?.previousTours||[]),world().northF1?.event,...(world().worldCup?.previousTours||[]),world().worldCup?.event,e].filter(Boolean);
   const planes=[...new Set(events)].flatMap(event=>(event.charters||[]).flatMap(f=>[f,...(f.returnLeg?[f.returnLeg]:[])]));
-  return [...city,...planes].filter(f=>f!==except&&(f.airportId||'city')===id&&!f.aircraftGone&&Number.isFinite(f.inboundAt));
+  return [...city,...planes].filter(f=>f!==except&&(!except?.id||f.id!==except.id)&&(f.airportId||'city')===id&&!f.aircraftGone&&Number.isFinite(f.inboundAt));
  }
  let arrivalDispatchAt=-Infinity;const arrivalDispatches=new Map();
  function schedule(e,flight,earliest,stay=1800){
@@ -178,14 +183,16 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(used>=2)return false;arrivalDispatches.set(airport,used+1);
   }
   const unavailable=()=>{if(fresh)flight.arrivalBookingRetryAt=now()+900;return false;};
-  const others=traffic(e,flight.airportId,flight);
+  const others=traffic(e,flight.airportId,flight);let terminalLock=flight.preparedTerminalId;
   for(let tries=0;tries<40;tries++){
-   const reservation=visitorStandReservation(earliest,others,flight.airportId,stay,{...flight,motionVersion:2});
+   const reservation=visitorStandReservation(earliest,others,flight.airportId,stay,{...flight,preparedTerminalId:terminalLock,motionVersion:2});
    if(!reservation)return unavailable();
-   const candidate={...flight,motionVersion:2,standId:reservation.stand.id,arrivalStand:reservation.stand,terminalId:flight.airportId==='city'?airportTerminalForStand(reservation.stand).id:undefined,runwayId:reservation.runwayId,
+   const candidate={...flight,arrivalPathVersion:flight.arrivalPathVersion??(fresh?2:1),departurePathVersion:flight.boardingStartedAt==null?2:flight.departurePathVersion,motionVersion:2,standId:reservation.stand.id,arrivalStand:reservation.stand,terminalId:flight.airportId==='city'?airportTerminalForStand(reservation.stand).id:undefined,runwayId:reservation.runwayId,
     inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration};
-   const path=visitorArrivalPath(candidate,Math.max(0,(flight.guests?.length||10)-1),scale());
-   const ground=candidate.kind==='positioning'?visitorDepartureCompleteAt({...candidate,boardingStartedAt:candidate.parkedAt},flight.guests?.length||10,scale())-candidate.parkedAt+780:Math.max(1200,visitorStairsClearAt(candidate,flight.guests?.length||10,scale())-candidate.parkedAt+120);
+   const prepared=flight.preboarding?visitorDepartureCompleteAt({...candidate,preboarding:false},flight.boardingGuestIds?.length||0,scale()):null;
+   if(flight.preboarding&&flight.airportId==='city'){terminalLock||=candidate.terminalId;candidate.preparedTerminalId=terminalLock;}
+   if(prepared!=null&&candidate.parkedAt<prepared-600){earliest=Math.max(earliest,prepared-600-reservation.duration);continue;}
+   const ground=prepared!=null?Math.max(1200,prepared+600-candidate.parkedAt):candidate.kind==='positioning'?visitorDepartureCompleteAt({...candidate,boardingStartedAt:candidate.parkedAt},flight.guests?.length||10,scale())-candidate.parkedAt+780:Math.max(1200,visitorStairsClearAt(candidate,flight.guests?.length||10,scale())-candidate.parkedAt+120);
    outbound(e,candidate,candidate.parkedAt+ground);
    const actualStay=candidate.standReleasedAt-candidate.parkedAt;
    if(actualStay>stay){stay=actualStay;continue;}
@@ -233,6 +240,8 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   for(let i=0;i<count;i++){
    const short=i>=count-shortCount,airport=short?'north':'city',id=e.id+'-TOUR-'+(i+1);
    const day=Math.floor(e.startsAt/DAY)*DAY;
+   // Long-stay guests arrive early enough for shared runway traffic,
+   // immigration queues and an inter-terminal transfer before race day.
    const earliest=short?e.startsAt-(28+signature(id+'hour')*2)*HOUR:e.startsAt-(60+signature(id+'hour')*10)*HOUR;
    const flight={...carrier,id,airportId:airport,sector:sectors[Math.floor(signature(id)*3)],direction:signature(id+'wind')<.5?-1:1,
     earliestAt:Math.max(now()+60,earliest),inboundAt:null,parkedAt:null,arrivingGuests:10,kind:'passenger',guests:[],
@@ -255,12 +264,14 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  }
  function atSite(f,id){return f.currentLocationId===id;}
  function visit(e,f,flight){
+  if(advanceRoadsideRecovery(world(),f,headway))return;
   if(f.phase==='inbound'){
    if(!Number.isFinite(f.terminalAt)||now()<f.terminalAt)return;
    const port=airportById(flight.airportId);
    if(admit?.(f,{airportId:port.id,flightId:flight.id,toCountryId:port.countryId})?.allowed===false){f.phase='denied';return;}
    if(!f.legacyAirlineContract&&!chargeHansdrexFare(world(),f,'inbound',{reference:flight.id})){f.action='waiting for airline ticket payment';return;}
-   Object.assign(f,port.gate,{phase:'visiting',y:1.1,currentLocationId:port.locationId,traveling:false,motion:null,arrivedAt:now()});
+   const arrivalGate=port.id==='city'&&Number(flight.arrivalPathVersion)>=2?airportTerminalById(flight.terminalId).gate:port.gate;
+   Object.assign(f,arrivalGate,{arrivalTerminalId:flight.terminalId,phase:'visiting',y:1.1,currentLocationId:port.locationId,traveling:false,motion:null,arrivedAt:now()});
    const totals=stats();
    totals.charterArrivals++;totals.externalInflow+=f.initialCash;
    f.immigrationClearedAt=now();f.visitorReservedBudget=Math.max(200,Number(f.visitorReservedBudget||0));
@@ -336,14 +347,16 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
  function stepPlane(e,plane){
   if(plane.aircraftGone||!Number.isFinite(plane.parkedAt))return;
   const previous=Number(plane.lastAirfieldAt??Math.min(now(),plane.inboundAt));plane.lastAirfieldAt=now();
-  if(!plane.landed&&!Number.isFinite(plane.touchdownAt)&&now()>=plane.inboundAt&&previous<plane.inboundAt+visitorTouchdownSeconds(plane)&&weatherClosed()){
+  if(!plane.landed&&!Number.isFinite(plane.touchdownAt)&&now()>=plane.inboundAt&&previous<plane.inboundAt+visitorTouchdownSeconds(plane)&&(weatherClosed()||priorityArrivalConflict(plane,traffic(e,plane.airportId,plane),now()))){
    const pose=visitorAircraftPose(Math.max(plane.inboundAt,previous),plane);
    if(pose)plane.hold={...pose,at:now()};
    schedule(e,plane,now()+900,plane.kind==='positioning'?8*HOUR:1800);return;
   }
   if(!plane.landed&&now()>=plane.inboundAt+visitorTouchdownSeconds(plane))plane.touchdownAt??=plane.inboundAt+visitorTouchdownSeconds(plane);
-  const wasTaxiHeld=Boolean(plane.taxiHold);
+  const wasTaxiHeld=Boolean(plane.taxiHold),previousStand=plane.arrivalStand;
   if(resolveVisitorTaxiStand(plane,traffic(e,plane.airportId,plane),now())&&plane.outboundAt!=null){
+   const cohort=(e.charters||[]).find(f=>f.returnLeg===plane);
+   if(cohort)rerouteAirportBoarding(world(),plane,previousStand,cohort.guests);
    // A taxiway hold invalidated the old takeoff slot. Once a real bay opens,
    // rotate from its actual parking time rather than retaining days of mutually
    // postponed phantom reservations. A committed boarding path still wins.
@@ -352,8 +365,15 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    outbound(e,plane,earliest);
   }
   if(!plane.landed&&!plane.taxiHold&&now()>=plane.parkedAt)plane.landed=true;
+  if(plane.landed&&!weatherClosed()){
+   const count=plane.boardingGuestIds?.length||plane.passengerIds?.length||0;
+   const planned=plane.boardingStartedAt!=null?visitorDepartureCompleteAt(plane,count,scale())+600:plane.kind==='positioning'?Infinity:visitorStairsClearAt(plane,plane.guests?.length||plane.arrivingGuests||0,scale())+120;
+   const stairs=visitorStairsClearAt(plane,plane.kind==='positioning'?0:plane.guests?.length||plane.arrivingGuests||0,scale())+120;
+   const ready=!plane.passengerIds?.length?Math.min(planned,Math.max(emptyAircraftDeadline(plane),stairs)):planned;
+   prioritizeGroundDeparture(world(),plane,traffic(e,plane.airportId,plane),ready);
+  }
   if(plane.outboundAt!=null&&now()>=plane.outboundAt&&!plane.tookOff){
-   if(weatherClosed())outbound(e,plane,now()+900);else plane.tookOff=true;
+   if(weatherClosed()){delete plane.groundDeparturePriorityAt;outbound(e,plane,now()+900);}else plane.tookOff=true;
   }
   if(plane.tookOff&&now()>=plane.exitAt)plane.aircraftGone=true;
  }
@@ -365,7 +385,11 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
   const airport=plane.airportId||'city',used=returnDispatches.get(airport)||0;
   if(used>=2)return false;
   returnDispatches.set(airport,used+1);
+  plane.preboarding=true;plane.departurePathVersion=2;plane.boardingStartedAt=now();plane.passengerIds=[];
+  plane.boardingGuestIds=flight.guests.filter(f=>f.phase==='airport-ready').map(f=>f.id);
+  plane.departureEntrances={};for(const [index,id] of plane.boardingGuestIds.entries()){const guest=flight.guests.find(f=>f.id===id),entry=airportDepartureEntranceFor(guest);if(entry)plane.departureEntrances[index]=entry;else{const terminal=airportGroundDepartureTerminalFor(guest);if(terminal)(plane.departureGroundTerminals||={})[index]=terminal;}}
   const accepted=schedule(e,plane,plane.earliestAt,8*HOUR);
+  if(accepted)for(const id of plane.boardingGuestIds){const guest=flight.guests.find(f=>f.id===id);if(guest)delete guest.airportDepartureEntrance;}
   if(!accepted)flight.returnBookingRetryAt=now()+HOUR;else delete flight.returnBookingRetryAt;
   return accepted;
  }
@@ -385,6 +409,7 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(!Number.isFinite(flight.parkedAt))continue;
    stepPlane(e,flight);
    for(const [index,f] of flight.guests.entries()){
+    if(recoverAirportPassenger(world(),f,flight))continue;
     if(f.phase==='inbound'){
      if(!flight.landed&&now()>=flight.parkedAt)continue;
      const pose=visitorArrivalPose(now(),flight,index,scale());
@@ -412,26 +437,30 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    if(waiting.length&&!flight.returnLeg&&(ready||now()-flight.returnReadyAt>=HOUR)){
     const returnNumber=Number(flight.completedReturnFlights||0)+1;
     const plane={...carrier,id:flight.id+'-RETURN'+(returnNumber>1?'-'+returnNumber:''),airportId:flight.airportId,kind:'positioning',arrivingGuests:0,sector:flight.sector,
-     direction:flight.direction,earliestAt:now()+120,inboundAt:null,parkedAt:null,outboundAt:null,exitAt:null};
-    if(reserveReturn(e,flight,plane))flight.returnLeg=plane;
+     direction:flight.direction,earliestAt:now()+120,inboundAt:null,parkedAt:null,outboundAt:null,exitAt:null,
+     preboarding:true,departurePathVersion:2,boardingStartedAt:now(),boardingGuestIds:waiting.map(f=>f.id),passengerIds:[],departureEntrances:{}};
+    for(const [index,person]of waiting.entries()){const entry=airportDepartureEntranceFor(person);if(entry)plane.departureEntrances[index]=entry;else{const terminal=airportGroundDepartureTerminalFor(person);if(terminal)(plane.departureGroundTerminals||={})[index]=terminal;}}
+    if(reserveReturn(e,flight,plane)){flight.returnLeg=plane;for(const person of waiting)delete person.airportDepartureEntrance;}
    }
    const plane=flight.returnLeg;if(!plane)continue;
    if(!Number.isFinite(plane.parkedAt))schedule(e,plane,Math.max(now()+60,plane.earliestAt||now()+60),8*HOUR);
    stepPlane(e,plane);
    if(plane.landed&&plane.boardingStartedAt==null){
-    plane.boardingStartedAt=now();
+    plane.boardingStartedAt=now();plane.departurePathVersion=2;
     plane.boardingGuestIds=flight.guests.filter(f=>f.phase==='airport-ready').map(f=>f.id);
+    for(const [index,id] of plane.boardingGuestIds.entries()){const person=flight.guests.find(f=>f.id===id);if(person)captureAirportDepartureEntrance(plane,person,index);}
     const duration=visitorDepartureCompleteAt(plane,plane.boardingGuestIds.length,scale())-now();
     if(plane.outboundAt==null||plane.outboundAt<now()+duration+600)outbound(e,plane,now()+duration+600);
     plane.boardAt=now()+duration;plane.passengerIds=[];
    }
    if(plane.boardingStartedAt!=null&&!plane.boardingGuestIds)plane.boardingGuestIds=flight.guests.filter(f=>['airport-ready','boarding','return-flight'].includes(f.phase)).map(f=>f.id);
-   if(plane.boardingStartedAt!=null)for(const [index,id] of plane.boardingGuestIds.entries()){
+   if(!plane.aircraftGone&&plane.boardingStartedAt!=null)for(const [index,id] of plane.boardingGuestIds.entries()){
     const f=flight.guests.find(f=>f.id===id);if(!f)continue;
-    if(!['airport-ready','boarding','return-flight'].includes(f.phase))continue;
+    if(f.missedReturnFlightId===plane.id||!['airport-ready','boarding','return-flight'].includes(f.phase))continue;
+    if(plane.tookOff&&!plane.passengerIds?.includes(f.id)){f.phase='stranded';f.missedReturnFlightId=plane.id;f.onPlane=false;f.motion=null;f.action='returning to the terminal after the two-hour aircraft turnaround';continue;}
     const pose=boardingPose(plane,index);if(!pose)continue;
     if(pose.onPlane&&!f.legacyAirlineContract&&!chargeHansdrexFare(world(),f,'outbound',{reference:plane.id})){
-     f.phase='stranded';f.onPlane=false;f.motion=null;f.action='waiting at the terminal: return ticket funds unavailable';continue;
+     f.phase='stranded';f.missedReturnFlightId=plane.id;f.onPlane=false;f.motion=null;f.action='waiting at the terminal: return ticket funds unavailable';continue;
     }
     Object.assign(f,pose,{indoors:pose.onPlane,traveling:false,motion:pose.onPlane?null:visitorBoardingMotion(now(),plane,index,scale()),action:pose.onPlane?'flying home with Hansdrex Airline':'walking through the terminal to board Hansdrex Airline'});
     f.phase=pose.onPlane?'return-flight':'boarding';

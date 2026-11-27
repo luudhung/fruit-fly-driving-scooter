@@ -17,13 +17,13 @@ test('empty rotating aircraft across all four terminals leave after stairs clear
  for(const f of flights){
   assert.equal(f.passengerIds.length,0);assert.equal(f.arrivalPassengerIds.length,10);
   assert.ok(f.outboundAt>=visitorStairsClearAt(f,10),'the aircraft cannot move while its arriving people use the stairs');
-  assert.ok(f.outboundAt-f.parkedAt<3600,'empty aircraft must not budget hours of nonexistent check-in walks');
+  assert.ok(f.outboundAt-f.parkedAt<=7200,'empty aircraft leave within two hours of parking, including shared runway clearance');
   assert.ok(visitorAircraftPose(f.outboundAt+120,f).phase==='taxi-out');
   assert.equal(visitorAircraftPose(f.exitAt,f),null);assert.ok(visitorStandReleaseAt(f)<f.exitAt);
  }
  const ids=t.state.cityVisitors.visitors.map(p=>[p.id,p.brain.id,p.money,p.savings]);
  t.restore();assert.deepEqual(t.state.cityVisitors.visitors.map(p=>[p.id,p.brain.id,p.money,p.savings]),ids);
- for(const f of t.state.cityVisitors.airportTraffic.flights)assert.ok(f.outboundAt-f.parkedAt<3600);
+ for(const f of t.state.cityVisitors.airportTraffic.flights)assert.ok(f.outboundAt-f.parkedAt<=7200);
 });
 
 test('a saved empty plane with an obsolete day-long timer obtains a real near-term departure without jumping off its stand',()=>{
@@ -37,15 +37,15 @@ test('a saved empty plane with an obsolete day-long timer obtains a real near-te
  t.tick(f.exitAt);assert.equal(t.state.cityVisitors.airportTraffic.departed,1);assert.equal(t.state.cityVisitors.airportTraffic.flights.length,0);
 });
 
-test('a single returning guest extends only its actual boarding walk and the plane still departs with nine unsold seats',()=>{
+test('one returning guest checks in before its return ferry arrives while empty equipment rotates without waiting',()=>{
  const t=fixture(),guest=t.system.spawnVisitor({budget:2000,staySeconds:999999});
  Object.assign(guest,{visitorPhase:'airport-wait',currentLocationId:'airport',targetLocationId:'airport',x:AIRPORT.gate.x,y:1.1,z:AIRPORT.gate.z,traveling:false,indoors:false,airportQueuedAt:0,departAt:0});
  assert.equal(t.system.queueAircraft(0,'city'),true);let f=t.state.cityVisitors.airportTraffic.flights[0];
- t.tick(f.parkedAt+1);assert.deepEqual(f.passengerIds,[guest.id]);assert.equal(guest.airportFlightId,f.id);
+ t.tick(f.parkedAt+1);const empty=f;f=t.state.cityVisitors.airportTraffic.flights.find(p=>p.passengerIds?.includes(guest.id));assert.ok(f);assert.notEqual(f.id,empty.id);assert.equal(empty.passengerIds.length,0);assert.equal(f.preboarding,true);assert.equal(guest.airportFlightId,f.id);
  assert.ok(f.outboundAt>=visitorDepartureCompleteAt(f,1));
  assert.ok(f.boardAt<visitorDepartureCompleteAt(f,10),'unbooked seats add no stagger/check-in wait');
- const boardingStartedAt=f.boardingStartedAt,outboundAt=f.outboundAt,guestIdentity=[guest.id,guest.brain.id,guest.money,guest.savings];
- t.restore();f=t.state.cityVisitors.airportTraffic.flights[0];const restored=t.state.cityVisitors.visitors.find(p=>p.id===guest.id);
+ const flightId=f.id,boardingStartedAt=f.boardingStartedAt,outboundAt=f.outboundAt,guestIdentity=[guest.id,guest.brain.id,guest.money,guest.savings];
+ t.restore();f=t.state.cityVisitors.airportTraffic.flights.find(p=>p.id===flightId);const restored=t.state.cityVisitors.visitors.find(p=>p.id===guest.id);
  assert.deepEqual([restored.id,restored.brain.id,restored.money,restored.savings],guestIdentity);
  assert.equal(f.boardingStartedAt,boardingStartedAt);assert.equal(f.outboundAt,outboundAt);
  t.tick(f.boardAt+1);assert.equal(restored.onPlane,true);t.tick(f.exitAt+1);assert.equal(restored.departed,true);assert.equal(t.state.cityVisitors.totalDepartures,1);

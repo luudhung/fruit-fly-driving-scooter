@@ -1,6 +1,8 @@
-import {airportTerminalForStand,AIRPORT_TAXI_BAYS} from './airport-campus.mjs';
+import {recoverAirportPassenger,rerouteAirportBoarding} from './airport-passenger-recovery.mjs';
+import {prioritizeGroundDeparture,priorityArrivalConflict,emptyAircraftDeadline} from './airport-ground-dispatch.mjs';
+import {airportTerminalForStand,airportTerminalById,AIRPORT_TAXI_BAYS} from './airport-campus.mjs';
 import {AIRPORT_DEPARTURE_ROAD,AIRPORT_DEPARTURE_DROPOFFS,airportDepartureDropoff,airportDepartureDrive} from './airport-departure-roads.mjs';
-import {captureAirportDepartureEntrance,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
+import {airportDepartureEntranceFor,airportGroundDepartureTerminalFor,captureAirportDepartureEntrance,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
 import {createHansdrexTourism} from './hansdrex-tourism.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
@@ -19,7 +21,7 @@ const money=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const location=id=>LOCATIONS.find(l=>l.id===id);
 const departurePort=v=>airportById(v.departureAirportId||v.entryAirportId||'city');
-const atAirport=v=>v.currentLocationId===departurePort(v).locationId&&(dist(v,departurePort(v).terminal)<45||departurePort(v).id==='city'&&v.airportDepartureEntrance&&v.y>4&&dist(v,v.airportDepartureEntrance)<15);
+const atAirport=v=>v.currentLocationId===departurePort(v).locationId&&(dist(v,departurePort(v).terminal)<45||departurePort(v).id==='city'&&AIRPORT.terminals.some(t=>dist(v,t.gate)<15)||departurePort(v).id==='city'&&v.airportDepartureEntrance&&v.y>4&&dist(v,v.airportDepartureEntrance)<15);
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
 const hansHotels={'hotel':56,'riverside-hotel':42,'marina-bay':128};
 function busy(f,now=0){return f.countryAirTrip||f.countryFlightPlan||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
@@ -72,6 +74,13 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   }
   for(const v of s.visitors){v.kind='visitor';v.taxiPassenger=Boolean(v.taxiPassenger);v.entryAirportId||='city';v.departureAirportId||=v.entryAirportId;v.originCountryId||='outside';v.citizenshipCountryId||='outside';v.travelGoals||=['hansdrex','north-city'];v.travelGoalsCompleted||=[];v.siteCountryVisits||={};if(international&&!v.returnFarePaid){v.returnFareReserve=hansdrexReturnFare(v);v.visitorReservedBudget=Math.max(Number(v.visitorReservedBudget||0),v.returnFareReserve+100);}}
   if(international&&!s.internationalTourVersion){for(const v of s.visitors)if(v.airportFlightId)v.visitorMedicalException='grandfathered booked departure';s.internationalTourVersion=1;}
+  for(const visitor of s.visitors){
+   if(!visitor.alive||visitor.departed||visitor.onPlane)continue;
+   const missingFlight=visitor.airportFlightId&&!s.airportTraffic.flights.some(f=>f.id===visitor.airportFlightId&&!f.aircraftGone);
+   if(missingFlight||visitor.visitorPhase==='airport-wait'&&!atAirport(visitor)&&/return ticket|return fare/i.test(visitor.action||'')){
+    Object.assign(visitor,{airportFlightId:null,visitorPhase:'airport-recovery',phase:'stranded',airportRecovery:true,traveling:false,airportMotion:null});
+   }
+  }
   ignoreOrphanedArrivalSlots(s);
   // Reservations and committed trips resume from stored phases; never recharge in init.
   return s;
@@ -153,7 +162,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   completeAirportArrival(v);
   return v;
  }
- function completeAirportArrival(v){
+ function completeAirportArrival(v,terminalId=null){
   if(v.immigrationClearedAt!=null)return;
   const port=airportById(v.entryAirportId||'city');
   if(international){
@@ -163,7 +172,8 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   }
   const s=data();s.totalArrivals++;v.visitorArrivedAt=now();v.immigrationClearedAt=now();
   if(v.staySeconds){v.departAt=now()+v.staySeconds;const room=s.hotels[v.hotelId]?.rooms[v.id];if(room)room.checkoutAt=v.departAt;}
-  Object.assign(v,{x:port.gate.x,y:1.1,z:port.gate.z,airportMotion:null,visitorPhase:'arrival',currentLocationId:port.locationId,targetLocationId:port.locationId,onPlane:false,indoors:false,traveling:false,routeWaypoints:[],vx:0,vz:0,action:'cleared airport immigration'});
+  const gate=port.id==='city'&&terminalId?airportTerminalById(terminalId).gate:port.gate;
+  Object.assign(v,{x:gate.x,y:1.1,z:gate.z,arrivalTerminalId:terminalId,airportMotion:null,visitorPhase:'arrival',currentLocationId:port.locationId,targetLocationId:port.locationId,onPlane:false,indoors:false,traveling:false,routeWaypoints:[],vx:0,vz:0,action:'cleared airport immigration'});
   const duration=v.departAt-now(),budget=money(v)+Number(v.hotelPaid||0),h=s.hotels[v.hotelId],id=v.id;
   emit('visitor_arrival',`${v.id} cleared immigration and booked ${Math.ceil(duration/DAY)} days at ${h.id}.`,{visitorId:id,hotelId:h.id,budget,departAt:v.departAt,flightId:v.arrivalFlightId});
   remember(v,'city_arrival',{hotelId:h.id,departure:v.departAt});
@@ -186,11 +196,12 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  function requestTaxi(passenger,destinationId){
   const s=data(),dest=location(destinationId);if(!dest||isUnavailable(destinationId,passenger)||passenger.departed||busy(passenger,now()))return false;
   if(passenger.airportDepartureWalk||s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).length>=MAX_TAXIS)return false;
-  const airportPickup=passenger.currentLocationId==='airport'&&!s.taxiJobs.some(j=>!['complete','cancelled'].includes(j.phase)&&j.pickup?.bayId==='T1-PICKUP');
+  const pickupTerminal=airportGroundDepartureTerminalFor(passenger)||'T1';
+  const airportPickup=passenger.currentLocationId==='airport'&&!s.taxiJobs.some(j=>!['complete','cancelled'].includes(j.phase)&&j.pickup?.bayId===`${pickupTerminal}-PICKUP`);
   const assigned=s.airportTraffic?.flights?.find(f=>f.passengerIds?.includes(passenger.id)&&!f.aircraftGone)?.terminalId;
   const departureBay=destinationId==='airport'?AIRPORT_DEPARTURE_DROPOFFS.filter(b=>!s.taxiJobs.some(j=>!['complete','cancelled','exiting'].includes(j.phase)&&j.drop?.bayId===b.id)).sort((a,b)=>Number(b.terminalId===assigned)-Number(a.terminalId===assigned))[0]:null;
   const airportDrop=destinationId==='airport'&&Boolean(departureBay);
-  const bay=kind=>{const b=AIRPORT_TAXI_BAYS.find(b=>b.terminalId==='T1'&&b.kind===kind);return b?{x:b.x,z:b.z,y:1.1,heading:Math.PI/2,bayId:b.id}:null;};
+  const bay=kind=>{const b=AIRPORT_TAXI_BAYS.find(b=>b.terminalId===pickupTerminal&&b.kind===kind);return b?{x:b.x,z:b.z,y:1.1,heading:Math.PI/2,bayId:b.id}:null;};
   if(passenger.currentLocationId==='airport'&&!airportPickup||destinationId==='airport'&&!airportDrop)return false;
   const pickup=airportPickup?bay('pickup'):parkingPoint(passenger),drop=airportDrop?{x:departureBay.x,y:departureBay.y,z:departureBay.z,heading:departureBay.heading,bayId:departureBay.id,terminalId:departureBay.terminalId}:parkingPoint(dest);if(!pickup||!drop||dist(pickup,drop)<30)return false;
   const drivers=taxiCandidates().sort((a,b)=>dist(a,pickup)-dist(b,pickup));
@@ -383,6 +394,11 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    emit('visitor_fatality',`${v.id} died during a visit; the room was released and the estate returned abroad.`,{visitorId:v.id,cause:v.causeOfDeath||'fatal injuries'});return;
   }
   if(v.visitorPhase==='inbound-flight'||v.visitorPhase==='airport-arrival')return;
+  if(v.airportRecovery){
+   recoverAirportPassenger(raw(),v,{airportId:departurePort(v).id});
+   if(v.phase==='airport-ready'){v.visitorPhase='airport-wait';v.airportQueuedAt=now();delete v.airportRecovery;}
+   return;
+  }
   if(tourism.advance(v,clock))return;
   const tourComplete=!international||v.visitorMedicalException||v.travelGoals?.every(id=>v.travelGoalsCompleted?.includes(id));
   if(v.airportFlightId||v.visitorPhase==='airport-wait'&&atAirport(v)&&tourComplete)return;
@@ -579,7 +595,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   flight.arrivalCompleteAt=visitorArrivalCompleteAt(flight,count,Number(raw().timeScale||120));
   return true;
  }
- function queueAircraft(guests,airportId='city'){
+ function queueAircraft(guests,airportId='city',departing=[]){
   const traffic=data().airportTraffic;
   if(guests>0&&airportAdmissionCapacity()<MIN_VISITOR_PASSENGERS)return false;
   const sector=AIRPORT_SECTORS[Math.floor(rng()*AIRPORT_SECTORS.length)];
@@ -589,8 +605,10 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    arrivingGuests:guests>0?MIN_VISITOR_PASSENGERS:0,unloaded:false,passengerIds:[],
    kind:guests>0?'passenger':'ferry',arrivalPassengerIds:guests>0?undefined:[],
    boardAt:null,outboundAt:null,exitAt:null};
+  if(departing.length){flight.preboarding=true;flight.departurePathVersion=2;flight.boardingStartedAt=now();flight.passengerIds=departing.map(v=>v.id);flight.departureEntrances={};for(const [index,v]of departing.entries()){const entry=airportDepartureEntranceFor(v);if(entry)flight.departureEntrances[index]=entry;else{const terminal=airportGroundDepartureTerminalFor(v);if(terminal)(flight.departureGroundTerminals||={})[index]=terminal;}}}
   if(!reserveAircraft(flight,now()+180))return false;
   traffic.flights.push(flight);
+  if(departing.length)for(const visitor of departing){visitor.airportFlightId=flight.id;visitor.action='checking in ahead of the arriving return aircraft';delete visitor.airportDepartureEntrance;}
   if(guests>0&&!reserveManifest(flight)){traffic.flights=traffic.flights.filter(f=>f!==flight);return false;}
   // The aircraft rotates after its ten passengers have left the stairs. Their
   // walk through immigration continues independently of the parked aircraft.
@@ -614,9 +632,10 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  function scheduleTurnaround(flight,otherFlights=airportFlights(flight.airportId||'city',flight)){
   const count=Number(flight.arrivingGuests||0),stairs=count?visitorStairsClearAt(flight,count,Number(raw().timeScale||120)):flight.parkedAt;
   const departing=(flight.passengerIds||[]).length;
+  if(flight.departurePathVersion==null&&!(departing&&Number.isFinite(flight.boardingStartedAt)))flight.departurePathVersion=2;
   // Seats are a capacity, never a dispatch requirement. Empty arriving aircraft
   // must not reserve ten hypothetical upstairs check-in walks at the stand.
-  flight.boardingStartedAt=departing?Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600):Math.max(now()+120,flight.parkedAt+600,Number(stairs||flight.parkedAt)+120);
+  flight.boardingStartedAt=flight.preboarding?flight.boardingStartedAt??now():departing?Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600):Math.max(now()+120,flight.parkedAt+600,Number(stairs||flight.parkedAt)+120);
   const earliest=departing?(flight.terminalId?visitorDepartureCompleteAt(flight,departing,Number(raw().timeScale||120))+600:flight.boardingStartedAt):Math.max(flight.parkedAt+1200,flight.boardingStartedAt+120);
   flight.outboundAt=visitorRunwaySlot(earliest,visitorFlightDuration(flight,true),[...otherFlights,flight],flight.airportId||'city',flight.runwayId,flight.motionVersion>=1?visitorRunwayTiming(flight,true):null);
   flight.boardAt=flight.terminalId?visitorDepartureCompleteAt(flight,departing,Number(raw().timeScale||120)):flight.outboundAt-420;flight.exitAt=flight.outboundAt+visitorFlightDuration(flight,true);
@@ -630,12 +649,14 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  }
  function reserveAircraft(flight,earliest){
   const airport=flight.airportId||'city',others=airportFlights(airport,flight);
-  let stay=21600;
+  let stay=21600,terminalLock=flight.preparedTerminalId;
   for(let tries=0;tries<40;tries++){
-   const reservation=visitorStandReservation(earliest,others,airport,stay,{...flight,motionVersion:2});if(!reservation)return false;
-   const candidate={...flight,motionVersion:2,inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration,runwayId:reservation.runwayId,
+   const reservation=visitorStandReservation(earliest,others,airport,stay,{...flight,preparedTerminalId:terminalLock,motionVersion:2});if(!reservation)return false;
+   const candidate={...flight,arrivalPathVersion:flight.arrivalPathVersion??(flight.inboundAt==null?2:1),motionVersion:2,inboundAt:reservation.at,parkedAt:reservation.at+reservation.duration,runwayId:reservation.runwayId,
     standId:reservation.stand.id,arrivalStand:reservation.stand,terminalId:airport==='city'?airportTerminalForStand(reservation.stand).id:undefined,outboundAt:null,boardAt:null,exitAt:null};
+   if(flight.preboarding&&airport==='city'){terminalLock||=candidate.terminalId;candidate.preparedTerminalId=terminalLock;}
    scheduleTurnaround(candidate,others);
+   if(flight.preboarding){const ready=visitorDepartureCompleteAt({...candidate,preboarding:false},candidate.passengerIds.length,Number(raw().timeScale||120));if(candidate.parkedAt<ready-600){earliest=Math.max(earliest,ready-600-reservation.duration);continue;}}
    const actualStay=candidate.expectedStandReleaseAt-candidate.parkedAt;
    if(actualStay>stay){stay=actualStay;continue;}
    Object.assign(flight,candidate);return true;
@@ -651,19 +672,21 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    if(!f.unloaded&&(f.arrivalPassengerIds?.length||0)<MIN_VISITOR_PASSENGERS&&f.arrivingGuests>0&&!reserveManifest(f)){
     rescheduleArrival(f,time+900);continue;
    }
-   if(closed&&!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+visitorTouchdownSeconds(f)){
+   if(!f.unloaded&&!Number.isFinite(f.touchdownAt)&&time>=f.inboundAt&&previous<f.inboundAt+visitorTouchdownSeconds(f)&&(closed||priorityArrivalConflict(f,airportFlights(f.airportId||'city',f),time))){
     const pose=visitorAircraftPose(Math.max(f.inboundAt,previous),f);
     if(pose)f.hold={x:pose.x,y:pose.y,z:pose.z,at:time};
     rescheduleArrival(f,time+900);continue;
    }
    if(time>=f.inboundAt+visitorTouchdownSeconds(f))f.touchdownAt??=f.inboundAt+visitorTouchdownSeconds(f);
-   if(resolveVisitorTaxiStand(f,airportFlights(f.airportId||'city',f),time))scheduleTurnaround(f,airportFlights(f.airportId||'city',f));
+   const previousStand=f.arrivalStand;
+   if(resolveVisitorTaxiStand(f,airportFlights(f.airportId||'city',f),time)){rerouteAirportBoarding(raw(),f,previousStand,s.visitors);scheduleTurnaround(f,airportFlights(f.airportId||'city',f));}
    if(f.taxiHold)continue;
    // Saved empty aircraft keep their real parked pose, but get a fresh, finite
    // takeoff clearance instead of waiting out an obsolete full-manifest timer.
    // Never rewrite a passenger's accepted boarding walk or a taxiing departure.
    if(!f.aircraftGone&&time>=f.parkedAt&&!f.passengerIds?.length&&f.turnaroundVersion!==1&&(f.outboundAt==null||time<f.outboundAt))scheduleTurnaround(f);
    if(closed&&f.outboundAt!=null&&time>=f.outboundAt&&previous<f.outboundAt){
+    delete f.groundDeparturePriorityAt;
     f.outboundAt=visitorRunwaySlot(time+900,visitorFlightDuration(f,true),airportFlights(f.airportId||'city',f),f.airportId||'city',f.runwayId,f.motionVersion>=1?visitorRunwayTiming(f,true):null);
     f.exitAt=f.outboundAt+visitorFlightDuration(f,true);
     f.expectedStandReleaseAt=f.standReleasedAt=f.outboundAt+visitorStandReleaseSeconds(f);
@@ -684,9 +707,16 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
      routeWaypoints:pose.next?[{x:pose.next.x,y:pose.next.y,z:pose.next.z,mode:'walk'}]:[]});
     visitor.movementTrace=[...(visitor.movementTrace||[]),{x:visitor.x,y:visitor.y,z:visitor.z,t:time}].slice(-8);
     if(pose.onPlane)allOffPlane=false;
-    if(pose.phase==='complete')completeAirportArrival(visitor);
+    if(pose.phase==='complete')completeAirportArrival(visitor,Number(f.arrivalPathVersion)>=2?f.terminalId:null);
    }
    if(!f.unloaded&&time>=f.parkedAt&&allOffPlane)f.unloaded=true;
+   if(!closed&&time>=f.parkedAt){
+    const count=f.passengerIds?.length||0,stairs=visitorStairsClearAt(f,Number(f.arrivingGuests||0),Number(raw().timeScale||120))+120;
+    const planned=count?visitorDepartureCompleteAt(f,count,Number(raw().timeScale||120))+600:stairs;
+    const boarded=(f.passengerIds||[]).some(id=>s.visitors.some(v=>v.id===id&&v.onPlane&&v.airportFlightId===f.id));
+    const ready=boarded?planned:Math.min(planned,Math.max(emptyAircraftDeadline(f),stairs));
+    prioritizeGroundDeparture(raw(),f,airportFlights(f.airportId||'city',f),ready);
+   }
    if(f.boardAt==null||time<(f.terminalId?f.boardingStartedAt:f.boardAt))continue;
    const pose=visitorAircraftPose(time,f);
    for(const [index,id] of f.passengerIds.entries()){
@@ -696,13 +726,14 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
      Object.assign(visitor,{airportFlightId:null,onPlane:false,visitorPhase:'departing'});
      continue;
     }
+    if(time>=f.outboundAt&&!visitor.onPlane){Object.assign(visitor,{airportFlightId:null,visitorPhase:'airport-recovery',phase:'stranded',airportRecovery:true,missedReturnFlightId:f.id,traveling:false,airportMotion:null,action:'returning for the next flight after the two-hour aircraft turnaround'});continue;}
     const boarding=f.terminalId?visitorBoardingPose(time,f,index,Number(raw().timeScale||120)):null;
     if(boarding&&!boarding.onPlane){
      Object.assign(visitor,boarding,{onPlane:false,indoors:boarding.y>2,visitorPhase:'boarding',transitMode:'walk',traveling:true,currentLocationId:null,
       airportMotion:visitorBoardingMotion(time,f,index,Number(raw().timeScale||120)),action:'upstairs check-in and walking to the departure gate'});continue;
     }
     if(!visitor.onPlane&&international&&!chargeHansdrexFare(raw(),visitor,'outbound',{reference:f.id})){
-     Object.assign(visitor,{airportFlightId:null,visitorPhase:'airport-wait',action:'waiting until the return ticket is funded'});continue;
+     Object.assign(visitor,{airportFlightId:null,visitorPhase:'airport-recovery',phase:'stranded',airportRecovery:true,missedReturnFlightId:f.id,action:'walking back for a funded replacement return ticket'});continue;
     }
     if(time>=f.exitAt){depart(visitor);continue;}
     visitor.onPlane=true;visitor.indoors=true;visitor.visitorPhase='return-flight';visitor.airportMotion=null;visitor.traveling=false;
@@ -722,6 +753,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    f.passengerIds||=[];
    const seats=Math.max(0,HANSDREX_AIRLINE.seats-f.passengerIds.length);
    const passengers=waiting.filter(v=>departurePort(v).id===(f.airportId||'city')&&(!international||v.returnFarePaid||money(v)>=hansdrexReturnFare(v))).slice(0,seats);
+   if(passengers.length&&!f.preboarding&&visitorDepartureCompleteAt({...f,departurePathVersion:2,boardingStartedAt:Math.max(time+720,Number(f.boardingStartedAt||0))},passengers.length,Number(raw().timeScale||120))+600>emptyAircraftDeadline(f))continue;
    for(const v of passengers){const i=waiting.indexOf(v);if(i>=0)waiting.splice(i,1);}
    f.passengerIds.push(...passengers.map(v=>v.id));
    for(const v of passengers){captureAirportDepartureEntrance(f,v,f.passengerIds.indexOf(v.id));v.airportFlightId=f.id;v.action=`waiting to board ${f.id}`;}
@@ -730,7 +762,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    if(passengers.length)scheduleTurnaround(f);
   }
   // A return flight can operate even when all hotel rooms are occupied.
-  for(const airport of ['city','north'])if(waiting.some(v=>departurePort(v).id===airport)&&!traffic.flights.some(f=>(f.airportId||'city')===airport&&!f.aircraftGone&&time<f.outboundAt&&(f.passengerIds||[]).length<HANSDREX_AIRLINE.seats))queueAircraft(0,airport);
+  for(const airport of ['city','north']){const passengers=waiting.filter(v=>departurePort(v).id===airport).slice(0,HANSDREX_AIRLINE.seats);if(passengers.length)queueAircraft(0,airport,passengers);}
  }
  function tick(gameSeconds,clock){
   init();const s=data(),dt=Math.max(0,Number(gameSeconds||0));

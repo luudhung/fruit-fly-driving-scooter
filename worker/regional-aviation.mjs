@@ -1,3 +1,4 @@
+import {regionalAircraftVisibleUntil} from './regional-empty-rotation.mjs';
 import {airportTerminalForStand} from './airport-campus.mjs';
 import {createIslandAirCargo} from './island-air-cargo.mjs';
 import {MAIN_SCHOOL_IDS} from './education-map.mjs';
@@ -48,7 +49,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function departurePlan(flight,boardingStartedAt){
   if(flight.from!=='city'||!(flight.motionVersion>=2))return null;
   const stand=airportById('city').stands.at(-1);
-  return {...flight,airportId:'city',standId:stand.id,arrivalStand:stand,terminalId:airportTerminalForStand(stand).id,boardingStartedAt,parkedAt:boardingStartedAt,outboundAt:flight.departure,exitAt:flight.arrival};
+  return {...flight,departurePathVersion:2,airportId:'city',standId:stand.id,arrivalStand:stand,terminalId:airportTerminalForStand(stand).id,boardingStartedAt,parkedAt:boardingStartedAt,outboundAt:flight.departure,exitAt:flight.arrival};
  }
  function nextReadyFlight(at,from,to,minimumLead=AVIATION.checkInSeconds){
   let flight=nextRegionalFlight(at,from,to,minimumLead);if(!flight)return null;
@@ -66,7 +67,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  function standFor(flight,airportId){const port=airportById(airportId);return port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);}
  function activeFlights(at){
   const flights=new Map(scheduledAircraftFlights(at).map(f=>[f.id,f]));
-  for(const person of people())if(person.alive)for(const flight of [person.countryAirTrip?.outbound,person.countryAirTrip?.inbound,person.airTrip?.outbound,person.airTrip?.inbound])if(flight&&at>=flight.departure&&at<=flight.arrival+900)flights.set(flight.id,flight);
+  for(const person of people())if(person.alive)for(const flight of [person.countryAirTrip?.outbound,person.countryAirTrip?.inbound,person.airTrip?.outbound,person.airTrip?.inbound])if(flight&&at>=flight.departure&&at<=flight.arrival+24000&&at<=regionalAircraftVisibleUntil(flight))flights.set(flight.id,flight);
   return [...flights.values()];
  }
  function atStand(flight,at,airportId){
@@ -265,7 +266,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
    const trip=f.countryAirTrip||f.airTrip;
    if(!trip||!f.alive)continue;
    for(const leg of [trip.outbound,trip.inbound]){
-    if(!leg||at<leg.departure-300||at>leg.arrival+900)continue;
+    if(!leg||at<leg.departure-300||at>leg.arrival+24000||at>regionalAircraftVisibleUntil(leg))continue;
     if(isScheduledIslandFlight(leg)&&leg.motionVersion>=1&&!manifests.has(leg.id))continue;
     let record=manifests.get(leg.id);
     if(!record){

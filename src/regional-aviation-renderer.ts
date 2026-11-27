@@ -1,3 +1,4 @@
+import {regionalAircraftVisibleUntil} from '../worker/regional-empty-rotation.mjs';
 import {addAviationBeacons} from './aviation-beacons.ts';
 import * as THREE from 'three';
 import {airlinerGeometry} from './visitor-aviation-renderer.ts';
@@ -17,7 +18,7 @@ export class RegionalAviationRenderer{
  update(now:number){
   let visible=0;
   for(const flight of this.flights){
-   if(!flight.scheduled&&!flight.passengerIds?.length||now<flight.departure-300||now>flight.arrival+900)continue;
+   if(!flight.scheduled&&!flight.passengerIds?.length||now<flight.departure-300||now>regionalAircraftVisibleUntil(flight))continue;
    if(visible===this.planes.length)break;
    const mesh=this.planes[visible++],pose=flightPose(now,flight);
    mesh.visible=true;mesh.position.set(pose.x,pose.y,pose.z);mesh.rotation.y=pose.heading;

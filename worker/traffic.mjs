@@ -74,6 +74,9 @@ function bodyContact(f,other,ux,uz,length){
  if(overlapping){
   // Old snapshots can already overlap. Let one car leave instead of preserving
   // the corrupt stack forever; this is migration, not a newly recorded crash.
+  // Towed guests can also begin shoulder assistance side by side less than one
+  // body width apart. Release one owned walker from that existing overlap.
+  if(f.roadsideRecovery&&other.pedestrian&&String(f.id).localeCompare(String(other.id))<0)return null;
   if(other.parked&&dx*ux+dz*uz<=.001||dx*ux+dz*uz<-.01||String(f.id).localeCompare(String(other.id))<0&&(Math.hypot(dx,dz)<.25||q.x*ux+q.z*uz>.7&&dx*q.x+dz*q.z<-.01))return null;
   return {distance:0,legacy:true};
  }
@@ -82,12 +85,16 @@ function bodyContact(f,other,ux,uz,length){
 /** Nearby spatial snapshot, rebuilt once per simulation sample. */
 export function createVehicleIndex(drivers,onCollision){
  const bins=new Map(),cell=20;
+ const insert=sample=>{const key=`${Math.floor(sample.x/cell)},${Math.floor(sample.z/cell)}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(sample);};
  for(const f of drivers){
   if(!f.alive||f.onPlane||f.onTrain||f.onFireEngine||f.onAmbulance||f.taxiPassenger)continue;
+  // An escorted roadside pedestrian is a real body too. Their parked car keeps
+  // its own curb collider; do not resurrect the abandoned driving trajectory.
+  if(f.roadsideRecovery&&f.traveling&&f.transitMode==='walk')insert({id:f.id+':roadside',actor:f,x:f.x,z:f.z,y:Number(f.y??1.1),heading:heading(f),angle:0,length:.7,width:.65,pedestrian:true,parked:false});
   const driving=f.traveling&&['car','scooter'].includes(f.transitMode),parked=!driving&&f.parkedCar&&(String(f.vehicle||'').includes('car')||f.rentalCar);
   if(!driving&&!parked)continue;const p=parked?f.parkedCar:f;
   const sample={id:f.id,actor:f,x:p.x,z:p.z,y:Number(parked?p.y??1.1:f.y??1.1),heading:driving?heading(f):null,angle:parked?Number(p.heading||0):Number(f.heading||0),length:Math.max(2,Math.min(12,Number(f.vehicleLength)||4)),width:Number(f.vehicleWidth||1.8),emergency:f.emergency===true,parked:Boolean(parked)};
-  const key=`${Math.floor(p.x/cell)},${Math.floor(p.z/cell)}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(sample);
+  insert(sample);
  }
  function nearby(minX,maxX,minZ,maxZ){const found=[];
   for(let x=Math.floor(minX/cell);x<=Math.floor(maxX/cell);x++)for(let z=Math.floor(minZ/cell);z<=Math.floor(maxZ/cell);z++)found.push(...(bins.get(`${x},${z}`)||[]));return found;
@@ -160,7 +167,7 @@ export function createVehicleIndex(drivers,onCollision){
    });
    if(blocked){allowed=Math.min(allowed,entry.distance);break;}
   }
-  if(contact&&!contact.legacy&&contact.distance<=allowed+.02&&onCollision){
+  if(contact&&!contact.legacy&&!f.roadsideRecovery&&!contact.other.pedestrian&&contact.distance<=allowed+.02&&onCollision){
    const ownSpeed=Math.hypot(Number(f.vx||0),Number(f.vz||0)),otherSpeed=contact.other.parked?0:Math.hypot(Number(contact.other.actor.vx||0),Number(contact.other.actor.vz||0));
    const h=contact.other.heading,alignment=h?h.x*ux+h.z*uz:0;
    const closingSpeed=Math.max(0,ownSpeed-otherSpeed*alignment);

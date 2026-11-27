@@ -34,3 +34,8 @@ test('an already travelling guest keeps the return price quoted before the new t
  assert.equal(person.money,45);assert.equal(hansdrexAirlineSummary(state).revenue,45);
  assert.equal(person.hansdrexAirlineReceipts.outbound.amount,45);
 });
+
+test('a durable paid receipt restores a missing compatibility flag without charging a returning guest again',()=>{
+ const state={simulationAgeSeconds:10,businesses:{'hansdrex-airline':{cash:900,revenue:900,outboundPassengers:1}},totalTransactions:4},person={money:0,savings:0,hansdrexAirlineReceipts:{outbound:{carrierId:HANSDREX_AIRLINE.id,amount:200,reference:'PAID-RETURN',at:1}}};
+ assert.ok(chargeHansdrexFare(state,person,'outbound',{reference:'REBOOKED'}));assert.equal(person.returnFarePaid,200);assert.equal(state.businesses['hansdrex-airline'].cash,900);assert.equal(state.totalTransactions,4);assert.equal(person.hansdrexAirlineReceipts.outbound.reference,'PAID-RETURN');
+});

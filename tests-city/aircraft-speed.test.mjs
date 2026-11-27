@@ -1,3 +1,4 @@
+import {regionalAircraftVisibleUntil} from '../worker/regional-empty-rotation.mjs';
 import test from'node:test';import assert from'node:assert/strict';import{PLAYER_FLIGHT_SPEED,AIRCRAFT_TIME_SCALE,aircraftPathTiming,timedAircraftPose}from'../worker/aircraft-speed.mjs';import{nextRegionalFlight,regionalFlightTiming,flightPose,scheduledAircraftFlights}from'../worker/aviation.mjs';import{visitorStands,visitorRunways,visitorRunwayTiming,visitorAircraftPose}from'../worker/visitor-aviation.mjs';
 test('every newly planned commercial leg accelerates from player 1x speed toward 1.5x with slower ground movement',()=>{
  assert.equal(PLAYER_FLIGHT_SPEED,22);
@@ -13,7 +14,7 @@ test('every newly planned commercial leg accelerates from player 1x speed toward
  }
 });
 test('slower overlapping Hawaii services keep all airborne aircraft visible until their actual arrival',()=>{
- const now=8*3600+8000,flights=scheduledAircraftFlights(now);assert.ok(flights.length>1);assert.ok(flights.every(f=>f.departure<=now&&f.arrival+900>now));assert.equal(new Set(flights.map(f=>f.id)).size,flights.length);
+ const now=8*3600+8000,flights=scheduledAircraftFlights(now);assert.ok(flights.length>1);assert.ok(flights.every(f=>f.departure<=now&&regionalAircraftVisibleUntil(f)>now));assert.equal(new Set(flights.map(f=>f.id)).size,flights.length);
 });
 
 test('takeoff acceleration is continuous from22 toward33 rather than a speed jump',()=>{const p=aircraftPathTiming([[0,100,0],[1000,100,0]]),velocity=t=>{const a=timedAircraftPose(p,t*120),b=timedAircraftPose(p,(t+.01)*120);return(b.x-a.x)/.01;};assert.ok(velocity(0)>=22&&velocity(0)<22.1);assert.ok(velocity(6)>27&&velocity(6)<28);assert.ok(Math.abs(velocity(14)-33)<.001);});

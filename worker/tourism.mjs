@@ -1,3 +1,4 @@
+import {regionalAircraftVisibleUntil} from './regional-empty-rotation.mjs';
 import {COUNTRY_IDS} from './country-map.mjs';
 import {AIRPORT,ISLAND,onIsland} from './city-map.mjs';
 import {AVIATION,tourismFares,nextFlight,flightPose,scheduledAircraft} from './aviation.mjs';
@@ -154,7 +155,7 @@ export function createTourismSystem({world,emit,remember,weatherDanger,startJour
  }
  function aviationSummary(){
   const s=world(),now=s.simulationAgeSeconds;
-  const legacyFlights=[...new Map(s.flies.filter(f=>f.alive&&f.airTrip).flatMap(f=>[f.airTrip.outbound,f.airTrip.inbound]).filter(f=>f&&now>=f.departure-300&&now<=f.arrival+900).map(f=>[f.id,f])).values()];
+  const legacyFlights=[...new Map(s.flies.filter(f=>f.alive&&f.airTrip).flatMap(f=>[f.airTrip.outbound,f.airTrip.inbound]).filter(f=>f&&now>=f.departure-300&&now<=f.arrival+24000&&now<=regionalAircraftVisibleUntil(f)).map(f=>[f.id,f])).values()];
   return {...ensure(),fares:fares(),seats:AVIATION.seats,heliSeats:AVIATION.heliSeats,
    nextCityFlight:nextFlight(now,'city',0),nextIslandFlight:nextFlight(now,'island',0),
    plane:scheduledAircraft(now),legacyFlights,weatherClosed:weatherDanger()>.3,

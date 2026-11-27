@@ -1,3 +1,4 @@
+import {regionalAircraftVisibleUntil} from '../worker/regional-empty-rotation.mjs';
 import {updateAviationBeacons} from './aviation-beacons.ts';
 import {buildFruitFarm} from './fruit-farm.ts';
 import {LocalCitySession} from './local-city-session.ts';
@@ -1960,7 +1961,7 @@ function animate(now = performance.now()) {
     const hour=Math.floor(gameNow%86400/3600),minute=Math.floor(gameNow%3600/60),text=`${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
     if(gameClockEl.textContent!==text){gameClockEl.textContent=text;gameDayEl.textContent=`DAY ${Math.floor(gameNow/86400)+1}`;}
   }
-  const legacyFlight=snapshot?.aviation?.legacyFlights?.find(f=>gameNow>=f.departure-300&&gameNow<=f.arrival+900);
+  const legacyFlight=snapshot?.aviation?.legacyFlights?.find(f=>gameNow>=f.departure-300&&gameNow<=regionalAircraftVisibleUntil(f));
   aviationVisual.plane.visible=Boolean(legacyFlight&&!snapshot?.regionalAviation?.flights?.some(f=>f.id===legacyFlight.id));
   if(legacyFlight){const pose=flightPose(gameNow,legacyFlight);aviationVisual.plane.position.set(pose.x,pose.y,pose.z);aviationVisual.plane.rotation.y=pose.heading;for(const prop of aviationVisual.propellers)prop.rotation.z+=dt*(pose.phase==='flying'?40:8);}
   const heliLead=(snapshot?.flies||[]).find(f=>f.heliPassenger);

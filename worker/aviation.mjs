@@ -1,3 +1,4 @@
+import {regionalEmptyPose,regionalAircraftVisibleUntil} from './regional-empty-rotation.mjs';
 import {aircraftPathTiming,timedAircraftPose} from './aircraft-speed.mjs';
 import {AIRPORT,ISLAND,BUILDINGS,urbanGeometryRevision} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_AIRPORT_ALIASES} from './country-map.mjs';
@@ -64,7 +65,7 @@ export function pathPose(points,progress){
 export function flightPose(now,flight){
  if(flight.regional||flight.from==='north'||flight.to==='north'||flight.from==='city'||flight.from==='island'){
   const points=regionalFlightPath(flight);if(!points)return null;
-  if(now>=flight.arrival){const port=airportById(flight.to||(flight.from==='city'?'island':'city')),stand=port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);return{...stand,y:3,heading:0,phase:'parked'};}
+  if(now>=flight.arrival){const empty=regionalEmptyPose(now,{...flight,to:flight.to||(flight.from==='city'?'island':'city')});if(empty)return empty;const port=airportById(flight.to||(flight.from==='city'?'island':'city')),stand=port.id==='city'&&flight.motionVersion===1?port.stands[7]:port.stands.at(-1);return{...stand,y:3,heading:0,phase:'parked'};}
   return {...(flight.motionVersion>=1?timedAircraftPose(regionalFlightTiming(flight),(now-flight.departure)*regionalFlightTiming(flight).at(-1)[0]/Math.max(1,flight.arrival-flight.departure)):pathPose(points,(now-flight.departure)/Math.max(1,flight.arrival-flight.departure))),phase:now<flight.departure?'boarding':now>=flight.arrival?'arrived':'flying'};
  }
  const city=[AIRPORT.terminal.x,3,-420],island=[ISLAND.terminal.x,3,ISLAND.gate.z];
@@ -81,7 +82,7 @@ export function scheduledAircraft(now){
 }
 export function scheduledAircraftFlights(now){
  const duration=Math.max(...['city','island'].map(from=>regionalFlightTiming({from,to:from==='city'?'island':'city'}).at(-1)[0])),flights=[];
- for(let cycle=Math.floor((now-duration-900)/AVIATION.islandIntervalSeconds)*AVIATION.islandIntervalSeconds;cycle<=now;cycle+=AVIATION.islandIntervalSeconds)for(const from of ['city','island']){const departure=cycle+(from==='island'?AVIATION.islandReturnOffsetSeconds:0),flight=nextFlight(departure,from,0);if(departure<=now&&flight.departure===departure&&now<flight.arrival+900)flights.push({...flight,regional:true});}
+ for(let cycle=Math.floor((now-duration-18000)/AVIATION.islandIntervalSeconds)*AVIATION.islandIntervalSeconds;cycle<=now;cycle+=AVIATION.islandIntervalSeconds)for(const from of ['city','island']){const departure=cycle+(from==='island'?AVIATION.islandReturnOffsetSeconds:0),flight=nextFlight(departure,from,0);if(departure<=now&&flight.departure===departure&&now<regionalAircraftVisibleUntil(flight))flights.push({...flight,regional:true});}
  return flights.sort((a,b)=>b.departure-a.departure);
 }
 export function helicopterPose(now,start,end){

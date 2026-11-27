@@ -64,7 +64,7 @@ export function createIslandAirCargo({world,mayDepart=()=>true,emit=()=>{}}){
     if(!mayDepart(shipment.flight)){const next=nextFlight(at+1,'city',0);shipment.flight={...next,regional:true};shipment.unloadAt=next.arrival+UNLOAD_SECONDS;continue;}
     shipment.status='in-flight';
    }
-   if(shipment.status==='delivered'||at<shipment.unloadAt||flightPose(at,shipment.flight)?.phase!=='parked')continue;
+   if(shipment.status==='delivered'||at<shipment.unloadAt||flightPose(shipment.unloadAt,shipment.flight)?.phase!=='parked')continue;
    for(const line of shipment.manifest){const buyer=account(line.buyerId);buyer.inventory=positive(buyer.inventory)+line.quantity;buyer.lastAirImportAt=at;buyer.lastAirImportUnitCost=line.total/line.quantity;}
    shipment.status='delivered';shipment.deliveredAt=at;d.deliveredUnits+=shipment.quantity;
    emit('island_food_unloaded','The scheduled aircraft parked at Hawaii and unloaded its paid daily food shipment.',{shipmentId:shipment.id,flightId:shipment.flight.id,quantity:shipment.quantity});

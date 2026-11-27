@@ -1,4 +1,5 @@
 import {HANSDREX_AIRPORT} from './hansdrex-airport-map.mjs';
+import {airportTerminalPassengerLayout} from './airport-terminal-layout.mjs';
 
 export const AIRPORT_TERMINAL_RAIL={id:'HCA-FREE',fare:0,speed:14,dwell:10,y:5.42,z:-365,trackOffset:4};
 export const AIRPORT_TERMINAL_STATIONS=HANSDREX_AIRPORT.terminals.map(t=>({id:`HCA-${t.id}`,terminalId:t.id,x:t.x,z:AIRPORT_TERMINAL_RAIL.z,y:6.52}));
@@ -18,8 +19,8 @@ export function airportTerminalUpperAccess(id='T1'){
  return [{x:t.x,y:6.52,z:t.z+6},{x:t.x,y:6.52,z:t.z+8},{x:t.x,y:6.52,z:AIRPORT_TERMINAL_RAIL.z}];
 }
 
-/** Separate departures: public upstairs check-in/security, then secure stairs to the aircraft. */
-export function airportDeparturePath(standOrId,terminalId,{upperStart=false}={}){
+/** Accepted older boarding plans retain their exact pre-upgrade stairs/timing. */
+function legacyAirportDeparturePath(standOrId,terminalId,{upperStart=false}={}){
  const stand=typeof standOrId==='string'?HANSDREX_AIRPORT.stands.find(s=>s.id===standOrId):standOrId;
  if(!stand||!Number.isFinite(stand.x)||!Number.isFinite(stand.z))return [];
  const t=terminalId?airportTerminalById(terminalId):airportTerminalForStand(stand),left=t.x-t.w/2+5;
@@ -34,6 +35,29 @@ export function airportDeparturePath(standOrId,terminalId,{upperStart=false}={})
   {x:t.x,y:1.1,z:t.z-11,stage:'departure-airside'},
   {x:stand.x-6,y:1.1,z:-414,stage:'departure-apron'},
   {x:stand.x-6,y:1.1,z:stand.z+4,stage:'departure-boarding-stairs'},
+  {x:stand.x-1.4,y:3.4,z:stand.z+4,stage:'departure-aircraft-door'});
+ return path;
+}
+/** Departures approach the dedicated side stair outside the arrivals hall. */
+export function airportTerminalDepartureAccess(id='T1'){
+ const t=airportTerminalById(id),l=airportTerminalPassengerLayout(t),p=l.landside;
+ return [{x:t.gate.x,y:l.groundY,z:t.gate.z},p.approach,p.entry,p.foot,p.top,p.turn,p.door,p.inside,p.corridor,p.upperEntrance];
+}
+/** Upstairs exit-passport control leads through the rear door to exterior stairs;
+ * arrivals' floor-one immigration hall is never part of this departure path. */
+export function airportDeparturePath(standOrId,terminalId,{upperStart=false,legacy=false}={}){
+ if(legacy)return legacyAirportDeparturePath(standOrId,terminalId,{upperStart});
+ const stand=typeof standOrId==='string'?HANSDREX_AIRPORT.stands.find(s=>s.id===standOrId):standOrId;
+ if(!stand||!Number.isFinite(stand.x)||!Number.isFinite(stand.z))return [];
+ const t=terminalId?airportTerminalById(terminalId):airportTerminalForStand(stand),l=airportTerminalPassengerLayout(t);
+ const path=upperStart?[{...l.landside.upperEntrance,stage:'departure-upper-entrance'}]:airportTerminalDepartureAccess(t.id).map(p=>({...p,stage:'departure-stairs-up'}));
+ path.push(...l.departureControls,
+  {...l.airside.door,stage:'departure-airside-door'},
+  {...l.airside.landing,stage:'departure-airside-landing'},
+  {...l.airside.foot,stage:'departure-airside-stairs'},
+  {...l.airside.apron,stage:'departure-apron'},
+  {x:stand.x-6,y:l.groundY,z:l.airside.apron.z,stage:'departure-apron'},
+  {x:stand.x-6,y:l.groundY,z:stand.z+4,stage:'departure-boarding-stairs'},
   {x:stand.x-1.4,y:3.4,z:stand.z+4,stage:'departure-aircraft-door'});
  return path;
 }

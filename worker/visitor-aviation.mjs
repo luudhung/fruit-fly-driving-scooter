@@ -1,4 +1,5 @@
-import {airportTerminalForStand,airportTerminalById,airportTerminalTransfer,airportDeparturePath} from './airport-campus.mjs';
+import {regionalEmptyRotation} from './regional-empty-rotation.mjs';
+import {airportTerminalForStand,airportTerminalById,airportTerminalTransfer,airportDeparturePath,airportTerminalDepartureAccess} from './airport-campus.mjs';
 import {aircraftPathTiming,timedAircraftPose} from './aircraft-speed.mjs';
 import {passengerImmigrationGate} from './airport-immigration.mjs';
 import {NORTH_F1_CHARTER_STANDS} from './north-f1-map.mjs';
@@ -51,7 +52,7 @@ const flightStand=flight=>flight.arrivalStand||(flight.airportId&&flight.airport
 // aircraft door -> portable stairs -> apron -> terminal -> immigration -> exit.
 const arrivalPaths=new WeakMap(),departurePaths=new WeakMap();
 function passengerPath(cache,flight,index,timeScale,compute,departure=false){
- const stand=flightStand(flight),key=[flight.airportId,flight.terminalId,stand?.id,stand?.x,stand?.z,flight.parkedAt,flight.disembarkAt,departure?flight.boardingStartedAt:flight.disembarkAt??flight.parkedAt,timeScale,departure?JSON.stringify(flight.departureEntrances||null):''].join('|');
+ const stand=flightStand(flight),key=[flight.airportId,flight.terminalId,stand?.id,stand?.x,stand?.z,flight.parkedAt,flight.disembarkAt,flight.arrivalPathVersion,departure?flight.boardingStartedAt:flight.disembarkAt??flight.parkedAt,timeScale,departure?JSON.stringify([flight.departurePathVersion,flight.preboarding,flight.boardingRerouteVersion,flight.departureEntrances||null,flight.departureGroundTerminals||null]):''].join('|');
  let entry=cache.get(flight);if(entry?.key!==key){entry={key,paths:new Map()};cache.set(flight,entry);}
  if(!entry.paths.has(index)){if(entry.paths.size>=32)entry.paths.clear();entry.paths.set(index,compute(flight,index,timeScale));}
  return entry.paths.get(index);
@@ -88,12 +89,13 @@ function computeArrivalPath(flight,index=0,timeScale=120) {
   add(t.x+(gate.axis==='x'?t.w/2-3:0),1.1,t.z+(gate.axis==='z'?t.d/2-3:0),'immigration',0,{stage:'concourse'});
   const exit=gate.publicGate||airport.gate;
   add(exit.x,1.1,exit.z,'immigration',0,{stage:'public-exit'});
-  if(airport.id==='city'&&visitorTerminalId(flight)!=='T1'){
+  if(airport.id==='city'&&visitorTerminalId(flight)!=='T1'&&Number(flight.arrivalPathVersion||1)<2){
    const transfer=airportTerminalTransfer(visitorTerminalId(flight),'T1',at,timeScale);
    for(const p of transfer.waypoints)path.push({...p,phase:'terminal-transfer'});
    at=transfer.arrivalAt;
   }
-  add(airport.gate.x,1.1,airport.gate.z,'complete');return path;
+  const finalGate=airport.id==='city'&&Number(flight.arrivalPathVersion||1)>=2?airportTerminalById(visitorTerminalId(flight)).gate:airport.gate;
+  add(finalGate.x,1.1,finalGate.z,'complete');return path;
  };
  add(stand.x-1.4,3.4,stand.z+4,'disembarking');
  add(stand.x-6,1.1,stand.z+4,'disembarking');
@@ -137,14 +139,23 @@ export function airportDepartureEntranceFor(person){
  if(Math.hypot(Number(person.x)-target.x,Number(person.y)-target.y,Number(person.z)-target.z)>1.5||![person.x,person.y,person.z].every(Number.isFinite))return null;
  return {terminalId:t.id,x:person.x,y:person.y,z:person.z};
 }
+export function airportGroundDepartureTerminalFor(person){
+ if(person?.currentLocationId!=='airport'||person.traveling||person.onPlane||person.onTrain||Math.abs(Number(person.y??1.1)-1.1)>.3)return null;
+ return AIRPORT.terminals.find(t=>Math.hypot(Number(person.x)-t.gate.x,Number(person.z)-t.gate.z)<15)?.id||null;
+}
 /** Record physical upper-hall arrival only for newly assigned boarding slots. */
 export function captureAirportDepartureEntrance(flight,person,index=0){
  if((flight.airportId||'city')!=='city'||!Number.isSafeInteger(index)||index<0||index>=32)return false;
- const entry=airportDepartureEntranceFor(person);if(!entry)return false;
+ const entry=airportDepartureEntranceFor(person);if(!entry){const ground=!person?.airportDepartureEntrance&&Number(flight.departurePathVersion)>=2?airportGroundDepartureTerminalFor(person):null;if(ground){(flight.departureGroundTerminals||={})[index]=ground;return true;}return false;}
  (flight.departureEntrances||={})[index]=entry;delete person.airportDepartureEntrance;return true;
 }
-export function visitorDeparturePath(flight,index=0,timeScale=120){return passengerPath(departurePaths,flight,index,timeScale,computeDeparturePath,true);}
+export function visitorDeparturePath(flight,index=0,timeScale=120){return passengerPath(departurePaths,flight,index,timeScale,(f,i,scale)=>{
+ const path=computeDeparturePath(f,i,scale);if(!f.preboarding||!path.length)return path;
+ const ground=path.findLastIndex(p=>p.y<=1.2),notBefore=f.parkedAt+i*VISITOR_ARRIVAL_STAGGER;if(ground<0||ground===path.length-1||notBefore<=path[ground].at)return path;
+ const wait=notBefore-path[ground].at;return [...path.slice(0,ground+1),{...path[ground],at:notBefore,stage:'departure-wait-for-aircraft'},...path.slice(ground+1).map(p=>({...p,at:p.at+wait}))];
+ },true);}
 function computeDeparturePath(flight,index=0,timeScale=120){
+ if(flight.boardingReroutes?.[index])return flight.boardingReroutes[index].map(p=>({...p,phase:'boarding'}));
  if(!Number.isFinite(flight.boardingStartedAt))return [];
  if((flight.airportId||'city')!=='city'||!flight.terminalId){
   const reverse=visitorArrivalPath(flight,index,timeScale).toReversed();if(!reverse.length)return [];
@@ -154,17 +165,18 @@ function computeDeparturePath(flight,index=0,timeScale=120){
  const path=[],speed=1.8/Math.max(1,timeScale);let at=flight.boardingStartedAt+index*VISITOR_ARRIVAL_STAGGER;
  const add=p=>{const previous=path.at(-1);if(previous)at+=Math.hypot(p.x-previous.x,p.y-previous.y,p.z-previous.z)/speed;
   path.push({...p,at,phase:'boarding'});
-  if(p.stage==='departure-check-in'||p.stage==='departure-security'){at+=180;path.push({...p,at,phase:'boarding'});}};
+  if(p.stage==='departure-check-in'||p.stage==='departure-security'||p.stage==='departure-emigration'){at+=180;path.push({...p,at,phase:'boarding'});}};
  const entry=flight.departureEntrances?.[index],upper=entry&&AIRPORT.terminals.some(t=>t.id===entry.terminalId)&&[entry.x,entry.y,entry.z].every(Number.isFinite)&&Math.abs(entry.y-6.52)<.1;
- const from=upper?entry.terminalId:'T1';
+ const separateExit=Number(flight.departurePathVersion||1)>=2,from=upper?entry.terminalId:separateExit?flight.departureGroundTerminals?.[index]||'T1':'T1';
  if(upper)add({...entry,stage:'departure-upper-entrance'});
  if(flight.terminalId!==from){
   if(upper){const t=airportTerminalById(from);add({x:t.x,y:6.52,z:t.z+6,stage:'departure-upper-entrance'});}
-  const transfer=airportTerminalTransfer(from,flight.terminalId,at,timeScale,{upperStart:Boolean(upper),upperEnd:Boolean(upper)});
+  else if(separateExit)for(const p of airportTerminalDepartureAccess(from))add({...p,stage:'departure-stairs-up'});
+  const transfer=airportTerminalTransfer(from,flight.terminalId,at,timeScale,{upperStart:Boolean(upper)||separateExit,upperEnd:Boolean(upper)||separateExit});
   for(const p of transfer.waypoints)path.push({...p,phase:'boarding'});
   at=transfer.arrivalAt;
  }
- for(const p of airportDeparturePath(flight.arrivalStand||flight.standId,flight.terminalId,{upperStart:Boolean(upper)}))add(p);
+ for(const p of airportDeparturePath(flight.arrivalStand||flight.standId,flight.terminalId,{upperStart:Boolean(upper)||separateExit&&flight.terminalId!==from,legacy:!separateExit}))add(p);
  return path;
 }
 export function visitorDepartureCompleteAt(flight,count=10,timeScale=120){
@@ -212,6 +224,7 @@ function regionalOperations(start,after,airportId){
   let f=nextRegionalFlight(first*86400,from,to,0);
   while(f&&f.departure<(last+1)*86400){
    const ground=regionalRunwayWindow(f,airportId);operations.push({start:ground[0],end:ground[1],runwayId:primary,ground});
+   if(f.to===airportId){const ferry=regionalEmptyRotation(f);operations.push({start:ferry.start,end:ferry.end,runwayId:ferry.runwayId,ground:[ferry.start,ferry.end]});}
    f=nextRegionalFlight(f.departure+1,from,to,0);
   }
  }
@@ -235,6 +248,14 @@ function reservedOperations(flights,airportId){
  }
  return operations;
 }
+// The eastern and western runway pairs have independent end-around taxi exits.
+// Keep the conservative shared-ground gap within a pair; disjoint strips do not
+// close the opposite half of this four-runway airport.
+function sharedRunwayGround(airportId,a,b){
+ if(airportId!=='city'||a===b)return true;
+ const strips=visitorRunways(airportId),left=strips.find(r=>r.id===a),right=strips.find(r=>r.id===b);
+ return !left||!right||Math.abs(left.x-right.x)<(left.w+right.w)/2+20;
+}
 export function visitorRunwaySlot(earliest,duration,flights,airportId='city',runwayId=visitorRunways(airportId)[0]?.id,timing=null,reserved=null){
  let start=earliest;const fixed=reserved||reservedOperations(flights,airportId);
  for(let tries=0;tries<10000;tries++){
@@ -243,7 +264,7 @@ export function visitorRunwaySlot(earliest,duration,flights,airportId='city',run
   for(const operations of [fixed,regionalOperations(start,after,airportId)])for(const op of operations){
    const runwayStart=timing?ground[0]:start,runwayEnd=timing?ground[1]:after,opStart=timing?op.ground[0]:op.start,opEnd=timing?op.ground[1]:op.end;
    if(op.runwayId===runwayId&&opStart<runwayEnd+SEPARATION&&opEnd+SEPARATION>runwayStart)next=Math.max(next,opEnd+SEPARATION-(runwayStart-start));
-   if(op.ground[0]<ground[1]+GROUND_SEPARATION&&op.ground[1]+GROUND_SEPARATION>ground[0])next=Math.max(next,op.ground[1]+GROUND_SEPARATION-(ground[0]-start));
+   if(sharedRunwayGround(airportId,runwayId,op.runwayId)&&op.ground[0]<ground[1]+GROUND_SEPARATION&&op.ground[1]+GROUND_SEPARATION>ground[0])next=Math.max(next,op.ground[1]+GROUND_SEPARATION-(ground[0]-start));
   }
   if(next<=start)return start;start=next;
  }
@@ -273,7 +294,7 @@ function terminalStandRanks(flights,airportId,at){
 export function visitorStandReservation(earliest,flights,airportId='city',groundStay=21600,profile=null){
  const all=flights.filter(f=>(f.airportId||'city')===airportId&&!f.aircraftGone),operations=reservedOperations(all,airportId),runways=visitorRunways(airportId);
  const choices=[];
- for(const stand of visitorStands(airportId)){
+ for(const stand of visitorStands(airportId).filter(s=>!profile?.preparedTerminalId||airportId!=='city'||airportTerminalForStand(s).id===profile.preparedTerminalId)){
   // A stand's geometry does not change while searching later available times.
   const timings=runways.map(r=>{const candidate={...profile,airportId,arrivalStand:stand,standId:stand.id,runwayId:r.id},timing=profile?.motionVersion>=1?visitorRunwayTiming(candidate,false):null;return{runwayId:r.id,timing,duration:timing?.duration||INBOUND_SECONDS,distance:Math.hypot(stand.x-r.x,stand.z-r.z)};});
   let at=earliest;
@@ -311,7 +332,7 @@ export function resolveVisitorTaxiStand(flight,flights,now){
  const current=flightStand(flight);
  if(current&&!occupied(current)&&!flight.taxiHold){flight.taxiStandChecked=true;return false;}
  const rank=terminalStandRanks(flights,flight.airportId||'city',now);
- const free=visitorStands(flight.airportId||'city').filter(p=>!occupied(p)).sort((a,b)=>{const x=rank(a),y=rank(b),balance=(flight.airportId||'city')==='city'?(x[0]-y[0]||x[1]-y[1]):0;return balance||Math.hypot(a.x-(current?.x||0),a.z-(current?.z||0))-Math.hypot(b.x-(current?.x||0),b.z-(current?.z||0));})[0];
+ const free=visitorStands(flight.airportId||'city').filter(p=>(!flight.preparedTerminalId||(flight.airportId||'city')!=='city'||airportTerminalForStand(p).id===flight.preparedTerminalId)&&!occupied(p)).sort((a,b)=>{const x=rank(a),y=rank(b),balance=(flight.airportId||'city')==='city'?(x[0]-y[0]||x[1]-y[1]):0;return balance||Math.hypot(a.x-(current?.x||0),a.z-(current?.z||0))-Math.hypot(b.x-(current?.x||0),b.z-(current?.z||0));})[0];
  const checkedAt=flight.taxiStandChecked?now:Math.min(now,flight.inboundAt+visitorRunwayClearSeconds(flight));
  const pose=flight.taxiHold?.pose||visitorAircraftPose(checkedAt,flight);
  if(!pose)return false;
