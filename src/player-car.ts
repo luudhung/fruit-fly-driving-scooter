@@ -6,6 +6,7 @@ import {PLAYER_EYE} from './player-controller.ts';
 import {streetCollidersNear} from '../worker/street-furniture.mjs';
 import {motorwaySpeedMultiplier,motorwayMedianBlocked} from '../worker/motorway.mjs';
 import {onNorthF1Track} from '../worker/north-f1-map.mjs';
+import {AIRPORT_DEPARTURE_ROAD,AIRPORT_DEPARTURE_DROPOFFS,airportDepartureRoadLevels} from '../worker/airport-departure-roads.mjs';
 
 export const CAR_HALF_WIDTH=.93,CAR_HALF_LENGTH=2.1;
 /** East-facing curb space on the main-city approach, before the west-bank underpass. */
@@ -37,19 +38,22 @@ function sceneryClear(x:number,z:number,heading:number,ground:number){
 }
 /** Choose the connected deck or ramp, retaining the current level at grade-separated crossings. */
 export function cityCarGround(x:number,z:number,previous:number){
+ const departures=airportDepartureRoadLevels({x,z}).filter(y=>Math.abs(y-previous)<=.24).sort((a,b)=>Math.abs(a-previous)-Math.abs(b-previous));
+ if(departures.length)return departures[0];
  const p={x,z},levels=[roadTravelY(p,'z')-.9];
  if(BRIDGES.some(b=>contains(b,p)))levels.push(.2);
  const ground=levels.reduce((a,b)=>Math.abs(b-previous)<Math.abs(a-previous)?b:a);
  return Math.abs(ground-previous)<=.24?ground:null;
 }
 function pavedAtLevel(p:{x:number;z:number},ground:number,margin=0){
- return ground>=0&&onNorthF1Track(p,margin)||ROADS.some(r=>contains(r,p,margin)&&!(ground<-.5&&r.w>r.d&&BRIDGES.some(b=>contains(b,p))));
+ return airportDepartureRoadLevels(p,margin).some(y=>Math.abs(y-ground)<.25)||ground>=0&&onNorthF1Track(p,margin)||ROADS.some(r=>contains(r,p,margin)&&!(ground<-.5&&r.w>r.d&&BRIDGES.some(b=>contains(b,p))));
 }
 const cityWorld:CarWorld={clear:cityCarClear,ground:cityCarGround};
 /** Player wheels may climb low pavement, while buildings, water and street furniture stay solid. */
 export function playerCarClear(x:number,z:number,heading:number,ground=.2){
  if(!sceneryClear(x,z,heading,ground))return false;
  const sin=Math.sin(heading),cos=Math.cos(heading),w=CAR_HALF_WIDTH,l=CAR_HALF_LENGTH;
+ if(ground>.5&&airportDepartureRoadLevels({x,z},3).length&&!footprint.every(([a,b])=>airportDepartureRoadLevels({x:x+a*w*cos+b*l*sin,z:z-a*w*sin+b*l*cos},.05).some(y=>Math.abs(y-ground)<.25)))return false;
  for(const b of streetCollidersNear(x,z,Math.hypot(w,l))){
   if(b.maxY<=ground+.02||b.minY>=ground+1.8)continue;
   const dx=b.x-x,dz=b.z-z;
@@ -72,6 +76,7 @@ export function playerCarGround(x:number,z:number,previous:number){
   else floor=.2;
  }
  if(floor>-.1){
+  if(airportDepartureRoadLevels(p).some(y=>Math.abs(y-floor!)<.01))return Math.max(previous-.08,Math.min(previous+.08,floor));
   if(bridge&&Math.abs(z-bridge.z)>4.45)floor=Math.abs(Math.abs(z-bridge.z)-4.65)<.15?.66:.40;
   else if(DISTRICT_BRIDGES.some(b=>!b.motorway&&contains(b,p)&&Math.abs(b.axis==='x'?z-b.z:x-b.x)>b.roadWidth/2+.25))floor=.34;
   else if(onNorthF1Track(p))floor=.25;
@@ -159,6 +164,7 @@ export class PlayerCar{
 /** Find the nearest dry sidewalk beside the current road, at the car's own level. */
 export function carExitPosition(x:number,z:number,ground:number,trackClosed=false){
  const candidates:Array<{x:number;z:number}>=[];
+ if(Math.abs(ground-AIRPORT_DEPARTURE_ROAD.deckTop)<.15&&AIRPORT_DEPARTURE_DROPOFFS.some(b=>Math.abs(x-b.x)<b.w/2&&Math.abs(z-b.z)<3))candidates.push({x,z:AIRPORT_DEPARTURE_ROAD.z-AIRPORT_DEPARTURE_ROAD.width/2-.4});
  for(const b of BRIDGES)if(contains(b,{x,z})&&ground>-.1)for(const side of [-1,1])candidates.push({x,z:b.z+side*6.1});
  for(const r of ROADS){
   if(Math.abs(x-r.x)>r.w/2+12||Math.abs(z-r.z)>r.d/2+12)continue;
@@ -168,7 +174,7 @@ export function carExitPosition(x:number,z:number,ground:number,trackClosed=fals
  candidates.sort((a,b)=>Math.hypot(a.x-x,a.z-z)-Math.hypot(b.x-x,b.z-z));
  for(const p of candidates){
   if(blocked(p))continue;
-  let floor=.2;
+  let floor=airportDepartureRoadLevels(p,1.2).find(y=>Math.abs(y-ground)<.25)??.2;
   const tunnel=UNDERPASSES.find(t=>Math.abs(p.x-t.x)<t.w/2+2.6&&Math.abs(p.z-t.z)<t.halfLength);
   if(tunnel&&ground<-.1){const d=Math.abs(p.z-tunnel.z);floor=.2-tunnel.depth*(d<=tunnel.coveredHalf?1:(tunnel.halfLength-d)/(tunnel.halfLength-tunnel.coveredHalf));}
   if(Math.abs(floor-ground)>.55||pavedAtLevel(p,floor,.35)||trackClosed&&northF1PointRestricted({...p,y:floor},.35))continue;

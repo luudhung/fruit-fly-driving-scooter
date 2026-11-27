@@ -4,7 +4,7 @@ import {MAIN_SCHOOL_IDS} from './education-map.mjs';
 import {ISLAND} from './city-map.mjs';
 import {COUNTRY_AIRPORTS,COUNTRY_IDS,HAWAII_APARTMENTS,NORTH_SPORTS_PARK,countryAt} from './country-map.mjs';
 import {AVIATION,airportById,nextRegionalFlight,regionalFlightPath,flightPose,tourismFares,scheduledAircraftFlights,isScheduledIslandFlight} from './aviation.mjs';
-import {visitorArrivalPose,visitorArrivalMotion,visitorRunwaySlot,visitorDeparturePath,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion} from './visitor-aviation.mjs';
+import {visitorArrivalPose,visitorArrivalMotion,visitorRunwaySlot,visitorDeparturePath,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion,airportDepartureEntranceFor,captureAirportDepartureEntrance} from './visitor-aviation.mjs';
 const DAY=86400,wallet=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const SPORTS_STOP_SECONDS=3600;
 const STUDY_NIGHTS=2,STUDY_TUITION=15,STUDY_COOLDOWN=18*DAY;
@@ -92,7 +92,8 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
  }
  function book(f,toId,{staySeconds=DAY,hotelId,studySchoolId,race=false,visitAirportId=null}={}){
   init();const from=COUNTRY_AIRPORTS.find(p=>p.countryId===countryAt(f)),to=airportById(toId);
-  if(!f.alive||f.countryAirTrip||f.airTrip||f.onPlane||f.onTrain||f.traveling||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.taxiJobId||f.urbanTask||!from||!to||from.id===to.id||f.currentLocationId!==from.locationId||Math.hypot(f.x-from.terminal.x,f.z-from.terminal.z)>55||weatherDanger()>.3)return false;
+  const upperEntrance=from?.id==='city'&&airportDepartureEntranceFor(f);
+  if(!f.alive||f.countryAirTrip||f.airTrip||f.onPlane||f.onTrain||f.traveling||f.fireEngineDuty||f.ambulanceDuty||f.publicServiceDuty||f.industrialFreightDuty||f.cityService||f.taxiJobId||f.urbanTask||!from||!to||from.id===to.id||f.currentLocationId!==from.locationId||!upperEntrance&&Math.hypot(f.x-from.terminal.x,f.z-from.terminal.z)>55||weatherDanger()>.3)return false;
   if(studySchoolId&&(!eligibleStudent(f)||from.id!=='north'||to.id!=='city'||!MAIN_SCHOOL_IDS.includes(studySchoolId)||now()-Number(f.lastExchangeAt??-STUDY_COOLDOWN)<STUDY_COOLDOWN))return false;
   if(!nextRegionalFlight(now(),from.id,to.id))return false;
   if(visitAirportId&&!(from.id==='island'&&to.id==='city'&&visitAirportId==='north'))return false;
@@ -117,7 +118,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
   if(!charge(f,cost,account('regional-flight-escrow')))return false;
   h.rooms[f.id]={visitorId:f.id,bookedAt:now(),checkoutAt:inbound.departure,nights,paid:roomCost,checkedIn:false};
   f.countryAirTrip={phase:'outbound-wait',from:from.id,to:to.id,...(visitAirportId?{visitAirportId}:{}),outbound:{...outbound,regional:true},inbound:{...inbound,regional:true},outboundIndex:occupancy(outbound),inboundIndex:occupancy(inbound),hotelId:hotel,cost,fares,settled:false,bookedAt:now(),visaReserve:visas,...(studySchoolId?{studySchoolId,roomCost,tuition}:{}),...(raceEvent?{raceEvent}:{} )};
-  const boarding=departurePlan(f.countryAirTrip.outbound,now());if(boarding)f.countryAirTrip.outboundBoarding=boarding;
+  const boarding=departurePlan(f.countryAirTrip.outbound,now());if(boarding){captureAirportDepartureEntrance(boarding,f,f.countryAirTrip.outboundIndex||0);f.countryAirTrip.outboundBoarding=boarding;}
   f.countryFlightPlan=null;f.sleeping=false;f.action='waiting at the regional gate with a paid return ticket';data().ticketsSold+=2;
   remember(f,'regional_flight_booked',{from:from.id,to:to.id,cost,outbound:outbound.id,inbound:inbound.id});return true;
  }
@@ -182,7 +183,7 @@ export function createRegionalAviationSystem({world,startJourney,moveFly,aviatio
       }
       plan=departurePlan(leg,now());
      }
-     t[key]=plan;
+     captureAirportDepartureEntrance(plan,f,out?t.outboundIndex||0:t.inboundIndex||0);t[key]=plan;
     }
     const index=out?t.outboundIndex||0:t.inboundIndex||0,walk=departureWalk(plan,index),path=walk.path,completeAt=path.at(-1)?.at||now(),boarded=now()>=completeAt;
     const pose=boarded?flightPose(Math.min(now(),leg.departure),leg):pathPoseAt(path,now());

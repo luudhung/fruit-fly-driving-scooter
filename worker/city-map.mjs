@@ -15,7 +15,8 @@ import {GOVERNMENT_BUILDINGS,GOVERNMENT_LOCATIONS,GOVERNMENT_ROADS,GOVERNMENT_RE
 import {districtRiverTopology,districtRiverRoads} from './district-rivers.mjs';
 import {HAWAII_ISLAND,NORTH_AIRPORT,NORTH_BUILDINGS,NORTH_LOCATIONS,NORTH_ROADS,NORTH_FARM,NORTH_LANDMARK,NORTH_RIVERSIDE_LINK,HAWAII_COTTAGES,HAWAII_APARTMENTS,HAWAII_ROADS,BORDER_CUSTOMS_DECKS,BORDER_CUSTOMS_BUILDINGS,countryAt,COUNTRY_IDS} from './country-map.mjs';
 // Shared authoritative geometry. The observer and simulation import this same map.
-export const MAP_VERSION = 37;
+// Departure-deck routes and upper-hall boarding need the matching local engine.
+export const MAP_VERSION = 38;
 export const SKYLINE_PLOTS = {
  toronto: {x:-11,z:43.5},
  empire: {x:106,z:-14.5},

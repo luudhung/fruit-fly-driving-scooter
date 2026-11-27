@@ -1,5 +1,6 @@
 import {airportTerminalForStand,AIRPORT_TAXI_BAYS} from './airport-campus.mjs';
-import {visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
+import {AIRPORT_DEPARTURE_ROAD,AIRPORT_DEPARTURE_DROPOFFS,airportDepartureDropoff,airportDepartureDrive} from './airport-departure-roads.mjs';
+import {captureAirportDepartureEntrance,visitorDepartureCompleteAt,visitorBoardingPose,visitorBoardingMotion,visitorFlightDuration,visitorRunwayTiming,visitorTouchdownSeconds,visitorStandReleaseSeconds} from './visitor-aviation.mjs';
 import {createHansdrexTourism} from './hansdrex-tourism.mjs';
 import {isNorthF1TrackClosed,northF1MovementBlocked} from './north-f1-closure.mjs';
 import {AIRPORT,LOCATIONS,BUILDINGS,entrance,pedestrianRoute,parkingPoint,clearSegment,onIsland} from './city-map.mjs';
@@ -18,7 +19,7 @@ const money=f=>Math.max(0,Number(f.money||0))+Math.max(0,Number(f.savings||0));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const location=id=>LOCATIONS.find(l=>l.id===id);
 const departurePort=v=>airportById(v.departureAirportId||v.entryAirportId||'city');
-const atAirport=v=>v.currentLocationId===departurePort(v).locationId&&dist(v,departurePort(v).terminal)<45;
+const atAirport=v=>v.currentLocationId===departurePort(v).locationId&&(dist(v,departurePort(v).terminal)<45||departurePort(v).id==='city'&&v.airportDepartureEntrance&&v.y>4&&dist(v,v.airportDepartureEntrance)<15);
 const scenery=['bridge-view','park','ferris-wheel','stadium','riverside-park','rooftop'];
 const hansHotels={'hotel':56,'riverside-hotel':42,'marina-bay':128};
 function busy(f,now=0){return f.countryAirTrip||f.countryFlightPlan||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||!f.alive||f.sleeping||f.arrested||f.arrestedUntil>now||f.onPlane||f.onTrain||f.heliPassenger||f.airTrip||f.privateFlight||f.onPrivateHelicopter||f.privateHelicopterTrip||f.luxuryTrip||f.civicDuty||f.urbanTask||f.urbanFloodEscape||f.urbanJob||f.emergencyTask||f.sportsSession||f.cityService||f.taxiJobId||f.taxiPassenger||onIsland(f);}
@@ -179,22 +180,26 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   f.travelStartedAt=now();f.travelLastDistance=dist(f,{x:f.targetX,z:f.targetZ});f.travelStuckTicks=0;f.actionUntil=0;
  }
  function taxiCandidates(){
-  return residents().filter(f=>!busy(f,now())&&!isWorkCommitted(f)&&f.ageYears>=18&&f.ageYears<76&&String(f.vehicle||'').includes('car')&&f.energy>40&&f.hunger<80&&f.health>50&&!f.traveling&&!f.airTrip)
+  return residents().filter(f=>!f.airportDepartureWalk&&!busy(f,now())&&!isWorkCommitted(f)&&f.ageYears>=18&&f.ageYears<76&&String(f.vehicle||'').includes('car')&&f.energy>40&&f.hunger<80&&f.health>50&&!f.traveling&&!f.airTrip)
    .sort((a,b)=>(Number(a.traits?.thrift||0)-Number(b.traits?.thrift||0))||a.id.localeCompare(b.id)).slice(0,MAX_TAXIS);
  }
  function requestTaxi(passenger,destinationId){
   const s=data(),dest=location(destinationId);if(!dest||isUnavailable(destinationId,passenger)||passenger.departed||busy(passenger,now()))return false;
-  if(s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).length>=MAX_TAXIS)return false;
-  const airportPickup=passenger.currentLocationId==='airport'&&!s.taxiJobs.some(j=>!['complete','cancelled'].includes(j.phase)&&j.pickup?.bayId==='T1-PICKUP'),airportDrop=destinationId==='airport'&&!s.taxiJobs.some(j=>!['complete','cancelled'].includes(j.phase)&&j.drop?.bayId==='T1-DROPOFF');
+  if(passenger.airportDepartureWalk||s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).length>=MAX_TAXIS)return false;
+  const airportPickup=passenger.currentLocationId==='airport'&&!s.taxiJobs.some(j=>!['complete','cancelled'].includes(j.phase)&&j.pickup?.bayId==='T1-PICKUP');
+  const assigned=s.airportTraffic?.flights?.find(f=>f.passengerIds?.includes(passenger.id)&&!f.aircraftGone)?.terminalId;
+  const departureBay=destinationId==='airport'?AIRPORT_DEPARTURE_DROPOFFS.filter(b=>!s.taxiJobs.some(j=>!['complete','cancelled','exiting'].includes(j.phase)&&j.drop?.bayId===b.id)).sort((a,b)=>Number(b.terminalId===assigned)-Number(a.terminalId===assigned))[0]:null;
+  const airportDrop=destinationId==='airport'&&Boolean(departureBay);
   const bay=kind=>{const b=AIRPORT_TAXI_BAYS.find(b=>b.terminalId==='T1'&&b.kind===kind);return b?{x:b.x,z:b.z,y:1.1,heading:Math.PI/2,bayId:b.id}:null;};
   if(passenger.currentLocationId==='airport'&&!airportPickup||destinationId==='airport'&&!airportDrop)return false;
-  const pickup=airportPickup?bay('pickup'):parkingPoint(passenger),drop=airportDrop?bay('dropoff'):parkingPoint(dest);if(!pickup||!drop||dist(pickup,drop)<30)return false;
+  const pickup=airportPickup?bay('pickup'):parkingPoint(passenger),drop=airportDrop?{x:departureBay.x,y:departureBay.y,z:departureBay.z,heading:departureBay.heading,bayId:departureBay.id,terminalId:departureBay.terminalId}:parkingPoint(dest);if(!pickup||!drop||dist(pickup,drop)<30)return false;
   const drivers=taxiCandidates().sort((a,b)=>dist(a,pickup)-dist(b,pickup));
   const driver=drivers.find(d=>pedestrianRoute(d.parkedCar||d,pickup,'car').length);if(!driver)return false;
-  const road=pedestrianRoute(pickup,drop,'car'),walk=pedestrianRoute(passenger,pickup);if(!road.length||!walk.length)return false;
+  const groundRoad=pedestrianRoute(pickup,airportDrop?AIRPORT_DEPARTURE_ROAD.entry:drop,'car');
+  const road=airportDrop?[...groundRoad,...airportDepartureDrive(departureBay.terminalId)]:groundRoad,walk=pedestrianRoute(passenger,pickup);if(!groundRoad.length||!walk.length)return false;
   const fare=Math.round((3+dist(pickup,drop)*.025)*level()*100)/100;
   if(money(passenger)<fare+(international&&passenger.kind==='visitor'?passenger.visitorReservedBudget||190:30)||!transfer(passenger,fare,business('city-taxi-escrow')))return false;
-  const job={id:`TAXI-${s.nextTaxiId++}`,driverId:driver.id,passengerId:passenger.id,destinationId,pickup,drop,fare,phase:'pickup',createdAt:now(),deadline:now()+24*3600,paid:false,rideRoute:road};
+  const job={id:`TAXI-${s.nextTaxiId++}`,driverId:driver.id,passengerId:passenger.id,destinationId,pickup,drop,fare,phase:'pickup',createdAt:now(),deadline:now()+24*3600,paid:false,rideRoute:road,...(airportDrop?{departureTerminalId:departureBay.terminalId}: {})};
   const approach=pedestrianRoute(driver.parkedCar||driver,pickup,'car');
   // An idle owner walks to their own curb-parked car before driving to the pickup.
   const access=driver.indoors?pedestrianRoute(entrance(driver),driver.parkedCar||driver):pedestrianRoute(driver,driver.parkedCar||driver);
@@ -214,32 +219,61 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   let left=Math.max(0,gameSeconds)/Math.max(1,Number(raw().timeScale||120));
   for(let hop=0;left>1e-6&&hop<48;hop++){
    const p=f.routeWaypoints?.[f.routeIndex];if(!p){f.traveling=false;f.vx=f.vz=0;return true;}
-   f.targetX=p.x;f.targetZ=p.z;f.transitMode=p.mode||'walk';const dx=p.x-f.x,dz=p.z-f.z,length=Math.hypot(dx,dz),speed=f.transitMode==='car'?11*motorwaySpeedMultiplier(f):2.5;
+   f.targetX=p.x;f.targetZ=p.z;f.transitMode=p.mode||'walk';const dx=p.x-f.x,dz=p.z-f.z,dy=(p.y??1.1)-(f.y??1.1),length=f.transitMode==='car'?Math.hypot(dx,dz):Math.hypot(dx,dy,dz),speed=f.transitMode==='car'?(p.airportDepartureRoad?7:11*motorwaySpeedMultiplier(f)):2.5;
    const waitingForF1=next=>trackClosed&&northF1MovementBlocked(f,next,f.transitMode==='car'?1.5:.32);
    if(length<.05&&!waitingForF1({...p,y:p.y??1.1})){f.x=p.x;f.z=p.z;f.y=p.y??1.1;f.routeIndex++;continue;}
    if(length<.05){f.vx=f.vz=f.motionSpeed=0;f.trafficStatus='waiting outside the closed Grand Prix circuit';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
    const ux=dx/length,uz=dz/length;let step=Math.min(length,left*speed),stop=false;
    if(f.transitMode==='car'){
-    const barrier=signalBarrier(f,{x:f.x+ux*step,z:f.z+uz*step},now()/Math.max(1,Number(raw().timeScale||120)));
+    f.signalEncounter=p.airportDepartureRoad?{permit:true,airportDepartureRoad:true}:null;
+    const barrier=p.airportDepartureRoad?null:signalBarrier(f,{x:f.x+ux*step,z:f.z+uz*step},now()/Math.max(1,Number(raw().timeScale||120)));
     if(barrier){step=Math.min(step,barrier.distance);stop=true;f.trafficStatus='waiting at red light';}
     const limit=headway?headway(f,{x:f.x+ux*step,z:f.z+uz*step}):step;if(limit<step){step=limit;stop=true;f.trafficStatus='queuing behind traffic';}
    }
-   let next={x:f.x+ux*step,z:f.z+uz*step};if(waitingForF1({...next,y:p.y??1.1})){
+   let next={x:f.x+ux*step,y:(f.y??1.1)+dy*step/length,z:f.z+uz*step};if(waitingForF1(next)){
     f.vx=f.vz=f.motionSpeed=0;f.trafficStatus='waiting outside the closed Grand Prix circuit';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;
    }
-   if(!clearSegment(f,next)){f.vx=f.vz=0;f.trafficStatus='route temporarily blocked';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
-   if(interceptMovement){const taxi=data().taxiJobs.find(j=>j.driverId===f.id&&j.phase==='riding'),admission=interceptMovement(f,{x:f.x,z:f.z},next,{mode:f.transitMode==='car'?'car':'walk',commit:true,occupantIds:taxi?[f.id,taxi.passengerId]:[f.id]});if(admission&&!admission.allowed){if(admission.position)Object.assign(f,admission.position);f.trafficStatus=admission.reason||'waiting at international customs';f.vx=f.vz=0;return false;}if(admission?.position)next=admission.position;}
-   f.vx=next.x-f.x;f.vz=next.z-f.z;f.x=next.x;f.z=next.z;f.y=p.y??1.1;f.motionSpeed=speed;
-   if(f.transitMode==='car')f.carPosition={x:f.x,z:f.z};
+   if(!p.airportDepartureWalk&&!clearSegment(f,next)){f.vx=f.vz=0;f.trafficStatus='route temporarily blocked';f.trafficHoldUntil=now()+Math.max(1,gameSeconds);return false;}
+   if(interceptMovement){const taxi=data().taxiJobs.find(j=>j.driverId===f.id&&j.phase==='riding'),admission=interceptMovement(f,{x:f.x,z:f.z},{x:next.x,z:next.z},{mode:f.transitMode==='car'?'car':'walk',commit:true,occupantIds:taxi?[f.id,taxi.passengerId]:[f.id]});if(admission&&!admission.allowed){if(admission.position)Object.assign(f,admission.position);f.trafficStatus=admission.reason||'waiting at international customs';f.vx=f.vz=0;return false;}if(admission?.position)next={...next,...admission.position};}
+   f.vx=next.x-f.x;f.vz=next.z-f.z;f.x=next.x;f.z=next.z;f.y=next.y??p.y??1.1;f.motionSpeed=speed;
+   if(f.transitMode==='car'){f.carPosition={x:f.x,z:f.z,...(Math.abs(f.y-1.1)>.001?{y:f.y}:{})};if(step>.001)f.vehicleHeading=Math.atan2(ux,uz);}
    f.movementTrace=[...(f.movementTrace||[]),{x:f.x,y:f.y,z:f.z,t:now()+hop*.001}].slice(-8);
    left-=step/speed;if(stop){f.trafficHoldUntil=now()+Math.max(1,gameSeconds);break;}if(step>=length-.001)f.routeIndex++;
   }
   if(f.routeIndex>=f.routeWaypoints.length){f.traveling=false;f.vx=f.vz=0;f.routeWaypoints=[];f.routeIndex=0;return true;}return false;
  }
  function divertedTaxiActor(f){return Boolean(f.countryAirTrip||f.countryFlightPlan||f.industrialFreightDuty||f.publicServiceDuty||f.socialTask||f.fireEngineDuty||f.ambulanceDuty||f.onFireEngine||f.onAmbulance||f.urbanTask||f.urbanFloodEscape||f.emergencyTask||f.civicDuty||f.privateFlight||f.onPrivateHelicopter||f.sportsSession||f.airTrip||f.onPlane||f.onTrain||f.heliPassenger||f.arrested||f.arrestedUntil>now());}
+ function releaseTaxiPassenger(job,passenger,cancel){
+  if(!passenger||job.passengerReleased)return;
+  job.passengerReleased=true;
+  if(passenger.cityService===job.id)passenger.cityService=null;if(passenger.taxiJobId===job.id)passenger.taxiJobId=null;passenger.taxiPassenger=false;
+  if(!passenger.alive||divertedTaxiActor(passenger))return;
+  passenger.traveling=false;passenger.routeWaypoints=[];passenger.transitMode='walk';passenger.indoors=false;
+  if(!cancel&&job.departureTerminalId){
+   const bay=airportDepartureDropoff(job.departureTerminalId);
+   delete passenger.airportDepartureEntrance;passenger.currentLocationId=null;
+   passenger.airportDepartureWalk={terminalId:bay.terminalId};
+   setRoute(passenger,bay.walk.map(p=>({...p,mode:'walk',airportDepartureWalk:true})),'airport','walking from the departure curb into the upstairs check-in hall');
+  }else startWalk(passenger,job.destinationId,cancel?'continuing after a cancelled taxi':'walking from taxi drop-off');
+  if(passenger.kind==='visitor')passenger.visitorTransitDestination=job.destinationId;
+ }
+ function departureExitRoute(job,driver,continueToBay=false){
+  const exit=airportDepartureDrive(job.departureTerminalId,true),remaining=continueToBay?(driver.routeWaypoints||[]).slice(driver.routeIndex||0):[];
+  // A cancelled occupied ride still exits physically; nobody is dropped onto a ramp.
+  const parking=parkingPoint(AIRPORT_DEPARTURE_ROAD.exit),last=parking?pedestrianRoute(AIRPORT_DEPARTURE_ROAD.exit,parking,'car'):[];
+  job.exitParking=parking||AIRPORT_DEPARTURE_ROAD.exit;
+  return [...remaining,...exit,...last];
+ }
  function finishTaxi(job,cancel=false,reason=''){
   const s=data();job=job&&s.taxiJobs.find(current=>current.id===job.id);if(!job||['complete','cancelled'].includes(job.phase))return;
   const driver=actor(job.driverId),passenger=actor(job.passengerId),escrow=business('city-taxi-escrow');
+  if(job.phase==='exiting'){
+   if(driver?.alive&&!divertedTaxiActor(driver)&&driver.traveling&&now()<=job.deadline)return;
+   if(driver){if(driver.cityService===job.id)driver.cityService=null;driver.taxiDriver=false;
+    if(driver.alive&&!divertedTaxiActor(driver)){driver.traveling=false;driver.routeWaypoints=[];driver.carPosition=null;driver.parkedCar={x:driver.x,y:driver.y??1.1,z:driver.z,heading:job.exitParking?.heading??Math.PI/2};driver.action='finished a taxi job';driver.actionUntil=now()+1200;}}
+   releaseTaxiPassenger(job,passenger,Boolean(job.cancelAfterExit));
+   job.phase=job.cancelAfterExit?'cancelled':'complete';job.completedAt=now();return;
+  }
   if(!job.paid){
    escrow.cash-=job.fare;
    if(cancel&&passenger)passenger.money=Number(passenger.money||0)+job.fare;
@@ -247,6 +281,15 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    else business('city-tourism').cash+=job.fare;
    job.paid=true;
    if(!cancel){s.taxiRevenue+=job.fare;raw().totalTransactions=Number(raw().totalTransactions||0)+1;}
+  }
+  if(job.departureTerminalId&&driver?.alive&&!divertedTaxiActor(driver)&&job.phase==='riding'&&(!cancel||Number(driver.y)>1.35)){
+   if(!cancel)releaseTaxiPassenger(job,passenger,false);
+   else if(passenger&&!divertedTaxiActor(passenger)){passenger.taxiPassenger=true;passenger.traveling=false;passenger.cityService=job.id;passenger.taxiJobId=job.id;}
+   else releaseTaxiPassenger(job,passenger,true);
+   const exit=departureExitRoute(job,driver,cancel);job.phase='exiting';job.cancelAfterExit=cancel;job.deliveredAt=cancel?null:now();job.exitStartedAt=now();job.deadline=Math.max(job.deadline,now()+24*3600);
+   setRoute(driver,exit,job.destinationId,cancel?'returning the cancelled taxi safely to the public street':'leaving the upstairs departure road');driver.cityService=job.id;driver.taxiDriver=true;driver.parkedCar=null;
+   if(cancel)s.taxiCancelled++;else s.taxiCompleted++;
+   emit(cancel?'taxi_cancelled':'taxi_completed',`${job.id} ${cancel?'cancelled: '+reason:'dropped off its passenger upstairs and settled the fare once'}.`,{taxiId:job.id,reason,fare:job.fare});return;
   }
   if(driver){
    if(driver.cityService===job.id)driver.cityService=null;driver.taxiDriver=false;
@@ -270,6 +313,12 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   const index=createVehicleIndex(residents());
   for(const j of active){
    const d=actor(j.driverId),p=actor(j.passengerId);
+   if(j.phase==='exiting'){
+    if(!d||!d.alive||divertedTaxiActor(d)||now()>j.deadline){finishTaxi(j,true,'departure road exit interrupted');continue;}
+    localMotion(d,dt,index);
+    if(!j.passengerReleased&&p&&!divertedTaxiActor(p))Object.assign(p,{x:d.x,y:d.y,z:d.z,vx:d.vx,vz:d.vz,transitMode:'taxi',onTrain:false,traveling:false});
+    if(!d.traveling)finishTaxi(j);continue;
+   }
    if(!d||!p||!d.alive||!p.alive||divertedTaxiActor(d)||divertedTaxiActor(p)||now()>j.deadline){finishTaxi(j,true,!d?'driver unavailable':!p?'passenger unavailable':'pickup or trip timed out');continue;}
    d.cityService=p.cityService=j.id;
    if(j.phase==='pickup'){
@@ -279,9 +328,14 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
      setRoute(d,j.rideRoute,j.destinationId,'driving a taxi passenger');d.transitMode='car';d.carPosition={x:d.x,z:d.z};
     }
    }else if(j.phase==='riding'){
-    localMotion(d,dt,index);Object.assign(p,{x:d.x,y:1.1,z:d.z,vx:d.vx,vz:d.vz,transitMode:'taxi',onTrain:false,traveling:false});
+    localMotion(d,dt,index);Object.assign(p,{x:d.x,y:d.y??1.1,z:d.z,vx:d.vx,vz:d.vz,transitMode:'taxi',onTrain:false,traveling:false});
     if(!d.traveling&&dist(d,j.drop)<1.5)finishTaxi(j);
    }
+  }
+  for(const f of [...residents(),...data().visitors])if(f.airportDepartureWalk){
+   if(!f.alive||divertedTaxiActor(f)){f.airportDepartureWalk=null;continue;}
+   localMotion(f,dt);
+   if(!f.traveling){const bay=airportDepartureDropoff(f.airportDepartureWalk.terminalId);f.airportDepartureEntrance={...bay.entrance,terminalId:bay.terminalId};f.airportDepartureWalk=null;f.currentLocationId=f.targetLocationId='airport';f.visitorTransitDestination=null;f.indoors=true;f.action='waiting in the upstairs departure check-in hall';}
   }
   data().taxiJobs=data().taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)||now()-j.completedAt<7200).slice(-24);
  }
@@ -335,6 +389,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   if(v.visitorPhase==='airport-wait')v.visitorPhase='departing';
   const hours=dt/3600;
   v.hunger=cap(v.hunger+hours*3);v.thirst=cap(v.thirst+hours*4);v.energy=cap(v.energy-hours*1.1);v.stress=cap(v.stress+hours*.15);
+  if(v.airportDepartureWalk)return;
   if((isUnavailable(v.hotelId,v)||data().hotels[v.hotelId]?.closed)&&v.hotelEvacuatedAt==null){
    v.hotelEvacuatedAt=now();v.departAt=Math.min(v.departAt,now());v.stress=cap(v.stress+12);
    if(v.targetLocationId===v.hotelId){v.traveling=false;v.routeWaypoints=[];v.visitorTransitDestination=null;}
@@ -471,6 +526,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
   s.lastCommunityEvent={...e,attendees:e.attendees.slice()};club.event=null;club.completed++;
  }
  function handleResident(f,clock){
+  if(f.airportDepartureWalk){needsAndActivities?.(f,clock);payAndFinance?.(f,clock);return true;}
   if(f.cityService&&String(f.cityService).startsWith('TAXI-')){
    const id=f.cityService,job=data().taxiJobs.find(j=>j.id===id&&!['complete','cancelled'].includes(j.phase)&&(j.driverId===f.id||j.passengerId===f.id));
    if(!job){f.cityService=null;if(f.taxiJobId===id)f.taxiJobId=null;f.taxiPassenger=false;f.taxiDriver=false;if(!divertedTaxiActor(f)){f.traveling=false;f.routeWaypoints=[];f.action='orphan taxi commitment released';f.actionUntil=0;}return false;}
@@ -660,7 +716,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    const passengers=waiting.filter(v=>departurePort(v).id===(f.airportId||'city')&&(!international||v.returnFarePaid||money(v)>=hansdrexReturnFare(v))).slice(0,seats);
    for(const v of passengers){const i=waiting.indexOf(v);if(i>=0)waiting.splice(i,1);}
    f.passengerIds.push(...passengers.map(v=>v.id));
-   for(const v of passengers){v.airportFlightId=f.id;v.action=`waiting to board ${f.id}`;}
+   for(const v of passengers){captureAirportDepartureEntrance(f,v,f.passengerIds.indexOf(v.id));v.airportFlightId=f.id;v.action=`waiting to board ${f.id}`;}
   }
   // A return flight can operate even when all hotel rooms are occupied.
   for(const airport of ['city','north'])if(waiting.some(v=>departurePort(v).id===airport)&&!traffic.flights.some(f=>(f.airportId||'city')===airport&&!f.aircraftGone&&time<f.outboundAt&&(f.passengerIds||[]).length<HANSDREX_AIRLINE.seats))queueAircraft(0,airport);
@@ -688,7 +744,7 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    capacity:MAX_VISITORS,tourism:tourism.snapshot(),totalArrivals:s.totalArrivals,totalDepartures:s.totalDepartures,reputation:Math.round(s.reputation*10)/10,
    externalInflow:s.externalInflow,externalOutflow:s.externalOutflow,visitorFatalities:Number(s.visitorFatalities||0),hotelRooms:Object.values(s.hotels).map(h=>({id:h.id,capacity:h.capacity,occupied:Object.keys(h.rooms).length})),
    taxiCompleted:s.taxiCompleted,taxiRevenue:s.taxiRevenue,taxiCancelled:s.taxiCancelled,
-   taxiJobs:s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).map(j=>({id:j.id,driverId:j.driverId,passengerId:j.passengerId,destinationId:j.destinationId,phase:j.phase,fare:j.fare,x:actor(j.driverId)?.x,z:actor(j.driverId)?.z})),
+   taxiJobs:s.taxiJobs.filter(j=>!['complete','cancelled'].includes(j.phase)).map(j=>({id:j.id,driverId:j.driverId,passengerId:j.passengerId,destinationId:j.destinationId,phase:j.phase,fare:j.fare,x:actor(j.driverId)?.x,y:actor(j.driverId)?.y,z:actor(j.driverId)?.z})),
    visitors:s.visitors.filter(v=>v.alive&&!v.departed).map(v=>({citizenshipCountryId:v.citizenshipCountryId,originCountryId:v.originCountryId,entryAirportId:v.entryAirportId,departureAirportId:v.departureAirportId,travelGoals:v.travelGoals,travelGoalsCompleted:v.travelGoalsCompleted,siteCountryVisits:v.siteCountryVisits,countryPresence:v.countryPresence,id:v.id,name:v.name,kind:'visitor',visitorPhase:v.visitorPhase,alive:true,ageYears:v.ageYears,generation:v.generation,sex:v.sex,x:v.x,y:v.y,z:v.z,vx:v.vx,vz:v.vz,money:v.money,savings:v.savings,action:v.action,traveling:v.traveling,indoors:v.indoors,sleeping:v.sleeping,onTrain:v.onTrain,onPlane:v.onPlane,transitMode:v.transitMode,metroLineId:v.metroLineId,heliPassenger:Boolean(v.heliPassenger),heliTourStartedAt:v.heliTourStartedAt,heliTourUntil:v.heliTourUntil,taxiPassenger:v.taxiPassenger,currentLocationId:v.currentLocationId,targetLocationId:v.targetLocationId,movementTrace:(v.movementTrace||[]).slice(-8),motion:v.airportMotion||(v.traveling&&!v.onTrain?{at:now(),speed:Number(v.motionSpeed||Math.hypot(v.vx,v.vz)||2.5),mode:v.transitMode,blocked:Number(v.trafficHoldUntil||0)>now(),points:(v.routeWaypoints||[]).slice(v.routeIndex||0,(v.routeIndex||0)+8).filter(p=>p.mode===v.transitMode).map(p=>({x:p.x,y:p.y??1.1,z:p.z}))}:null),health:v.health,hunger:v.hunger,energy:v.energy,stress:v.stress,happiness:v.happiness,excitement:v.excitement,loneliness:v.loneliness,children:[],parents:[],homeId:v.hotelId,hotelId:v.hotelId,departAt:v.departAt,brainId:v.brain.id})),
    photoCount:s.photoCount,photos:s.photos.slice(-16),communityEvent:s.club.event||s.lastCommunityEvent||null};
  }

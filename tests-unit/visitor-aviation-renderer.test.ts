@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {VisitorAviationRenderer} from '../src/visitor-aviation-renderer.ts';
-import {type VisitorAircraft} from '../worker/visitor-aviation.mjs';
+import {visitorAircraftPose,type VisitorAircraft} from '../worker/visitor-aviation.mjs';
 import {AIRPORT} from '../worker/city-map.mjs';
 
 function flight(index:number,inboundAt=0):VisitorAircraft {
@@ -48,4 +48,20 @@ test('future and finished manifests cannot hide a later active flight in the ren
  assert.equal(visible[0].position.z,current.arrivalStand!.z);
  renderer.sync([]);renderer.update(2001);
  assert.equal(aircraft.filter(mesh=>mesh.visible).length,0);
+});
+
+test('landing aircraft and boarding stairs update their drawn world matrices after static city initialization',()=>{
+ const scene=new THREE.Scene(),{root,renderer,aircraft}=setup();scene.add(root);
+ scene.updateMatrix();scene.matrixAutoUpdate=false;
+ root.traverse(object=>{object.updateMatrix();object.matrixAutoUpdate=Boolean(object.userData.dynamicCity);});
+ const manifest=flight(3);renderer.sync([manifest]);let previous:THREE.Vector3|undefined,moved=false;
+ for(const now of [100,300,500,700,900,1500]){
+  renderer.update(now);scene.updateMatrixWorld();const mesh=aircraft.find(a=>a.visible)!,expected=visitorAircraftPose(now,manifest)!;
+  const drawn=new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
+  assert.ok(drawn.distanceTo(new THREE.Vector3(expected.x,expected.y,expected.z))<1e-6);
+  if(previous&&drawn.distanceTo(previous)>10)moved=true;previous=drawn;
+ }
+ assert.ok(moved);const stairs=root.children.find(c=>c.name==='International boarding stairs'&&c.visible)!;
+ const drawn=new THREE.Vector3().setFromMatrixPosition(stairs.matrixWorld);assert.equal(drawn.x,manifest.arrivalStand!.x);assert.equal(drawn.z,manifest.arrivalStand!.z);
+ assert.equal(root.matrixAutoUpdate,false);assert.ok(aircraft.every(m=>m.matrixAutoUpdate));
 });

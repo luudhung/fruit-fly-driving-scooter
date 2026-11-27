@@ -13,13 +13,17 @@ export function airportTerminalAccess(id='T1'){
  const t=airportTerminalById(id),stairX=t.x+t.w/2-5;
  return [{x:t.gate.x,y:1.1,z:t.gate.z},{x:t.x,y:1.1,z:t.z+7},{x:stairX,y:1.1,z:t.z+6},{x:stairX,y:6.52,z:t.z-6},{x:t.x,y:6.52,z:t.z-6},{x:t.x,y:6.52,z:t.z+8},{x:t.x,y:6.52,z:AIRPORT_TERMINAL_RAIL.z}];
 }
+export function airportTerminalUpperAccess(id='T1'){
+ const t=airportTerminalById(id);
+ return [{x:t.x,y:6.52,z:t.z+6},{x:t.x,y:6.52,z:t.z+8},{x:t.x,y:6.52,z:AIRPORT_TERMINAL_RAIL.z}];
+}
 
 /** Separate departures: public upstairs check-in/security, then secure stairs to the aircraft. */
-export function airportDeparturePath(standOrId,terminalId){
+export function airportDeparturePath(standOrId,terminalId,{upperStart=false}={}){
  const stand=typeof standOrId==='string'?HANSDREX_AIRPORT.stands.find(s=>s.id===standOrId):standOrId;
  if(!stand||!Number.isFinite(stand.x)||!Number.isFinite(stand.z))return [];
  const t=terminalId?airportTerminalById(terminalId):airportTerminalForStand(stand),left=t.x-t.w/2+5;
- const path=airportTerminalAccess(t.id).slice(0,4).map(p=>({...p,stage:'departure-stairs-up'}));
+ const path=upperStart?[{...airportTerminalUpperAccess(t.id)[0],stage:'departure-upper-entrance'}]:airportTerminalAccess(t.id).slice(0,4).map(p=>({...p,stage:'departure-stairs-up'}));
  path.push({x:t.x-8,y:6.52,z:t.z+6,stage:'departure-check-in'},
   {x:t.x-14,y:6.52,z:t.z+6,stage:'departure-security-queue'},
   {x:t.x-20,y:6.52,z:t.z+6,stage:'departure-security'},
@@ -60,12 +64,12 @@ export function airportTerminalTrainStates(seconds){
  });
 }
 /** A real zero-fare departure after the caller reaches the platform; no money mutation. */
-export function airportTerminalTransfer(fromId,toId,at=0,timeScale=120){
+export function airportTerminalTransfer(fromId,toId,at=0,timeScale=120,{upperStart=false,upperEnd=false}={}){
  const from=airportTerminalById(fromId),to=airportTerminalById(toId);if(from.id===to.id)return {fare:0,arrivalAt:at,waypoints:[]};
  const scale=Math.max(1,timeScale),speed=1.8/scale,direction=to.x>from.x?1:-1,schedule=schedules[direction>0?0:1],origin=schedule.visits.find(v=>v.station.terminalId===from.id),destination=schedule.visits.find(v=>v.station.terminalId===to.id);
  let time=at;const waypoints=[];
  const add=(p,stage,when)=>{const prev=waypoints.at(-1);if(when===undefined&&prev)time+=Math.hypot(p.x-prev.x,p.z-prev.z,p.y-prev.y)/speed;else if(when!==undefined)time=when;waypoints.push({...p,at:time,mode:'walk',stage,lineId:AIRPORT_TERMINAL_RAIL.id,fare:0});};
- for(const p of airportTerminalAccess(from.id))add(p,'terminal-stairs-up');
+ for(const p of (upperStart?airportTerminalUpperAccess(from.id):airportTerminalAccess(from.id)))add(p,upperStart?'terminal-upper-access':'terminal-stairs-up');
  const earliest=time/scale+4/1.8,cycle=Math.max(0,Math.ceil((earliest-origin.at)/schedule.cycle)),depart=cycle*schedule.cycle+origin.at;
  const board={x:from.x,y:6.52,z:AIRPORT_TERMINAL_RAIL.z+direction*4};
  add(board,'terminal-train-board',depart*scale);
@@ -76,6 +80,6 @@ export function airportTerminalTransfer(fromId,toId,at=0,timeScale=120){
   if(visit!==destination)add(point,'terminal-train-departure',(cycle*schedule.cycle+visit.until)*scale);
  }
  add({x:to.x,y:6.52,z:AIRPORT_TERMINAL_RAIL.z},'terminal-train-alight');
- for(const p of [...airportTerminalAccess(to.id)].reverse())add(p,'terminal-stairs-down');
+ for(const p of [...(upperEnd?airportTerminalUpperAccess(to.id):airportTerminalAccess(to.id))].reverse())add(p,upperEnd?'terminal-upper-access':'terminal-stairs-down');
  return {fare:0,trainId:`HCA-FREE-${direction>0?'A':'B'}`,direction,arrivalAt:time,waypoints};
 }

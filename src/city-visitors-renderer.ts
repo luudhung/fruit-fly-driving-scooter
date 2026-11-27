@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 type Point={x:number;y?:number;z:number};
-type CityVisitorSnapshot={taxiJobs?:Array<{id:string;driverId:string;phase:string;x?:number;z?:number}>;photos?:Array<{id:string;at:number;camera:Point}>;communityEvent?:{locationId:string;endsAt:number;attendees:string[]}|null};
+type CityVisitorSnapshot={taxiJobs?:Array<{id:string;driverId:string;phase:string;x?:number;y?:number;z?:number}>;photos?:Array<{id:string;at:number;camera:Point}>;communityEvent?:{locationId:string;endsAt:number;attendees:string[]}|null};
 /** Presentation only. Visitor bodies come from the main shared resident renderer. */
 export class CityVisitorsRenderer{
  private taxis:THREE.InstancedMesh;
@@ -19,8 +19,8 @@ export class CityVisitorsRenderer{
  update(_dt:number,gameNow:number){
   let n=0;
   for(const job of this.data.taxiJobs||[]){
-   if(n>=6)break;const p=this.positions.get(job.driverId)||{x:job.x??0,z:job.z??0};
-   this.dummy.position.set(p.x,1.86,p.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.taxis.setMatrixAt(n++,this.dummy.matrix);
+   if(n>=6)break;const p=this.positions.get(job.driverId)||{x:job.x??0,y:job.y,z:job.z??0};
+   this.dummy.position.set(p.x,(p.y??1.1)+.76,p.z);this.dummy.rotation.set(0,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.taxis.setMatrixAt(n++,this.dummy.matrix);
   }
   this.taxis.count=n;this.taxis.instanceMatrix.needsUpdate=true;n=0;
   for(const photo of this.data.photos||[]){

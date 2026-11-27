@@ -51,7 +51,7 @@ const flightStand=flight=>flight.arrivalStand||(flight.airportId&&flight.airport
 // aircraft door -> portable stairs -> apron -> terminal -> immigration -> exit.
 const arrivalPaths=new WeakMap(),departurePaths=new WeakMap();
 function passengerPath(cache,flight,index,timeScale,compute,departure=false){
- const stand=flightStand(flight),key=[flight.airportId,flight.terminalId,stand?.id,stand?.x,stand?.z,flight.parkedAt,flight.disembarkAt,departure?flight.boardingStartedAt:flight.disembarkAt??flight.parkedAt,timeScale].join('|');
+ const stand=flightStand(flight),key=[flight.airportId,flight.terminalId,stand?.id,stand?.x,stand?.z,flight.parkedAt,flight.disembarkAt,departure?flight.boardingStartedAt:flight.disembarkAt??flight.parkedAt,timeScale,departure?JSON.stringify(flight.departureEntrances||null):''].join('|');
  let entry=cache.get(flight);if(entry?.key!==key){entry={key,paths:new Map()};cache.set(flight,entry);}
  if(!entry.paths.has(index)){if(entry.paths.size>=32)entry.paths.clear();entry.paths.set(index,compute(flight,index,timeScale));}
  return entry.paths.get(index);
@@ -130,6 +130,19 @@ export function visitorArrivalMotion(now,flight,index=0,timeScale=120){
 }
 
 /** Departures use the upstairs check-in hall; arrivals remain downstairs. */
+export function airportDepartureEntranceFor(person){
+ const entry=person?.airportDepartureEntrance,t=entry&&AIRPORT.terminals.find(t=>t.id===entry.terminalId);
+ if(!t||person.traveling||person.onPlane||person.onTrain||person.currentLocationId!=='airport')return null;
+ const target={x:t.x,y:6.52,z:t.z+6};
+ if(Math.hypot(Number(person.x)-target.x,Number(person.y)-target.y,Number(person.z)-target.z)>1.5||![person.x,person.y,person.z].every(Number.isFinite))return null;
+ return {terminalId:t.id,x:person.x,y:person.y,z:person.z};
+}
+/** Record physical upper-hall arrival only for newly assigned boarding slots. */
+export function captureAirportDepartureEntrance(flight,person,index=0){
+ if((flight.airportId||'city')!=='city'||!Number.isSafeInteger(index)||index<0||index>=32)return false;
+ const entry=airportDepartureEntranceFor(person);if(!entry)return false;
+ (flight.departureEntrances||={})[index]=entry;delete person.airportDepartureEntrance;return true;
+}
 export function visitorDeparturePath(flight,index=0,timeScale=120){return passengerPath(departurePaths,flight,index,timeScale,computeDeparturePath,true);}
 function computeDeparturePath(flight,index=0,timeScale=120){
  if(!Number.isFinite(flight.boardingStartedAt))return [];
@@ -142,12 +155,16 @@ function computeDeparturePath(flight,index=0,timeScale=120){
  const add=p=>{const previous=path.at(-1);if(previous)at+=Math.hypot(p.x-previous.x,p.y-previous.y,p.z-previous.z)/speed;
   path.push({...p,at,phase:'boarding'});
   if(p.stage==='departure-check-in'||p.stage==='departure-security'){at+=180;path.push({...p,at,phase:'boarding'});}};
- if(flight.terminalId!=='T1'){
-  const transfer=airportTerminalTransfer('T1',flight.terminalId,at,timeScale);
+ const entry=flight.departureEntrances?.[index],upper=entry&&AIRPORT.terminals.some(t=>t.id===entry.terminalId)&&[entry.x,entry.y,entry.z].every(Number.isFinite)&&Math.abs(entry.y-6.52)<.1;
+ const from=upper?entry.terminalId:'T1';
+ if(upper)add({...entry,stage:'departure-upper-entrance'});
+ if(flight.terminalId!==from){
+  if(upper){const t=airportTerminalById(from);add({x:t.x,y:6.52,z:t.z+6,stage:'departure-upper-entrance'});}
+  const transfer=airportTerminalTransfer(from,flight.terminalId,at,timeScale,{upperStart:Boolean(upper),upperEnd:Boolean(upper)});
   for(const p of transfer.waypoints)path.push({...p,phase:'boarding'});
   at=transfer.arrivalAt;
  }
- for(const p of airportDeparturePath(flight.arrivalStand||flight.standId,flight.terminalId))add(p);
+ for(const p of airportDeparturePath(flight.arrivalStand||flight.standId,flight.terminalId,{upperStart:Boolean(upper)}))add(p);
  return path;
 }
 export function visitorDepartureCompleteAt(flight,count=10,timeScale=120){
@@ -276,6 +293,7 @@ export function visitorStandReservation(earliest,flights,airportId='city',ground
  * Never send a landed aircraft back into the airborne holding pattern. */
 export function resolveVisitorTaxiStand(flight,flights,now){
  if(flight.aircraftGone||flight.landed||flight.landedAt!=null||!Number.isFinite(flight.inboundAt)||now<flight.inboundAt+visitorRunwayClearSeconds(flight))return false;
+ if(flight.taxiHold?.runwayCleared&&now<flight.taxiHold.at){flight.parkedAt=Math.max(flight.parkedAt,flight.taxiHold.at+330);return true;}
  const occupied=stand=>flights.some(f=>f!==flight&&!f.aircraftGone&&(f.airportId||'city')===(flight.airportId||'city')&&flightStand(f)&&Math.hypot(flightStand(f).x-stand.x,flightStand(f).z-stand.z)<24&&Number(f.parkedAt)<Math.max(now+330,visitorStandReleaseAt(flight))&&visitorStandReleaseAt(f)>Math.max(now,flight.inboundAt+visitorRunwayClearSeconds(flight)));
  const current=flightStand(flight);
  if(current&&!occupied(current)&&!flight.taxiHold){flight.taxiStandChecked=true;return false;}
@@ -284,11 +302,25 @@ export function resolveVisitorTaxiStand(flight,flights,now){
  const checkedAt=flight.taxiStandChecked?now:Math.min(now,flight.inboundAt+visitorRunwayClearSeconds(flight));
  const pose=flight.taxiHold?.pose||visitorAircraftPose(checkedAt,flight);
  if(!pose)return false;
- if(!free){flight.taxiHold||={at:now,pose};flight.parkedAt=Math.max(flight.parkedAt,now+330);return true;}
  const start=flight.taxiHold?now:checkedAt,taxi=visitorFlightRunway(flight).taxiwayZ??visitorAirport(flight).taxiwayZ??VISITOR_TAXIWAY_Z;
+ // North's compact, already booked charter movements keep their accepted
+ // ground schedule. The new parallel holding lane belongs to the Hansdrex hub.
+ if(!free&&(flight.airportId||'city')!=='city'){flight.taxiHold||={at:now,pose};flight.parkedAt=Math.max(flight.parkedAt,now+330);return true;}
+ if(!free&&flight.taxiHold?.runwayCleared){flight.parkedAt=Math.max(flight.parkedAt,now+330);return true;}
  const points=[{...pose,at:start}],add=(x,z)=>{const p=points.at(-1);points.push({x,y:3,z,at:p.at+Math.max(30,Math.hypot(x-p.x,z-p.z)*(flight.motionVersion>=1?20:2))});};
  if(!flight.taxiRoute&&!flight.taxiStandChecked)for(const step of flightPath(current||free,flight,false).filter(p=>p[0]>690&&p[0]<=820))add(step[1],step[3]);
  else add(pose.x,taxi);
+ if(!free){
+  // Vacate the landing strip before waiting for a late stand release. The old
+  // hold froze the rollout point on the runway itself, blocking the next flight.
+  const airport=visitorAirport(flight),vertical=airport.runway.d>airport.runway.w;
+  const held=flights.filter(f=>f!==flight&&(f.airportId||'city')===(flight.airportId||'city')&&f.taxiHold?.runwayCleared).map(f=>f.taxiHold.pose);
+  const candidates=[current,...visitorStands(flight.airportId||'city')].filter(Boolean);
+  const wait=candidates.find(p=>held.every(q=>Math.abs((vertical?p.z:p.x)-(vertical?q.z:q.x))>=24))||current||candidates[0];
+  if(vertical)add(taxi,wait.z);else add(wait.x,taxi);
+  const hold=points.at(-1);flight.taxiRoute=points;flight.taxiHold={at:hold.at,pose:{x:hold.x,y:hold.y,z:hold.z},runwayCleared:true};
+  flight.parkedAt=Math.max(flight.parkedAt,hold.at+330,now+330);return true;
+ }
  add(free.x,taxi);add(free.x,free.z);
  flight.standId=free.id;if(flight.motionVersion>=2&&(flight.airportId||'city')==='city')flight.terminalId=airportTerminalForStand(free).id;flight.arrivalStand={...free};flight.taxiRoute=points;flight.parkedAt=points.at(-1).at;delete flight.taxiHold;flight.taxiStandChecked=true;return true;
 }
@@ -370,7 +402,7 @@ export function visitorAircraftPose(now, flight) {
  if(!stand)return null;
  const outbound=flight.outboundAt!=null&&now>=flight.outboundAt;
  if(!outbound&&now>=flight.parkedAt)return {...stand,y:3,heading:0,phase:'parked'};
- if(!outbound&&flight.taxiHold)return {...flight.taxiHold.pose,heading:flight.taxiHold.pose.heading||0,phase:'taxi-hold'};
+ if(!outbound&&flight.taxiHold&&now>=flight.taxiHold.at)return {...flight.taxiHold.pose,heading:flight.taxiHold.pose.heading||0,phase:'taxi-hold'};
  if(!outbound&&flight.taxiRoute){
   const points=flight.taxiRoute;let i=points.findIndex(p=>p.at>now);if(i<0)i=points.length-1;i=Math.max(1,i);const a=points[i-1],b=points[i],t=Math.max(0,Math.min(1,(now-a.at)/Math.max(1,b.at-a.at)));
   return {x:a.x+(b.x-a.x)*t,y:3,z:a.z+(b.z-a.z)*t,heading:Math.atan2(b.x-a.x,b.z-a.z),phase:'taxi-in'};

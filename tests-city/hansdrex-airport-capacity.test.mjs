@@ -345,9 +345,10 @@ test('a late stand release redirects a landed airliner to an empty bay, and a fu
  const free=incoming();assert.equal(airportTraffic.resolveVisitorTaxiStand(free,occupied.slice(0,1),700),true);
  assert.notEqual(free.standId,stands[0].id);assert.equal(free.inboundAt,0);assert.equal(free.hold,undefined);
  assert.equal(visitorAircraftPose(701,free).y,3);assert.equal(visitorAircraftPose(free.parkedAt,free).phase,'parked');
- const full=incoming();assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,700),true);assert.equal(visitorAircraftPose(700,full).phase,'taxi-hold');assert.equal(visitorAircraftPose(700,full).y,3);
+ const full=incoming();assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,700),true);assert.equal(visitorAircraftPose(700,full).phase,'taxi-in');assert.equal(visitorAircraftPose(700,full).y,3);
+ const offRunway=full.taxiHold.at+1;assert.equal(visitorAircraftPose(offRunway,full).phase,'taxi-hold');assert.equal(visitorAircraftPose(offRunway,full).z,AIRPORT.taxiwayZ);
  occupied[1].aircraftGone=true;
- assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,900),true);assert.equal(full.standId,stands[1].id);assert.equal(full.taxiHold,undefined);assert.equal(full.hold,undefined);
+ assert.equal(airportTraffic.resolveVisitorTaxiStand(full,occupied,offRunway),true);assert.equal(full.standId,stands[1].id);assert.equal(full.taxiHold,undefined);assert.equal(full.hold,undefined);
 });
 
 test('a restored legacy visitor car keeps moving when a new parking itinerary cannot yet be reserved',()=>{

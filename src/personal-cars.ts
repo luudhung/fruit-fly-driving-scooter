@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import {PARKING_SPACES,clearSegment} from '../worker/city-map.mjs';
 import {isCarTrip} from './actor-transport.ts';
 
-type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;rentalCar?:boolean;vehicleHeading?:number;traveling?:boolean;transitMode?:string;indoors?:boolean;onPlane?:boolean;onTrain?:boolean;heliPassenger?:boolean;onPrivateHelicopter?:boolean;onFireEngine?:boolean;onAmbulance?:boolean;taxiPassenger?:boolean;x:number;y?:number;z:number;vx:number;vz:number;parkedCar?:{x:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;y?:number;z:number;t:number}>};
+type Driver={motion?:MotionPlan|null;trafficSignalPermit?:boolean;id:string;alive:boolean;vehicle?:string|null;rentalCar?:boolean;vehicleHeading?:number;traveling?:boolean;transitMode?:string;indoors?:boolean;onPlane?:boolean;onTrain?:boolean;heliPassenger?:boolean;onPrivateHelicopter?:boolean;onFireEngine?:boolean;onAmbulance?:boolean;taxiPassenger?:boolean;x:number;y?:number;z:number;vx:number;vz:number;parkedCar?:{x:number;y?:number;z:number;heading?:number}|null;movementTrace?:Array<{x:number;y?:number;z:number;t:number}>};
 type Car={id:string;motion?:CityMotion;hasMotion?:boolean;signalPermit?:boolean;color:THREE.Color;x:number;y:number;z:number;heading:number;pitch:number;targetX:number;targetY:number;targetZ:number;targetHeading:number;driving:boolean;lastTrace:number;route:Array<{x:number;y?:number;z:number}>;actor:TrafficActor};
 export type RoadIncident={id:string;x:number;z:number;repairAt:number};
 const position=(f:Driver)=>!f.alive?null:isCarTrip(f)?f:f.vehicle?.includes('car')||f.rentalCar?f.parkedCar||null:null;
@@ -59,14 +59,14 @@ export class PersonalCars{
  private syncDriver(f:Driver,car:Car,fresh:boolean){
   const driving=isCarTrip(f),p=position(f)!;
   const heading=driving&&Number.isFinite(f.vehicleHeading)?f.vehicleHeading!:driving&&Math.abs(f.vx)+Math.abs(f.vz)>.01?Math.atan2(f.vx,f.vz):f.parkedCar?.heading||0;
-  if(fresh||!driving||!car.driving){car.route.length=0;car.x=p.x;car.y=driving?(f.y??1.1):1.1;car.z=p.z;car.heading=heading;car.pitch=0;}
+  if(fresh||!driving||!car.driving){car.route.length=0;car.x=p.x;car.y=driving?(f.y??1.1):(p.y??1.1);car.z=p.z;car.heading=heading;car.pitch=0;}
   else for(const q of f.motion?[]:f.movementTrace||[]){if(q.t<=car.lastTrace)continue;const last=car.route.at(-1)||car;if(clearSegment(last,q))car.route.push(q);else{car.route.length=0;car.x=q.x;car.y=q.y??1.1;car.z=q.z;}}
   if(car.route.length>12)car.route=car.route.slice(-8);
   car.hasMotion=Boolean(driving&&f.motion);
   if(car.hasMotion){car.motion ||=new CityMotion(CITY_ROUTE_PREDICTION_SECONDS);car.motion.accept(f,f.motion!);car.route.length=0;}
   else car.motion=undefined;
   car.signalPermit=Boolean(f.trafficSignalPermit);car.lastTrace=f.movementTrace?.at(-1)?.t??car.lastTrace;
-  car.actor.vehicleHeading=car.heading;car.targetX=p.x;car.targetY=driving?(f.y??1.1):1.1;car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
+  car.actor.vehicleHeading=car.heading;car.targetX=p.x;car.targetY=driving?(f.y??1.1):(p.y??1.1);car.targetZ=p.z;car.targetHeading=heading;car.driving=driving;
  }
  private reconcile(){
   if(this.camera)this.view.setCamera(this.camera);

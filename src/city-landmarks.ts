@@ -4,6 +4,7 @@ import {COUNTRY_AIRPORTS} from '../worker/country-map.mjs';
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
 import {createPassengerTerminal} from './passenger-terminal.ts';
+import {buildAirportDepartureRoad} from './airport-departure-road.ts';
 import {AIRPORT,ISLAND,SEA,RIVER,DISTRICT_RIVERS,SKYLINE_PLOTS} from '../worker/city-map.mjs';
 import {createAirportGroundLayout,AIRPORT_GROUND_LEVELS} from './airport-ground-layout.ts';
 import {subtractRects} from './surface-rectangles.ts';
@@ -63,6 +64,7 @@ export function buildHansdrexEmpire(root:THREE.Group,make:Sign){
  sign(g,make,'HANSDREX EMPIRE',0,205,0,27,1.4);batchStaticMeshes(g);root.add(g);return g;
 }
 export function buildAirportAndIsland(root:THREE.Group,make:Sign){
+ buildAirportDepartureRoad(root,make);
  const g=new THREE.Group(),asphalt=new THREE.MeshStandardMaterial({color:0x293139,roughness:.95}),concrete=new THREE.MeshStandardMaterial({color:0xaeb8b7,roughness:.9});
  const white=new THREE.MeshBasicMaterial({color:0xf4f0db}),yellow=new THREE.MeshBasicMaterial({color:0xeac95e});
  function slab(x:number,z:number,w:number,d:number,m:THREE.Material,y=.15){box(g,w,.12,d,x,y,z,m);}

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {batchStaticMeshes} from './static-box-batches.ts';
+import {AIRPORT_DEPARTURE_ROAD} from '../worker/airport-departure-roads.mjs';
 type Airport={terminal:{x:number;z:number;w:number;d:number;floors?:number;floorHeight?:number;id?:string};gate:{x:number;z:number}};
 type Sign=(text:string,width:number,height:number)=>THREE.Sprite;
 /** Fixed, batched architecture with an open airside-to-landside arrivals hall. */
@@ -43,8 +44,15 @@ export function createPassengerTerminal(airport:Airport,makeSign:Sign,{name,mode
   }
   sign('CHECK-IN · SECURITY · DEPARTURES',0,floorHeight+3.1,0,38,.9);
   // Open central doors serve both floors; bridge connects the free train platform.
-  box(6,.22,18,0,.22+floorHeight-.11,depth/2+8,stone);
-  for(const side of [-1,1])box(.12,.9,18,side*2.94,.22+floorHeight+.45,depth/2+8,metal);
+  const start=depth/2-1,end=depth/2+17,road=AIRPORT_DEPARTURE_ROAD;
+  const bridges=modern&&/^T[1-4]$/.test(t.id||'')?[[start,road.z-road.width/2-t.z],[road.z+road.width/2-t.z,end]]:[[start,end]];
+  // A marked crossing replaces the bridge slab and handrails over the road;
+  // continuous bridge railings here would physically fence in every taxi.
+  for(const [a,b]of bridges)if(b>a){
+   box(6,.22,b-a,0,.22+floorHeight-.11,(a+b)/2,stone);
+   // The curb sidewalk joins the hall laterally before the crossing.
+   if(bridges.length===1||a>=road.z+road.width/2-t.z-.01)for(const side of [-1,1])box(.12,.9,b-a,side*2.94,.22+floorHeight+.45,(a+b)/2,metal);
+  }
   for(const side of [-1,1]){
    const px=side*width*.26;
    box(3,.65,2.4,px,floorHeight+.55,0,stone);

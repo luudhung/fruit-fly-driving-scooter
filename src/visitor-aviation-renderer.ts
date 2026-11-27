@@ -91,12 +91,13 @@ export class VisitorAviationRenderer {
   this.aircraft=slots.map(()=>{
    const mesh=new THREE.Mesh(geometry,material);
    mesh.name='International passenger aircraft';mesh.visible=false;addAviationBeacons(mesh,[[-8.5,-.28,-1.55],[8.5,-.28,-1.55]]);
+   mesh.userData.dynamicCity=true;
    root.add(mesh);
    return mesh;
   });
   const stairsGeometry=boardingStairsGeometry();
   this.stairs=slots.map(()=>{
-   const mesh=new THREE.Mesh(stairsGeometry,material);mesh.name='International boarding stairs';mesh.visible=false;root.add(mesh);return mesh;
+   const mesh=new THREE.Mesh(stairsGeometry,material);mesh.name='International boarding stairs';mesh.visible=false;mesh.userData.dynamicCity=true;root.add(mesh);return mesh;
   });
  }
 

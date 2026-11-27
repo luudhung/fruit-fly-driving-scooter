@@ -86,7 +86,7 @@ export function createVehicleIndex(drivers,onCollision){
   if(!f.alive||f.onPlane||f.onTrain||f.onFireEngine||f.onAmbulance||f.taxiPassenger)continue;
   const driving=f.traveling&&['car','scooter'].includes(f.transitMode),parked=!driving&&f.parkedCar&&(String(f.vehicle||'').includes('car')||f.rentalCar);
   if(!driving&&!parked)continue;const p=parked?f.parkedCar:f;
-  const sample={id:f.id,actor:f,x:p.x,z:p.z,y:Number(parked?1.1:f.y??1.1),heading:driving?heading(f):null,angle:parked?Number(p.heading||0):Number(f.heading||0),length:Math.max(2,Math.min(12,Number(f.vehicleLength)||4)),width:Number(f.vehicleWidth||1.8),emergency:f.emergency===true,parked:Boolean(parked)};
+  const sample={id:f.id,actor:f,x:p.x,z:p.z,y:Number(parked?p.y??1.1:f.y??1.1),heading:driving?heading(f):null,angle:parked?Number(p.heading||0):Number(f.heading||0),length:Math.max(2,Math.min(12,Number(f.vehicleLength)||4)),width:Number(f.vehicleWidth||1.8),emergency:f.emergency===true,parked:Boolean(parked)};
   const key=`${Math.floor(p.x/cell)},${Math.floor(p.z/cell)}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(sample);
  }
  function nearby(minX,maxX,minZ,maxZ){const found=[];

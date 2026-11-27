@@ -1,4 +1,5 @@
 import {PLAYER_FLIGHT_SPEED} from '../worker/aircraft-speed.mjs';
+import {airportDepartureRoadLevels} from '../worker/airport-departure-roads.mjs';
 import {northF1MovementBlocked} from '../worker/north-f1-closure.mjs';
 import {NORTH_MILITARY_WALLS} from '../worker/country-map.mjs';
 import {BUILDINGS,ISLAND,WATER,BRIDGES,DISTRICT_BRIDGES,contains,onIsland,atSea,onWaterCrossing,WORLD_HALF,UNDERPASSES,METRO_LINES,metroStationGeometry,urbanGeometryRevision,effectiveBuildingHeight,URBAN_FLOODS} from '../worker/city-map.mjs';
@@ -56,6 +57,7 @@ function surfaceY(x:number,z:number,a:SurfacePoint,b:SurfacePoint,width:number,m
 }
 function support(x:number,z:number,max:number){
  let y=terrain(x,z);
+ for(const top of airportDepartureRoadLevels({x,z},1.2))if(top<=max+EPS)y=Math.max(y,top);
  for(const bridge of BRIDGES)if(contains(bridge,{x,z})){
   const top=Math.abs(Math.abs(z-bridge.z)-6)<1.25?.34:.2;if(top<=max+EPS)y=Math.max(y,top);
  }
