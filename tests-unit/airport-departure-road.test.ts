@@ -38,6 +38,36 @@ test('the static two-floor road has no real lights or rails blocking taxis and p
  assert.equal(lights,0);assert.ok(road.children.filter(o=>o instanceof THREE.Mesh).length<=5,'fixed surfaces are merged by material');
 });
 
+test('the factory street remains straight beneath a separate slip road with rounded, gap-free bends',()=>{
+ const root=new THREE.Group(),road=buildAirportDepartureRoad(root,()=>new THREE.Sprite());root.updateMatrixWorld(true);
+ const meshes:THREE.Mesh[]=[];road.traverse(o=>{if(o instanceof THREE.Mesh)meshes.push(o);});
+ // The former ramp occupied this ground-level road. Both directions must now
+ // stay down, with enough clearance to pass beneath the elevated connector.
+ for(const direction of [-1,1]){
+  let ground=.25;
+  for(let d=0;d<=120;d+=.5){const x=direction>0?-405+d:-285-d;
+   ground=playerCarGround(x,-400,ground);assert.ok(ground<.31);assert.ok(playerCarClear(x,-400,direction*Math.PI/2,ground));
+   const ray=new THREE.Raycaster(new THREE.Vector3(x,1.1,-400),new THREE.Vector3(direction,0,0),.01,.5);
+   assert.equal(ray.intersectObjects(meshes,false).length,0,'the slip-road rail must not fence off the through street');
+  }
+  ground=.25;
+  for(let d=0;d<=125;d+=.5){const z=direction>0?-380+d:-255-d;
+   ground=playerCarGround(372,z,ground);assert.ok(ground<.31,'the riverside through lane never joins the separate ramp');assert.ok(playerCarClear(372,z,direction>0?0:Math.PI,ground));
+   const ray=new THREE.Raycaster(new THREE.Vector3(372,1.1,z),new THREE.Vector3(0,0,direction),.01,.5);
+   assert.equal(ray.intersectObjects(meshes,false).length,0,'no merge railing crosses the riverside through lane');
+  }
+ }
+ for(let i=1;i<ROAD.points.length;i++){
+  const a=ROAD.points[i-1],b=ROAD.points[i],length=Math.hypot(b.x-a.x,b.z-a.z),nx=-(b.z-a.z)/length,nz=(b.x-a.x)/length;
+  if(i<ROAD.points.length-1){const c=ROAD.points[i+1],h=Math.atan2(b.x-a.x,b.z-a.z),j=Math.atan2(c.x-b.x,c.z-b.z);assert.ok(Math.abs(Math.atan2(Math.sin(j-h),Math.cos(j-h)))<Math.PI/12,'no right-angle centerline joins');}
+  for(let d=.05;d<length-.05;d+=.7)for(const side of [-2.5,0,2.5]){
+   const u=d/length,p=new THREE.Vector3(a.x+(b.x-a.x)*u+nx*side,a.y+(b.y-a.y)*u+2,a.z+(b.z-a.z)*u+nz*side);
+   const hits=new THREE.Raycaster(p,new THREE.Vector3(0,-1,0),0,5).intersectObjects(meshes,false),expected=a.y+(b.y-a.y)*u-ROAD.carOffset+.04;
+   assert.ok(hits.some(h=>Math.abs(h.point.y-expected)<.035),`missing road surface at ${p.x},${p.z}`);
+  }
+ }
+});
+
 test('player wheels climb and descend connected departure ramps and stay at ground level when passing below a high deck',()=>{
  let ground=.25;const points=ROAD.points;
  for(let i=1;i<points.length;i++){
