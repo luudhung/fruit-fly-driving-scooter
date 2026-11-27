@@ -342,7 +342,15 @@ export function createF1Charters({world,signature,admit,intercept,weatherClosed,
    schedule(e,plane,now()+900,plane.kind==='positioning'?8*HOUR:1800);return;
   }
   if(!plane.landed&&now()>=plane.inboundAt+visitorTouchdownSeconds(plane))plane.touchdownAt??=plane.inboundAt+visitorTouchdownSeconds(plane);
-  if(resolveVisitorTaxiStand(plane,traffic(e,plane.airportId,plane),now())&&plane.outboundAt!=null)outbound(e,plane,Math.max(plane.outboundAt,plane.parkedAt+1200));
+  const wasTaxiHeld=Boolean(plane.taxiHold);
+  if(resolveVisitorTaxiStand(plane,traffic(e,plane.airportId,plane),now())&&plane.outboundAt!=null){
+   // A taxiway hold invalidated the old takeoff slot. Once a real bay opens,
+   // rotate from its actual parking time rather than retaining days of mutually
+   // postponed phantom reservations. A committed boarding path still wins.
+   const boarding=plane.boardingStartedAt!=null?visitorDepartureCompleteAt(plane,plane.boardingGuestIds?.length||plane.passengerIds?.length||0,scale())+600:0;
+   const earliest=(plane.airportId||'city')==='city'&&wasTaxiHeld&&!plane.taxiHold?Math.max(plane.parkedAt+1200,boarding):Math.max(plane.outboundAt,plane.parkedAt+1200);
+   outbound(e,plane,earliest);
+  }
   if(!plane.landed&&!plane.taxiHold&&now()>=plane.parkedAt)plane.landed=true;
   if(plane.outboundAt!=null&&now()>=plane.outboundAt&&!plane.tookOff){
    if(weatherClosed())outbound(e,plane,now()+900);else plane.tookOff=true;

@@ -2,7 +2,7 @@ export type VisitorAircraft = {
  departureEntrances?:Record<number,{terminalId:string;x:number;y:number;z:number}>;
  terminalId?:string; motionVersion?:number; id:string; standId:string; sector:string; direction:number; inboundAt:number; parkedAt:number;airportId?:string;arrivalStand?:{id:string;x:number;z:number};
  outboundAt:number|null; exitAt:number|null; boardAt?:number|null; boardingStartedAt?:number; arrivingGuests?:number; passengerIds?:string[]; hold?:{x:number;y:number;z:number;at:number};
- kind?:'passenger'|'ferry'|'positioning'; runwayId?:string; aircraftGone?:boolean; standReleasedAt?:number; expectedStandReleaseAt?:number; arrivalPassengerIds?:string[]; arrivalCompleteAt?:number; landedAt?:number; disembarkAt?:number;
+ turnaroundVersion?:number; kind?:'passenger'|'ferry'|'positioning'; runwayId?:string; aircraftGone?:boolean; standReleasedAt?:number; expectedStandReleaseAt?:number; arrivalPassengerIds?:string[]; arrivalCompleteAt?:number; landedAt?:number; disembarkAt?:number;
 };
 export type VisitorAircraftPose = {x:number;y:number;z:number;heading:number;phase:string};
 export const VISITOR_STANDS:ReadonlyArray<{id:string;x:number;z:number}>;

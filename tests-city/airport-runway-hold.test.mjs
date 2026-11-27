@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {AIRPORT} from '../worker/city-map.mjs';
-import {visitorStands,visitorAircraftPose,resolveVisitorTaxiStand} from '../worker/visitor-aviation.mjs';
+import {visitorStands,visitorAircraftPose,resolveVisitorTaxiStand,visitorStandReservation,visitorRunwaySlot} from '../worker/visitor-aviation.mjs';
 const stands=visitorStands('city');
 const incoming=id=>({id,airportId:'city',standId:stands[0].id,arrivalStand:stands[0],runwayId:AIRPORT.runways[0].id,sector:'west',direction:1,inboundAt:0,parkedAt:1020,outboundAt:null,exitAt:null});
 const occupied=()=>stands.map((s,i)=>({id:'PARKED-'+i,airportId:'city',standId:s.id,arrivalStand:s,inboundAt:-1020,parkedAt:0,landed:true,outboundAt:null,exitAt:null}));
@@ -25,4 +25,32 @@ test('a saved old hold on the landing strip resumes physically instead of stayin
  resolveVisitorTaxiStand(flight,all,900);assert.equal(flight.taxiHold.runwayCleared,true);
  assert.deepEqual(visitorAircraftPose(900,flight),{...pose,heading:visitorAircraftPose(900,flight).heading,phase:'taxi-in'});
  assert.equal(visitorAircraftPose(flight.taxiHold.at+1,flight).z,AIRPORT.taxiwayZ);assert.equal(flight.hold,undefined);
+});
+
+test('future bookings and other taxiway holds cannot mutually occupy every physically empty Hansdrex stand',()=>{
+ const now=10000,holds=stands.map((stand,i)=>({...incoming('QUEUED-'+i),standId:stand.id,arrivalStand:stand,
+  inboundAt:-30000,parkedAt:now+330,outboundAt:now+864000,exitAt:now+866000,expectedStandReleaseAt:now+864140,
+  taxiHold:{at:now-1000,pose:{x:stand.x,y:3,z:AIRPORT.taxiwayZ},runwayCleared:true}}));
+ const future=stands.map((stand,i)=>({...incoming('FUTURE-'+i),standId:stand.id,arrivalStand:stand,inboundAt:now+3600,parkedAt:now+4620,outboundAt:now+100000,exitAt:now+101080}));
+ const all=[...holds,...future];
+ for(const f of holds){
+  const before=visitorAircraftPose(now,f);assert.equal(resolveVisitorTaxiStand(f,all,now),true);assert.equal(f.taxiHold,undefined);
+  assert.deepEqual(visitorAircraftPose(now,f),{...before,heading:visitorAircraftPose(now,f).heading,phase:'taxi-in'},'dispatch starts at the actual queue position');
+  assert.equal(visitorAircraftPose(f.parkedAt,f).phase,'parked');
+ }
+ assert.equal(new Set(holds.map(f=>f.standId)).size,stands.length,'ground-bound aircraft reserve different bays immediately');
+ const last=incoming('WAIT-FOR-ACTUAL-BAY');assert.equal(resolveVisitorTaxiStand(last,all,now),true);assert.ok(last.taxiHold,'a real full apron still queues safely');
+});
+
+test('Hansdrex taxiway holds do not reserve phantom gate stays or obsolete takeoff slots',()=>{
+ const now=10000,held=stands.map((stand,i)=>({...incoming('PHANTOM-'+i),standId:stand.id,arrivalStand:stand,inboundAt:-30000,parkedAt:now+330,outboundAt:now,exitAt:now+1080,standReleasedAt:now+140,
+  taxiHold:{at:now-1000,pose:{x:stand.x,y:3,z:AIRPORT.taxiwayZ},runwayCleared:true}}));
+ assert.equal(visitorRunwaySlot(now,1080,held,'city'),visitorRunwaySlot(now,1080,[],'city'),'a plane without a bay cannot reserve a takeoff it is unable to reach');
+ const reserved=visitorStandReservation(now,held,'city',1800);assert.ok(reserved);assert.equal(reserved.at,now,'empty bays remain bookable while previous flights wait on the taxiway');
+});
+
+test('planning still protects the landing strip while a queued aircraft is physically taxiing off it',()=>{
+ const f={...incoming('CLEARING-TO-HOLD'),parkedAt:2000,taxiHold:{at:1400,pose:{x:stands[0].x,y:3,z:AIRPORT.taxiwayZ},runwayCleared:true}};
+ assert.ok(visitorRunwaySlot(700,1080,[f],'city')>=f.taxiHold.at+120);
+ assert.equal(visitorRunwaySlot(2000,1080,[f],'city'),visitorRunwaySlot(2000,1080,[],'city'));
 });

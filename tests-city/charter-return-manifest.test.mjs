@@ -25,3 +25,14 @@ test('a backlog books at most two new return aircraft per airport and sample, th
  const s={simulationAgeSeconds:at,timeScale:120,flies:[],businesses:{},northF1:{event:e,previousTours:[]}},service=createF1Charters({world:()=>s,signature:()=>.5,weatherClosed:()=>false,account:()=>({cash:0}),visitAttraction:()=>{}}),count=()=>e.charters.filter(f=>f.returnLeg).length;
  service.tick(e);s.simulationAgeSeconds+=HOUR;service.tick(e);assert.equal(count(),2);service.tick(e);assert.equal(count(),2);s.simulationAgeSeconds+=120;service.tick(e);assert.equal(count(),4);s.simulationAgeSeconds+=120;service.tick(e);assert.equal(count(),5);assert.ok(e.charters.every(f=>f.guests.every(g=>g.money===1000)));
 });
+
+test('a restored taxi-held charter uses a newly free real stand and replaces its obsolete many-day departure reservation',()=>{
+ const at=10*86400,port=airportById('city'),stand=port.stands[0];
+ const guest={id:'HELD-RETURN-GUEST',kind:'visitor',alive:true,money:1000,savings:0,phase:'airport-ready',x:port.gate.x,y:1.1,z:port.gate.z,currentLocationId:'airport'};
+ const plane={id:'HELD-RETURN-PLANE',airportId:'city',kind:'positioning',standId:stand.id,arrivalStand:stand,sector:'west',direction:1,inboundAt:at-10000,parkedAt:at+330,outboundAt:at+10*86400,exitAt:at+10*86400+1080,standReleasedAt:at+10*86400+140,
+  taxiHold:{at:at-1000,pose:{x:stand.x,y:3,z:port.taxiwayZ},runwayCleared:true}};
+ const flight={id:'HELD-RETURN-COHORT',airportId:'city',sector:'west',direction:1,inboundAt:at-30000,parkedAt:at-20000,outboundAt:at-15000,exitAt:at-14000,landed:true,aircraftGone:true,guests:[guest],returnLeg:plane};
+ const event={id:'HELD-RETURN-EVENT',format:2,tenPassengerVersion:1,airportItineraryVersion:1,startsAt:at-20000,endsAt:at-15000,charters:[flight],tourPaths:{}};
+ const s={simulationAgeSeconds:at,timeScale:120,businesses:{},weather:{condition:'clear'},northF1:{event,previousTours:[]}},service=createF1Charters({world:()=>s,signature:()=>.5,weatherClosed:()=>false,account:()=>({cash:0})});
+ service.tick(event);assert.equal(plane.taxiHold,undefined);assert.ok(plane.parkedAt>at);assert.ok(plane.outboundAt<at+2*HOUR);assert.equal(guest.money,1000);assert.equal(guest.phase,'airport-ready');
+});

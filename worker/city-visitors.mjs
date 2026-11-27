@@ -613,11 +613,15 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
  }
  function scheduleTurnaround(flight,otherFlights=airportFlights(flight.airportId||'city',flight)){
   const count=Number(flight.arrivingGuests||0),stairs=count?visitorStairsClearAt(flight,count,Number(raw().timeScale||120)):flight.parkedAt;
-  flight.boardingStartedAt=Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600);
-  const earliest=flight.terminalId?visitorDepartureCompleteAt(flight,HANSDREX_AIRLINE.seats,Number(raw().timeScale||120))+600:flight.boardingStartedAt;
+  const departing=(flight.passengerIds||[]).length;
+  // Seats are a capacity, never a dispatch requirement. Empty arriving aircraft
+  // must not reserve ten hypothetical upstairs check-in walks at the stand.
+  flight.boardingStartedAt=departing?Math.max(now()+720,flight.parkedAt+1000,Number(stairs||flight.parkedAt)+600):Math.max(now()+120,flight.parkedAt+600,Number(stairs||flight.parkedAt)+120);
+  const earliest=departing?(flight.terminalId?visitorDepartureCompleteAt(flight,departing,Number(raw().timeScale||120))+600:flight.boardingStartedAt):Math.max(flight.parkedAt+1200,flight.boardingStartedAt+120);
   flight.outboundAt=visitorRunwaySlot(earliest,visitorFlightDuration(flight,true),[...otherFlights,flight],flight.airportId||'city',flight.runwayId,flight.motionVersion>=1?visitorRunwayTiming(flight,true):null);
-  flight.boardAt=flight.terminalId?visitorDepartureCompleteAt(flight,HANSDREX_AIRLINE.seats,Number(raw().timeScale||120)):flight.outboundAt-420;flight.exitAt=flight.outboundAt+visitorFlightDuration(flight,true);
-  flight.expectedStandReleaseAt=flight.outboundAt+visitorStandReleaseSeconds(flight);
+  flight.boardAt=flight.terminalId?visitorDepartureCompleteAt(flight,departing,Number(raw().timeScale||120)):flight.outboundAt-420;flight.exitAt=flight.outboundAt+visitorFlightDuration(flight,true);
+  flight.expectedStandReleaseAt=flight.standReleasedAt=flight.outboundAt+visitorStandReleaseSeconds(flight);
+  flight.turnaroundVersion=1;
  }
  function rescheduleArrival(flight,earliest){
   if(!reserveAircraft(flight,earliest))return false;
@@ -655,10 +659,14 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    if(time>=f.inboundAt+visitorTouchdownSeconds(f))f.touchdownAt??=f.inboundAt+visitorTouchdownSeconds(f);
    if(resolveVisitorTaxiStand(f,airportFlights(f.airportId||'city',f),time))scheduleTurnaround(f,airportFlights(f.airportId||'city',f));
    if(f.taxiHold)continue;
+   // Saved empty aircraft keep their real parked pose, but get a fresh, finite
+   // takeoff clearance instead of waiting out an obsolete full-manifest timer.
+   // Never rewrite a passenger's accepted boarding walk or a taxiing departure.
+   if(!f.aircraftGone&&time>=f.parkedAt&&!f.passengerIds?.length&&f.turnaroundVersion!==1&&(f.outboundAt==null||time<f.outboundAt))scheduleTurnaround(f);
    if(closed&&f.outboundAt!=null&&time>=f.outboundAt&&previous<f.outboundAt){
     f.outboundAt=visitorRunwaySlot(time+900,visitorFlightDuration(f,true),airportFlights(f.airportId||'city',f),f.airportId||'city',f.runwayId,f.motionVersion>=1?visitorRunwayTiming(f,true):null);
     f.exitAt=f.outboundAt+visitorFlightDuration(f,true);
-    f.expectedStandReleaseAt=f.outboundAt+visitorStandReleaseSeconds(f);
+    f.expectedStandReleaseAt=f.standReleasedAt=f.outboundAt+visitorStandReleaseSeconds(f);
    }
    if(!f.landedAt&&time>=f.parkedAt){f.landedAt=time;traffic.landed++;}
    let allOffPlane=true;
@@ -717,6 +725,9 @@ export function createCityVisitors({world,random=()=>.5,brainRandom,emit=()=>{},
    for(const v of passengers){const i=waiting.indexOf(v);if(i>=0)waiting.splice(i,1);}
    f.passengerIds.push(...passengers.map(v=>v.id));
    for(const v of passengers){captureAirportDepartureEntrance(f,v,f.passengerIds.indexOf(v.id));v.airportFlightId=f.id;v.action=`waiting to board ${f.id}`;}
+   // Only an actual booking can lengthen this still-open boarding window.
+   // Partial manifests depart too; nobody waits for the last seat to sell.
+   if(passengers.length)scheduleTurnaround(f);
   }
   // A return flight can operate even when all hotel rooms are occupied.
   for(const airport of ['city','north'])if(waiting.some(v=>departurePort(v).id===airport)&&!traffic.flights.some(f=>(f.airportId||'city')===airport&&!f.aircraftGone&&time<f.outboundAt&&(f.passengerIds||[]).length<HANSDREX_AIRLINE.seats))queueAircraft(0,airport);

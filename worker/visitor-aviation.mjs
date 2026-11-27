@@ -223,8 +223,15 @@ function reservedOperations(flights,airportId){
  for(const f of flights){
   if((f.airportId||'city')!==airportId||f.aircraftGone)continue;
   const runwayId=f.runwayId||primary;
-  if(Number.isFinite(f.inboundAt)&&Number.isFinite(f.parkedAt))operations.push({start:f.inboundAt,end:f.parkedAt,runwayId,ground:f.motionVersion>=1?visitorRunwayTiming(f,false).ground.map(t=>f.inboundAt+t):groundWindow(f.inboundAt,INBOUND_SECONDS)});
-  if(Number.isFinite(f.outboundAt)&&Number.isFinite(f.exitAt))operations.push({start:f.outboundAt,end:f.exitAt,runwayId,ground:f.motionVersion>=1?visitorRunwayTiming(f,true).ground.map(t=>f.outboundAt+t):groundWindow(f.outboundAt,OUTBOUND_SECONDS)});
+  if(Number.isFinite(f.inboundAt)&&Number.isFinite(f.parkedAt)){
+   const ground=f.motionVersion>=1?visitorRunwayTiming(f,false).ground.map(t=>f.inboundAt+t):groundWindow(f.inboundAt,INBOUND_SECONDS),clearing=airportId==='city'&&f.taxiHold?.runwayCleared;
+   // Keep runway clearance until the held aircraft actually finishes its taxi
+   // exit. Afterwards, extending parkedAt while it queues cannot reserve the
+   // already vacated landing strip again.
+   if(clearing)ground[1]=Math.max(ground[1],f.taxiHold.at);
+   operations.push({start:f.inboundAt,end:clearing?Math.min(f.parkedAt,f.taxiHold.at):f.parkedAt,runwayId,ground});
+  }
+  if(!(airportId==='city'&&f.taxiHold)&&Number.isFinite(f.outboundAt)&&Number.isFinite(f.exitAt))operations.push({start:f.outboundAt,end:f.exitAt,runwayId,ground:f.motionVersion>=1?visitorRunwayTiming(f,true).ground.map(t=>f.outboundAt+t):groundWindow(f.outboundAt,OUTBOUND_SECONDS)});
  }
  return operations;
 }
@@ -274,7 +281,7 @@ export function visitorStandReservation(earliest,flights,airportId='city',ground
    const choicesForRunway=timings.map(r=>({...r,at:visitorRunwaySlot(at,r.duration,all,airportId,r.runwayId,r.timing,operations)}));
    const runway=choicesForRunway.sort((a,b)=>a.at-b.at||a.distance-b.distance)[0];if(!runway)break;
    at=runway.at;const parked=at+runway.duration,end=parked+groundStay;
-   const conflict=all.filter(f=>{const other=flightStand(f);return other&&Math.hypot(other.x-stand.x,other.z-stand.z)<24&&Number(f.parkedAt||f.inboundAt)<end&&visitorStandReleaseAt(f)>parked;});
+   const conflict=all.filter(f=>{const other=flightStand(f);return !(airportId==='city'&&f.taxiHold)&&other&&Math.hypot(other.x-stand.x,other.z-stand.z)<24&&Number(f.parkedAt||f.inboundAt)<end&&visitorStandReleaseAt(f)>parked;});
    if(!conflict.length){choices.push({at:runway.at,runwayId:runway.runwayId,duration:runway.duration,stand:{...stand}});break;}
    const until=Math.max(...conflict.map(visitorStandReleaseAt));if(!Number.isFinite(until))break;
    at=Math.max(at+1,until+120-runway.duration);
@@ -294,7 +301,13 @@ export function visitorStandReservation(earliest,flights,airportId='city',ground
 export function resolveVisitorTaxiStand(flight,flights,now){
  if(flight.aircraftGone||flight.landed||flight.landedAt!=null||!Number.isFinite(flight.inboundAt)||now<flight.inboundAt+visitorRunwayClearSeconds(flight))return false;
  if(flight.taxiHold?.runwayCleared&&now<flight.taxiHold.at){flight.parkedAt=Math.max(flight.parkedAt,flight.taxiHold.at+330);return true;}
- const occupied=stand=>flights.some(f=>f!==flight&&!f.aircraftGone&&(f.airportId||'city')===(flight.airportId||'city')&&flightStand(f)&&Math.hypot(flightStand(f).x-stand.x,flightStand(f).z-stand.z)<24&&Number(f.parkedAt)<Math.max(now+330,visitorStandReleaseAt(flight))&&visitorStandReleaseAt(f)>Math.max(now,flight.inboundAt+visitorRunwayClearSeconds(flight)));
+ // Ground dispatch owns actual bays, not a whole future holiday's booking
+ // horizon. Taxiway-held aircraft occupy no bay; future arrivals must recheck
+ // their accepted bay after touchdown instead of making the current apron look
+ // full. Reserve a bay once an aircraft is actually taxiing into it so two
+ // simultaneously released holds cannot choose the same free parking space.
+ const physical=other=>(flight.airportId||'city')!=='city'?Number(other.parkedAt)<Math.max(now+330,visitorStandReleaseAt(flight)):!other.taxiHold&&(Number(other.parkedAt)<=now||other.landed||other.landedAt!=null||other.taxiRoute?.[0]?.at<=now||Number.isFinite(other.inboundAt)&&now>=other.inboundAt+visitorRunwayClearSeconds(other));
+ const occupied=stand=>flights.some(f=>f!==flight&&!f.aircraftGone&&(f.airportId||'city')===(flight.airportId||'city')&&physical(f)&&flightStand(f)&&Math.hypot(flightStand(f).x-stand.x,flightStand(f).z-stand.z)<24&&visitorStandReleaseAt(f)>now);
  const current=flightStand(flight);
  if(current&&!occupied(current)&&!flight.taxiHold){flight.taxiStandChecked=true;return false;}
  const rank=terminalStandRanks(flights,flight.airportId||'city',now);
